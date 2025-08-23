@@ -1,0 +1,27 @@
+[project]
+name = "qimchi-api"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi[standard]>=0.115.12",
+    "gunicorn>=23.0.0",
+    "kaleido>=1.0.0",
+    "numpy>=2.2.4",
+    "pip>=25.2",
+    "plotly>=6.0.1",
+    "pydantic>=2.11.3",
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.0.0",
+    "python-dotenv>=1.1.1",
+    "rich>=14.1.0",
+    "ruff>=0.12.10",
+    "scikit-image>=0.25.2",
+    "setuptools>=78.1.0",
+    "watchdog>=6.0.0",
+    "websockets>=15.0.1",
+    "wheel>=0.45.1",
+    "xarray>=2025.3.1",
+    "zarr>=3.0.6",
+]

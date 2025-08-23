@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/qimchi-logo.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fira+Sans:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&family=Martian+Mono:wght@100..800&family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap"
+      rel="stylesheet"
+    />
+
+    <title>🧪 Qimchi 0.1.0 [WIP]</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- MathJax config + loader so Plotly's typesetMath can find a typesetter
+        Load before the React bundle so plots that render on mount get typeset. -->
+    <script>
+      window.MathJax = {
+        tex: {
+          inlineMath: [
+            ["$", "$"],
+            ["\\(", "\\)"],
+          ],
+          packages: ["base", "ams"],
+        },
+        options: {
+          skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"],
+        },
+      };
+    </script>
+    <!-- Use the MathJax v3 SVG build so Plotly can typeset math inside SVG elements.
+      Pin to a known v3 release for stability (Plotly expects MathJax v3 API).
+      Loading via unpkg as requested. -->
+    <script src="https://unpkg.com/mathjax@3.2.2/es5/tex-svg.js"></script>
+
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

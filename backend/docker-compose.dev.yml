@@ -1,0 +1,11 @@
+services:
+  backend:
+    volumes:
+      - ./:/app:rw
+    command: >
+      uv run uvicorn main:app
+      --reload
+      --host 0.0.0.0
+      --port 8000
+    environment:
+      ENABLE_KALEIDO_WARMUP: "${ENABLE_KALEIDO_WARMUP:-0}"

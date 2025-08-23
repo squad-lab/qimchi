@@ -1,0 +1,29 @@
+services:
+  backend:
+    build: ./backend
+    container_name: qimchi_backend
+    restart: unless-stopped
+    volumes:
+      # CHANGEME: Bind host test data folder into container for two-way syncing in prod
+      - ./data/test:/data:rw
+    environment:
+      ALLOWED_ORIGINS: "http://localhost:80"
+      ENABLE_KALEIDO_WARMUP: "${ENABLE_KALEIDO_WARMUP:-0}"
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build: ./frontend
+    container_name: qimchi_frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    environment:
+      - NODE_ENV=production

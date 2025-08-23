@@ -1,0 +1,155 @@
+/* PlotWrapper resize handle styles */
+.plot-wrapper .react-resizable-handle {
+  opacity: 0;
+  transition: opacity 0.1s ease-in-out;
+  z-index: 10;
+}
+
+.plot-wrapper .react-resizable-handle:hover,
+.plot-wrapper:hover .react-resizable-handle {
+  opacity: 1;
+}
+
+.plot-wrapper .react-resizable-handle-se {
+  background: linear-gradient(
+    -45deg,
+    transparent 40%,
+    #cbd5e1 40%,
+    #cbd5e1 60%,
+    transparent 60%
+  );
+  border-radius: 0 0 8px 0;
+  width: 12px !important;
+  height: 12px !important;
+  right: 3px !important;
+  bottom: 3px !important;
+}
+
+.plot-wrapper .react-resizable-handle-s {
+  background: linear-gradient(
+    to bottom,
+    transparent 40%,
+    #cbd5e1 40%,
+    #cbd5e1 60%,
+    transparent 60%
+  );
+  height: 6px !important;
+  bottom: 3px !important;
+}
+
+.plot-wrapper .react-resizable-handle-e {
+  background: linear-gradient(
+    to right,
+    transparent 40%,
+    #cbd5e1 40%,
+    #cbd5e1 60%,
+    transparent 60%
+  );
+  width: 6px !important;
+  right: 3px !important;
+}
+
+/* Smooth transitions */
+.plot-wrapper {
+  /* Keep quick transitions for visual polish, but avoid animating width/height
+     because this causes slow resizing when toggling square-mode. */
+  transition: box-shadow 0.1s ease-out, transform 0.12s ease-in-out;
+  border: 1px solid rgba(229, 231, 235, 0.8);
+  transform-origin: center;
+}
+
+/* Maximized state styling */
+.plot-wrapper.maximized {
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  z-index: 50;
+}
+
+/* Smooth modal overlay transition */
+.modal-overlay {
+  transition: opacity 0.3s ease-in-out;
+}
+
+/* Header styling */
+.plot-wrapper .plot-header {
+  background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+  border-bottom: 1px solid rgba(229, 231, 235, 0.8);
+}
+
+/* Button hover effects */
+.plot-wrapper button {
+  transition: all 0.1s ease-in-out;
+  border-radius: 6px;
+}
+
+.plot-wrapper button:hover {
+  transform: scale(1.05);
+}
+
+/* Maximized state */
+.plot-wrapper.maximized {
+  animation: maximizeIn 0.2s ease-out;
+}
+
+@keyframes maximizeIn {
+  from {
+    transform: scale(0.98);
+    opacity: 0.95;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Focus and active states */
+.plot-wrapper:focus-within {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+/* Plot content area styling */
+.plot-wrapper .plot-content {
+  background: linear-gradient(135deg, #ffffff 0%, #fefefe 100%);
+}
+
+/* Performance optimizations */
+.plot-wrapper * {
+  box-sizing: border-box;
+}
+
+/* Square mode: force a 1:1 aspect ratio while scaling to available space. */
+.plot-content .square-mode {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Ensure parent respects sizing, then force a square inner box */
+}
+
+.plot-content .square-mode {
+  /* Ensure the wrapper fills available height so child can use height to size the square */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.plot-content .square-mode > div {
+  /* Prefer the current height to determine the square size. Set height:100% and use aspect-ratio
+     so width will be computed from height. Cap by max-width to avoid overflowing narrow containers. */
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  width: auto;
+  max-width: 100%;
+  max-height: 100%;
+  display: flex;
+}
+
+/* Ensure the PlotComponent root div fills the square box */
+.plot-content .square-mode > div > div {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* When maximized, prevent page-level scrollbars from interfering */
+.fixed .plot-content .square-mode > div {
+  max-height: calc(100vh - 120px);
+}

@@ -1,0 +1,8 @@
+# Folders
+.venv/
+__pycache__/
+.pytest_cache/
+
+# Files
+*.pyc
+*.log*

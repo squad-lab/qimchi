@@ -1,0 +1,205 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  overflow: hidden;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+}
+
+#root {
+  margin: 0 auto;
+  height: 100vh;
+  overflow: hidden;
+}
+
+body {
+  background-color: #f0f0f0;
+  font-family: "Martian Mono", monospace;
+  color: #333;
+}
+
+/* Tree indentation styles - reduced spacing for better alignment */
+[data-level="0"] {
+  padding-left: 0.25rem;
+}
+[data-level="1"] {
+  padding-left: 1rem;
+}
+[data-level="2"] {
+  padding-left: 1.75rem;
+}
+[data-level="3"] {
+  padding-left: 2.5rem;
+}
+[data-level="4"] {
+  padding-left: 3.25rem;
+}
+[data-level="5"] {
+  padding-left: 4rem;
+}
+[data-level="6"] {
+  padding-left: 4.75rem;
+}
+[data-level="7"] {
+  padding-left: 5.5rem;
+}
+[data-level="8"] {
+  padding-left: 6.25rem;
+}
+
+/* Drag and drop styles */
+.dragging {
+  opacity: 0.5;
+  transform: rotate(5deg);
+}
+
+.drag-over {
+  background-color: #dbeafe;
+  border-color: #3b82f6;
+}
+
+/* Prevent default drag behavior on the entire app to avoid conflicts */
+* {
+  -webkit-user-drag: auto;
+}
+
+/* Disable drag on buttons and interactive elements */
+button,
+input,
+textarea,
+select {
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+/* Ensure draggable items can still be dragged */
+[draggable="true"] {
+  -webkit-user-drag: element;
+  cursor: grab;
+}
+
+[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+/* Tooltip positioning utility classes */
+.tooltip-positioned {
+  /* When used inside the app tree: absolute positioning (deprecated for portal) */
+  position: absolute;
+  z-index: 50;
+  left: 0;
+  top: 0;
+}
+
+/* Tooltip portal - escapes ancestor clipping by using fixed positioning
+   and reading the coordinates from CSS variables set on :root by the
+   component. High z-index prevents it from being painted under other
+   app elements. */
+.tooltip-portal > .tooltip-positioned {
+  position: fixed !important;
+  left: var(--tooltip-left, 0);
+  top: var(--tooltip-top, 0);
+  transform: var(--tooltip-transform, translate(-50%, -100%));
+  z-index: 9999 !important;
+  pointer-events: auto;
+}
+
+.tooltip-top {
+  transform: translate(
+    calc(var(--tooltip-x) - 50%),
+    calc(var(--tooltip-y) - 100%)
+  );
+}
+
+.tooltip-bottom {
+  transform: translate(calc(var(--tooltip-x) - 50%), var(--tooltip-y));
+}
+
+.tooltip-left {
+  transform: translate(
+    calc(var(--tooltip-x) - 100%),
+    calc(var(--tooltip-y) - 50%)
+  );
+}
+
+.tooltip-right {
+  transform: translate(var(--tooltip-x), calc(var(--tooltip-y) - 50%));
+}
+
+/* Modebar positioning - bottom middle horizontal */
+.modebar-container {
+  position: absolute !important;
+  top: 0% !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  width: auto !important;
+  z-index: 1000 !important;
+}
+
+.modebar {
+  position: relative !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: rgba(0, 0, 0, 0.75) !important;
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+  border-radius: 6px !important;
+  padding: 4px 8px !important;
+  padding-top: 0px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15) !important;
+  opacity: 0 !important;
+  transition: opacity 0.2s ease-in-out !important;
+}
+
+.modebar:hover {
+  opacity: 1 !important;
+  backdrop-filter: blur(8px) !important;
+}
+
+.modebar-group {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+/* Custom sleek scrollbar styles */
+.scrollbar-thin {
+  scrollbar-width: thin;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+
+.scrollbar-track-gray-100::-webkit-scrollbar-track {
+  background: #f3f4f6;
+  border-radius: 3px;
+}
+
+.scrollbar-thumb-gray-300::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+  transition: background-color 0.2s ease;
+}
+
+.hover\:scrollbar-thumb-gray-400:hover::-webkit-scrollbar-thumb {
+  background: #9ca3af;
+}
+
+.scrollbar-thumb-gray-300::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Firefox scrollbar styling */
+.scrollbar-thin {
+  scrollbar-color: #d1d5db #f3f4f6;
+}
