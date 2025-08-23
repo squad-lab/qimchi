@@ -1,4 +1,4 @@
-# Qimchi Plotting and Visualization — Full App
+# Qimchi Plotting and Visualization
 
 This repository contains frontend and backend for the Qimchi plotting and visualization app.
 
