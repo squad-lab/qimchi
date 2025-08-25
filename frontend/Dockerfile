@@ -10,7 +10,19 @@ COPY tailwind.config.js ./
 COPY index.html ./
 COPY public ./public
 COPY src ./src
-RUN npm ci && npm run build
+# Accept Vite-related build args, so the API URLs can be embedded at build-time
+ARG VITE_PROD_BACKEND_HOST=localhost
+ARG VITE_PROD_BACKEND_PORT=8000
+ARG VITE_PROD_BACKEND_URL=
+ARG VITE_PROD_BACKEND_WS=
+
+# Install deps, write a .env.production for Vite using the build args, then build
+RUN npm ci \
+	&& echo "VITE_PROD_BACKEND_HOST=${VITE_PROD_BACKEND_HOST}" > .env.production \
+	&& echo "VITE_PROD_BACKEND_PORT=${VITE_PROD_BACKEND_PORT}" >> .env.production \
+	&& if [ -n "${VITE_PROD_BACKEND_URL}" ]; then echo "VITE_PROD_BACKEND_URL=${VITE_PROD_BACKEND_URL}" >> .env.production; fi \
+	&& if [ -n "${VITE_PROD_BACKEND_WS}" ]; then echo "VITE_PROD_BACKEND_WS=${VITE_PROD_BACKEND_WS}" >> .env.production; fi \
+	&& npm run build
 
 # Stage 2: serve with nginx
 FROM nginx:stable-alpine
