@@ -23,7 +23,7 @@ frontend_container:
   script:
     - VERSION=$(grep '^[[:space:]]*version[[:space:]]*=' pyproject.toml | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')
     - update-binfmts --enable
-    - docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull -t "$CI_REGISTRY/qimchi-react/squad-lab/frontend:latest" -t "$CI_REGISTRY/squad-lab/qimchi-react/frontend:$VERSION" --push frontend/
+    - docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull -t "$CI_REGISTRY/squad-lab/qimchi-react/frontend:latest" -t "$CI_REGISTRY/squad-lab/qimchi-react/frontend:$VERSION" --push frontend/
   only:
     - main
 
@@ -40,7 +40,7 @@ backend_container:
   script:
     - VERSION=$(grep '^[[:space:]]*version[[:space:]]*=' pyproject.toml | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')
     - update-binfmts --enable
-    - docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull -t "$CI_REGISTRY/qimchi-react/squad-lab/backend:latest" -t "$CI_REGISTRY/squad-lab/qimchi-react/backend:$VERSION" --push backend/
+    - docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull -t "$CI_REGISTRY/squad-lab/qimchi-react/backend:latest" -t "$CI_REGISTRY/squad-lab/qimchi-react/backend:$VERSION" --push backend/
   only:
     - main
 
