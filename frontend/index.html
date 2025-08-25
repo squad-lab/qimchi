@@ -37,6 +37,13 @@
       Loading via unpkg as requested. -->
     <script src="https://unpkg.com/mathjax@3.2.2/es5/tex-svg.js"></script>
 
+    <!-- runtime-config.js is generated at container start (if running from docker).
+      It should set window.__QIMCHI_RUNTIME__ = { PROD_BACKEND_URL, PROD_BACKEND_WS, PROD_BACKEND_HOST, PROD_BACKEND_PORT }
+      Load it before the app bundle so config.ts can read runtime values. -->
+    <script
+      src="/runtime-config.js"
+      onerror="(function(){window.__QIMCHI_RUNTIME__ = window.__QIMCHI_RUNTIME__ || undefined;})()"
+    ></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

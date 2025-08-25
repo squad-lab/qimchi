@@ -27,8 +27,12 @@ RUN npm ci \
 # Stage 2: serve with nginx
 FROM nginx:stable-alpine
 COPY --from=build /app/dist /usr/share/nginx/html
+# Copy the runtime entrypoint script which will generate runtime-config.js inside the served HTML dir
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 # Remove default nginx conf and add a simple one to allow SPA routing
 RUN rm /etc/nginx/conf.d/default.conf
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
