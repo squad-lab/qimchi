@@ -1,0 +1,54 @@
+image: "python:3.13"
+
+variables:
+  DOCKER_HOST: "tcp://docker:2375"
+  DOCKER_DRIVER: "overlay2"
+  CI_BUILD_ARCHS: linux/amd64 #, linux/arm64
+
+stages:
+  - format
+  - test
+  - build
+  - deploy  
+
+frontend_container:
+  image: jonoh/docker-buildx-qemu
+  stage: deploy
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - docker buildx create --driver docker-container --use
+    - docker buildx inspect --bootstrap
+  script:
+    - VERSION=$(grep '^[[:space:]]*version[[:space:]]*=' pyproject.toml | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')
+    - update-binfmts --enable
+    - docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull \
+    -t "$CI_REGISTRY/$CI_PROJECT_PATH/frontend:latest" \
+    -t "$CI_REGISTRY/$CI_PROJECT_PATH/frontend:$VERSION" \
+    --push frontend/
+
+  only:
+    - main
+
+
+backend_container:
+  image: jonoh/docker-buildx-qemu
+  stage: deploy
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - docker buildx create --driver docker-container --use
+    - docker buildx inspect --bootstrap
+  script:
+    - VERSION=$(grep '^[[:space:]]*version[[:space:]]*=' pyproject.toml | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')
+    - update-binfmts --enable
+    - docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull \
+    -t "$CI_REGISTRY/$CI_PROJECT_PATH/backend:latest" \
+    -t "$CI_REGISTRY/$CI_PROJECT_PATH/backend:$VERSION" \
+    --push backend/
+
+  only:
+    - main
+
