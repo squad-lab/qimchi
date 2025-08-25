@@ -1,14 +1,20 @@
+# Standard library
 import os
-from typing import List
-from fastapi import APIRouter, FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from concurrent.futures import ProcessPoolExecutor
 import logging
+from typing import List
+from concurrent.futures import ProcessPoolExecutor
+from contextlib import asynccontextmanager
+
+# Third-party
 import plotly.io as pio
 from plotly import graph_objects as go
 from dotenv import load_dotenv
-from contextlib import asynccontextmanager
+from fastapi import APIRouter, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
+# Configure logging after loading environment so env-controlled settings can be
+# considered if needed; keep a basic config so `logging.info()` during import
+# and early startup is visible when running via uvicorn/fastapi launcher.
 # Local imports
 from api import (
     dirtree,
@@ -20,6 +26,24 @@ from api import (
 )
 
 load_dotenv()
+
+# Configure logging early. Prefer using RichHandler for prettier console output
+# when the `rich` package is installed; otherwise fall back to a basic config.
+_log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+try:
+    from rich.logging import RichHandler
+
+    root_logger = logging.getLogger()
+    # remove any existing handlers to avoid duplicate messages
+    root_logger.handlers.clear()
+    root_logger.addHandler(RichHandler())
+    root_logger.setLevel(_log_level)
+    logging.debug("QimchiBackend | Configured RichHandler for logging")
+except Exception:
+    # Safe fallback if rich isn't available or any other error occurs
+    logging.basicConfig(level=_log_level)
+
+
 _export_max_workers_env = os.environ.get("EXPORT_MAX_WORKERS")
 _export_timing_log = os.environ.get("EXPORT_TIMING_LOG", "false").lower() in (
     "1",
@@ -71,13 +95,13 @@ async def lifespan(app: FastAPI):
             try:
                 tiny = go.Figure({"data": [{"x": [0, 1], "y": [0, 1]}]})
                 pio.to_image(tiny, format="png")
-                logging.info("Kaleido warm-up successful (enabled)")
+                logging.info("QimchiBackend | Kaleido warm-up successful (enabled)")
             except Exception:
-                logging.exception("Kaleido warm-up failed (enabled)")
+                logging.exception("QimchiBackend | Kaleido warm-up failed (enabled)")
         else:
-            logging.info("Kaleido warm-up skipped (ENABLE_KALEIDO_WARMUP not set)")
+            logging.info("QimchiBackend | Kaleido warm-up skipped (ENABLE_KALEIDO_WARMUP not set)")
     except Exception:
-        logging.exception("Failed to create export ProcessPoolExecutor")
+        logging.exception("QimchiBackend | Failed to create export ProcessPoolExecutor")
 
     try:
         yield
@@ -86,9 +110,9 @@ async def lifespan(app: FastAPI):
             pool = getattr(app.state, "export_pool", None)
             if pool:
                 pool.shutdown(wait=True)
-                logging.info("Export ProcessPoolExecutor shut down")
+                logging.info("QimchiBackend | Export ProcessPoolExecutor shut down")
         except Exception:
-            logging.exception("Error shutting down export pool")
+            logging.exception("QimchiBackend | Error shutting down export pool")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -150,7 +174,7 @@ app.add_middleware(
 # Emit the resolved CORS configuration on startup for easier debugging in logs
 try:
     logging.info(
-        f"CORS configured allow_origins={origins} allow_origin_regex='^https?://(localhost|127.0.0.1)(:\\d+)?$'"
+        f"QimchiBackend | CORS configured allow_origins={origins} allow_origin_regex='^https?://(localhost|127.0.0.1)(:\\d+)?$'"
     )
 except Exception:
     # Logging must never crash the app
