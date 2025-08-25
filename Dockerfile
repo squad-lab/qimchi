@@ -29,6 +29,9 @@ RUN rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-available/default ||
 COPY backend/requirements.txt /app/backend/requirements.txt
 RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 
+# Run plotly_get_chrome for kaleido (plotly static image export) non-interactively
+RUN yes | plotly_get_chrome
+
 # Copy backend application code
 COPY backend /app/backend
 

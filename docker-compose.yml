@@ -9,6 +9,15 @@ services:
     environment:
       - LOG_LEVEL=INFO
       - GUNICORN_WORKERS=8
+      # Optional runtime overrides for the frontend to locate the backend.
+      # Either set PROD_BACKEND_URL (full http(s) URL) or set PROD_BACKEND_HOST / PROD_BACKEND_PORT
+      # Example: PROD_BACKEND_URL=http://backend.example.com:8000
+      # Example: PROD_BACKEND_HOST=backend.example.com
+      #          PROD_BACKEND_PORT=8000
+      - PROD_BACKEND_URL=
+      - PROD_BACKEND_WS=
+      - PROD_BACKEND_HOST=
+      - PROD_BACKEND_PORT=
     volumes:
       - ./data:/data:rw
     restart: unless-stopped
