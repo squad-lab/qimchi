@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 
 # Local tool execs
-from .config import FD_EXEC, DU_EXEC, XARGS_EXEC
+from .config import FD_EXEC, DU_EXEC, XARGS_EXEC, MAX_DEPTH
 
 # Local imports
 from .models import PathData
@@ -130,7 +130,7 @@ async def _run_subprocess(cmd, input_data: bytes = None):
         return 1, "", str(e)
 
 
-async def get_directory_tree_zarr(path: str, max_depth: int = 7) -> Dict:
+async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
     """
     Build a directory tree using the `fd` utility for fast traversal.
 
@@ -186,20 +186,27 @@ async def get_directory_tree_zarr(path: str, max_depth: int = 7) -> Dict:
         "children": [],
     }
 
-    # Use fd to list directories up to specified depth.
+    if max_depth is None:
+        max_depth = MAX_DEPTH
+
+    # Use fd to list zarr directories up to specified depth.
     cmd = [
         FD_EXEC,
         "--hidden",
-        "--no-ignore-vcs",
+        # "--no-ignore-vcs",  # Commented out to respect .gitignore
         "--absolute-path",
         "--color=never",
         "--max-depth",
         str(max_depth),
         "-t",
         "d",
+        "-e",
+        "zarr",
         ".",
         str(path),
     ]
+
+    # logger.debug(f"Running fd command: {' '.join(cmd)}")
 
     rc, out, err = await _run_subprocess(cmd)
     if rc != 0:
@@ -207,32 +214,58 @@ async def get_directory_tree_zarr(path: str, max_depth: int = 7) -> Dict:
 
     paths = [line.strip() for line in out.splitlines() if line.strip()]
 
-    # Build nodes map and only include directories (and .zarr dirs).
+    # If paths is empty, raise an error
+    if not paths:
+        raise RuntimeError(
+            f"No .zarr dataset (sub-)directories found at this level. MAX_DEPTH={MAX_DEPTH} may be too low."
+        )
+
+    # Build nodes map - start with root node only
     nodes: Dict[str, Dict] = {}
     nodes[str(path)] = root_node
 
     # Sort paths so parents come before children
     paths_sorted = sorted(paths, key=lambda s: (s.count("/"), s))
 
+    # Collect all unique parent paths first to minimize filesystem calls
+    all_parent_paths = set()
+    zarr_paths = []
+
     for p in paths_sorted:
         try:
             item = Path(p)
+            item.relative_to(path)  # Ensure path is under root
+
+            if item.is_dir():
+                zarr_paths.append(item)
+                # Collect all parent paths
+                current = item.parent
+                while current != path:
+                    all_parent_paths.add(current)
+                    current = current.parent
         except Exception:
             continue
 
-        # Ensure the path is under root
+    # Create all parent nodes first (batch filesystem operations)
+    for parent_path in sorted(all_parent_paths, key=lambda x: len(x.parts)):
         try:
-            item.relative_to(path)
+            parent_str = str(parent_path)
+            if parent_str not in nodes:
+                nodes[parent_str] = {
+                    "id": f"folder-{hash(parent_str) % 100000}",
+                    "name": parent_path.name,
+                    "path": parent_str,
+                    "type": "folder",
+                    "timestamp": _get_file_timestamp(parent_path),
+                    "children": [],
+                }
         except Exception:
             continue
 
-        # Only directories should be returned by fd with -t d, but guard anyway
-        if not item.is_dir():
-            continue
-
-        # Only include folders and .zarr folders
-        if item.name.endswith(".zarr"):
-            node = {
+    # Create zarr nodes
+    for item in zarr_paths:
+        try:
+            zarr_node = {
                 "id": f"file-{hash(str(item)) % 100000}",
                 "name": item.name,
                 "path": str(item),
@@ -242,27 +275,13 @@ async def get_directory_tree_zarr(path: str, max_depth: int = 7) -> Dict:
                 "tags": ["zarr"],
                 "lastModified": _get_dataset_last_modified(item),
             }
-            nodes[str(item)] = node
-        else:
-            # TODOLATER: Maybe attach a .export or some standard suffix for exports directory
-            # Skip directories that have a corresponding .zarr sibling
-            # (these are export/companion directories for zarr datasets)
-            zarr_sibling = item.parent / f"{item.name}.zarr"
-            if zarr_sibling.exists() and zarr_sibling.is_dir():
-                continue
+            nodes[str(item)] = zarr_node
+        except Exception:
+            continue
 
-            nodes[str(item)] = {
-                "id": f"folder-{hash(str(item)) % 100000}",
-                "name": item.name,
-                "path": str(item),
-                "type": "folder",
-                "timestamp": _get_file_timestamp(item),
-                "children": [],
-            }
-
-    # Attach nodes to parents
+    # Build parent-child relationships
     for p_str, node in list(nodes.items()):
-        if p_str == str(path):
+        if p_str == str(path):  # Skip root
             continue
 
         try:
@@ -270,27 +289,19 @@ async def get_directory_tree_zarr(path: str, max_depth: int = 7) -> Dict:
             parent = p_path.parent
             parent_str = str(parent)
 
-            if parent_str not in nodes:
-                # create missing parent(s)
-                nodes[parent_str] = {
-                    "id": f"folder-{hash(parent_str) % 100000}",
-                    "name": parent.name,
-                    "path": parent_str,
-                    "type": "folder",
-                    "timestamp": _get_file_timestamp(parent),
-                    "children": [],
-                }
+            # Parent should exist at this point, but guard against edge cases
+            if parent_str in nodes:
+                parent_node = nodes[parent_str]
+                if parent_node.get("children") is None:
+                    parent_node["children"] = []
 
-            parent_node = nodes[parent_str]
-            if parent_node.get("children") is None:
-                parent_node["children"] = []
-
-            if not any(
-                ch.get("path") == node.get("path") for ch in parent_node["children"]
-            ):
-                parent_node["children"].append(node)
+                if not any(
+                    ch.get("path") == node.get("path") for ch in parent_node["children"]
+                ):
+                    parent_node["children"].append(node)
 
         except Exception:
+            # logger.debug(f"Error attaching node: {p_str}")
             continue
 
     # Sort children lists for consistent ordering
@@ -301,6 +312,9 @@ async def get_directory_tree_zarr(path: str, max_depth: int = 7) -> Dict:
                 sort_children(c)
 
     sort_children(nodes[str(path)])
+
+    logger.debug(f"Directory tree built with these nodes:\n{nodes}")
+    # print(f"Directory tree built with these nodes:\n{nodes}")  # DEBUG:
 
     # --- Compute sizes for .zarr nodes using fast external tool (du) if available ---
     # Collect zarr paths

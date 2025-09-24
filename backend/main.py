@@ -21,6 +21,7 @@ from api import (
     export,
 )
 
+# Load environment variables from file
 load_dotenv()
 _export_max_workers_env = os.environ.get("EXPORT_MAX_WORKERS")
 _export_timing_log = os.environ.get("EXPORT_TIMING_LOG", "false").lower() in (

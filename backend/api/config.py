@@ -3,6 +3,7 @@ Qimchi Backend Configuration with executable checks etc.
 
 """
 
+import os
 import shutil
 
 # Candidate names for the fd executable on different platforms
@@ -23,3 +24,6 @@ if shutil.which("du"):
 XARGS_EXEC = None
 if shutil.which("xargs"):
     XARGS_EXEC = "xargs"
+
+# Max depth for directory traversal (default: 6)
+MAX_DEPTH = int(os.getenv("QIMCHI_MAX_DEPTH", 6))
