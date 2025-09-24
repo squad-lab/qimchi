@@ -16,6 +16,7 @@
     "@headless-tree/core": "^1.2.0",
     "@headless-tree/react": "^1.2.0",
     "@headlessui/react": "^2.2.1",
+    "@tanstack/react-virtual": "^3.13.12",
     "@uiw/react-json-view": "^2.0.0-alpha.32",
     "@uiw/react-md-editor": "^4.0.7",
     "axios": "^1.10.0",

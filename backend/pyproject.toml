@@ -1,5 +1,5 @@
 [project]
-name = "qimchi-backend"
+name = "qimchi-api"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"

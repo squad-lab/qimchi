@@ -3,21 +3,17 @@ services:
     build: .
     image: qimchi-react:latest
     container_name: qimchi-react
+    restart: unless-stopped
     ports:
-      - "8000:8000" # backend
-      - "80:80" # frontend/nginx
+      - "8001:8001"
     environment:
-      - LOG_LEVEL=INFO
-      - GUNICORN_WORKERS=8
-      # Optional runtime overrides for the frontend to locate the backend.
-      # Either set PROD_BACKEND_URL (full http(s) URL) or set PROD_BACKEND_HOST / PROD_BACKEND_PORT
-      # Example: PROD_BACKEND_URL=http://backend.example.com:8000
-      # Example: PROD_BACKEND_HOST=backend.example.com
-      #          PROD_BACKEND_PORT=8000
-      - PROD_BACKEND_URL=
-      - PROD_BACKEND_WS=
-      - PROD_BACKEND_HOST=
-      - PROD_BACKEND_PORT=
+      LOG_LEVEL: "INFO"
+      ENABLE_KALEIDO_WARMUP: "${ENABLE_KALEIDO_WARMUP:-0}"
+      SERVE_STATIC_FILES: "true"
     volumes:
       - ./data:/data:rw
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

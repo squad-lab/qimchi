@@ -1,0 +1,15 @@
+# Development override for docker-compose.yml
+# Use with: docker compose -f docker-compose.yml -f docker-compose.override.yml up --build
+
+services:
+  qimchi:
+    # Override the command for development with hot reload
+    command: ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
+    # Mount source code for live development (backend only - frontend is built into image)
+    volumes:
+      - ./backend/api:/app/api:ro
+      - ./backend/main.py:/app/main.py:ro
+      - ./data/test:/data:rw
+    environment:
+      - EXPORT_TIMING_LOG=true
+      - ENABLE_KALEIDO_WARMUP=0

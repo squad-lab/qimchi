@@ -1,20 +1,16 @@
-# Standard library
 import os
 import logging
-from typing import List
-from concurrent.futures import ProcessPoolExecutor
-from contextlib import asynccontextmanager
-
-# Third-party
 import plotly.io as pio
 from plotly import graph_objects as go
 from dotenv import load_dotenv
-from fastapi import APIRouter, FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 
-# Configure logging after loading environment so env-controlled settings can be
-# considered if needed; keep a basic config so `logging.info()` during import
-# and early startup is visible when running via uvicorn/fastapi launcher.
+from fastapi import APIRouter, FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from concurrent.futures import ProcessPoolExecutor
+
+
 # Local imports
 from api import (
     dirtree,
@@ -26,24 +22,6 @@ from api import (
 )
 
 load_dotenv()
-
-# Configure logging early. Prefer using RichHandler for prettier console output
-# when the `rich` package is installed; otherwise fall back to a basic config.
-_log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
-try:
-    from rich.logging import RichHandler
-
-    root_logger = logging.getLogger()
-    # remove any existing handlers to avoid duplicate messages
-    root_logger.handlers.clear()
-    root_logger.addHandler(RichHandler())
-    root_logger.setLevel(_log_level)
-    logging.debug("QimchiBackend | Configured RichHandler for logging")
-except Exception:
-    # Safe fallback if rich isn't available or any other error occurs
-    logging.basicConfig(level=_log_level)
-
-
 _export_max_workers_env = os.environ.get("EXPORT_MAX_WORKERS")
 _export_timing_log = os.environ.get("EXPORT_TIMING_LOG", "false").lower() in (
     "1",
@@ -95,13 +73,13 @@ async def lifespan(app: FastAPI):
             try:
                 tiny = go.Figure({"data": [{"x": [0, 1], "y": [0, 1]}]})
                 pio.to_image(tiny, format="png")
-                logging.info("QimchiBackend | Kaleido warm-up successful (enabled)")
+                logging.info("Kaleido warm-up successful (enabled)")
             except Exception:
-                logging.exception("QimchiBackend | Kaleido warm-up failed (enabled)")
+                logging.exception("Kaleido warm-up failed (enabled)")
         else:
-            logging.info("QimchiBackend | Kaleido warm-up skipped (ENABLE_KALEIDO_WARMUP not set)")
+            logging.info("Kaleido warm-up skipped (ENABLE_KALEIDO_WARMUP not set)")
     except Exception:
-        logging.exception("QimchiBackend | Failed to create export ProcessPoolExecutor")
+        logging.exception("Failed to create export ProcessPoolExecutor")
 
     try:
         yield
@@ -110,14 +88,47 @@ async def lifespan(app: FastAPI):
             pool = getattr(app.state, "export_pool", None)
             if pool:
                 pool.shutdown(wait=True)
-                logging.info("QimchiBackend | Export ProcessPoolExecutor shut down")
+                logging.info("Export ProcessPoolExecutor shut down")
         except Exception:
-            logging.exception("QimchiBackend | Error shutting down export pool")
+            logging.exception("Error shutting down export pool")
 
 
 app = FastAPI(lifespan=lifespan)
 
+# Static file serving (optional - nginx handles this in production)
+serve_static = os.environ.get("SERVE_STATIC_FILES", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
+# Always determine frontend dist path (needed for conditional root route)
+if os.path.exists("/app/frontend/dist"):
+    # Docker environment - frontend built into /app/frontend/dist
+    frontend_dist_path = "/app/frontend/dist"
+else:
+    # Local development - frontend/dist relative to backend directory
+    frontend_dist_path = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "frontend", "dist"
+    )
+
+if serve_static:
+    # Set up static file serving for the React frontend
+
+    # Serve static files from the React build
+    if os.path.exists(frontend_dist_path):
+        # Mount the assets directory at /assets/ to match Vite's build output
+        assets_path = os.path.join(frontend_dist_path, "assets")
+        if os.path.exists(assets_path):
+            app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
+
+        logging.info(f"Serving static files from: {frontend_dist_path}")
+    else:
+        logging.warning(f"Frontend dist directory not found at: {frontend_dist_path}")
+else:
+    logging.info("Static file serving disabled (handled by nginx)")
+
+# API routes - nginx handles /* prefix routing
 app.include_router(router)
 app.include_router(dirtree.router)
 app.include_router(notes.router)
@@ -127,55 +138,25 @@ app.include_router(filters.router)
 app.include_router(export.router)
 
 
-# CORS configuration
-# For production (LAN-only) you should set the ALLOWED_ORIGINS environment
-# variable to a comma-separated list of allowed origins, e.g.:
-#   ALLOWED_ORIGINS=http://192.168.1.42:5173,https://example.local
-# If ALLOWED_ORIGINS is not provided we fall back to a restricted developer
-# localhosts list so a dev frontend on the same machine will work.
-def parse_allowed_origins(env_val: str | None) -> List[str]:
-    """Parse a comma-separated ALLOWED_ORIGINS env var into a list.
+# Root route to serve the SPA (only when FastAPI serves static files)
+if serve_static:
 
-    Empty entries and whitespace are ignored. If env_val is None or empty,
-    caller can decide to use a safe default.
-    """
-    if not env_val:
-        return []
-    return [o.strip() for o in env_val.split(",") if o.strip()]
+    @app.get("/qimchi-logo.png")
+    async def get_favicon():
+        """Serve the favicon/logo."""
+        favicon_path = os.path.join(frontend_dist_path, "qimchi-logo.png")
+        if os.path.exists(favicon_path):
+            return FileResponse(favicon_path, media_type="image/png")
+        else:
+            return {"error": "Favicon not found"}
 
-
-# Read from environment. For LAN/production set this to the exact origins
-# that should be allowed. Avoid using ['*'] in production.
-env_allowed = os.environ.get("ALLOWED_ORIGINS")
-origins = parse_allowed_origins(env_allowed)
-
-if not origins:
-    # Fallback: restrict to localhost origins only
-    origins = [
-        "http://localhost:80",
-        "http://127.0.0.1:80",
-        "http://0.0.0.0:80",  # FastAPI prod uses 0.0.0.0 as --host.
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://0.0.0.0:5173",  # FastAPI prod uses 0.0.0.0 as --host.
-    ]
-
-app.add_middleware(
-    CORSMiddleware,
-    # Allow explicit origins from env and also match common localhost variants
-    allow_origins=origins,
-    # Accept localhost and 127.0.0.1 with or without ports
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Emit the resolved CORS configuration on startup for easier debugging in logs
-try:
-    logging.info(
-        f"QimchiBackend | CORS configured allow_origins={origins} allow_origin_regex='^https?://(localhost|127.0.0.1)(:\\d+)?$'"
-    )
-except Exception:
-    # Logging must never crash the app
-    pass
+    @app.get("/")
+    async def read_root():
+        """Serve the React SPA at the root route."""
+        index_path = os.path.join(frontend_dist_path, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        else:
+            return {
+                "error": "Frontend not built. Please run 'npm run build' in the frontend directory."
+            }

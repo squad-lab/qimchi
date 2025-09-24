@@ -1,49 +1,65 @@
-# Multi-stage Dockerfile
-# Stage 1: build the frontend with Node
-FROM node:24-alpine AS frontend-builder
-WORKDIR /frontend
-COPY frontend/package*.json ./
-COPY frontend/ ./
-RUN npm ci --prefer-offline --no-audit --progress=false || npm install
-RUN npm run build
-
-# Stage 2: runtime image with Python + nginx
 FROM python:3.13-slim
 
-ENV PYTHONUNBUFFERED=1
+# Set working directory
 WORKDIR /app
 
-# Install system packages (nginx + small build tools). Keep layer small.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-      nginx \
-      build-essential \
-      ca-certificates \
-      curl \
+# Install OS packages + fd-find + nginx
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    fd-find \
+    nginx \
+    supervisor \
     && rm -rf /var/lib/apt/lists/*
 
-# Remove default nginx site(s) to avoid duplicate default_server errors
-RUN rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-available/default || true
+# Install Node.js for building the frontend
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+    && apt-get install -y nodejs
 
-# Copy and install Python requirements
-COPY backend/requirements.txt /app/backend/requirements.txt
-RUN pip install --no-cache-dir -r /app/backend/requirements.txt
+# Install Python dependencies first (for better Docker layer caching)
+COPY backend/pyproject.toml backend/requirements.txt /app/
+RUN python -m pip install --no-cache-dir -U pip setuptools wheel \
+    && pip install --no-cache-dir uv \
+    && (uv sync --no-dev || (if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi)) \
+    && echo "y" | uv run plotly_get_chrome
 
-# Run plotly_get_chrome for kaleido (plotly static image export) non-interactively
-RUN yes | plotly_get_chrome
+# Copy and build the React frontend
+COPY frontend/package*.json /tmp/frontend/
+COPY frontend/tsconfig*.json /tmp/frontend/
+COPY frontend/vite.config.ts /tmp/frontend/
+COPY frontend/postcss.config.js /tmp/frontend/
+COPY frontend/tailwind.config.js /tmp/frontend/
+COPY frontend/index.html /tmp/frontend/
+COPY frontend/public/ /tmp/frontend/public/
+COPY frontend/src/ /tmp/frontend/src/
+
+# Build the frontend & copy the built files to /app/frontend
+RUN cd /tmp/frontend \
+    && npm ci \
+    && npm run build \
+    && mkdir -p /app/frontend \
+    && cp -r dist /app/frontend/ \
+    && rm -rf /tmp/frontend
 
 # Copy backend application code
-COPY backend /app/backend
+COPY backend/api/ /app/api/
+COPY backend/main.py /app/
 
-# Copy built frontend from the builder stage into nginx html dir
-COPY --from=frontend-builder /frontend/dist /usr/share/nginx/html
+# Copy nginx and supervisor configurations
+COPY nginx.conf /etc/nginx/sites-available/default
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Nginx config, start script and gunicorn config
-COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
-COPY docker/start.sh /start.sh
-COPY docker/gunicorn_conf.py /app/gunicorn_conf.py
-RUN chmod +x /start.sh
+# Remove default nginx config and create log directories
+RUN rm -f /etc/nginx/sites-enabled/default \
+    && ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/ \
+    && mkdir -p /var/log/supervisor
 
-EXPOSE 80
+# Clean up Node.js to reduce image size
+RUN apt-get remove -y nodejs \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
 
-CMD ["/start.sh"]
+# Expose the port nginx will listen on
+EXPOSE 8001
+
+# Use supervisor to run both nginx and FastAPI
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

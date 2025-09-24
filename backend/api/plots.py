@@ -403,7 +403,7 @@ async def create_plots(request: PlotRequest) -> PlotResponse:
 
     """
     logger.info(f"Received plot request: {request}")
-    logger.info(f"Dependencies requested: {request.deps}")
+    logger.info(f"Dependents requested: {request.deps}")
     logger.info(f"Independents requested: {request.indeps}")
 
     # Extra debug: ensure lists are present
