@@ -3,12 +3,17 @@ FastAPI endpoint for many Explorer/DirTree related operations.
 
 """
 
+import asyncio
+import time
 import xarray as xr
 
 from pathlib import Path
 from typing import Dict
 from datetime import datetime
 from fastapi import APIRouter, HTTPException
+
+# Local tool execs
+from .config import FD_EXEC, DU_EXEC, XARGS_EXEC
 
 # Local imports
 from .models import PathData
@@ -17,8 +22,7 @@ from .logger import logger
 
 router = APIRouter()
 
-# TODONOW: HERE:
-# NOTE: Live-dataset detection and websocket-based live updates were removed.
+# FIXME: Live-dataset detection and websocket-based live updates were removed.
 
 
 def _get_dataset_last_modified(path: Path) -> float:
@@ -47,142 +51,8 @@ def _get_dataset_last_modified(path: Path) -> float:
         return 0.0
 
 
-def get_directory_tree_zarr(
-    path: str, current_level: int = 0, max_depth: int = 7
-) -> Dict:
-    """
-    Recursively get the directory tree structure up to ``max_depth`` depth.
-    Include .zarr directories as special file nodes.
-    Returns data in TreeNode format for React frontend.
-
-    Args:
-        path (str): Path to the directory.
-        current_level (int): Current depth level in the directory tree.
-        max_depth (int): Maximum depth level to explore. Default is 7.
-
-    Returns:
-        Dict: Directory tree structure in TreeNode format.
-
-    """
-    path = Path(path)
-    # logger.debug(f"get_directory_tree | {path=}")
-    # logger.debug(f"get_directory_tree | {path.resolve()=}")
-
-    if not path.exists():
-        return {"error": "Path does not exist"}
-
-    if not path.is_dir():
-        return {"error": "Path is not a folder"}
-
-    if current_level >= max_depth:
-        return {
-            "id": f"folder-{hash(str(path)) % 100000}",
-            "name": path.name,
-            "path": str(path),
-            "type": "folder",
-            "timestamp": _get_file_timestamp(path),
-            "children": [],
-        }
-
-    # Generate unique ID based on path
-    item_id = (
-        f"folder-{hash(str(path)) % 100000}"
-        if path.is_dir()
-        else f"file-{hash(str(path)) % 100000}"
-    )
-
-    result = {
-        "id": item_id,
-        "name": path.name or path.parts[-1] or "root",
-        "path": str(path),
-        "type": "folder",
-        "timestamp": _get_file_timestamp(path),
-        "children": [],
-    }
-
-    # Check if current directory is a zarr file
-    if path.name.endswith(".zarr") or (path / ".zarray").exists():
-        result["type"] = "file"
-        result["size"] = _get_folder_size(path)
-        result["tags"] = ["zarr"]
-        result["lastModified"] = _get_dataset_last_modified(path)
-        # Remove children for files
-        del result["children"]
-        return result
-
-    try:
-        items = list(path.iterdir())
-        # Sort items for consistent ordering
-        items.sort(key=lambda x: x.name)
-
-        for item in items:
-            # Handle .zarr directories as files
-            if item.name.endswith(".zarr") and item.is_dir():
-                last_modified = _get_dataset_last_modified(item)
-                result["children"].append(
-                    {
-                        "id": f"file-{hash(str(item)) % 100000}",
-                        "name": item.name,
-                        "path": str(item),
-                        "type": "file",
-                        "size": _get_folder_size(item),
-                        "timestamp": _get_file_timestamp(item),
-                        "tags": ["zarr"],
-                        "lastModified": last_modified,
-                    }
-                )
-
-            # Handle .txt files
-            elif item.suffix == ".txt" and item.is_file():
-                result["children"].append(
-                    {
-                        "id": f"file-{hash(str(item)) % 100000}",
-                        "name": item.name,
-                        "path": str(item),
-                        "type": "file",
-                        "size": _get_file_size(item),
-                        "timestamp": _get_file_timestamp(item),
-                        "tags": ["text"],
-                    }
-                )
-
-            # Handle regular directories
-            elif item.is_dir():
-                child_tree = get_directory_tree_zarr(
-                    str(item), current_level + 1, max_depth
-                )
-                if "error" not in child_tree:
-                    result["children"].append(child_tree)
-
-    except PermissionError:
-        result["children"].append(
-            {
-                "id": f"error-{hash(str(path)) % 100000}",
-                "name": "Permission denied",
-                "path": str(path),
-                "type": "file",
-                "timestamp": _get_file_timestamp(path),
-                "tags": ["error"],
-            }
-        )
-
-    return result
-
-
-def _get_file_size(path: Path) -> int:
-    """
-    Get file size in bytes.
-
-    """
-    try:
-        return path.stat().st_size
-    except (OSError, IOError):
-        return 0
-
-
 def _get_folder_size(path: Path) -> int:
     """
-    # TODOLATER: Unused on frontend
     Helper function to get approximate folder size in bytes.
 
     Args:
@@ -216,6 +86,9 @@ def _get_file_timestamp(path: Path) -> str:
     Returns:
         str: ISO formatted timestamp of the last modification.
 
+    Raises:
+        OSError: If the path cannot be accessed.
+
     """
     try:
         import datetime
@@ -224,10 +97,263 @@ def _get_file_timestamp(path: Path) -> str:
         return datetime.datetime.fromtimestamp(timestamp).isoformat()
 
     except (OSError, IOError):
-        import datetime
+        raise OSError(f"Failed to stat path {path}")
 
-        # TODO: Fallback. Handle this better.
-        return datetime.datetime.now().isoformat()
+
+# Simple TTL cache for zarr sizes
+_SIZE_CACHE: Dict[str, Dict] = {}
+# cache entry: { 'value': int, 'expires_at': float }
+
+
+async def _run_subprocess(cmd, input_data: bytes = None):
+    """
+    Run subprocess asynchronously and return (returncode, stdout, stderr).
+
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.PIPE if input_data is not None else None,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        stdout, stderr = await proc.communicate(input=input_data)
+        return (
+            proc.returncode,
+            stdout.decode("utf-8", errors="replace"),
+            stderr.decode("utf-8", errors="replace"),
+        )
+    except FileNotFoundError as e:
+        return 127, "", str(e)
+    except Exception as e:
+        return 1, "", str(e)
+
+
+async def get_directory_tree_zarr(path: str, max_depth: int = 7) -> Dict:
+    """
+    Build a directory tree using the `fd` utility for fast traversal.
+
+    - This function lists directories (not files) under `path` up to
+    `max_depth` and returns a TreeNode-like dictionary suitable for the
+    frontend.
+    - Only directories and directories whose name ends with .zarr are included.
+    - Detection of zarr datasets relies solely on the directory name ending with ".zarr".
+
+    If `fd` is not available (FD_EXEC is None), the function
+    returns an error dict so the caller can decide on fallback behavior.
+
+    Args:
+        path: str or Path-like root directory to scan.
+        max_depth: maximum recursion depth to request from fd.
+
+    Returns:
+        Dict: TreeNode-style dict describing the directory tree, or an
+        error dict when `fd` is unavailable or fails.
+
+    """
+    path = Path(path)
+
+    if not path.exists():
+        raise FileNotFoundError("Path does not exist")
+
+    if not path.is_dir():
+        raise NotADirectoryError("Path is not a folder")
+
+    # Check fd availability from config
+    # Require command-line utilities
+    missing_tools = []
+    if not FD_EXEC:
+        missing_tools.append("fd")
+    if not DU_EXEC:
+        missing_tools.append("du")
+    if not XARGS_EXEC:
+        missing_tools.append("xargs")
+
+    if missing_tools:
+        raise RuntimeError(
+            f"Missing required system utilities: {', '.join(missing_tools)}"
+        )
+
+    # Prepare root node
+    root_id = f"folder-{hash(str(path)) % 100000}"
+    root_node = {
+        "id": root_id,
+        "name": path.name or path.parts[-1] or "root",
+        "path": str(path),
+        "type": "folder",
+        "timestamp": _get_file_timestamp(path),
+        "children": [],
+    }
+
+    # Use fd to list directories up to specified depth.
+    cmd = [
+        FD_EXEC,
+        "--hidden",
+        "--no-ignore-vcs",
+        "--absolute-path",
+        "--color=never",
+        "--max-depth",
+        str(max_depth),
+        "-t",
+        "d",
+        ".",
+        str(path),
+    ]
+
+    rc, out, err = await _run_subprocess(cmd)
+    if rc != 0:
+        raise RuntimeError(f"fd error: {err.strip() or out.strip()}")
+
+    paths = [line.strip() for line in out.splitlines() if line.strip()]
+
+    # Build nodes map and only include directories (and .zarr dirs).
+    nodes: Dict[str, Dict] = {}
+    nodes[str(path)] = root_node
+
+    # Sort paths so parents come before children
+    paths_sorted = sorted(paths, key=lambda s: (s.count("/"), s))
+
+    for p in paths_sorted:
+        try:
+            item = Path(p)
+        except Exception:
+            continue
+
+        # Ensure the path is under root
+        try:
+            item.relative_to(path)
+        except Exception:
+            continue
+
+        # Only directories should be returned by fd with -t d, but guard anyway
+        if not item.is_dir():
+            continue
+
+        # Only include folders and .zarr folders
+        if item.name.endswith(".zarr"):
+            node = {
+                "id": f"file-{hash(str(item)) % 100000}",
+                "name": item.name,
+                "path": str(item),
+                "type": "file",
+                "size": _get_folder_size(item),
+                "timestamp": _get_file_timestamp(item),
+                "tags": ["zarr"],
+                "lastModified": _get_dataset_last_modified(item),
+            }
+            nodes[str(item)] = node
+        else:
+            # TODOLATER: Maybe attach a .export or some standard suffix for exports directory
+            # Skip directories that have a corresponding .zarr sibling
+            # (these are export/companion directories for zarr datasets)
+            zarr_sibling = item.parent / f"{item.name}.zarr"
+            if zarr_sibling.exists() and zarr_sibling.is_dir():
+                continue
+
+            nodes[str(item)] = {
+                "id": f"folder-{hash(str(item)) % 100000}",
+                "name": item.name,
+                "path": str(item),
+                "type": "folder",
+                "timestamp": _get_file_timestamp(item),
+                "children": [],
+            }
+
+    # Attach nodes to parents
+    for p_str, node in list(nodes.items()):
+        if p_str == str(path):
+            continue
+
+        try:
+            p_path = Path(p_str)
+            parent = p_path.parent
+            parent_str = str(parent)
+
+            if parent_str not in nodes:
+                # create missing parent(s)
+                nodes[parent_str] = {
+                    "id": f"folder-{hash(parent_str) % 100000}",
+                    "name": parent.name,
+                    "path": parent_str,
+                    "type": "folder",
+                    "timestamp": _get_file_timestamp(parent),
+                    "children": [],
+                }
+
+            parent_node = nodes[parent_str]
+            if parent_node.get("children") is None:
+                parent_node["children"] = []
+
+            if not any(
+                ch.get("path") == node.get("path") for ch in parent_node["children"]
+            ):
+                parent_node["children"].append(node)
+
+        except Exception:
+            continue
+
+    # Sort children lists for consistent ordering
+    def sort_children(node):
+        if node.get("children"):
+            node["children"].sort(key=lambda c: c.get("name", ""))
+            for c in node["children"]:
+                sort_children(c)
+
+    sort_children(nodes[str(path)])
+
+    # --- Compute sizes for .zarr nodes using fast external tool (du) if available ---
+    # Collect zarr paths
+    # Compute sizes for zarr paths using du + xargs in parallel. We expect
+    # GNU du with -b to be available on the user's linux host. Use xargs to
+    # parallelize work. Any missing utility is an error which we already
+    # checked above.
+    zarr_paths = [p for p, n in nodes.items() if n.get("tags") == ["zarr"]]
+
+    sizes_from_du = {}
+
+    if zarr_paths:
+        # Check cache first
+        now = time.time()
+        to_query = []
+        for p in zarr_paths:
+            ent = _SIZE_CACHE.get(p)
+            if ent and ent.get("expires_at", 0) > now:
+                sizes_from_du[p] = ent["value"]
+            else:
+                to_query.append(p)
+
+        if to_query:
+            # Build null-separated input and run: xargs -0 -n50 -P4 du -sb
+            input_data = "\0".join(to_query).encode("utf-8") + b"\0"
+            cmd = [XARGS_EXEC, "-0", "-n", "50", "-P", "4", DU_EXEC, "-sb"]
+            rc, out, err = await _run_subprocess(cmd, input_data=input_data)
+            if rc != 0:
+                raise RuntimeError(
+                    f"Error running du/xargs: {err.strip() or out.strip()}"
+                )
+
+            for line in out.splitlines():
+                parts = line.strip().split(None, 1)
+                if len(parts) == 2:
+                    size_str, pth = parts
+                    try:
+                        size = int(size_str)
+                        sizes_from_du[str(Path(pth))] = size
+                        # store in cache for 30s
+                        _SIZE_CACHE[str(Path(pth))] = {
+                            "value": size,
+                            "expires_at": now + 30,
+                        }
+                    except ValueError:
+                        continue
+
+    # Attach computed sizes to nodes
+    for pth, size in sizes_from_du.items():
+        if pth in nodes and nodes[pth].get("tags") == ["zarr"]:
+            nodes[pth]["size"] = size
+
+    return nodes[str(path)]
 
 
 @router.post("/load/")
@@ -257,30 +383,7 @@ async def load_directory(path: PathData) -> Dict:
         )
 
     try:
-        tree = get_directory_tree_zarr(path)
-
-        # Post-process the tree to ensure:
-        # 1. Empty directories are removed
-        # 2. Dirs containing "exports/" are removed
-        # 3. Only .zarr files are included as leaf nodes
-        def _post_process_tree(node):
-            if "children" in node:
-                # First recursively process children
-                processed_children = []
-                for child in node["children"]:
-                    # Skip directories containing "exports/"
-                    if "exports/" not in child.get("path", ""):
-                        processed_child = _post_process_tree(child)
-                        # Only keep if it's a file or has non-empty children
-                        if processed_child.get("type") == "file" or processed_child.get(
-                            "children"
-                        ):
-                            processed_children.append(processed_child)
-
-                node["children"] = processed_children
-            return node
-
-        tree = _post_process_tree(tree)
+        tree = await get_directory_tree_zarr(path=str(path))
 
         return tree
 
@@ -435,7 +538,7 @@ async def get_metadata(path: PathData) -> Dict:
 
 
 @router.post("/dataset-status/")
-async def get_dataset_status(data: PathData):
+async def get_dataset_status(data: PathData) -> Dict:
     """
     Get live status and metadata for a dataset.
 
@@ -452,7 +555,7 @@ async def get_dataset_status(data: PathData):
         if not path.exists():
             raise HTTPException(status_code=404, detail="Dataset not found")
 
-        if not (path.name.endswith(".zarr") or (path / ".zarray").exists()):
+        if not path.name.endswith(".zarr"):
             raise HTTPException(status_code=400, detail="Path is not a zarr dataset")
 
         last_modified = _get_dataset_last_modified(path)
