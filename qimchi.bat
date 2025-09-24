@@ -167,7 +167,9 @@ if errorlevel 1 (
         echo Warning: Could not install fd-find. The application will still work but may be slower.
         echo You can manually install it later for better performance.
     ) else (
-        echo fd-find installed successfully
+        echo fd-find installed successfully. Please restart the script.
+        pause
+        exit /b 0
     )
 ) else (
     echo fd-find is already installed
