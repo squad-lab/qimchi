@@ -2,7 +2,7 @@
 
 This repository contains a unified FastAPI application that serves both the React frontend and backend API for the Qimchi plotter.
 
-**Supported Platform:** Linux only (Windows is unsupported, except via WSL)
+**Supported Platform:** Linux only (Windows is unsupported - supported again, except via WSL)
 
 ## Quick Start
 

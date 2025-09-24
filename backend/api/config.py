@@ -16,14 +16,14 @@ for _c in _FD_CANDIDATES:
         break
 
 # Detect du executable
-DU_EXEC = None
-if shutil.which("du"):
-    DU_EXEC = "du"
+# DU_EXEC = None
+# if shutil.which("du"):
+#     DU_EXEC = "du"
 
-# Detect xargs
-XARGS_EXEC = None
-if shutil.which("xargs"):
-    XARGS_EXEC = "xargs"
+# # Detect xargs
+# XARGS_EXEC = None
+# if shutil.which("xargs"):
+#     XARGS_EXEC = "xargs"
 
 # Max depth for directory traversal (default: 6)
 MAX_DEPTH = int(os.getenv("QIMCHI_MAX_DEPTH", 6))

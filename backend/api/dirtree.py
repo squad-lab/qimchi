@@ -4,7 +4,7 @@ FastAPI endpoint for many Explorer/DirTree related operations.
 """
 
 import asyncio
-import time
+import subprocess  # Windows compat
 import xarray as xr
 
 from pathlib import Path
@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 
 # Local tool execs
-from .config import FD_EXEC, DU_EXEC, XARGS_EXEC, MAX_DEPTH
+from .config import FD_EXEC, MAX_DEPTH  #  DU_EXEC, XARGS_EXEC | Windows compat
 
 # Local imports
 from .models import PathData
@@ -165,10 +165,11 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
     missing_tools = []
     if not FD_EXEC:
         missing_tools.append("fd")
-    if not DU_EXEC:
-        missing_tools.append("du")
-    if not XARGS_EXEC:
-        missing_tools.append("xargs")
+    # Windows compat - skip du/xargs checks
+    # if not DU_EXEC:
+    #     missing_tools.append("du")
+    # if not XARGS_EXEC:
+    #     missing_tools.append("xargs")
 
     if missing_tools:
         raise RuntimeError(
@@ -207,9 +208,24 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
     ]
 
     # logger.debug(f"Running fd command: {' '.join(cmd)}")
+    # print(f"Running fd command: {' '.join(cmd)}")  # DEBUG:
 
-    rc, out, err = await _run_subprocess(cmd)
+    # Windows compat - use subprocess.run instead of asyncio subprocess
+    # rc, out, err = await _run_subprocess(cmd)
+    result = subprocess.run(
+        cmd,
+        input=None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    rc = result.returncode
+    out = result.stdout.decode("utf-8", errors="replace")
+    err = result.stderr.decode("utf-8", errors="replace")
+
     if rc != 0:
+        # print(f"fd error: {err.strip() or out.strip()}")  # DEBUG:
         raise RuntimeError(f"fd error: {err.strip() or out.strip()}")
 
     paths = [line.strip() for line in out.splitlines() if line.strip()]
@@ -316,56 +332,57 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
     logger.debug(f"Directory tree built with these nodes:\n{nodes}")
     # print(f"Directory tree built with these nodes:\n{nodes}")  # DEBUG:
 
+    # TODOLATER: Re-enable size computation using du/xargs if windows compat is ever resolved.
     # --- Compute sizes for .zarr nodes using fast external tool (du) if available ---
     # Collect zarr paths
     # Compute sizes for zarr paths using du + xargs in parallel. We expect
     # GNU du with -b to be available on the user's linux host. Use xargs to
     # parallelize work. Any missing utility is an error which we already
     # checked above.
-    zarr_paths = [p for p, n in nodes.items() if n.get("tags") == ["zarr"]]
+    # zarr_paths = [p for p, n in nodes.items() if n.get("tags") == ["zarr"]]
 
-    sizes_from_du = {}
+    # sizes_from_du = {}
 
-    if zarr_paths:
-        # Check cache first
-        now = time.time()
-        to_query = []
-        for p in zarr_paths:
-            ent = _SIZE_CACHE.get(p)
-            if ent and ent.get("expires_at", 0) > now:
-                sizes_from_du[p] = ent["value"]
-            else:
-                to_query.append(p)
+    # if zarr_paths:
+    #     # Check cache first
+    #     now = time.time()
+    #     to_query = []
+    #     for p in zarr_paths:
+    #         ent = _SIZE_CACHE.get(p)
+    #         if ent and ent.get("expires_at", 0) > now:
+    #             sizes_from_du[p] = ent["value"]
+    #         else:
+    #             to_query.append(p)
 
-        if to_query:
-            # Build null-separated input and run: xargs -0 -n50 -P4 du -sb
-            input_data = "\0".join(to_query).encode("utf-8") + b"\0"
-            cmd = [XARGS_EXEC, "-0", "-n", "50", "-P", "4", DU_EXEC, "-sb"]
-            rc, out, err = await _run_subprocess(cmd, input_data=input_data)
-            if rc != 0:
-                raise RuntimeError(
-                    f"Error running du/xargs: {err.strip() or out.strip()}"
-                )
+    #     if to_query:
+    #         # Build null-separated input and run: xargs -0 -n50 -P4 du -sb
+    #         input_data = "\0".join(to_query).encode("utf-8") + b"\0"
+    #         cmd = [XARGS_EXEC, "-0", "-n", "50", "-P", "4", DU_EXEC, "-sb"]
+    #         rc, out, err = await _run_subprocess(cmd, input_data=input_data)
+    #         if rc != 0:
+    #             raise RuntimeError(
+    #                 f"Error running du/xargs: {err.strip() or out.strip()}"
+    #             )
 
-            for line in out.splitlines():
-                parts = line.strip().split(None, 1)
-                if len(parts) == 2:
-                    size_str, pth = parts
-                    try:
-                        size = int(size_str)
-                        sizes_from_du[str(Path(pth))] = size
-                        # store in cache for 30s
-                        _SIZE_CACHE[str(Path(pth))] = {
-                            "value": size,
-                            "expires_at": now + 30,
-                        }
-                    except ValueError:
-                        continue
+    #         for line in out.splitlines():
+    #             parts = line.strip().split(None, 1)
+    #             if len(parts) == 2:
+    #                 size_str, pth = parts
+    #                 try:
+    #                     size = int(size_str)
+    #                     sizes_from_du[str(Path(pth))] = size
+    #                     # store in cache for 30s
+    #                     _SIZE_CACHE[str(Path(pth))] = {
+    #                         "value": size,
+    #                         "expires_at": now + 30,
+    #                     }
+    #                 except ValueError:
+    #                     continue
 
-    # Attach computed sizes to nodes
-    for pth, size in sizes_from_du.items():
-        if pth in nodes and nodes[pth].get("tags") == ["zarr"]:
-            nodes[pth]["size"] = size
+    # # Attach computed sizes to nodes
+    # for pth, size in sizes_from_du.items():
+    #     if pth in nodes and nodes[pth].get("tags") == ["zarr"]:
+    #         nodes[pth]["size"] = size
 
     return nodes[str(path)]
 

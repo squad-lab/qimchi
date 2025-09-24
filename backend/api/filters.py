@@ -410,14 +410,14 @@ class Differentiate(Filter):
                 # Use y_axis spacing since axis 0 corresponds to y-direction
                 z_data = np.gradient(self.z_axis, self.y_axis, axis=0)
                 twod_axis_label = (
-                    f"d{self.x_label}" if "$" not in self.x_label else "dx"
+                    f"d{self.y_label}" if "$" not in self.y_label else "dx"
                 )
             case 1:
                 # Differentiate along axis 1 (columns/x-direction)
                 # Use x_axis spacing since axis 1 corresponds to x-direction
                 z_data = np.gradient(self.z_axis, self.x_axis, axis=1)
                 twod_axis_label = (
-                    f"d{self.y_label}" if "$" not in self.y_label else "dy"
+                    f"d{self.x_label}" if "$" not in self.x_label else "dy"
                 )
             case _:
                 err = f"Invalid value of `twod_axis={twod_axis}` for differentiation."

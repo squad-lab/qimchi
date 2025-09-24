@@ -203,3 +203,22 @@ select {
 .scrollbar-thin {
   scrollbar-color: #d1d5db #f3f4f6;
 }
+
+/* Global media rules */
+/* @layer base {
+  @media (max-width: 1920px) {
+    body {
+      --zoom-ratio: 0.8;
+      transform-origin: 0 0;
+      transform: scale(var(--zoom-ratio));
+
+      width: calc(100% / var(--zoom-ratio));
+      height: calc(100% / var(--zoom-ratio));
+
+    }
+
+    html, #root {
+      height: 100%;
+    }
+  }
+} */

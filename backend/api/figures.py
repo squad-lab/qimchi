@@ -111,7 +111,7 @@ GRID_DASH_OPTS = [
     {"label": "Dash Dot", "value": "dashdot"},
     {"label": "Long Dash Dot", "value": "longdashdot"},
 ]
-DEFAULT_TICK_WIDTH = 1  # px
+DEFAULT_TICK_WIDTH = 2  # px
 DEFAULT_TICK_LENGTH = 5  # px
 DEFAULT_TICK_ANGLE = 0  # deg
 
@@ -345,7 +345,7 @@ class Line(QimchiFigure):
                 "text": plot_title,
                 "font": dict(
                     family="Roboto, sans-serif",
-                    size=10,
+                    size=14,
                     color="rgba(0,0,0,0.6)",
                 ),
                 "x": 0.5,
@@ -415,7 +415,7 @@ class Line(QimchiFigure):
                 },
             },
             "font": {
-                "size": 12,
+                "size": 16,
             },
             "margin": {"l": 50, "r": 10, "t": 40, "b": 50},
             "paper_bgcolor": "rgba(0,0,0,0)",
@@ -533,7 +533,7 @@ class HeatMap(QimchiFigure):
                 "text": plot_title,
                 "font": dict(
                     family="Roboto, sans-serif",
-                    size=10,
+                    size=14,
                     color="rgba(0,0,0,0.6)",
                 ),
                 "x": 0.5,
@@ -584,7 +584,7 @@ class HeatMap(QimchiFigure):
                 },
             },
             "font": {
-                "size": 12,
+                "size": 16,
             },
             "coloraxis": {
                 "colorbar_title": z_title,
@@ -625,7 +625,7 @@ class HeatMap(QimchiFigure):
             data_array = data_array.T
 
         fig = imshow(
-            data_array,
+            data_array.transpose(self.ind[0], self.ind[1]),
             x=self.data.coords[self.ind[1]],
             y=self.data.coords[self.ind[0]],
             origin="lower",  # Moves origin to lower left
