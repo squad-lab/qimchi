@@ -1706,10 +1706,10 @@ const PlotWrapper: React.FC<Props> = ({
                 <Tooltip content="Close" position="left">
                   <button
                     onClick={onClose}
-                    className="p-1.5 rounded hover:bg-red-100 transition-colors duration-150"
+                    className="p-1.5 rounded hover:bg-gray-300 transition-colors"
                     title="Close"
                   >
-                    <X size={16} className="text-gray-600" />
+                    <X size={16} className="text-red-600" />
                   </button>
                 </Tooltip>
               )}

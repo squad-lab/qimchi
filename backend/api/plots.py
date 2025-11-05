@@ -3,9 +3,10 @@ FastAPI endpoints for creating and managing plots based on xarray datasets.
 
 """
 
-import xarray as xr
 from pathlib import Path
 from typing import Dict, List
+
+import xarray as xr
 from fastapi import APIRouter, HTTPException
 
 # Local imports
@@ -13,10 +14,14 @@ from .figures import Line, HeatMap, DEFAULT_THEME
 from .filters import apply_filters
 from .models import PlotRequest, PlotResponse
 from .logger import logger
+from .live_utils import resolve_live_dataset
+from . import live_client
 
 
 # FastAPI router for plot endpoints
 router = APIRouter()
+
+MEMORY_PROTOCOL = "memory://"
 
 
 def _validate_paths(fpaths: List[str]) -> bool:
@@ -31,6 +36,9 @@ def _validate_paths(fpaths: List[str]) -> bool:
 
     """
     for fpath in fpaths:
+        if fpath.startswith(MEMORY_PROTOCOL):
+            # Memory-backed paths are validated at load time.
+            continue
         path = Path(fpath)
         if not path.exists() or not path.is_dir():
             return False
@@ -68,8 +76,75 @@ def load_dataset(fpath: str) -> xr.Dataset:
         xr.Dataset: The loaded dataset.
 
     """
+    if fpath.startswith(MEMORY_PROTOCOL):
+        measurement_id = fpath[len(MEMORY_PROTOCOL) :]
+
+        # Get WebSocket URL and disk path from database
+        info = resolve_live_dataset(measurement_id)
+        ws_url = info.get("ws_url")
+        disk_path = info.get("disk_path")
+
+        # Try WebSocket first for in-memory access
+        if ws_url:
+            try:
+                dataset = live_client.open_live_dataset_sync(
+                    measurement_id, ws_url=ws_url
+                )
+                dataset.attrs["path"] = fpath
+                dataset.attrs.setdefault("measurement_id", measurement_id)
+                logger.info(
+                    f"Loaded live dataset '{measurement_id}' via WebSocket from memory"
+                )
+                return dataset
+            except Exception as e:
+                logger.info(
+                    f"WebSocket unavailable for '{measurement_id}': {e}, loading from disk..."
+                )
+        else:
+            logger.info(
+                f"No WebSocket URL for '{measurement_id}', loading from disk..."
+            )
+
+        # Fallback to disk path
+        if not disk_path:
+            # Try live_measurements as secondary fallback
+            from . import live_measurements
+
+            measurement_info = live_measurements.get_measurement_info(measurement_id)
+            if measurement_info and measurement_info.fpath:
+                disk_path = measurement_info.fpath
+                logger.info(f"Found disk path from live_measurements: {disk_path}")
+
+        if not disk_path:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Live dataset {measurement_id} has no disk path available",
+            )
+
+        # Load from disk
+        try:
+            logger.info(f"Loading dataset from disk: {disk_path}")
+            dataset = xr.open_zarr(disk_path)
+            dataset.attrs["path"] = fpath  # Keep memory:// path for consistency
+            dataset.attrs["actual_path"] = disk_path  # Store actual disk path
+            dataset.attrs["loaded_from"] = "disk"
+            logger.info(
+                f"❕Loaded dataset '{measurement_id}' from disk (measurement ended)"
+            )
+            dataset.attrs.setdefault("measurement_id", measurement_id)
+            return dataset
+        except Exception as e:
+            logger.error(
+                f"Failed to load dataset '{measurement_id}' from disk at {disk_path}: {e}"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to load dataset {measurement_id} from disk: {e}",
+            )
+
     try:
         dataset = xr.open_zarr(fpath)
+        dataset.attrs["path"] = fpath
         return dataset
 
     except Exception as e:
@@ -264,6 +339,9 @@ def create_line_plots(
 
                 dataset_name = Path(fpath).stem
 
+                # Check if dataset was loaded from disk (measurement ended)
+                is_live = dataset.attrs.get("loaded_from") != "disk"
+
                 plots.append(
                     {
                         "id": f"line_plot_{i}_{dataset_name}_{dep}",
@@ -271,6 +349,7 @@ def create_line_plots(
                         "title": f"Line Plot - {dataset_name}: {dep} vs {', '.join(indeps)}",
                         "type": "LinePlot",
                         "slider_config": auto_slider_config,  # Include auto-generated slider configuration for frontend
+                        "is_live": is_live,  # Indicate if data is from live measurement or disk
                     }
                 )
 
@@ -363,6 +442,9 @@ def create_heat_maps(
 
                 dataset_name = Path(fpath).stem
 
+                # Check if dataset was loaded from disk (measurement ended)
+                is_live = dataset.attrs.get("loaded_from") != "disk"
+
                 plots.append(
                     {
                         "id": f"heat_map_{i}_{dataset_name}_{dep}",
@@ -370,6 +452,7 @@ def create_heat_maps(
                         "title": f"Heat Map - {dataset_name}: {dep} vs {x_var}, {y_var}",
                         "type": "HeatMap",
                         "slider_config": auto_slider_config,
+                        "is_live": is_live,  # Indicate if data is from live measurement or disk
                     }
                 )
 

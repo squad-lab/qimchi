@@ -6,12 +6,14 @@ REM This script will:
 REM 1. Check for existing installation and skip setup if found
 REM 2. Check and install Git via winget if not present
 REM 3. Clone or update QIMCHI repository to %USERPROFILE%\.qimchi
-REM 4. Check and install Python dependencies (uv)
+REM    - Interactive branch selection during initial installation
+REM 4. Create and activate Python virtual environment using uv
 REM 5. Install Node.js via winget if not present
 REM 6. Install fd-find for better performance (optional)
-REM 7. Install Python backend dependencies using uv
-REM 8. Install and build React frontend using npm
-REM 9. Start the FastAPI server with static file serving
+REM 7. Clone and install QCUtils with interactive branch selection
+REM 8. Install Python backend dependencies using pip
+REM 9. Install and build React frontend using npm
+REM 10. Start the FastAPI server with static file serving
 REM
 REM Usage: Double-click this file or run from command prompt
 REM The web interface will be available at http://localhost:8001
@@ -20,6 +22,13 @@ REM To force a fresh installation, delete: %USERPROFILE%\.qimchi\.qimchi_install
 REM ============================================================================
 
 setlocal EnableDelayedExpansion
+
+REM ============================================================================
+REM Configuration Parameters - Edit these as needed
+REM ============================================================================
+set DEFAULT_QIMCHI_BRANCH=main
+set DEFAULT_QCUTILS_BRANCH=main
+REM ============================================================================
 
 echo ============================================
 echo          QIMCHI Setup and Run Script
@@ -53,23 +62,53 @@ echo Setting up QIMCHI in: %QIMCHI_DIR%
 if exist "%INSTALL_MARKER%" (
     echo.
     echo ============================================
-    echo     QIMCHI Already Installed - Quick Start
+    echo    QIMCHI Already Installed - Quick Start
     echo ============================================
     echo Previous installation detected. Checking if everything is ready...
     
     :: Verify all components exist
     if exist "%QIMCHI_DIR%\qimchi-react\backend\main.py" (
         if exist "%QIMCHI_DIR%\qimchi-react\frontend\dist\index.html" (
-            echo Installation verified. Checking for updates...
-            cd /d "%QIMCHI_DIR%\qimchi-react"
-            git pull origin main >nul 2>&1
-            if errorlevel 1 (
-                echo Warning: Could not update repository. Using existing version.
+            if exist "%QIMCHI_DIR%\qcutils" (
+                echo Installation verified. Checking for updates...
+                cd /d "%QIMCHI_DIR%\qimchi-react"
+                
+                :: Capture git pull output to check for frontend changes
+                git pull origin > "%TEMP%\qimchi_git_pull.txt" 2>&1
+                if errorlevel 1 (
+                    echo Warning: Could not update repository. Using existing version.
+                ) else (
+                    :: Check if pull output indicates changes
+                    findstr /C:"Already up to date" "%TEMP%\qimchi_git_pull.txt" >nul
+                    if errorlevel 1 (
+                        echo Repository updated. Checking for frontend changes...
+                        :: Check if frontend directory was affected - can be a bit more discerning, e.g., checking only src/
+                        findstr /C:"frontend/" "%TEMP%\qimchi_git_pull.txt" >nul
+                        if not errorlevel 1 (
+                            echo Frontend changes detected. Rebuilding frontend...
+                            cd /d "%QIMCHI_DIR%\qimchi-react\frontend"
+                            call npm install >nul 2>&1
+                            call npm run build
+                            if errorlevel 1 (
+                                echo Warning: Frontend rebuild failed. Using existing build.
+                            ) else (
+                                echo Frontend rebuilt successfully.
+                            )
+                            cd /d "%QIMCHI_DIR%\qimchi-react"
+                        ) else (
+                            echo No frontend changes detected. Using existing build.
+                        )
+                    ) else (
+                        echo Repository already up to date.
+                    )
+                )
+                
+                echo Starting server directly...
+                goto :start_server
             ) else (
-                echo Repository updated successfully.
+                echo QCUtils not found. Re-running setup...
+                del "%INSTALL_MARKER%" 2>nul
             )
-            echo Starting server directly...
-            goto :start_server
         )
     )
     
@@ -85,9 +124,54 @@ if not exist "%QIMCHI_DIR%" (
 
 :: Check if qimchi-react already exists, if not clone it
 if not exist "%QIMCHI_DIR%\qimchi-react" (
-    echo Cloning QIMCHI repository...
+    echo.
+    echo ============================================
+    echo     Selecting QIMCHI Branch to Install
+    echo ============================================
+    
+    :: Fetch available branches from GitLab
+    echo Fetching available branches from repository...
     cd /d "%QIMCHI_DIR%"
-    git clone https://gitlab.com/squad-lab/qimchi-react.git
+    git ls-remote --heads https://gitlab.com/squad-lab/qimchi-react.git > "%TEMP%\qimchi_branches.txt"
+    if errorlevel 1 (
+        echo ERROR: Failed to fetch branches from repository
+        echo Please check your internet connection and try again
+        pause
+        exit /b 1
+    )
+    
+    :: Parse and display branches
+    echo.
+    echo Available branches:
+    echo.
+    set /a BRANCH_COUNT=0
+    for /f "tokens=2" %%a in ('type "%TEMP%\qimchi_branches.txt"') do (
+        set "BRANCH_FULL=%%a"
+        :: Extract branch name after refs/heads/
+        for /f "tokens=3 delims=/" %%b in ("!BRANCH_FULL!") do (
+            set /a BRANCH_COUNT+=1
+            set "BRANCH_!BRANCH_COUNT!=%%b"
+            echo !BRANCH_COUNT!. %%b
+        )
+    )
+    
+    echo.
+    set /p BRANCH_CHOICE="Select branch number (default: %DEFAULT_QIMCHI_BRANCH%): "
+    
+    :: Set default or validate choice
+    if "!BRANCH_CHOICE!"=="" (
+        set "SELECTED_BRANCH=%DEFAULT_QIMCHI_BRANCH%"
+    ) else (
+        call set "SELECTED_BRANCH=%%BRANCH_!BRANCH_CHOICE!%%"
+        if "!SELECTED_BRANCH!"=="" (
+            echo Invalid selection. Using default: %DEFAULT_QIMCHI_BRANCH%
+            set "SELECTED_BRANCH=%DEFAULT_QIMCHI_BRANCH%"
+        )
+    )
+    
+    echo.
+    echo Cloning QIMCHI repository from branch: !SELECTED_BRANCH!
+    git clone --branch !SELECTED_BRANCH! --single-branch https://gitlab.com/squad-lab/qimchi-react.git
     if errorlevel 1 (
         echo ERROR: Failed to clone repository
         echo Please check your internet connection and try again
@@ -98,7 +182,7 @@ if not exist "%QIMCHI_DIR%\qimchi-react" (
 ) else (
     echo Repository already exists. Updating...
     cd /d "%QIMCHI_DIR%\qimchi-react"
-    git pull origin main
+    git pull origin
     if errorlevel 1 (
         echo Warning: Failed to update repository. Continuing with existing version...
     ) else (
@@ -177,8 +261,26 @@ if errorlevel 1 (
 
 echo.
 echo ============================================
-echo          Setting up Backend
+echo              Setting up Backend
 echo ============================================
+
+:: Navigate to .qimchi directory
+cd /d "%QIMCHI_DIR%"
+if errorlevel 1 (
+    echo ERROR: Could not navigate to .qimchi directory
+    pause
+    exit /b 1
+)
+
+:: Setup venv
+echo Setting up Python virtual environment and activating...
+uv venv --python 3.13 --seed --clear
+call .\.venv\Scripts\activate.bat
+if errorlevel 1 (
+    echo ERROR: Failed to set up Python virtual environment
+    pause
+    exit /b 1
+)
 
 :: Navigate to backend directory
 cd /d "%QIMCHI_DIR%\qimchi-react\backend"
@@ -190,7 +292,7 @@ if errorlevel 1 (
 
 :: Install Python dependencies with uv
 echo Installing Python dependencies...
-uv sync
+uv pip install .
 if errorlevel 1 (
     echo ERROR: Failed to install Python dependencies
     pause
@@ -199,11 +301,89 @@ if errorlevel 1 (
 
 :: Install plotly chrome for kaleido
 echo Installing plotly chrome support...
-echo y | uv run python -c "import plotly; plotly.io.kaleido.scope.chromium.config.set_executable('chrome')" 2>nul || echo Plotly chrome setup completed
+echo y | python -c "import plotly; plotly.io.kaleido.scope.chromium.config.set_executable('chrome')" 2>nul || echo Plotly chrome setup completed
 
 echo.
 echo ============================================
-echo          Setting up Frontend
+echo             Setting up QCUtils
+echo ============================================
+
+:: Check if qcutils already exists, if not clone it
+if not exist "%QIMCHI_DIR%\qcutils" (
+    echo.
+    echo ============================================
+    echo     Selecting QCUtils Branch to Install
+    echo ============================================
+    
+    :: Fetch available branches from GitLab
+    echo Fetching available branches from qcutils repository...
+    cd /d "%QIMCHI_DIR%"
+    git ls-remote --heads https://gitlab.com/squad-lab/qcutils.git > "%TEMP%\qcutils_branches.txt"
+    if errorlevel 1 (
+        echo ERROR: Failed to fetch branches from qcutils repository
+        echo Please check your internet connection and try again
+        pause
+        exit /b 1
+    )
+    
+    :: Parse and display branches
+    echo.
+    echo Available branches:
+    echo.
+    set /a QCUTILS_BRANCH_COUNT=0
+    for /f "tokens=2" %%a in ('type "%TEMP%\qcutils_branches.txt"') do (
+        set "QCUTILS_BRANCH_FULL=%%a"
+        :: Extract branch name after refs/heads/
+        for /f "tokens=3 delims=/" %%b in ("!QCUTILS_BRANCH_FULL!") do (
+            set /a QCUTILS_BRANCH_COUNT+=1
+            set "QCUTILS_BRANCH_!QCUTILS_BRANCH_COUNT!=%%b"
+            echo !QCUTILS_BRANCH_COUNT!. %%b
+        )
+    )
+    
+    echo.
+    set /p QCUTILS_BRANCH_CHOICE="Select branch number (default: %DEFAULT_QCUTILS_BRANCH%): "
+    
+    :: Set default or validate choice
+    if "!QCUTILS_BRANCH_CHOICE!"=="" (
+        set "SELECTED_QCUTILS_BRANCH=%DEFAULT_QCUTILS_BRANCH%"
+    ) else (
+        call set "SELECTED_QCUTILS_BRANCH=%%QCUTILS_BRANCH_!QCUTILS_BRANCH_CHOICE!%%"
+        if "!SELECTED_QCUTILS_BRANCH!"=="" (
+            echo Invalid selection. Using default: %DEFAULT_QCUTILS_BRANCH%
+            set "SELECTED_QCUTILS_BRANCH=%DEFAULT_QCUTILS_BRANCH%"
+        )
+    )
+    
+    echo.
+    echo Cloning QCUtils repository from branch: !SELECTED_QCUTILS_BRANCH!
+    cd /d "%QIMCHI_DIR%"
+    git clone --branch !SELECTED_QCUTILS_BRANCH! --single-branch https://gitlab.com/squad-lab/qcutils.git
+    if errorlevel 1 (
+        echo ERROR: Failed to clone qcutils repository
+        echo Please check your internet connection and try again
+        pause
+        exit /b 1
+    )
+    echo QCUtils repository cloned successfully
+) else (
+    echo QCUtils repository already exists
+)
+
+:: Install qcutils using pip into the backend virtual environment
+echo Installing QCUtils into backend virtual environment...
+cd /d "%QIMCHI_DIR%\qimchi-react\backend"
+uv pip install "%QIMCHI_DIR%\qcutils"
+if errorlevel 1 (
+    echo ERROR: Failed to install qcutils
+    pause
+    exit /b 1
+)
+echo QCUtils installed successfully
+
+echo.
+echo ============================================
+echo             Setting up Frontend
 echo ============================================
 
 :: Navigate to frontend directory
@@ -243,7 +423,7 @@ if errorlevel 1 (
 :: Create installation completion marker
 echo Creating installation completion marker...
 echo Installation completed on %DATE% %TIME% > "%INSTALL_MARKER%"
-echo Git, Python, Node.js, backend and frontend setup complete >> "%INSTALL_MARKER%"
+echo Git, Python, Node.js, qcutils, backend and frontend setup complete >> "%INSTALL_MARKER%"
 
 :start_server
 echo.
@@ -253,6 +433,12 @@ echo ============================================
 
 :: Navigate back to root directory
 cd /d "%QIMCHI_DIR%\qimchi-react"
+
+:: Activate virtual environment
+call "%QIMCHI_DIR%\.venv\Scripts\activate.bat"
+if errorlevel 1 (
+    echo Warning: Could not activate virtual environment
+)
 
 :: Set environment variables
 set PYTHONPATH=%QIMCHI_DIR%\qimchi-react\backend
@@ -270,11 +456,47 @@ echo.
 :: Start the FastAPI server using uvicorn in background
 cd /d "%QIMCHI_DIR%\qimchi-react\backend"
 echo Starting server...
-start /min cmd /c "uv run uvicorn main:app --host 127.0.0.1 --port %PORT% --workers 8 --log-level info"
+start /min cmd /c "uvicorn main:app --host 127.0.0.1 --port %PORT% --workers 8 --log-level info"
 
-:: Wait a moment for server to start
-echo Waiting for server to start...
-timeout /t 3 /nobreak >nul
+:: Wait for server health endpoint to become ready (wait up to 300 seconds)
+echo Waiting for server to report healthy status (waiting up to 300s)...
+set MAX_RETRIES=300
+set /a RETRIES=0
+set "HEALTH="
+
+:wait_health
+for /f "usebackq delims=" %%a in (`curl -s http://127.0.0.1:%PORT%/health 2^>nul`) do set "HEALTH=%%a"
+if defined HEALTH (
+    @REM echo Response: !HEALTH!
+    echo !HEALTH! | findstr /i /c:"\"ok\":true" >nul
+    if errorlevel 1 (
+        rem ok flag not present or not true
+    ) else (
+        echo !HEALTH! | findstr /c:"\"id\"" >nul
+        if errorlevel 1 (
+            rem id not present
+        ) else (
+            echo Server healthy.
+            goto :health_ready
+        )
+    )
+)
+
+set /a RETRIES+=1
+if %RETRIES% GEQ %MAX_RETRIES% (
+    echo ERROR: Server did not become healthy after %MAX_RETRIES% seconds.
+    echo Last response: !HEALTH!
+    goto :health_timeout
+)
+
+timeout /t 1 /nobreak >nul
+goto :wait_health
+
+:health_ready
+rem Server is ready; continue
+
+:health_timeout
+rem Timeout reached; continuing anyway
 
 :: Try to open Firefox browser
 echo Opening Firefox browser...

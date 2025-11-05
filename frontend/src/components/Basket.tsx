@@ -192,9 +192,6 @@ const Basket = ({
   const { showToast } = useToast();
   const [isExpanded, setIsExpanded] = useState(true);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [loadingAttributes, setLoadingAttributes] = useState<Set<string>>(
-    new Set()
-  );
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [copiedItems, setCopiedItems] = useState<{
     [key: string]: "filename" | "path" | null;
@@ -373,40 +370,7 @@ const Basket = ({
           }
         }
 
-        // Use the item.id to axios fetch ('/load-attrs/') and populate attributes
-        try {
-          if (item.id) {
-            setLoadingAttributes((prev) => new Set(prev).add(item.id));
-            axios
-              .post(`${PROD_BACKEND_URL}/load-attrs/`, { path: item.path })
-              .then((response) => {
-                item.attributes = response.data;
-                console.log(
-                  "Attributes loaded for item:",
-                  item.id,
-                  response.data
-                );
-                setLoadingAttributes((prev) => {
-                  const newSet = new Set(prev);
-                  newSet.delete(item.id);
-                  return newSet;
-                });
-              })
-              .catch((error) => {
-                console.error("Error loading attributes:", error);
-                showToast("Failed to load item attributes", "error");
-                setLoadingAttributes((prev) => {
-                  const newSet = new Set(prev);
-                  newSet.delete(item.id);
-                  return newSet;
-                });
-              });
-          }
-        } catch (error) {
-          console.error("Error fetching attributes for item:", error);
-          showToast("Error fetching item attributes", "error");
-        }
-
+        // Call onDropItem to add the item - attribute loading is now handled by parent (Viewer)
         onDropItem?.(item);
       });
 
@@ -562,8 +526,7 @@ const Basket = ({
                               <span className="text-sm text-gray-500 flex-shrink-0">
                                 {item.attributes ? (
                                   <Info size={15} className="text-blue-500" />
-                                ) : loadingAttributes.has(item.id) ||
-                                  externalLoadingAttributes.has(item.id) ? (
+                                ) : externalLoadingAttributes.has(item.id) ? (
                                   <LoaderCircle
                                     size={15}
                                     className="text-blue-500 animate-spin"

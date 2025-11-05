@@ -704,11 +704,6 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          onMouseDown={(e) => {
-            // Prevent parent pointer layer from stealing focus
-            e.stopPropagation();
-            bringToFront();
-          }}
         >
           {/* Header */}
           <div className="flex items-center justify-between p-2 bg-gray-200 border-b-2 border-gray-300 drag-handle cursor-move flex-shrink-0">
@@ -779,10 +774,10 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
               <Tooltip content="Close modal">
                 <button
                   onClick={onClose}
-                  className="p-1.5 rounded hover:bg-red-100 transition-colors duration-150"
+                  className="p-1.5 rounded hover:bg-gray-300 transition-colors"
                   aria-label="Close modal"
                 >
-                  <X size={16} />
+                  <X size={16} className="text-red-600" />
                 </button>
               </Tooltip>
             </div>

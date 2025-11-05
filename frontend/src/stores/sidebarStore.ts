@@ -33,6 +33,7 @@ interface ComponentStates {
     showFilters: boolean;
     isExpanded: boolean;
     lastPath: string; // Track the last loaded path
+    showLiveOnly: boolean; // Show only live measurements
   };
 }
 
@@ -86,6 +87,7 @@ const initialComponentStates: ComponentStates = {
     showFilters: false,
     isExpanded: true,
     lastPath: "",
+    showLiveOnly: false,
   },
 };
 
