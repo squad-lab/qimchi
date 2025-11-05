@@ -13,6 +13,7 @@ import PlotContainer from "./PlotContainer";
 import { usePlotCollection } from "../hooks/usePlotCollection";
 import { useToast } from "../hooks/useToast";
 import Tooltip from "./Tooltip";
+import { generateAutoPlotConfigs } from "../utils/autoPlot";
 
 interface ViewerProps {
   defaultWidth?: number; // In percentage (0-100)
@@ -35,6 +36,8 @@ const Viewer = ({
   onClearBasket,
   onAddToBasket,
   loadingAttributes,
+  onStartLoadingAttributes,
+  onUpdateBasketItemAttributes,
 }: ViewerProps) => {
   const { plotConfigs, addPlot, removePlot, clearPlots, updatePlotDataSource } =
     usePlotCollection();
@@ -54,6 +57,7 @@ const Viewer = ({
   const composerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const previousBasketItems = useRef<BasketItem[]>([]);
+  const processedAutoPlotItems = useRef<Set<string>>(new Set());
 
   // Monitor basket changes for dataset cycling
   useEffect(() => {
@@ -64,6 +68,18 @@ const Viewer = ({
       (item) => item.type === "file" && item.path.endsWith(".zarr")
     );
 
+    const buildMemoryPath = (item: BasketItem): string | null => {
+      const baseName = item.name?.endsWith(".zarr")
+        ? item.name.slice(0, -5)
+        : item.name;
+      if (!baseName) {
+        return null;
+      }
+      return `memory://${baseName}`;
+    };
+
+    let nextPreviousItems: BasketItem[] = basketItems;
+
     // Check if we have exactly one zarr item and it's different from before
     if (
       zarrItems.length === 1 &&
@@ -72,15 +88,107 @@ const Viewer = ({
       plotConfigs.length > 0
     ) {
       // This indicates a dataset cycle - update all plot data sources
-      updatePlotDataSource(zarrItems[0].path);
+      const prevItem = prevZarrItems[0];
+      const newItem = zarrItems[0];
+
+      let preferredPath = newItem.path;
+
+      const newIsMemory = preferredPath.startsWith("memory://");
+      const prevIsMemory = prevItem.path.startsWith("memory://");
+      const sameDataset = prevItem.name === newItem.name;
+      const isLiveDataset = newItem.tags?.includes("live");
+      const isDiskFallback = newItem.tags?.includes("disk-fallback");
+
+      if (!newIsMemory) {
+        if (sameDataset && prevIsMemory) {
+          // Preserve the memory path we were already using for the same dataset
+          preferredPath = prevItem.path;
+        } else if (isLiveDataset && !isDiskFallback) {
+          // Prefer the memory URI when the basket item represents a live dataset with an in-memory store
+          const memoryPath = buildMemoryPath(newItem);
+          if (memoryPath) {
+            preferredPath = memoryPath;
+          }
+        }
+      }
+
+      const preferMemory =
+        preferredPath.startsWith("memory://") ||
+        prevItem.path.startsWith("memory://");
+
+      updatePlotDataSource(preferredPath, { preferMemory });
       console.log(
-        `Updated ${plotConfigs.length} plots with new dataset: ${zarrItems[0].path}`
+        `Updated ${plotConfigs.length} plots with new dataset: ${preferredPath}`
+      );
+
+      // Keep the "previous" snapshot aligned with the path we actually applied to avoid flip-flop churn
+      nextPreviousItems = basketItems.map((item) =>
+        item.id === newItem.id ? { ...item, path: preferredPath } : item
       );
     }
 
     // Update the reference for next comparison
-    previousBasketItems.current = basketItems;
+    previousBasketItems.current = nextPreviousItems;
   }, [basketItems, plotConfigs.length, updatePlotDataSource]);
+
+  // Auto-create default plots when new items with attributes are added to basket
+  useEffect(() => {
+    basketItems.forEach((item) => {
+      // Skip if already processed
+      if (processedAutoPlotItems.current.has(item.id)) {
+        return;
+      }
+
+      // Skip if item doesn't have attributes yet (still loading)
+      if (!item.attributes || loadingAttributes.has(item.id)) {
+        return;
+      }
+
+      // Skip auto-plotting if there are existing plots AND this specific item already has plots
+      // Check if any existing plot uses this item's path (either directly or via memory://)
+      if (plotConfigs.length > 0) {
+        const itemBaseName = item.name?.endsWith(".zarr")
+          ? item.name.slice(0, -5)
+          : item.name;
+        const itemMemoryPath = itemBaseName ? `memory://${itemBaseName}` : null;
+
+        const hasExistingPlots = plotConfigs.some((config) => {
+          return (
+            config.fpath === item.path ||
+            (itemMemoryPath && config.fpath === itemMemoryPath)
+          );
+        });
+
+        if (hasExistingPlots) {
+          // Still mark as processed to avoid future attempts
+          processedAutoPlotItems.current.add(item.id);
+          return;
+        }
+      }
+
+      // Mark as processed
+      processedAutoPlotItems.current.add(item.id);
+
+      // Generate auto-plot configs
+      const result = generateAutoPlotConfigs(item);
+
+      if (result.success && result.plotConfigs.length > 0) {
+        // Add each generated plot config to the viewer
+        result.plotConfigs.forEach((config) => {
+          addPlot(config);
+        });
+        showToast(result.message, "success");
+      } else {
+        // Only show error if there were actual issues (not just non-qualifying items)
+        if (
+          !result.message.includes("not a valid measurement") &&
+          !result.message.includes("no independents or dependents")
+        ) {
+          showToast(result.message, "error");
+        }
+      }
+    });
+  }, [basketItems, loadingAttributes, addPlot, showToast, plotConfigs]);
 
   // Calculate dynamic height based on actual rendered heights
   const updateViewerHeight = () => {
@@ -143,6 +251,17 @@ const Viewer = ({
       window.removeEventListener("plot-size-preset", handler as EventListener);
   }, []);
 
+  // Keep processedAutoPlotItems in sync: remove IDs for items no longer in the basket
+  useEffect(() => {
+    const currentIds = new Set(basketItems.map((it) => it.id));
+    // Remove any processed IDs that are no longer present
+    processedAutoPlotItems.current.forEach((id) => {
+      if (!currentIds.has(id)) {
+        processedAutoPlotItems.current.delete(id);
+      }
+    });
+  }, [basketItems]);
+
   // Also update on window resize
   useEffect(() => {
     const handleResize = () => updateViewerHeight();
@@ -171,6 +290,10 @@ const Viewer = ({
   );
 
   const handleCreatePlot = (config: PlotComposerConfig) => {
+    console.log(
+      `[Viewer] handleCreatePlot received config:`,
+      JSON.stringify(config, null, 2)
+    );
     // live dataset flags removed; just add the provided config
     addPlot({ ...config });
   };
@@ -220,8 +343,35 @@ const Viewer = ({
     }
   };
 
-  const handleDropItem = (item: BasketItem) => {
+  const handleDropItem = async (item: BasketItem) => {
+    // Add the item to basket immediately (without attributes)
     onAddToBasket(item);
+
+    // Load attributes from backend asynchronously if it's a file
+    if (item.type === "file") {
+      // Start loading state
+      onStartLoadingAttributes(item.id);
+
+      try {
+        console.log("Loading attributes for dropped item:", item.path);
+        const response = await axios.post(`${PROD_BACKEND_URL}/load-attrs/`, {
+          path: item.path,
+        });
+        console.log(
+          "Attributes loaded for dropped item:",
+          item.id,
+          response.data
+        );
+
+        // Update the basket item with the loaded attributes (this also removes from loading state)
+        onUpdateBasketItemAttributes(item.id, response.data);
+      } catch (error) {
+        showToast("Failed to load file attributes", "error");
+        console.error("Error loading attributes for dropped item:", error);
+        // Remove from loading state even if there's an error
+        onUpdateBasketItemAttributes(item.id, {});
+      }
+    }
   };
 
   return (
@@ -375,7 +525,7 @@ const Viewer = ({
                 >
                   <button
                     onClick={clearPlots}
-                    className="px-3 py-1 text-sm text-gray-600 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                    className="px-3 py-1 text-sm text-red-600 hover:bg-gray-300 rounded transition-colors"
                   >
                     Clear All Plots
                   </button>

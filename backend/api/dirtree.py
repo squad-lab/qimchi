@@ -8,7 +8,7 @@ import subprocess  # Windows compat
 import xarray as xr
 
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 from datetime import datetime
 from fastapi import APIRouter, HTTPException
 
@@ -18,11 +18,33 @@ from .config import FD_EXEC, MAX_DEPTH  #  DU_EXEC, XARGS_EXEC | Windows compat
 # Local imports
 from .models import PathData
 from .logger import logger
+from .live_utils import get_live_dataset_entries, resolve_live_dataset
+from . import live_client
+from . import live_measurements
 
 
 router = APIRouter()
 
 # FIXME: Live-dataset detection and websocket-based live updates were removed.
+
+MEMORY_PROTOCOL = "memory://"
+
+
+def _normalize_memory_path(raw_path: str) -> Optional[str]:
+    """Return a canonical memory:// path if applicable, otherwise None."""
+    if raw_path.startswith(MEMORY_PROTOCOL):
+        return raw_path
+
+    stripped = raw_path.rstrip("/")
+    if stripped == MEMORY_PROTOCOL.rstrip("/"):
+        return MEMORY_PROTOCOL
+
+    return None
+
+
+def _extract_measurement_id(memory_path: str) -> str:
+    """Extract the measurement identifier from a memory:// URI."""
+    return memory_path[len(MEMORY_PROTOCOL) :].strip("/")
 
 
 def _get_dataset_last_modified(path: Path) -> float:
@@ -387,6 +409,196 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
     return nodes[str(path)]
 
 
+def _memory_dataset_node(
+    measurement_id: str, entry: Dict[str, object]
+) -> Optional[Dict[str, object]]:
+    """Return a TreeNode entry for a live dataset from SQLite DB info."""
+
+    disk_path = entry.get("disk_path")
+    ws_url = entry.get("ws_url")
+    started_at = entry.get("started_at")
+    ended_at = entry.get("ended_at")
+
+    logger.debug(
+        f"[_memory_dataset_node] measurement_id={measurement_id}, "
+        f"disk_path={disk_path}, ws_url={ws_url}, ended_at={ended_at}"
+    )
+
+    if not disk_path:
+        logger.warning(
+            "Live dataset %s is registered without a disk path",
+            measurement_id,
+        )
+        return None
+
+    timestamp_iso: Optional[str] = None
+    last_modified: Optional[float] = None
+
+    # Try to read metadata from disk path
+    try:
+        with xr.open_zarr(disk_path) as dataset:
+            raw_ts = dataset.attrs.get("Timestamp")
+            if isinstance(raw_ts, str):
+                try:
+                    dt = datetime.fromisoformat(raw_ts)
+                except ValueError:
+                    dt = datetime.utcnow()
+                timestamp_iso = dt.isoformat()
+                last_modified = dt.timestamp()
+            elif raw_ts is not None:
+                timestamp_iso = str(raw_ts)
+    except Exception as exc:
+        logger.debug(
+            f"Could not read metadata for live dataset {measurement_id} from disk: {exc}"
+        )
+
+    # Fallback to started_at from database
+    if timestamp_iso is None and started_at:
+        try:
+            dt = datetime.fromisoformat(started_at)
+            timestamp_iso = dt.isoformat()
+            last_modified = dt.timestamp()
+        except ValueError:
+            pass
+
+    # Final fallback to current time
+    if timestamp_iso is None:
+        now = datetime.utcnow()
+        timestamp_iso = now.isoformat()
+        last_modified = now.timestamp()
+
+    # Always use memory:// path for live datasets in the tree
+    # The load_dataset() function will handle WebSocket vs disk fallback
+    path_value = f"{MEMORY_PROTOCOL}{measurement_id}"
+
+    logger.debug(
+        f"[_memory_dataset_node] Using memory:// path: {path_value} "
+        f"(disk_path: {disk_path})"
+    )
+
+    node = {
+        "id": f"file-memory-{measurement_id}",
+        "name": f"{measurement_id}.zarr",
+        "path": path_value,
+        "type": "file",
+        "timestamp": timestamp_iso,
+        "lastModified": last_modified,
+        "tags": [
+            "zarr",
+            "live" if ended_at is None else "ended",
+        ],
+    }
+
+    if disk_path:
+        node["diskPath"] = disk_path
+        try:
+            node["size"] = _get_folder_size(Path(disk_path))
+        except Exception:
+            pass
+
+    metadata: Dict[str, object] = {}
+    if ws_url:
+        metadata["ws_url"] = ws_url
+    if started_at:
+        metadata["started_at"] = started_at
+    if ended_at:
+        metadata["ended_at"] = ended_at
+    if metadata:
+        node["metadata"] = metadata
+
+    return node
+
+
+def _build_memory_tree(path_str: str) -> Dict[str, object]:
+    """Build a TreeNode-style response for live datasets."""
+
+    logger.debug(f"[_build_memory_tree] Called with path_str={path_str}")
+
+    entries = get_live_dataset_entries()
+    logger.debug(
+        f"[_build_memory_tree] Got {len(entries)} entries from get_live_dataset_entries()"
+    )
+
+    if path_str == MEMORY_PROTOCOL:
+        children = []
+        for measurement_id, entry in entries.items():
+            node = _memory_dataset_node(measurement_id, entry)
+            if node:
+                children.append(node)
+        now = datetime.utcnow()
+        return {
+            "id": "folder-memory-root",
+            "name": "Live Measurements",
+            "path": MEMORY_PROTOCOL,
+            "type": "folder",
+            "timestamp": now.isoformat(),
+            "children": children,
+        }
+
+    measurement_id = _extract_measurement_id(path_str)
+    if not measurement_id:
+        raise HTTPException(status_code=400, detail="Missing measurement id in path")
+
+    entry = entries.get(measurement_id)
+    if not entry:
+        entry = resolve_live_dataset(measurement_id)
+
+    node = _memory_dataset_node(measurement_id, entry)
+    if node is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Live dataset {measurement_id} is not available in memory",
+        )
+
+    return node
+
+
+@router.post("/load-live/")
+async def load_live_measurements() -> Dict:
+    """
+    Load live measurements from the database as a tree structure.
+
+    Returns:
+        Dict: Tree structure containing only live measurements
+    """
+    measurements = live_measurements.get_live_measurements()
+
+    if not measurements:
+        return {
+            "success": True,
+            "children": [],
+            "message": "No live measurements found",
+        }
+
+    # Build tree nodes for each live measurement
+    children = []
+    for measurement in measurements:
+        # Create a memory:// path for the measurement
+        memory_path = f"memory://{measurement.measurement_id}"
+
+        # Create tree node
+        node = {
+            "id": measurement.measurement_id,
+            "name": f"{measurement.measurement_id}",
+            "path": memory_path,
+            "type": "file",
+            # NOTE: Omit size for live measurements - frontend handles missing sizes
+            "timestamp": measurement.started_at,
+            "tags": ["live", "zarr"],
+            "live_status": True,
+            "ws_url": measurement.ws_url,
+            "ws_port": measurement.ws_port,
+            "disk_path": measurement.fpath,
+        }
+        children.append(node)
+
+    return {
+        "success": True,
+        "children": children,
+        "count": len(children),
+    }
+
+
 @router.post("/load/")
 async def load_directory(path: PathData) -> Dict:
     """
@@ -400,24 +612,37 @@ async def load_directory(path: PathData) -> Dict:
         Dict: Directory tree structure in TreeNode format.
 
     """
-    logger.debug(f"load_directory | POST path={path}")
+    raw_path = path.path
+    logger.debug(f"load_directory | POST path={raw_path}")
 
-    path = Path(path.path)
-    logger.debug(f"load_directory | Resolved path={path.resolve()}")
+    memory_path = _normalize_memory_path(raw_path)
+    logger.debug(f"load_directory | memory_path={memory_path} (raw_path={raw_path})")
 
-    if not path.exists() or not path.is_dir():
+    if memory_path is not None:
+        try:
+            return _build_memory_tree(memory_path)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error("load_directory | Failed to build memory tree: %s", exc)
+            raise HTTPException(
+                status_code=500, detail=f"Error loading memory directory: {exc}"
+            )
+
+    fs_path = Path(raw_path)
+    logger.debug(f"load_directory | Resolved path={fs_path.resolve()}")
+
+    if not fs_path.exists() or not fs_path.is_dir():
         logger.error(
-            f"load_directory | Path does not exist or is not a directory: {path}"
+            f"load_directory | Path does not exist or is not a directory: {fs_path}"
         )
         raise HTTPException(
             status_code=404, detail="Path does not exist or is not a directory"
         )
 
     try:
-        tree = await get_directory_tree_zarr(path=str(path))
-
+        tree = await get_directory_tree_zarr(path=str(fs_path))
         return tree
-
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Error loading directory: {str(e)}"
@@ -436,22 +661,90 @@ async def get_meta_attrs(path: PathData) -> Dict:
         Dict: Metadata attrs from the zarr dataset
 
     """
-    # Ensure path is a full path to the .zarr directory
-    path = Path(path.path)
+    raw_path = path.path
+    logger.debug(f"get_meta_attrs | POST path={raw_path}")
 
-    logger.debug(f"get_meta_attrs | POST path={path}")
-    if not path.exists() or not path.is_dir():
-        logger.error(
-            f"get_meta_attrs | Path does not exist or is not a directory: {path}"
-        )
-        raise HTTPException(
-            status_code=404, detail="Path does not exist or is not a directory"
-        )
+    memory_path = _normalize_memory_path(raw_path)
+    data: Optional[xr.Dataset] = None
 
-    # If path exists, load the zarr file using xarray
+    if memory_path is not None:
+        measurement_id = _extract_measurement_id(memory_path)
+        if not measurement_id:
+            raise HTTPException(
+                status_code=400, detail="Memory path must include a measurement id"
+            )
+
+        # Get WebSocket URL from database first
+        info = resolve_live_dataset(measurement_id)
+        ws_url = info.get("ws_url")
+        disk_path = info.get("disk_path")
+
+        # Try WebSocket first for in-memory access
+        if ws_url:
+            try:
+                data = await live_client.open_live_dataset(
+                    measurement_id, ws_url=ws_url
+                )
+                logger.info(
+                    f"Loaded live dataset '{measurement_id}' via WebSocket from memory"
+                )
+            except Exception as ws_error:
+                logger.warning(
+                    f"WebSocket load failed for '{measurement_id}': {ws_error}, trying disk fallback"
+                )
+                # Fall through to disk fallback
+                data = None
+        else:
+            logger.info(f"No WebSocket URL for '{measurement_id}', using disk fallback")
+            data = None
+
+        # Fallback to disk path from SQLite DB
+        if data is None:
+            if not disk_path:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Live dataset {measurement_id} has no disk path available",
+                )
+
+            try:
+                fs_path = Path(disk_path)
+                if not fs_path.exists() or not fs_path.is_dir():
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Disk path does not exist or is not a directory",
+                    )
+                data = xr.open_zarr(str(fs_path))
+            except HTTPException:
+                raise
+            except Exception as exc:
+                logger.error(
+                    "get_meta_attrs | Failed to load dataset %s: %s",
+                    measurement_id,
+                    exc,
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to load dataset {measurement_id}: {exc}",
+                )
+    else:
+        fs_path = Path(raw_path)
+        if not fs_path.exists() or not fs_path.is_dir():
+            logger.error(
+                f"get_meta_attrs | Path does not exist or is not a directory: {fs_path}"
+            )
+            raise HTTPException(
+                status_code=404, detail="Path does not exist or is not a directory"
+            )
+
+        try:
+            data = xr.open_dataset(fs_path, engine="zarr")
+        except Exception as exc:
+            logger.error("get_meta_attrs | Failed to open dataset %s: %s", fs_path, exc)
+            raise HTTPException(
+                status_code=400, detail=f"Failed to load dataset: {exc}"
+            )
+
     try:
-        # Load the zarr file using xarray.open_dataset for lazy loading
-        data = xr.open_dataset(path, engine="zarr")
         metadata: dict = data.attrs  # Metadata
         coords: xr.core.coordinates.DatasetCoordinates = (
             data.coords
@@ -480,8 +773,6 @@ async def get_meta_attrs(path: PathData) -> Dict:
             "Measurement ID",  # CONCERN: Already present in filename
             # "Instruments Snapshot"
         ]
-        # NOTE: Remaining keys:
-        # 'Code Archive',  'Extra Metadata', 'Instruments Snapshot', 'Parameters Snapshot', 'Requirements', 'Sweeps',
 
         attr_dict: dict = {key: metadata.get(key, "N/A") for key in attr_keys}
 
@@ -505,6 +796,9 @@ async def get_meta_attrs(path: PathData) -> Dict:
         )
 
         raise HTTPException(status_code=500, detail=f"Error loading metadata: {str(e)}")
+    finally:
+        if data is not None:
+            data.close()
 
 
 @router.post("/load-meta/")
@@ -519,25 +813,92 @@ async def get_metadata(path: PathData) -> Dict:
         Dict: Collapsible metadata key-vals from the zarr dataset
 
     """
-    # Ensure path is a full path to the .zarr directory
-    path = Path(path.path)
+    raw_path = path.path
 
-    logger.debug(f"get_metadata | POST path={path}")
-    if not path.exists() or not path.is_dir():
-        logger.error(
-            f"get_metadata | Path does not exist or is not a directory: {path}"
-        )
-        raise HTTPException(
-            status_code=404, detail="Path does not exist or is not a directory"
-        )
+    logger.debug(f"get_metadata | POST path={raw_path}")
 
-    # If path exists, load the zarr file using xarray
+    memory_path = _normalize_memory_path(raw_path)
+    data: Optional[xr.Dataset] = None
+
+    if memory_path is not None:
+        measurement_id = _extract_measurement_id(memory_path)
+        if not measurement_id:
+            raise HTTPException(
+                status_code=400, detail="Memory path must include a measurement id"
+            )
+
+        # Get WebSocket URL from database first
+        info = resolve_live_dataset(measurement_id)
+        ws_url = info.get("ws_url")
+        disk_path = info.get("disk_path")
+
+        # Try WebSocket first for in-memory access
+        if ws_url:
+            try:
+                data = await live_client.open_live_dataset(
+                    measurement_id, ws_url=ws_url
+                )
+                logger.info(
+                    f"Loaded live dataset '{measurement_id}' via WebSocket from memory"
+                )
+            except Exception as ws_error:
+                logger.warning(
+                    f"WebSocket load failed for '{measurement_id}': {ws_error}, trying disk fallback"
+                )
+                # Fall through to disk fallback
+                data = None
+        else:
+            logger.info(f"No WebSocket URL for '{measurement_id}', using disk fallback")
+            data = None
+
+        # Fallback to disk path from SQLite DB
+        if data is None:
+            if not disk_path:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Live dataset {measurement_id} has no disk path available",
+                )
+
+            try:
+                fs_path = Path(disk_path)
+                if not fs_path.exists() or not fs_path.is_dir():
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Disk path does not exist or is not a directory",
+                    )
+                data = xr.open_zarr(str(fs_path))
+            except HTTPException:
+                raise
+            except Exception as exc:
+                logger.error(
+                    "get_metadata | Failed to load dataset %s: %s",
+                    measurement_id,
+                    exc,
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to load dataset {measurement_id}: {exc}",
+                )
+    else:
+        fs_path = Path(raw_path)
+        if not fs_path.exists() or not fs_path.is_dir():
+            logger.error(
+                f"get_metadata | Path does not exist or is not a directory: {fs_path}"
+            )
+            raise HTTPException(
+                status_code=404, detail="Path does not exist or is not a directory"
+            )
+
+        try:
+            data = xr.open_dataset(fs_path, engine="zarr")
+        except Exception as exc:
+            logger.error("get_metadata | Failed to open dataset %s: %s", fs_path, exc)
+            raise HTTPException(
+                status_code=400, detail=f"Failed to load dataset: {exc}"
+            )
+
     try:
-        # Load the zarr file using xarray.open_dataset for lazy loading
-        data = xr.open_dataset(path, engine="zarr")
         metadata: dict = data.attrs  # Metadata
-        # logger.debug(f"get_metadata | {metadata.keys()=}")
-        # logger.debug(f"get_metadata | {metadata=}")
 
         # Convert metadata to a dictionary if it's not already
         if not isinstance(metadata, dict):
@@ -566,6 +927,9 @@ async def get_metadata(path: PathData) -> Dict:
         logger.error(f"get_metadata | Error loading metadata: {str(e)}", exc_info=True)
 
         raise HTTPException(status_code=500, detail=f"Error loading metadata: {str(e)}")
+    finally:
+        if data is not None:
+            data.close()
 
 
 @router.post("/dataset-status/")

@@ -14,6 +14,19 @@ type PlotlyJSON = {
   config?: Partial<Config>;
 };
 
+type CreatePlotOptions = {
+  silent?: boolean;
+  skipIfPending?: boolean;
+};
+
+const MEMORY_REFRESH_INTERVAL_MS = 500;
+
+const inferSourceFromPath = (path: string): "memory" | "disk" => {
+  const inferred = path.startsWith("memory://") ? "memory" : "disk";
+  console.log(`[IndividualPlot] inferSourceFromPath(${path}) -> ${inferred}`);
+  return inferred;
+};
+
 interface IndividualPlotProps {
   config: PlotConfiguration;
   onRemove: (id: string) => void;
@@ -35,6 +48,8 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
   const currentConfigRef = useRef(currentConfig);
   const hasInitialized = useRef(false);
   const { showToast } = useToast();
+  const fetchInFlight = useRef(false);
+  const autoRefreshTimer = useRef<number | null>(null);
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -42,9 +57,19 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
   }, [currentConfig]);
 
   const createPlot = useCallback(
-    async (configToUse?: PlotConfiguration) => {
-      setIsLoading(true);
-      setError(null);
+    async (
+      configToUse?: PlotConfiguration,
+      options: CreatePlotOptions = {}
+    ) => {
+      if (options.skipIfPending && fetchInFlight.current) {
+        return;
+      }
+
+      fetchInFlight.current = true;
+
+      if (!options.silent) {
+        setIsLoading(true);
+      }
 
       try {
         const plotConfig = configToUse || currentConfigRef.current;
@@ -66,7 +91,74 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         if (response.success && response.plots.length > 0) {
           // Take the first plot from the response
           const plot = response.plots[0];
-          setPlotJson(plot.plotJson);
+
+          // If measurement has ended (is_live=false) and we're using memory source, switch to disk
+          // BUT: Respect preferredSource - only switch if we don't have a strong preference for memory
+          if (
+            plot.is_live === false &&
+            currentConfigRef.current.source === "memory" &&
+            currentConfigRef.current.preferredSource !== "memory"
+          ) {
+            console.log(
+              "[IndividualPlot] Measurement ended, switching source to disk"
+            );
+            setCurrentConfig((prev) => ({ ...prev, source: "disk" }));
+            // Continue to update the plot with the disk data
+          }
+
+          const clonedPlotJson: PlotlyJSON = JSON.parse(
+            JSON.stringify(plot.plotJson)
+          );
+          if (Array.isArray(clonedPlotJson.data)) {
+            clonedPlotJson.data = clonedPlotJson.data.map((trace, idx) => {
+              if (!trace || typeof trace !== "object") {
+                return trace;
+              }
+
+              const hovertemplate = (
+                trace as {
+                  hovertemplate?: unknown;
+                }
+              ).hovertemplate;
+              const zValue = (trace as { z?: unknown }).z;
+
+              if (
+                typeof hovertemplate === "string" &&
+                hovertemplate.includes("%{z") &&
+                zValue == null
+              ) {
+                console.warn(
+                  `[IndividualPlot] Trace ${idx} (${
+                    (trace as { name?: string; type?: string }).name ||
+                    (trace as { type?: string }).type ||
+                    "unknown"
+                  }) has hovertemplate referencing %{{z}} but no z data; sanitizing template`
+                );
+                let sanitizedTemplate = hovertemplate
+                  .split("<br>")
+                  .filter((segment: string) => !segment.includes("%{z"))
+                  .join("<br>");
+                if (!sanitizedTemplate.includes("<extra")) {
+                  sanitizedTemplate = `${sanitizedTemplate}<extra></extra>`;
+                }
+                return {
+                  ...trace,
+                  hovertemplate: sanitizedTemplate,
+                };
+              }
+
+              return trace;
+            });
+          }
+          const now = Date.now();
+          clonedPlotJson.layout = {
+            ...(clonedPlotJson.layout || {}),
+            // Ensure Plotly.react sees a revision bump even if data arrays compare equal
+            datarevision: now,
+            uirevision: now,
+          };
+          setPlotJson(clonedPlotJson);
+          setError(null);
 
           // Capture auto-generated slider configuration from backend
           if (plot.slider_config) {
@@ -77,7 +169,9 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         } else {
           const errorMsg = response.message || "No plots created";
           setError(errorMsg);
-          showToast(`Failed to create plot: ${errorMsg}`, "error");
+          if (!options.silent) {
+            showToast(`Failed to create plot: ${errorMsg}`, "error");
+          }
         }
       } catch (err) {
         let errorMessage = "Unknown error occurred";
@@ -112,8 +206,11 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         setError(errorMessage);
         // Don't show toast since the plot component displays the detailed error
       } finally {
-        setIsLoading(false);
+        if (!options.silent) {
+          setIsLoading(false);
+        }
         setIsSliderRefresh(false); // Reset slider refresh flag
+        fetchInFlight.current = false;
       }
     },
     [showToast]
@@ -130,6 +227,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
 
   const handleConfigUpdate = useCallback(
     (updates: Partial<PlotConfiguration>) => {
+      console.log("[IndividualPlot] handleConfigUpdate invoked with", updates);
       setCurrentConfig((prev) => {
         // For filters, completely replace them instead of merging to avoid duplication
         const newConfig = { ...prev };
@@ -142,20 +240,51 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
 
         // Handle other updates normally
         Object.keys(updates).forEach((key) => {
-          if (key !== "filters_order" && key !== "filters_opts") {
-            const typedKey = key as keyof PlotConfiguration;
-            const typedNewConfig = newConfig as Record<
-              keyof PlotConfiguration,
-              unknown
-            >;
-            const typedUpdates = updates as Record<
-              keyof PlotConfiguration,
-              unknown
-            >;
-            typedNewConfig[typedKey] = typedUpdates[typedKey];
+          if (
+            key === "filters_order" ||
+            key === "filters_opts" ||
+            key === "fpath" ||
+            key === "source"
+          ) {
+            return;
           }
+
+          const typedKey = key as keyof PlotConfiguration;
+          const typedNewConfig = newConfig as Record<
+            keyof PlotConfiguration,
+            unknown
+          >;
+          const typedUpdates = updates as Record<
+            keyof PlotConfiguration,
+            unknown
+          >;
+          typedNewConfig[typedKey] = typedUpdates[typedKey];
         });
 
+        if (typeof updates.fpath === "string") {
+          newConfig.fpath = updates.fpath;
+          const shouldDeriveSource =
+            !("source" in updates) || updates.source === undefined;
+          if (shouldDeriveSource) {
+            const inferred = inferSourceFromPath(updates.fpath);
+            console.log(
+              `[IndividualPlot] handleConfigUpdate inferred source ${inferred} for ${updates.fpath}`
+            );
+            newConfig.source = inferred;
+          }
+        }
+
+        if (typeof updates.source === "string") {
+          console.log(
+            `[IndividualPlot] handleConfigUpdate received explicit source ${updates.source}`
+          );
+          newConfig.source = updates.source;
+        }
+
+        console.log(
+          "[IndividualPlot] handleConfigUpdate next config",
+          newConfig
+        );
         return newConfig;
       });
       // Don't automatically refresh - let the PlotWrapper handle refresh via onRefresh
@@ -182,6 +311,56 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
       // Don't call createPlot() - preserve the existing plot and let PlotWrapper handle data source change
     }
   }, [config]);
+
+  useEffect(() => {
+    // Only check the source field, not fpath
+    // (fpath may still be memory:// even when loading from disk)
+    const isMemorySource = currentConfig.source === "memory";
+
+    // Log current source and fpath
+    console.log(
+      `[IndividualPlot] auto-refresh check: fpath=${currentConfig.fpath} | source=${currentConfig.source} | isMemorySource=${isMemorySource}`
+    );
+
+    if (!isMemorySource) {
+      console.log(
+        `[IndividualPlot] auto-refresh disabled for source=${currentConfig.source}`
+      );
+      if (autoRefreshTimer.current !== null) {
+        window.clearInterval(autoRefreshTimer.current);
+        autoRefreshTimer.current = null;
+      }
+      return;
+    }
+
+    if (autoRefreshTimer.current !== null) {
+      console.log(
+        "[IndividualPlot] Clearing existing auto-refresh interval before creating new one"
+      );
+      window.clearInterval(autoRefreshTimer.current);
+    }
+
+    const intervalId = window.setInterval(() => {
+      console.log(
+        "[IndividualPlot] auto-refresh interval firing for memory dataset"
+      );
+      createPlot(undefined, { silent: true, skipIfPending: true });
+    }, MEMORY_REFRESH_INTERVAL_MS);
+    console.log(
+      `[IndividualPlot] auto-refresh interval set (id=${intervalId}) for source=${currentConfig.source} fpath=${currentConfig.fpath}`
+    );
+    autoRefreshTimer.current = intervalId;
+
+    return () => {
+      console.log(
+        "[IndividualPlot] auto-refresh effect cleanup running, clearing interval"
+      );
+      if (autoRefreshTimer.current !== null) {
+        window.clearInterval(autoRefreshTimer.current);
+        autoRefreshTimer.current = null;
+      }
+    };
+  }, [currentConfig.fpath, currentConfig.source, createPlot]);
 
   // Only create plot on initial mount - prevent double execution
   useEffect(() => {

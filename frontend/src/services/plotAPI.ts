@@ -16,6 +16,7 @@ export interface PlotRequest {
   filters_order?: string[];
   filters_opts?: Record<string, unknown>;
   slider?: Record<string, SliderConfig>;
+  source?: "memory" | "disk"; // Source of the data (memory for live, disk for ended measurements)
 }
 
 // SliderConfig imported from centralized interfaces
@@ -31,6 +32,7 @@ export interface PlotData {
   title?: string;
   type: "LinePlot" | "HeatMap";
   slider_config?: Record<string, SliderConfig>; // Slider configs from backend
+  is_live?: boolean; // True if loaded from memory via WebSocket, false if from disk
 }
 
 export interface PlotResponse {

@@ -1,7 +1,0 @@
-[project]
-name = "qimchi-react"
-version = "0.1.0"
-description = "React port of Qimchi"
-readme = "README.md"
-requires-python = ">=3.13"
-dependencies = []

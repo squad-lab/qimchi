@@ -23,3 +23,5 @@ node_modules/
 old-ignore/
 data/
 dist/
+qcutils/
+ws-live-test/

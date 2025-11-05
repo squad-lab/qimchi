@@ -8,20 +8,92 @@ export interface UsePlotCollectionReturn {
   addPlot: (config: Omit<PlotConfiguration, "id">) => void;
   removePlot: (id: string) => void;
   clearPlots: () => void;
-  updatePlotDataSource: (newFpath: string) => void; // Update all plots with new data source
+  updatePlotDataSource: (
+    newFpath: string,
+    options?: { preferMemory?: boolean }
+  ) => void; // Update all plots with new data source
 }
 
 export const usePlotCollection = (): UsePlotCollectionReturn => {
   const [plotConfigs, setPlotConfigs] = useState<PlotConfiguration[]>([]);
 
-  const addPlot = useCallback((config: Omit<PlotConfiguration, "id">) => {
-    const newPlot: PlotConfiguration = {
-      ...config,
-      id: `plot_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-    };
-
-    setPlotConfigs((prev) => [...prev, newPlot]);
+  const inferSourceFromPath = useCallback((path: string): "memory" | "disk" => {
+    return path.startsWith("memory://") ? "memory" : "disk";
   }, []);
+
+  const toMemoryPath = useCallback((path: string): string | null => {
+    if (path.startsWith("memory://")) {
+      return path;
+    }
+
+    const normalized = path.replace(/\\/g, "/");
+    const segments = normalized.split("/").filter(Boolean);
+    if (segments.length === 0) {
+      return null;
+    }
+
+    const lastSegment = segments[segments.length - 1];
+    if (!lastSegment.endsWith(".zarr")) {
+      return null;
+    }
+
+    const measurementId = lastSegment.slice(0, -`.zarr`.length);
+    if (!measurementId) {
+      return null;
+    }
+
+    return `memory://${measurementId}`;
+  }, []);
+
+  const addPlot = useCallback(
+    (config: Omit<PlotConfiguration, "id">) => {
+      console.log(
+        `[usePlotCollection] addPlot called with config:`,
+        JSON.stringify(config, null, 2)
+      );
+
+      const prefersMemory =
+        config.preferredSource === "memory" ||
+        config.source === "memory" ||
+        config.fpath.startsWith("memory://");
+
+      console.log(
+        `[usePlotCollection] prefersMemory=${prefersMemory}, fpath=${config.fpath}`
+      );
+
+      const normalizedFpath = prefersMemory
+        ? toMemoryPath(config.fpath) ?? config.fpath
+        : config.fpath;
+
+      console.log(
+        `[usePlotCollection] normalizedFpath=${normalizedFpath} (original=${config.fpath})`
+      );
+
+      const resolvedSource =
+        config.source ?? inferSourceFromPath(normalizedFpath);
+
+      console.log(
+        `[usePlotCollection] resolvedSource=${resolvedSource}, config.source=${config.source}`
+      );
+
+      const newPlot: PlotConfiguration = {
+        ...config,
+        fpath: normalizedFpath,
+        source: resolvedSource,
+        preferredSource:
+          config.preferredSource ?? (prefersMemory ? "memory" : resolvedSource),
+        id: `plot_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      };
+
+      console.log(
+        `[usePlotCollection] Created newPlot:`,
+        JSON.stringify(newPlot, null, 2)
+      );
+
+      setPlotConfigs((prev) => [...prev, newPlot]);
+    },
+    [inferSourceFromPath, toMemoryPath]
+  );
 
   const removePlot = useCallback((id: string) => {
     setPlotConfigs((prev) => prev.filter((plot) => plot.id !== id));
@@ -31,14 +103,37 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
     setPlotConfigs([]);
   }, []);
 
-  const updatePlotDataSource = useCallback((newFpath: string) => {
-    setPlotConfigs((prev) =>
-      prev.map((plot) => ({
-        ...plot,
-        fpath: newFpath,
-      }))
-    );
-  }, []);
+  const updatePlotDataSource = useCallback(
+    (newFpath: string, options?: { preferMemory?: boolean }) => {
+      const preferMemoryExplicit = Boolean(options?.preferMemory);
+      setPlotConfigs((prev) =>
+        prev.map((plot) => {
+          const preferMemoryImplicit =
+            plot.preferredSource === "memory" ||
+            plot.source === "memory" ||
+            plot.fpath.startsWith("memory://");
+
+          const shouldPreferMemory = preferMemoryExplicit || preferMemoryImplicit;
+          const memoryCandidate = toMemoryPath(newFpath);
+
+          const preferredPath =
+            shouldPreferMemory && memoryCandidate ? memoryCandidate : newFpath;
+
+          return {
+            ...plot,
+            fpath: preferredPath,
+            source: inferSourceFromPath(preferredPath),
+            preferredSource:
+              plot.preferredSource ??
+              (preferredPath.startsWith("memory://")
+                ? "memory"
+                : inferSourceFromPath(preferredPath)),
+          };
+        })
+      );
+    },
+    [inferSourceFromPath, toMemoryPath]
+  );
 
   return {
     plotConfigs,

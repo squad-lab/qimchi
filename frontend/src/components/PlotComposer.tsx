@@ -30,6 +30,8 @@ export interface PlotComposerConfig {
   indeps: string[];
   deps: string[];
   plotType: PlotType;
+  source?: "memory" | "disk";
+  preferredSource?: "memory" | "disk";
 }
 
 interface PlotComposerProps {
@@ -45,7 +47,7 @@ const PlotComposer = ({
   const [xFields, setXFields] = useState<PlotField[]>([]);
   const [yFields, setYFields] = useState<PlotField[]>([]);
   const [zFields, setZFields] = useState<PlotField[]>([]);
-  const [plotType, setPlotType] = useState<PlotType>("HeatMap");
+  const [plotType, setPlotType] = useState<PlotType>("LinePlot");
   const [isPlotTypeDropdownOpen, setIsPlotTypeDropdownOpen] = useState(false);
   const [dragOverField, setDragOverField] = useState<"x" | "y" | "z" | null>(
     null
@@ -350,13 +352,22 @@ const PlotComposer = ({
 
       // Create individual plot configurations for each dataset
       fpaths.forEach((fpath) => {
+        const source: "memory" | "disk" = fpath.startsWith("memory://")
+          ? "memory"
+          : "disk";
         const config: PlotComposerConfig = {
           fpath,
           indeps: finalIndeps,
           deps: finalDeps,
           plotType,
+          source,
+          preferredSource: source,
         };
 
+        console.log(
+          `[PlotComposer] Creating plot with config:`,
+          JSON.stringify(config, null, 2)
+        );
         onCreatePlot(config);
       });
     } else if (onCreatePlotLegacy) {

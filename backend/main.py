@@ -19,6 +19,7 @@ from api import (
     plots,
     filters,
     export,
+    live_measurements,
 )
 
 # Load environment variables from file
@@ -103,6 +104,9 @@ serve_static = os.environ.get("SERVE_STATIC_FILES", "true").lower() in (
     "yes",
 )
 
+# DEBUG: # TODONOW: REMOVE
+# serve_static = False
+
 # Always determine frontend dist path (needed for conditional root route)
 if os.path.exists("/app/frontend/dist"):
     # Docker environment - frontend built into /app/frontend/dist
@@ -114,6 +118,8 @@ else:
     )
 
 if serve_static:
+    # TODONOW: REMOVE # DEBUG:
+    print(f"Serving static files from FastAPI backend from {frontend_dist_path}")
     # Set up static file serving for the React frontend
 
     # Serve static files from the React build
@@ -137,10 +143,13 @@ app.include_router(download.router)
 app.include_router(plots.router)
 app.include_router(filters.router)
 app.include_router(export.router)
+app.include_router(live_measurements.router)
 
 
 # Root route to serve the SPA (only when FastAPI serves static files)
 if serve_static:
+    # TODONOW: REMOVE # DEBUG:
+    print(f"Serving static files from FastAPI backend from {frontend_dist_path}")
 
     @app.get("/qimchi-logo.png")
     async def get_favicon():

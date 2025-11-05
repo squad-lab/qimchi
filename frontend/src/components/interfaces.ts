@@ -129,6 +129,8 @@ export interface PlotConfiguration {
   filters_opts?: Record<string, unknown>;
   slider?: Record<string, SliderConfig>;
   appearance_settings?: unknown;
+  source?: "memory" | "disk";
+  preferredSource?: "memory" | "disk";
 }
 
 // Theme interface

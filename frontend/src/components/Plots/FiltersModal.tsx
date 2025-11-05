@@ -946,11 +946,11 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
               <Tooltip content="Close modal" position="bottom">
                 <button
                   onClick={onClose}
-                  className="p-1.5 rounded hover:bg-red-100 transition-colors duration-150"
+                  className="p-1.5 rounded hover:bg-gray-300 transition-colors"
                   title="Close modal"
                   aria-label="Close modal"
                 >
-                  <X size={16} />
+                  <X size={16} className="text-red-600" />
                 </button>
               </Tooltip>
             </div>

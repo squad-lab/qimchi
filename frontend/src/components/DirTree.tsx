@@ -47,6 +47,7 @@ import {
   Download,
   MoveUp,
   MoveDown,
+  Radio,
 } from "lucide-react";
 
 // Local imports
@@ -129,6 +130,7 @@ const DirTree = ({
     filterBy,
     showFilters,
     isExpanded,
+    showLiveOnly,
     // lastPath, // TODO: Use this to track the last loaded path
   } = componentStates.dirTree;
 
@@ -154,6 +156,42 @@ const DirTree = ({
 
   // Load data from API
   const loadDirectoryData = (path: string, forceReload: boolean = false) => {
+    // If showLiveOnly is true, load from /load-live/ endpoint instead
+    if (showLiveOnly) {
+      setIsLoading(true);
+      setTreeError(null);
+      console.log("Loading live measurements...");
+
+      axios
+        .post(`${PROD_BACKEND_URL}/load-live/`)
+        .then((response) => {
+          if (response.data.success && response.data.children) {
+            const children = response.data.children;
+            setApiData(children);
+            console.log(`Loaded ${children.length} live measurements`);
+          } else {
+            setApiData([]);
+            console.log("No live measurements found");
+          }
+        })
+        .catch((error) => {
+          console.error("Error loading live measurements:", error);
+          let errorMessage = "Failed to load live measurements";
+          if (error.response) {
+            errorMessage = error.response.data.detail || errorMessage;
+          } else if (error.request) {
+            errorMessage = "Server not responding";
+          } else {
+            errorMessage = error.message;
+          }
+          setTreeError(errorMessage);
+        })
+        .finally(() => {
+          setIsLoading(false);
+        });
+      return;
+    }
+
     // Check global cache first
     const cached = globalDirTreeCache.get(path);
     const now = Date.now();
@@ -246,16 +284,95 @@ const DirTree = ({
       });
   };
 
-  // Load data only when path changes and is not empty
+  // Load data when path or showLiveOnly changes
   useEffect(() => {
-    if (path && path.trim()) {
+    if (showLiveOnly) {
+      // Load live measurements
+      loadDirectoryData("", true); // Pass empty path for live mode
+    } else if (path && path.trim()) {
       console.log("Loading directory data for path:", path);
       loadDirectoryData(path);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path]); // Only depend on path, not loadDirectoryData
+  }, [path, showLiveOnly]); // Depend on both path and showLiveOnly
 
-  // live dataset subscriptions removed
+  // Periodic polling for live measurements (only when showLiveOnly is true)
+  useEffect(() => {
+    // Don't poll when not in live mode
+    if (!showLiveOnly) {
+      return;
+    }
+
+    // console.log("Starting live measurement polling (1s interval)");
+
+    // Poll every 1 second
+    const pollInterval = setInterval(() => {
+      axios
+        .post(`${PROD_BACKEND_URL}/load-live/`)
+        .then((response) => {
+          if (response.data.success && response.data.children) {
+            const newMeasurements = response.data.children;
+
+            // Incrementally update apiData without full rebuild
+            setApiData((prevData) => {
+              // Create a map of existing measurements by ID for quick lookup
+              const existingMap = new Map(
+                prevData.map((node) => [node.id, node])
+              );
+
+              // Create a map of new measurements by ID
+              const newMap = new Map(
+                newMeasurements.map((node: TreeNode) => [node.id, node])
+              );
+
+              // Find measurements to add (in new but not in existing)
+              const toAdd = newMeasurements.filter(
+                (node: TreeNode) => !existingMap.has(node.id)
+              );
+
+              // Find measurements to remove (in existing but not in new)
+              const toRemove = new Set(
+                prevData
+                  .filter((node) => !newMap.has(node.id))
+                  .map((node) => node.id)
+              );
+
+              // Update existing nodes and add new ones
+              const updated = prevData
+                .filter((node) => !toRemove.has(node.id)) // Remove old nodes
+                .map((node) => {
+                  // Update existing nodes with fresh data
+                  const newNode = newMap.get(node.id);
+                  return newNode || node;
+                });
+
+              // Add new nodes
+              const result = [...updated, ...toAdd];
+
+              // Log changes for debugging
+              if (toAdd.length > 0) {
+                console.log(`Added ${toAdd.length} new live measurement(s)`);
+              }
+              if (toRemove.size > 0) {
+                console.log(`Removed ${toRemove.size} ended measurement(s)`);
+              }
+
+              return result;
+            });
+          }
+        })
+        .catch((error) => {
+          console.error("Error polling live measurements:", error);
+          // Don't show error toast for polling failures to avoid spam
+        });
+    }, 1000); // Poll every 1 second
+
+    // Cleanup interval on unmount or when showLiveOnly changes
+    return () => {
+      console.log("Stopping live measurement polling");
+      clearInterval(pollInterval);
+    };
+  }, [showLiveOnly]); // Only re-run when showLiveOnly changes
 
   // Process and filter data for headless-tree with sorting
   const processedData = useMemo(() => {
@@ -864,7 +981,7 @@ const DirTree = ({
         <div>• Drag datasets to Notes to add paths to note</div>
         <div>• Drag folders to add all its contents to basket</div>
         <div>• Use ↑/↓ buttons to cycle through datasets</div>
-        <div>• Optimized rendering with virtualization and proxy instances</div>
+        <div>• Toggle button to view live measurements (auto-refreshes)</div>
       </div>
     </div>
   );
@@ -941,6 +1058,38 @@ const DirTree = ({
 
             {/* Row 2: Toolbar buttons */}
             <div className="flex items-center justify-center w-full gap-1">
+              {/* LIVE Toggle Button */}
+              <Tooltip
+                content={
+                  showLiveOnly
+                    ? "Showing only live measurements (refreshes every second)"
+                    : "Show only live measurements (refreshes every second)"
+                }
+                position="right"
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateDirTreeState({ showLiveOnly: !showLiveOnly });
+                  }}
+                  className={`px-2 py-1 rounded-md transition-all duration-200 ${
+                    showLiveOnly
+                      ? "bg-gradient-to-r from-green-500 to-emerald-500 text-white shadow-md hover:shadow-lg hover:from-green-600 hover:to-emerald-600"
+                      : "bg-blue-50 text-gray-600 hover:bg-blue-100 border border-blue-200"
+                  }`}
+                  title={
+                    showLiveOnly
+                      ? "Show all files"
+                      : "Show only live measurements (refreshes every second)"
+                  }
+                >
+                  <Radio
+                    size={16}
+                    className={showLiveOnly ? "animate-pulse" : ""}
+                  />
+                </button>
+              </Tooltip>
+
               {/* Tips */}
               <Tooltip
                 content={TIPS}
