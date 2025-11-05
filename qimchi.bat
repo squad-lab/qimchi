@@ -67,55 +67,129 @@ if exist "%INSTALL_MARKER%" (
     echo Previous installation detected. Checking if everything is ready...
     
     :: Verify all components exist
-    if exist "%QIMCHI_DIR%\qimchi-react\backend\main.py" (
-        if exist "%QIMCHI_DIR%\qimchi-react\frontend\dist\index.html" (
-            if exist "%QIMCHI_DIR%\qcutils" (
-                echo Installation verified. Checking for updates...
-                cd /d "%QIMCHI_DIR%\qimchi-react"
-                
-                :: Capture git pull output to check for frontend changes
-                git pull origin > "%TEMP%\qimchi_git_pull.txt" 2>&1
-                if errorlevel 1 (
-                    echo Warning: Could not update repository. Using existing version.
-                ) else (
-                    :: Check if pull output indicates changes
-                    findstr /C:"Already up to date" "%TEMP%\qimchi_git_pull.txt" >nul
-                    if errorlevel 1 (
-                        echo Repository updated. Checking for frontend changes...
-                        :: Check if frontend directory was affected - can be a bit more discerning, e.g., checking only src/
-                        findstr /C:"frontend/" "%TEMP%\qimchi_git_pull.txt" >nul
-                        if not errorlevel 1 (
-                            echo Frontend changes detected. Rebuilding frontend...
-                            cd /d "%QIMCHI_DIR%\qimchi-react\frontend"
-                            call npm install >nul 2>&1
-                            call npm run build
-                            if errorlevel 1 (
-                                echo Warning: Frontend rebuild failed. Using existing build.
-                            ) else (
-                                echo Frontend rebuilt successfully.
-                            )
-                            cd /d "%QIMCHI_DIR%\qimchi-react"
-                        ) else (
-                            echo No frontend changes detected. Using existing build.
-                        )
-                    ) else (
-                        echo Repository already up to date.
-                    )
-                )
-                
-                echo Starting server directly...
-                goto :start_server
-            ) else (
-                echo QCUtils not found. Re-running setup...
-                del "%INSTALL_MARKER%" 2>nul
+    if not exist "%QIMCHI_DIR%\qimchi-react\backend\main.py" (
+        echo Installation incomplete or corrupted. Re-running setup...
+        del "%INSTALL_MARKER%" 2>nul
+        goto :restart_install
+    )
+    if not exist "%QIMCHI_DIR%\qimchi-react\frontend\dist\index.html" (
+        echo Installation incomplete or corrupted. Re-running setup...
+        del "%INSTALL_MARKER%" 2>nul
+        goto :restart_install
+    )
+    if not exist "%QIMCHI_DIR%\qcutils" (
+        echo QCUtils not found. Re-running setup...
+        del "%INSTALL_MARKER%" 2>nul
+        goto :restart_install
+    )
+    
+    echo Installation verified. Checking branch status...
+    cd /d "%QIMCHI_DIR%\qimchi-react"
+    
+    :: Check if current branch exists on remote
+    for /f "tokens=*" %%b in ('git branch --show-current 2^>nul') do set "CURRENT_BRANCH=%%b"
+    if not "!CURRENT_BRANCH!"=="" (
+        echo Current branch: !CURRENT_BRANCH!
+        git ls-remote --heads origin !CURRENT_BRANCH! > "%TEMP%\qimchi_branch_check.txt" 2>&1
+        if not errorlevel 1 (
+            :: Check if branch exists in output
+            findstr /C:"refs/heads/!CURRENT_BRANCH!" "%TEMP%\qimchi_branch_check.txt" >nul
+            if not errorlevel 1 (
+                echo Branch exists on remote. Continuing...
+                goto :branch_check_ok
             )
+        )
+        
+        :: If we get here, branch was not found
+        echo.
+        echo ============================================
+        echo           WARNING: Branch Not Found
+        echo ============================================
+        echo The current branch "!CURRENT_BRANCH!" does not exist on the remote repository.
+        echo This may happen if the branch was deleted or renamed.
+        echo.
+        echo Switching to main branch...
+        git fetch origin main >nul 2>&1
+        git switch main
+        if errorlevel 1 (
+            echo ERROR: Failed to switch to main branch
+            echo Your installation may be corrupted.
+            echo.
+        )
+        if not errorlevel 1 (
+            echo Successfully switched to main branch.
+            echo.
+        )
+        
+        echo Would you like to:
+        echo   1. Reinstall QIMCHI completely (recommended)
+        echo   2. Continue with current installation
+        echo.
+        set /p "BRANCH_FIX_CHOICE=Enter your choice (1 or 2, default: 1): "
+        
+        if "!BRANCH_FIX_CHOICE!"=="" set "BRANCH_FIX_CHOICE=1"
+        if "!BRANCH_FIX_CHOICE!"=="1" (
+            echo.
+            echo Reinstalling QIMCHI...
+            echo Removing old installation...
+            cd /d "%USERPROFILE%"
+            rmdir /s /q "%QIMCHI_DIR%" 2>nul
+            if exist "%QIMCHI_DIR%" (
+                echo ERROR: Failed to remove old installation directory
+                echo Please manually delete: %QIMCHI_DIR%
+                echo Then run this script again.
+                pause
+                exit /b 1
+            )
+            echo Old installation removed. Restarting installation process...
+            echo.
+            goto :restart_install
+        )
+        echo Continuing with current installation...
+        echo.
+    )
+    if "!CURRENT_BRANCH!"=="" (
+        echo Warning: Could not detect current branch
+    )
+    
+    :branch_check_ok
+    
+    echo Checking for updates...
+    :: Capture git pull output to check for frontend changes
+    git pull origin > "%TEMP%\qimchi_git_pull.txt" 2>&1
+    if errorlevel 1 (
+        echo Warning: Could not update repository. Using existing version.
+    ) else (
+        :: Check if pull output indicates changes
+        findstr /C:"Already up to date" "%TEMP%\qimchi_git_pull.txt" >nul
+        if errorlevel 1 (
+            echo Repository updated. Checking for frontend changes...
+            :: Check if frontend directory was affected - can be a bit more discerning, e.g., checking only src/
+            findstr /C:"frontend/" "%TEMP%\qimchi_git_pull.txt" >nul
+            if not errorlevel 1 (
+                echo Frontend changes detected. Rebuilding frontend...
+                cd /d "%QIMCHI_DIR%\qimchi-react\frontend"
+                call npm install >nul 2>&1
+                call npm run build
+                if errorlevel 1 (
+                    echo Warning: Frontend rebuild failed. Using existing build.
+                ) else (
+                    echo Frontend rebuilt successfully.
+                )
+                cd /d "%QIMCHI_DIR%\qimchi-react"
+            ) else (
+                echo No frontend changes detected. Using existing build.
+            )
+        ) else (
+            echo Repository already up to date.
         )
     )
     
-    echo Installation incomplete or corrupted. Re-running setup...
-    del "%INSTALL_MARKER%" 2>nul
+    echo Starting server directly...
+    goto :start_server
 )
 
+:restart_install
 :: Create .qimchi directory if it doesn't exist
 if not exist "%QIMCHI_DIR%" (
     echo Creating .qimchi directory...

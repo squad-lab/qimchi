@@ -19,7 +19,7 @@ docker:
     - docker buildx create --driver docker-container --use
     - docker buildx inspect --bootstrap
   script:
-    - VERSION=$(grep '^[[:space:]]*version[[:space:]]*=' pyproject.toml | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')
+    - VERSION=$(grep '^[[:space:]]*version[[:space:]]*=' backend/pyproject.toml | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')
     - update-binfmts --enable
     - docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull -t "$CI_REGISTRY/squad-lab/qimchi-react:latest" -t "$CI_REGISTRY/squad-lab/qimchi-react:$VERSION" --push .
   only:
