@@ -58,6 +58,12 @@ set QIMCHI_DIR=%USERPROFILE%\.qimchi
 set INSTALL_MARKER=%QIMCHI_DIR%\.qimchi_installed
 echo Setting up QIMCHI in: %QIMCHI_DIR%
 
+:: Check if QIMCHI_DIR exists first, if not, force reinstall
+if not exist "%QIMCHI_DIR%" (
+    echo QIMCHI directory not found. Starting fresh installation...
+    goto :restart_install
+)
+
 :: Check if installation is already complete
 if exist "%INSTALL_MARKER%" (
     echo.
