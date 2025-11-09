@@ -30,8 +30,43 @@ set DEFAULT_QIMCHI_BRANCH=main
 set DEFAULT_QCUTILS_BRANCH=main
 REM ============================================================================
 
+REM Skip over function definitions
+goto :main
+
+REM ============================================================================
+REM Function to refresh PATH from registry without restarting script
+REM ============================================================================
+:refresh_path
+echo Refreshing PATH from registry...
+set "USER_PATH="
+set "SYSTEM_PATH="
+for /f "skip=2 tokens=2*" %%a in ('reg query "HKCU\Environment" /v PATH 2^>nul') do set "USER_PATH=%%b"
+for /f "skip=2 tokens=2*" %%a in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v PATH 2^>nul') do set "SYSTEM_PATH=%%b"
+if defined USER_PATH if defined SYSTEM_PATH set "PATH=!USER_PATH!;!SYSTEM_PATH!" & goto :path_done
+if defined USER_PATH set "PATH=!USER_PATH!" & goto :path_done
+if defined SYSTEM_PATH set "PATH=!SYSTEM_PATH!"
+:path_done
+REM Add Windows system directories (essential for built-in commands like findstr)
+set "PATH=%SystemRoot%\system32;%PATH%"
+set "PATH=%SystemRoot%;%PATH%"
+set "PATH=%SystemRoot%\System32\Wbem;%PATH%"
+set "PATH=%SystemRoot%\System32\WindowsPowerShell\v1.0\;%PATH%"
+REM Add common tool paths to ensure they're available
+set "PATH=%USERPROFILE%\.local\bin;%PATH%"
+set "PATH=%LOCALAPPDATA%\Microsoft\WindowsApps;%PATH%"
+set "PATH=%ProgramFiles%\Git\cmd;%PATH%"
+set "PATH=%ProgramFiles%\nodejs;%PATH%"
+echo PATH refreshed successfully
+goto :eof
+REM ============================================================================
+
+:main
 echo ============================================
 echo          QIMCHI Setup and Run Script
+echo ============================================
+echo.
+echo ============================================
+echo    Step 1: Installing Dependencies
 echo ============================================
 echo.
 
@@ -46,12 +81,80 @@ if errorlevel 1 (
         pause
         exit /b 1
     )
-    echo Git installed successfully. Please restart this script to refresh PATH.
-    pause
-    exit /b 0
+    echo Git installed successfully. Refreshing PATH...
+    call :refresh_path
+    echo.
 ) else (
     echo Git is already installed
 )
+
+:: Check if uv is installed, install if not
+uv --version >nul 2>&1
+if errorlevel 1 (
+    echo uv not found. Installing uv via PowerShell installer...
+    "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -ExecutionPolicy ByPass -Command "irm https://astral.sh/uv/install.ps1 | iex"
+    if errorlevel 1 (
+        echo ERROR: Failed to install uv
+        echo Please check your internet connection and try again
+        pause
+        exit /b 1
+    )
+    echo uv installed successfully. Refreshing PATH...
+    call :refresh_path
+    echo.
+    :: Verify uv is now available
+    uv --version >nul 2>&1
+    if errorlevel 1 (
+        echo ERROR: uv installed but not found in PATH
+        echo Please restart this script
+        pause
+        exit /b 1
+    )
+    echo uv verified and ready to use
+) else (
+    echo uv is already installed
+)
+
+:: Check if Node.js is installed, install if not
+node --version >nul 2>&1
+if errorlevel 1 (
+    echo Node.js not found. Installing via winget...
+    winget install OpenJS.NodeJS
+    if errorlevel 1 (
+        echo ERROR: Failed to install Node.js via winget
+        echo Please install Node.js manually and try again
+        pause
+        exit /b 1
+    )
+    echo Node.js installed successfully. Refreshing PATH...
+    call :refresh_path
+    echo.
+) else (
+    echo Node.js is already installed
+)
+
+:: Check for fd-find (optional but recommended for performance)
+fd --version >nul 2>&1
+if errorlevel 1 (
+    echo fd-find not found. Attempting to install via winget...
+    winget install sharkdp.fd
+    if errorlevel 1 (
+        echo Warning: Could not install fd-find. The application will still work but may be slower.
+        echo You can manually install it later for better performance.
+    ) else (
+        echo fd-find installed successfully. Refreshing PATH...
+        call :refresh_path
+        echo.
+    )
+) else (
+    echo fd-find is already installed
+)
+
+echo.
+echo ============================================
+echo    Step 2: Setting up QIMCHI
+echo ============================================
+echo.
 
 :: Set up .qimchi directory in user home
 set QIMCHI_DIR=%USERPROFILE%\.qimchi
@@ -280,64 +383,6 @@ if errorlevel 1 (
 
 echo Current directory: %CD%
 echo.
-
-:: Check if Python is installed
-python --version >nul 2>&1
-if errorlevel 1 (
-    echo ERROR: Python is not installed or not in PATH
-    echo Please install Python 3.13 or later and try again
-    pause
-    exit /b 1
-)
-
-:: Check if uv is installed, install if not
-uv --version >nul 2>&1
-if errorlevel 1 (
-    echo Installing uv...
-    python -m pip install uv
-    if errorlevel 1 (
-        echo ERROR: Failed to install uv
-        pause
-        exit /b 1
-    )
-) else (
-    echo uv is already installed
-)
-
-:: Check if Node.js is installed, install if not
-node --version >nul 2>&1
-if errorlevel 1 (
-    echo Node.js not found. Installing via winget...
-    winget install OpenJS.NodeJS
-    if errorlevel 1 (
-        echo ERROR: Failed to install Node.js via winget
-        echo Please install Node.js manually and try again
-        pause
-        exit /b 1
-    )
-    echo Please restart this script after Node.js installation completes
-    pause
-    exit /b 0
-) else (
-    echo Node.js is already installed
-)
-
-:: Check for fd-find (optional but recommended for performance)
-fd --version >nul 2>&1
-if errorlevel 1 (
-    echo fd-find not found. Attempting to install via winget...
-    winget install sharkdp.fd
-    if errorlevel 1 (
-        echo Warning: Could not install fd-find. The application will still work but may be slower.
-        echo You can manually install it later for better performance.
-    ) else (
-        echo fd-find installed successfully. Please restart the script.
-        pause
-        exit /b 0
-    )
-) else (
-    echo fd-find is already installed
-)
 
 echo.
 echo ============================================
