@@ -104,9 +104,6 @@ serve_static = os.environ.get("SERVE_STATIC_FILES", "true").lower() in (
     "yes",
 )
 
-# DEBUG: # TODONOW: REMOVE
-# serve_static = False
-
 # Always determine frontend dist path (needed for conditional root route)
 if os.path.exists("/app/frontend/dist"):
     # Docker environment - frontend built into /app/frontend/dist
@@ -118,8 +115,7 @@ else:
     )
 
 if serve_static:
-    # TODONOW: REMOVE # DEBUG:
-    print(f"Serving static files from FastAPI backend from {frontend_dist_path}")
+    # print(f"Serving static files from FastAPI backend from {frontend_dist_path}")
     # Set up static file serving for the React frontend
 
     # Serve static files from the React build
@@ -148,8 +144,7 @@ app.include_router(live_measurements.router)
 
 # Root route to serve the SPA (only when FastAPI serves static files)
 if serve_static:
-    # TODONOW: REMOVE # DEBUG:
-    print(f"Serving static files from FastAPI backend from {frontend_dist_path}")
+    # print(f"Serving static files from FastAPI backend from {frontend_dist_path}")
 
     @app.get("/qimchi-logo.png")
     async def get_favicon():
@@ -159,6 +154,24 @@ if serve_static:
             return FileResponse(favicon_path, media_type="image/png")
         else:
             return {"error": "Favicon not found"}
+
+    @app.get("/SQUAD-logo-dark.webp")
+    async def get_squad_logo():
+        """Serve the SQUAD Lab logo."""
+        logo_path = os.path.join(frontend_dist_path, "SQUAD-logo-dark.webp")
+        if os.path.exists(logo_path):
+            return FileResponse(logo_path, media_type="image/webp")
+        else:
+            return {"error": "SQUAD logo not found"}
+
+    @app.get("/FZJ-logo.svg")
+    async def get_fzj_logo():
+        """Serve the FZJ logo."""
+        logo_path = os.path.join(frontend_dist_path, "FZJ-logo.svg")
+        if os.path.exists(logo_path):
+            return FileResponse(logo_path, media_type="image/svg+xml")
+        else:
+            return {"error": "FZJ logo not found"}
 
     @app.get("/")
     async def read_root():

@@ -43,6 +43,7 @@ interface SidebarState {
   explorerCollapsed: boolean;
   metadataCollapsed: boolean;
   notesCollapsed: boolean;
+  brandingCollapsed: boolean;
 
   // Component states
   componentStates: ComponentStates;
@@ -52,6 +53,7 @@ interface SidebarState {
   setExplorerCollapsed: (collapsed: boolean) => void;
   setMetadataCollapsed: (collapsed: boolean) => void;
   setNotesCollapsed: (collapsed: boolean) => void;
+  setBrandingCollapsed: (collapsed: boolean) => void;
 
   // Actions for component states
   updateExplorerState: (state: Partial<ComponentStates["explorer"]>) => void;
@@ -99,6 +101,7 @@ export const useSidebarStore = create<SidebarState>()(
       explorerCollapsed: false, // Explorer should be open by default
       metadataCollapsed: true,
       notesCollapsed: true,
+      brandingCollapsed: false,
 
       // Initial component states
       componentStates: initialComponentStates,
@@ -110,6 +113,8 @@ export const useSidebarStore = create<SidebarState>()(
       setMetadataCollapsed: (collapsed) =>
         set({ metadataCollapsed: collapsed }),
       setNotesCollapsed: (collapsed) => set({ notesCollapsed: collapsed }),
+      setBrandingCollapsed: (collapsed) =>
+        set({ brandingCollapsed: collapsed }),
 
       // Component state actions
       updateExplorerState: (newState) =>

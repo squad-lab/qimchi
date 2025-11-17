@@ -15,6 +15,7 @@ import {
 import MarkdownEditor from "./MarkdownEditor";
 import { BasketItem } from "./Basket";
 import { PROD_BACKEND_URL } from "../config";
+import { themeClasses } from "../theme";
 
 interface DroppedItem {
   id: string;
@@ -496,7 +497,9 @@ export default function Notes({
       ref={notesContainerRef}
     >
       {/* Header */}
-      <div className="bg-cyan-200 border-b border-cyan-300 p-3">
+      <div
+        className={`p-3 border-b ${themeClasses.accentHeaderBg} ${themeClasses.accentBorderLight}`}
+      >
         <div className="flex flex-col space-y-2">
           {/* Row 1: Dropdown (full width) */}
           <div>
@@ -508,7 +511,7 @@ export default function Notes({
                     <div className="relative" ref={dropdownRef}>
                       <button
                         onClick={() => setShowDropdown(!showDropdown)}
-                        className="flex items-center justify-between w-full overflow-hidden px-2 py-1.5 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        className={`flex items-center justify-between w-full overflow-hidden px-2 py-1.5 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 ${themeClasses.accentFocusRing}`}
                       >
                         <span className="truncate">
                           {selectedItem
@@ -530,7 +533,7 @@ export default function Notes({
                                 }}
                                 className={`w-full px-3 py-2 text-sm text-left hover:bg-gray-100 ${
                                   selectedItemId === item.id
-                                    ? "bg-cyan-50 text-cyan-700"
+                                    ? `${themeClasses.accentLightBg} ${themeClasses.accentText}`
                                     : ""
                                 }`}
                               >
@@ -609,7 +612,9 @@ export default function Notes({
         {loading && !hasUnsavedChanges ? (
           <div className="flex items-center justify-center p-8">
             <div className="text-center">
-              <Loader2 className="w-6 h-6 animate-spin text-cyan-500 mx-auto mb-2" />
+              <Loader2
+                className={`w-6 h-6 animate-spin ${themeClasses.accentIcon} mx-auto mb-2`}
+              />
               <p className="text-gray-600">Loading notes...</p>
             </div>
           </div>
@@ -617,14 +622,18 @@ export default function Notes({
           <div
             className={`h-full bg-white m-2 rounded-lg border shadow-sm transition-all duration-200 relative ${
               isDragOver
-                ? "border-2 border-cyan-400 border-dashed bg-cyan-50"
+                ? `border-2 border-dashed ${themeClasses.accentBorder} ${themeClasses.accentLightBg}`
                 : "border-gray-200"
             }`}
           >
             {isDragOver && (
-              <div className="absolute inset-0 flex items-center justify-center bg-cyan-50/80 rounded-lg pointer-events-none z-10">
-                <div className="text-center text-cyan-700">
-                  <FileText className="w-8 h-8 mx-auto mb-2" />
+              <div
+                className={`absolute inset-0 flex items-center justify-center ${themeClasses.accentOverlay} rounded-lg pointer-events-none z-10`}
+              >
+                <div className={`text-center ${themeClasses.accentText}`}>
+                  <FileText
+                    className={`w-8 h-8 mx-auto mb-2 ${themeClasses.accentIcon}`}
+                  />
                   <p className="text-sm font-medium">Drop datasets here</p>
                   <p className="text-xs">
                     Their paths will be added to your notes

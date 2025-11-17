@@ -139,7 +139,7 @@ const Explorer = ({
           <button
             type="button"
             onClick={handleSubmit}
-            className="bg-blue-600 text-white px-4 py-2 rounded-r hover:bg-blue-700 transition-colors focus:outline-none focus:ring focus:ring-blue-300 border-blue-600 flex items-center justify-center"
+            className="bg-[#6ea030] hover:bg-[#5a8526] text-white px-4 py-2 rounded-r transition-colors focus:outline-none focus:ring focus:ring-[#8DC63F] flex items-center justify-center"
             title="Load folder"
           >
             <Folder size={20} />
