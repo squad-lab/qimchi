@@ -13,7 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Node.js for building the frontend
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-    && apt-get install -y nodejs
+    && apt-get update \
+    && apt-get install -y nodejs npm
 
 # Install Python dependencies first (for better Docker layer caching)
 COPY backend/pyproject.toml backend/requirements.txt /app/
@@ -54,7 +55,7 @@ RUN rm -f /etc/nginx/sites-enabled/default \
     && mkdir -p /var/log/supervisor
 
 # Clean up Node.js to reduce image size
-RUN apt-get remove -y nodejs \
+RUN apt-get remove -y nodejs npm \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
