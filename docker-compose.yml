@@ -1,8 +1,8 @@
 services:
-  qimchi-react:
+  qimchi:
     build: .
-    image: qimchi-react:latest
-    container_name: qimchi-react
+    image: qimchi:latest
+    container_name: qimchi
     restart: unless-stopped
     ports:
       - "8001:8001"

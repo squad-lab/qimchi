@@ -176,12 +176,12 @@ if exist "%INSTALL_MARKER%" (
     echo Previous installation detected. Checking if everything is ready...
     
     :: Verify all components exist
-    if not exist "%QIMCHI_DIR%\qimchi-react\backend\main.py" (
+    if not exist "%QIMCHI_DIR%\qimchi\backend\main.py" (
         echo Installation incomplete or corrupted. Re-running setup...
         del "%INSTALL_MARKER%" 2>nul
         goto :restart_install
     )
-    if not exist "%QIMCHI_DIR%\qimchi-react\frontend\dist\index.html" (
+    if not exist "%QIMCHI_DIR%\qimchi\frontend\dist\index.html" (
         echo Installation incomplete or corrupted. Re-running setup...
         del "%INSTALL_MARKER%" 2>nul
         goto :restart_install
@@ -193,7 +193,7 @@ if exist "%INSTALL_MARKER%" (
     )
     
     echo Installation verified. Checking branch status...
-    cd /d "%QIMCHI_DIR%\qimchi-react"
+    cd /d "%QIMCHI_DIR%\qimchi"
     
     :: Check if current branch exists on remote
     for /f "tokens=*" %%b in ('git branch --show-current 2^>nul') do set "CURRENT_BRANCH=%%b"
@@ -277,7 +277,7 @@ if exist "%INSTALL_MARKER%" (
             findstr /C:"frontend/" "%TEMP%\qimchi_git_pull.txt" >nul
             if not errorlevel 1 (
                 echo Frontend changes detected. Rebuilding frontend...
-                cd /d "%QIMCHI_DIR%\qimchi-react\frontend"
+                cd /d "%QIMCHI_DIR%\qimchi\frontend"
                 call npm install >nul 2>&1
                 call npm run build
                 if errorlevel 1 (
@@ -285,7 +285,7 @@ if exist "%INSTALL_MARKER%" (
                 ) else (
                     echo Frontend rebuilt successfully.
                 )
-                cd /d "%QIMCHI_DIR%\qimchi-react"
+                cd /d "%QIMCHI_DIR%\qimchi"
             ) else (
                 echo No frontend changes detected. Using existing build.
             )
@@ -305,8 +305,8 @@ if not exist "%QIMCHI_DIR%" (
     mkdir "%QIMCHI_DIR%"
 )
 
-:: Check if qimchi-react already exists, if not clone it
-if not exist "%QIMCHI_DIR%\qimchi-react" (
+:: Check if qimchi already exists, if not clone it
+if not exist "%QIMCHI_DIR%\qimchi" (
     echo.
     echo ============================================
     echo     Selecting QIMCHI Branch to Install
@@ -315,7 +315,7 @@ if not exist "%QIMCHI_DIR%\qimchi-react" (
     :: Fetch available branches from GitLab
     echo Fetching available branches from repository...
     cd /d "%QIMCHI_DIR%"
-    git ls-remote --heads https://gitlab.com/squad-lab/qimchi-react.git > "%TEMP%\qimchi_branches.txt"
+    git ls-remote --heads https://gitlab.com/squad-lab/qimchi.git > "%TEMP%\qimchi_branches.txt"
     if errorlevel 1 (
         echo ERROR: Failed to fetch branches from repository
         echo Please check your internet connection and try again
@@ -354,7 +354,7 @@ if not exist "%QIMCHI_DIR%\qimchi-react" (
     
     echo.
     echo Cloning QIMCHI repository from branch: !SELECTED_BRANCH!
-    git clone --branch !SELECTED_BRANCH! --single-branch https://gitlab.com/squad-lab/qimchi-react.git
+    git clone --branch !SELECTED_BRANCH! --single-branch https://gitlab.com/squad-lab/qimchi.git
     if errorlevel 1 (
         echo ERROR: Failed to clone repository
         echo Please check your internet connection and try again
@@ -364,7 +364,7 @@ if not exist "%QIMCHI_DIR%\qimchi-react" (
     echo Repository cloned successfully
 ) else (
     echo Repository already exists. Updating...
-    cd /d "%QIMCHI_DIR%\qimchi-react"
+    cd /d "%QIMCHI_DIR%\qimchi"
     git pull origin
     if errorlevel 1 (
         echo Warning: Failed to update repository. Continuing with existing version...
@@ -374,7 +374,7 @@ if not exist "%QIMCHI_DIR%\qimchi-react" (
 )
 
 :: Navigate to the cloned repository
-cd /d "%QIMCHI_DIR%\qimchi-react"
+cd /d "%QIMCHI_DIR%\qimchi"
 if errorlevel 1 (
     echo ERROR: Could not navigate to cloned repository
     pause
@@ -408,7 +408,7 @@ if errorlevel 1 (
 )
 
 :: Navigate to backend directory
-cd /d "%QIMCHI_DIR%\qimchi-react\backend"
+cd /d "%QIMCHI_DIR%\qimchi\backend"
 if errorlevel 1 (
     echo ERROR: Could not navigate to backend directory
     pause
@@ -497,7 +497,7 @@ if not exist "%QIMCHI_DIR%\qcutils" (
 
 :: Install qcutils using pip into the backend virtual environment
 echo Installing QCUtils into backend virtual environment...
-cd /d "%QIMCHI_DIR%\qimchi-react\backend"
+cd /d "%QIMCHI_DIR%\qimchi\backend"
 uv pip install "%QIMCHI_DIR%\qcutils"
 if errorlevel 1 (
     echo ERROR: Failed to install qcutils
@@ -512,7 +512,7 @@ echo             Setting up Frontend
 echo ============================================
 
 :: Navigate to frontend directory
-cd /d "%QIMCHI_DIR%\qimchi-react\frontend"
+cd /d "%QIMCHI_DIR%\qimchi\frontend"
 if errorlevel 1 (
     echo ERROR: Could not navigate to frontend directory
     pause
@@ -557,7 +557,7 @@ echo          Starting QIMCHI Server
 echo ============================================
 
 :: Navigate back to root directory
-cd /d "%QIMCHI_DIR%\qimchi-react"
+cd /d "%QIMCHI_DIR%\qimchi"
 
 :: Activate virtual environment
 call "%QIMCHI_DIR%\.venv\Scripts\activate.bat"
@@ -566,12 +566,13 @@ if errorlevel 1 (
 )
 
 :: Set environment variables
-set PYTHONPATH=%QIMCHI_DIR%\qimchi-react\backend
+set PYTHONPATH=%QIMCHI_DIR%\qimchi\backend
 set PORT=8001
 set SERVE_STATIC_FILES=true
+set NUM_WORKERS=8
 
 echo Starting FastAPI server on port %PORT%...
-echo Frontend will be served from: %QIMCHI_DIR%\qimchi-react\frontend\dist
+echo Frontend will be served from: %QIMCHI_DIR%\qimchi\frontend\dist
 echo Backend API available at: http://localhost:%PORT%/api
 echo Web interface available at: http://localhost:%PORT%
 echo.
@@ -579,9 +580,9 @@ echo Press Ctrl+C to stop the server
 echo.
 
 :: Start the FastAPI server using uvicorn in background
-cd /d "%QIMCHI_DIR%\qimchi-react\backend"
+cd /d "%QIMCHI_DIR%\qimchi\backend"
 echo Starting server...
-start /min cmd /c "uvicorn main:app --host 127.0.0.1 --port %PORT% --workers 8 --log-level info"
+start /min cmd /c "uvicorn main:app --host 127.0.0.1 --port %PORT% --workers %NUM_WORKERS% --log-level info"
 
 :: Wait for server health endpoint to become ready (wait up to 300 seconds)
 echo Waiting for server to report healthy status (waiting up to 300s)...

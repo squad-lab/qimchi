@@ -1,8 +1,20 @@
 [project]
 name = "qimchi-api"
-version = "0.2.0"
-description = "Add your description here"
+version = "0.3.0"
+description = "Plot your spicy quantum measurements with ease"
+authors = [
+  { name = "Spandan Anupam", email = "s.anupam@fz-juelich.de" },
+  { name = "Jyotirmaya Shivottam", email = "jyotirmaya.shivottam@niser.ac.in" },
+  { name = "Lino Visser", email = "l.visser@fz-juelich.de" },
+]
+license = "AGPL-3.0-or-later"
 readme = "README.md"
+keywords = ["quantum", "plotter", "plotly", "fastapi", "react"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
+    "Operating System :: OS Independent",
+]
 requires-python = ">=3.13"
 dependencies = [
     "fastapi[standard]>=0.115.12",
@@ -25,3 +37,8 @@ dependencies = [
     "xarray>=2025.3.1",
     "zarr>=3.0.6",
 ]
+
+[project.urls]
+homepage = "https://gitlab.com/squad-lab/qimchi"
+documentation = "https://qimchi.squad-lab.org"
+repository = "https://gitlab.com/squad-lab/qimchi"

@@ -9,19 +9,13 @@ wheels/
 # Virtual environments
 .venv/
 
+# Node/React-generated files
+node_modules/
+build/
+dist/
 
 # Custom
 .vscode/
-LIVE.md
-TODO.md
-TODOBAK.md
-TODOCONV.md
 md/
-
-node_modules/
-
-old-ignore/
 data/
-dist/
 qcutils/
-ws-live-test/

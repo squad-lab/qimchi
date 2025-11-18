@@ -4,10 +4,71 @@ variables:
   DOCKER_DRIVER: "overlay2"
   CI_BUILD_ARCHS: linux/amd64 #, linux/arm64
 stages:
+  - version_check
   - format
   - test
   - build
   - deploy
+  - release
+
+auto_tag_version:
+  stage: version_check
+  image: alpine/git:latest
+  before_script:
+    - apk add --no-cache python3 py3-pip
+    - pip3 install toml --break-system-packages
+    - git config --global user.email "gitlab-ci@gitlab.com"
+    - git config --global user.name "GitLab CI"
+  script:
+    # Extract current version from pyproject.toml
+    - |
+      python3 << 'EOF'
+      import toml
+      data = toml.load('backend/pyproject.toml')
+      version = data['project']['version']
+      with open('current_version.txt', 'w') as f:
+          f.write(version)
+      print(f"Current version: {version}")
+      EOF
+    - export CURRENT_VERSION=$(cat current_version.txt)
+    - echo "Current version in pyproject.toml is v$CURRENT_VERSION"
+    
+    # Check if this version tag already exists
+    - git fetch --tags
+    - |
+      if git rev-parse "v$CURRENT_VERSION" >/dev/null 2>&1; then
+        echo "Tag v$CURRENT_VERSION already exists, skipping tag creation"
+        exit 0
+      fi
+    
+    # Check if version line was changed in this commit
+    - |
+      # Check if this is the first commit (no parent)
+      if ! git rev-parse HEAD~1 >/dev/null 2>&1; then
+        echo "First commit detected - creating initial tag v$CURRENT_VERSION"
+        git tag -a "v$CURRENT_VERSION" -m "Release version $CURRENT_VERSION"
+        git push https://oauth2:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git "v$CURRENT_VERSION"
+        echo "Successfully created initial tag v$CURRENT_VERSION"
+        exit 0
+      fi
+      
+      # Check if version line was changed in this commit
+      if git diff HEAD~1 HEAD -- backend/pyproject.toml | grep -E '^\+[[:space:]]*version[[:space:]]*='; then
+        echo "Version was updated in this commit, creating tag v$CURRENT_VERSION"
+        
+        # Create and push the tag
+        git tag -a "v$CURRENT_VERSION" -m "Release version $CURRENT_VERSION"
+        git push https://oauth2:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git "v$CURRENT_VERSION"
+        
+        echo "Successfully created and pushed tag v$CURRENT_VERSION"
+      else
+        echo "Version line was not changed in this commit, skipping tag creation"
+      fi
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - backend/pyproject.toml
+  allow_failure: false
 
 docker:
   image: jonoh/docker-buildx-qemu
@@ -21,6 +82,128 @@ docker:
   script:
     - VERSION=$(grep '^[[:space:]]*version[[:space:]]*=' backend/pyproject.toml | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')
     - update-binfmts --enable
-    - docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull -t "$CI_REGISTRY/squad-lab/qimchi-react:latest" -t "$CI_REGISTRY/squad-lab/qimchi-react:$VERSION" --push .
+    - docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull -t "$CI_REGISTRY/squad-lab/qimchi:latest" -t "$CI_REGISTRY/squad-lab/qimchi:$VERSION" --push .
   only:
     - main
+
+build_qimchi_exe:
+  stage: build
+  tags:
+    - saas-windows-medium-amd64
+  script:
+    # Extract version from pyproject.toml
+    - $VERSION = (Select-String -Path "backend/pyproject.toml" -Pattern 'version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
+    - echo "Building QIMCHI v$VERSION for Windows"
+    
+    # Create build directory
+    - New-Item -ItemType Directory -Force -Path packaging/build
+    
+    # Copy batch file and icon
+    - Copy-Item qimchi.bat packaging/build/
+    - Copy-Item frontend/public/qimchi-logo.ico packaging/build/
+    
+    # Install Resource Hacker (trusted tool for adding icons to executables)
+    - choco install reshack -y
+    
+    # Create IExpress SED configuration file
+    - |
+      $sedContent = @"
+      [Version]
+      Class=IEXPRESS
+      SEDVersion=3
+      [Options]
+      PackagePurpose=InstallApp
+      ShowInstallProgramWindow=0
+      HideExtractAnimation=0
+      UseLongFileName=1
+      InsideCompressed=0
+      CAB_FixedSize=0
+      CAB_ResvCodeSigning=0
+      RebootMode=N
+      InstallPrompt=
+      DisplayLicense=
+      FinishMessage=
+      TargetName=%TargetName%
+      FriendlyName=%FriendlyName%
+      AppLaunched=%AppLaunched%
+      PostInstallCmd=%PostInstallCmd%
+      AdminQuietInstCmd=
+      UserQuietInstCmd=
+      SourceFiles=SourceFiles
+      [Strings]
+      TargetName=packaging\build\qimchi_temp.exe
+      FriendlyName=QIMCHI v$VERSION
+      AppLaunched=cmd /c qimchi.bat
+      PostInstallCmd=<None>
+      FILE0="qimchi.bat"
+      [SourceFiles]
+      SourceFiles0=packaging\build\
+      [SourceFiles0]
+      %FILE0%=
+      "@
+      
+      $sedContent | Out-File -FilePath "packaging/build/config.sed" -Encoding ASCII
+    
+    # Build EXE using IExpress (built into Windows)
+    - iexpress /N /Q packaging/build/config.sed
+    
+    # Add icon using Resource Hacker
+    - '& "C:\Program Files (x86)\Resource Hacker\ResourceHacker.exe" -open packaging/build/qimchi_temp.exe -save packaging/build/qimchi.exe -action addoverwrite -res packaging/build/qimchi-logo.ico -mask ICONGROUP,MAINICON,'
+    
+    # Verify EXE was created
+    - if (!(Test-Path "packaging/build/qimchi.exe")) { throw "EXE build failed" }
+    - echo "Successfully built qimchi.exe with custom icon"
+    
+  artifacts:
+    name: "qimchi-v$VERSION-windows"
+    paths:
+      - packaging/build/qimchi.exe
+    expire_in: 180 days
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+release_windows:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: build_qimchi_exe
+      artifacts: true
+  script:
+    - apk add --no-cache python3 py3-pip
+    - pip3 install toml
+    - |
+      python3 << 'EOF'
+      import toml
+      data = toml.load('backend/pyproject.toml')
+      version = data['project']['version']
+      with open('version.txt', 'w') as f:
+          f.write(version)
+      EOF
+    - export VERSION=$(cat version.txt)
+    - echo "Creating release for v$VERSION"
+  release:
+    tag_name: "v$VERSION"
+    name: "QIMCHI v$VERSION"
+    description: |
+      ## QIMCHI v$VERSION - Windows Release
+      
+      ### Installation
+      1. Download `qimchi.exe` below
+      2. Double-click to run the installer
+      3. Access the web interface at http://localhost:8001
+      
+      ### What's New
+      See the [commit history](${CI_PROJECT_URL}/-/commits/v${VERSION}) for changes in this release.
+      
+      ### Requirements
+      - Windows 11 24H2+ with winget installed
+      - Internet connection for first-time setup
+    assets:
+      links:
+        - name: "qimchi.exe (Windows Installer)"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/v${VERSION}/raw/packaging/build/qimchi.exe?job=build_qimchi_exe"
+          link_type: "package"
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+
