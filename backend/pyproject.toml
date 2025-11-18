@@ -1,6 +1,6 @@
 [project]
 name = "qimchi-api"
-version = "0.3.0"
+version = "0.3.1"
 description = "Plot your spicy quantum measurements with ease"
 authors = [
   { name = "Spandan Anupam", email = "s.anupam@fz-juelich.de" },
@@ -8,11 +8,9 @@ authors = [
   { name = "Lino Visser", email = "l.visser@fz-juelich.de" },
 ]
 license = "AGPL-3.0-or-later"
-readme = "README.md"
 keywords = ["quantum", "plotter", "plotly", "fastapi", "react"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Operating System :: OS Independent",
 ]
 requires-python = ">=3.13"
@@ -24,18 +22,18 @@ dependencies = [
     "pip>=25.2",
     "plotly>=6.0.1",
     "pydantic>=2.11.3",
-    "pytest>=8.4.1",
+    "pytest>=9.0.1",
     "pytest-asyncio>=1.0.0",
     "python-dotenv>=1.1.1",
     "rich>=14.1.0",
     "ruff>=0.12.10",
     "scikit-image>=0.25.2",
-    "setuptools>=78.1.0",
+    "setuptools>=80.9.0",
     "watchdog>=6.0.0",
     "websockets>=15.0.1",
     "wheel>=0.45.1",
     "xarray>=2025.3.1",
-    "zarr>=3.0.6",
+    "zarr==2.18.4",
 ]
 
 [project.urls]

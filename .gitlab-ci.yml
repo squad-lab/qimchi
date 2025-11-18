@@ -4,21 +4,23 @@ variables:
   DOCKER_DRIVER: "overlay2"
   CI_BUILD_ARCHS: linux/amd64 #, linux/arm64
 stages:
-  - version_check
-  - format
-  - test
+  - auto_tag_version
   - build
-  - deploy
-  - release
+  - release_windows
 
 auto_tag_version:
-  stage: version_check
-  image: alpine/git:latest
+  stage: auto_tag_version
+  image: python:3.13-alpine
   before_script:
-    - apk add --no-cache python3 py3-pip
+    - apk add --no-cache git
     - pip3 install toml --break-system-packages
-    - git config --global user.email "gitlab-ci@gitlab.com"
-    - git config --global user.name "GitLab CI"
+    - git config --global user.name "Janitor"
+    - git config --global user.email "squad@fz-juelich.de"
+    - git remote set-url origin https://squad_janitor:$CI_FORMAT@$CI_SERVER_HOST/$CI_PROJECT_NAMESPACE/$CI_PROJECT_NAME
+    - git fetch
+    - git checkout $CI_COMMIT_REF_NAME
+    - git reset --hard origin/$CI_COMMIT_REF_NAME
+    - git pull --rebase
   script:
     # Extract current version from pyproject.toml
     - |
@@ -47,7 +49,7 @@ auto_tag_version:
       if ! git rev-parse HEAD~1 >/dev/null 2>&1; then
         echo "First commit detected - creating initial tag v$CURRENT_VERSION"
         git tag -a "v$CURRENT_VERSION" -m "Release version $CURRENT_VERSION"
-        git push https://oauth2:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git "v$CURRENT_VERSION"
+        git push origin "v$CURRENT_VERSION"
         echo "Successfully created initial tag v$CURRENT_VERSION"
         exit 0
       fi
@@ -58,7 +60,7 @@ auto_tag_version:
         
         # Create and push the tag
         git tag -a "v$CURRENT_VERSION" -m "Release version $CURRENT_VERSION"
-        git push https://oauth2:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git "v$CURRENT_VERSION"
+        git push origin "v$CURRENT_VERSION"
         
         echo "Successfully created and pushed tag v$CURRENT_VERSION"
       else
@@ -66,13 +68,14 @@ auto_tag_version:
       fi
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-      changes:
-        - backend/pyproject.toml
-  allow_failure: false
+      when: on_success
+  #     changes:
+  #       - backend/pyproject.toml
+  # allow_failure: false
 
 docker:
   image: jonoh/docker-buildx-qemu
-  stage: deploy
+  stage: build
   services:
     - docker:28-dind
   before_script:
@@ -83,8 +86,9 @@ docker:
     - VERSION=$(grep '^[[:space:]]*version[[:space:]]*=' backend/pyproject.toml | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')
     - update-binfmts --enable
     - docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull -t "$CI_REGISTRY/squad-lab/qimchi:latest" -t "$CI_REGISTRY/squad-lab/qimchi:$VERSION" --push .
-  only:
-    - main
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: on_success
 
 build_qimchi_exe:
   stage: build
@@ -98,103 +102,93 @@ build_qimchi_exe:
     # Create build directory
     - New-Item -ItemType Directory -Force -Path packaging/build
     
-    # Copy batch file and icon
+    # Copy batch file and icon to build directory
     - Copy-Item qimchi.bat packaging/build/
     - Copy-Item frontend/public/qimchi-logo.ico packaging/build/
     
-    # Install Resource Hacker (trusted tool for adding icons to executables)
-    - choco install reshack -y
-    
-    # Create IExpress SED configuration file
+    # Create a Python wrapper that calls the batch file
     - |
-      $sedContent = @"
-      [Version]
-      Class=IEXPRESS
-      SEDVersion=3
-      [Options]
-      PackagePurpose=InstallApp
-      ShowInstallProgramWindow=0
-      HideExtractAnimation=0
-      UseLongFileName=1
-      InsideCompressed=0
-      CAB_FixedSize=0
-      CAB_ResvCodeSigning=0
-      RebootMode=N
-      InstallPrompt=
-      DisplayLicense=
-      FinishMessage=
-      TargetName=%TargetName%
-      FriendlyName=%FriendlyName%
-      AppLaunched=%AppLaunched%
-      PostInstallCmd=%PostInstallCmd%
-      AdminQuietInstCmd=
-      UserQuietInstCmd=
-      SourceFiles=SourceFiles
-      [Strings]
-      TargetName=packaging\build\qimchi_temp.exe
-      FriendlyName=QIMCHI v$VERSION
-      AppLaunched=cmd /c qimchi.bat
-      PostInstallCmd=<None>
-      FILE0="qimchi.bat"
-      [SourceFiles]
-      SourceFiles0=packaging\build\
-      [SourceFiles0]
-      %FILE0%=
-      "@
+      $pythonWrapper = @'
+      import subprocess
+      import sys
+      import os
       
-      $sedContent | Out-File -FilePath "packaging/build/config.sed" -Encoding ASCII
+      # Get the directory where the exe is located
+      exe_dir = os.path.dirname(sys.executable)
+      
+      if getattr(sys, 'frozen', False):
+          # Running as compiled exe - PyInstaller extracts to sys._MEIPASS temp directory
+          bundle_dir = sys._MEIPASS
+          bat_path = os.path.join(bundle_dir, "qimchi.bat")
+      else:
+          # Running as script
+          bundle_dir = os.path.dirname(os.path.abspath(__file__))
+          bat_path = os.path.join(bundle_dir, "qimchi.bat")
+      
+      if os.path.exists(bat_path):
+          print(f"Found batch file at: {bat_path}")
+          print(f"Running from exe directory: {exe_dir}")
+          # Run the batch file with exe directory as working directory
+          result = subprocess.run([bat_path], shell=True, cwd=exe_dir)
+          sys.exit(result.returncode)
+      else:
+          print(f"ERROR: qimchi.bat not found!")
+          print(f"Searched in bundle directory: {bundle_dir}")
+          print(f"Exe directory: {exe_dir}")
+          print(f"sys._MEIPASS: {getattr(sys, '_MEIPASS', 'Not available')}")
+          if os.path.exists(bundle_dir):
+              print(f"Bundle directory contents: {os.listdir(bundle_dir)}")
+          input("Press Enter to exit...")
+          sys.exit(1)
+      '@
+      $pythonWrapper | Out-File -FilePath "packaging/build/qimchi_launcher.py" -Encoding UTF8
     
-    # Build EXE using IExpress (built into Windows)
-    - iexpress /N /Q packaging/build/config.sed
+    # Install PyInstaller
+    - python -m pip install pyinstaller
     
-    # Add icon using Resource Hacker
-    - '& "C:\Program Files (x86)\Resource Hacker\ResourceHacker.exe" -open packaging/build/qimchi_temp.exe -save packaging/build/qimchi.exe -action addoverwrite -res packaging/build/qimchi-logo.ico -mask ICONGROUP,MAINICON,'
+    # Build EXE with PyInstaller, bundling the batch file
+    - $iconPath = Join-Path (Get-Location) "packaging\build\qimchi-logo.ico"
+    - $batPath = Join-Path (Get-Location) "qimchi.bat"
+    - python -m PyInstaller --onefile --console --icon="$iconPath" --add-data "${batPath};." --name="qimchi" --distpath="packaging/build" --workpath="packaging/build/pyinstaller_work" --specpath="packaging/build" "packaging/build/qimchi_launcher.py"
     
     # Verify EXE was created
     - if (!(Test-Path "packaging/build/qimchi.exe")) { throw "EXE build failed" }
-    - echo "Successfully built qimchi.exe with custom icon"
+    - $exeSize = (Get-Item "packaging/build/qimchi.exe").Length / 1MB
+    - echo "Successfully built qimchi.exe ($([math]::Round($exeSize, 2)) MB)"
     
   artifacts:
     name: "qimchi-v$VERSION-windows"
     paths:
       - packaging/build/qimchi.exe
+      - packaging/build/qimchi.bat
     expire_in: 180 days
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: on_success
 
 release_windows:
-  stage: release
+  stage: release_windows
   image: registry.gitlab.com/gitlab-org/release-cli:latest
   needs:
     - job: build_qimchi_exe
       artifacts: true
   script:
-    - apk add --no-cache python3 py3-pip
-    - pip3 install toml
-    - |
-      python3 << 'EOF'
-      import toml
-      data = toml.load('backend/pyproject.toml')
-      version = data['project']['version']
-      with open('version.txt', 'w') as f:
-          f.write(version)
-      EOF
-    - export VERSION=$(cat version.txt)
-    - echo "Creating release for v$VERSION"
+    - echo "Creating release for $CI_COMMIT_TAG"
+    - VERSION=${CI_COMMIT_TAG#v}
+    - echo "Version is $VERSION"
   release:
-    tag_name: "v$VERSION"
-    name: "QIMCHI v$VERSION"
+    tag_name: "$CI_COMMIT_TAG"
+    name: "QIMCHI $CI_COMMIT_TAG"
     description: |
-      ## QIMCHI v$VERSION - Windows Release
+      ## QIMCHI $CI_COMMIT_TAG - Windows Release
       
       ### Installation
-      1. Download `qimchi.exe` below
-      2. Double-click to run the installer
-      3. Access the web interface at http://localhost:8001
+      1. Download `qimchi.exe` above.
+      2. Double-click to run the installer.
+      3. Access the web interface at http://localhost:8001.
       
       ### What's New
-      See the [commit history](${CI_PROJECT_URL}/-/commits/v${VERSION}) for changes in this release.
+      See the [commit history](${CI_PROJECT_URL}/-/commits/${CI_COMMIT_TAG}) for changes in this release.
       
       ### Requirements
       - Windows 11 24H2+ with winget installed
@@ -202,8 +196,8 @@ release_windows:
     assets:
       links:
         - name: "qimchi.exe (Windows Installer)"
-          url: "${CI_PROJECT_URL}/-/jobs/artifacts/v${VERSION}/raw/packaging/build/qimchi.exe?job=build_qimchi_exe"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi.exe?job=build_qimchi_exe"
           link_type: "package"
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
-
+      when: on_success

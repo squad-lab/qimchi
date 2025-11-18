@@ -1,4 +1,4 @@
-# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="50" style="vertical-align: middle;"/> Qimchi v0.3
+# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.3.1
 
 Plotly based data visualization tool for `xarray` data. Optimized to work with the [`qcutils`](https://gitlab.com/squad-lab/qcutils) package. Qimchi expects the data to be `zarr` formatted `xarray` files. Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html#zarr).
 
@@ -8,19 +8,17 @@ This repository contains a unified FastAPI application that serves a React-based
 
 ## Table of Contents
 
-- [ Qimchi v0.3](#-qimchi-v03)
-  - [Table of Contents](#table-of-contents)
-  - [Installation](#installation)
-    - [Windows](#windows)
-    - [Linux/macOS: Docker Installation](#linuxmacos-docker-installation)
+- [Installation](#installation)
+   - [Windows](#windows)
+   - [Linux/macOS: Docker Installation](#linuxmacos-docker-installation)
       - [Prerequisites](#prerequisites)
       - [Basic Setup](#basic-setup)
       - [Advanced Setup (with HTTPS)](#advanced-setup-with-https)
-    - [Expert Installation](#expert-installation)
+   - [Expert Installation](#expert-installation)
       - [Windows](#windows-1)
       - [Linux/macOS](#linuxmacos)
-  - [Environment Variables](#environment-variables)
-  - [Measurements](#measurements)
+- [Environment Variables](#environment-variables)
+- [Measurements](#measurements)
 
 ## Installation
 
