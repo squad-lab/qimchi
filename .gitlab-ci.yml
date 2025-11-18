@@ -21,6 +21,6 @@ docker:
   script:
     - VERSION=$(grep '^[[:space:]]*version[[:space:]]*=' backend/pyproject.toml | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')
     - update-binfmts --enable
-    - docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull -t "$CI_REGISTRY/squad-lab/qimchi-react:latest" -t "$CI_REGISTRY/squad-lab/qimchi-react:$VERSION" --push .
+    - docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull -t "$CI_REGISTRY/squad-lab/qimchi:latest" -t "$CI_REGISTRY/squad-lab/qimchi:$VERSION" --push .
   only:
     - main
