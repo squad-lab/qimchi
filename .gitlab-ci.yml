@@ -97,7 +97,7 @@ build_qimchi_exe:
   script:
     # Extract version from pyproject.toml
     - $VERSION = (Select-String -Path "backend/pyproject.toml" -Pattern 'version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
-    - echo "Building QIMCHI v$VERSION for Windows"
+    - echo "Building Qimchi v$VERSION for Windows"
     
     # Create build directory
     - New-Item -ItemType Directory -Force -Path packaging/build
@@ -178,14 +178,17 @@ release_windows:
     - echo "Version is $VERSION"
   release:
     tag_name: "$CI_COMMIT_TAG"
-    name: "QIMCHI $CI_COMMIT_TAG"
+    name: "Qimchi $CI_COMMIT_TAG"
     description: |
-      ## QIMCHI $CI_COMMIT_TAG - Windows Release
+      # <img src="https://gitlab.com/squad-lab/qimchi/-/raw/main/frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi $CI_COMMIT_TAG - Windows Release
       
       ### Installation
-      1. Download `qimchi.exe` above.
+      1. Download `qimchi.exe` above or click [here](${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi.exe?job=build_qimchi_exe).
       2. Double-click to run the installer.
       3. Access the web interface at http://localhost:8001.
+      
+      ### Linux/macOS Installation
+      For Linux and macOS users, please see the [Docker Installation](${CI_PROJECT_URL}/-/blob/main/README.md#linuxmacos-docker-installation) or [Expert Installation](${CI_PROJECT_URL}/-/blob/main/README.md#expert-installation) instructions in the README.
       
       ### What's New
       See the [commit history](${CI_PROJECT_URL}/-/commits/${CI_COMMIT_TAG}) for changes in this release.
