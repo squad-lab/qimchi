@@ -22,6 +22,7 @@ import {
 import { Data, Layout, Config } from "plotly.js";
 
 // Local imports
+import plotlyColorscales from "./plotly_colorscales_plotlyjs.json";
 import { PlotAPI } from "../../services/plotAPI";
 import { PROD_BACKEND_URL } from "../../config";
 import "./PlotWrapper.css";
@@ -158,10 +159,21 @@ const mergeAppearanceDefaults = (
   return merge(defaults, p) as PlotAppearanceSettings;
 };
 
-// Normalize colorscale names to Plotly.js expected casing
-const normalizeColorscaleName = (name: string): string => {
+// Helper function to get colorscale data from name
+const getColorscaleData = (
+  name: string
+): string | Array<[number, string]> | Array<Array<number | string>> => {
   const key = name.toLowerCase();
-  const map: Record<string, string> = {
+
+  // First, try to get from our JSON file
+  if (key in plotlyColorscales) {
+    return plotlyColorscales[key as keyof typeof plotlyColorscales] as Array<
+      [number, string]
+    >;
+  }
+
+  // Fallback: return capitalized name for built-in Plotly colorscales
+  const builtInMap: Record<string, string> = {
     viridis: "Viridis",
     plasma: "Plasma",
     inferno: "Inferno",
@@ -192,7 +204,7 @@ const normalizeColorscaleName = (name: string): string => {
     rainbow: "Rainbow",
     sinebow: "Sinebow",
   };
-  return map[key] || name.charAt(0).toUpperCase() + name.slice(1);
+  return builtInMap[key] || name.charAt(0).toUpperCase() + name.slice(1);
 };
 
 const PlotWrapper: React.FC<Props> = ({
@@ -542,7 +554,9 @@ const PlotWrapper: React.FC<Props> = ({
           ) {
             // If trace is not using a shared coloraxis, set per-trace fallback
             // Note: When coloraxis is used (our backend does), layout.coloraxis takes precedence.
-            updatedTrace.colorscale = settings.hmap.colorscale;
+            updatedTrace.colorscale = getColorscaleData(
+              settings.hmap.colorscale
+            );
             if (settings.hmap.rangecolor) {
               updatedTrace.zmin = settings.hmap.rangecolor[0];
               updatedTrace.zmax = settings.hmap.rangecolor[1];
@@ -613,9 +627,9 @@ const PlotWrapper: React.FC<Props> = ({
           const newColoraxis: NonNullable<LayoutWithColorAxis["coloraxis"]> = {
             ...existing,
           };
-          // Update scale (use normalized name; Plotly also accepts array but we only have names here)
+          // Update scale - use the actual colorscale data array from JSON
           (newColoraxis as { colorscale?: unknown }).colorscale =
-            normalizeColorscaleName(settings.hmap.colorscale);
+            getColorscaleData(settings.hmap.colorscale);
           // Update or clear range
           if (settings.hmap.rangecolor) {
             (newColoraxis as { cmin?: number }).cmin =

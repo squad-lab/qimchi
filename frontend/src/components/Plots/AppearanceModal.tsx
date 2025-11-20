@@ -20,8 +20,10 @@ import {
   ChartNoAxesCombined,
   Hourglass,
   Info,
+  AlertTriangle,
 } from "lucide-react";
 import { Rnd } from "react-rnd";
+import plotlyColorscales from "./plotly_colorscales_plotlyjs.json";
 
 // Local imports
 import { useToast } from "../../hooks/useToast";
@@ -181,48 +183,134 @@ const GRID_DASH_OPTS = [
   { label: "Long Dash Dot", value: "longdashdot", icon: "━━ • ━━" },
 ];
 
-// Plotly colorscales for heatmaps
-const COLORSCALE_OPTS = [
-  { label: "Viridis", value: "viridis" },
-  { label: "Plasma", value: "plasma" },
-  { label: "Inferno", value: "inferno" },
-  { label: "Magma", value: "magma" },
-  { label: "Cividis", value: "cividis" },
-  { label: "Blues", value: "blues" },
-  { label: "Greens", value: "greens" },
-  { label: "Greys", value: "greys" },
-  { label: "Oranges", value: "oranges" },
-  { label: "Purples", value: "purples" },
-  { label: "Reds", value: "reds" },
-  { label: "YlOrRd", value: "ylorrd" },
-  { label: "YlOrBr", value: "ylorbr" },
-  { label: "YlGnBu", value: "ylgnbu" },
-  { label: "YlGn", value: "ylgn" },
-  { label: "Burg", value: "burg" },
-  { label: "BuGn", value: "bugn" },
-  { label: "BuPu", value: "bupu" },
-  { label: "GnBu", value: "gnbu" },
-  { label: "OrRd", value: "orrd" },
-  { label: "PuBuGn", value: "pubugn" },
-  { label: "PuBu", value: "pubu" },
-  { label: "PuRd", value: "purd" },
-  { label: "RdPu", value: "rdpu" },
-  { label: "Spectral", value: "spectral" },
-  { label: "Coolwarm", value: "coolwarm" },
-  { label: "Balance", value: "balance" },
-  { label: "RdYlBu", value: "rdylbu" },
-  { label: "RdYlGn", value: "rdylgn" },
-  { label: "RdBu", value: "rdbu" },
-  { label: "PiYG", value: "piyg" },
-  { label: "PRGn", value: "prgn" },
-  { label: "BrBG", value: "brbg" },
-  { label: "PuOr", value: "puor" },
-  { label: "RdGy", value: "rdgy" },
-  { label: "Turbo", value: "turbo" },
-  { label: "Hot", value: "hot" },
-  { label: "Jet", value: "jet" },
-  { label: "Rainbow", value: "rainbow" },
-  { label: "Sinebow", value: "sinebow" },
+// Plotly colorscales for heatmaps, organized by category
+// NOTE: Cyclical colormaps (edge, phase, twilight, mrybm, mygbm) should be avoided for continuous heatmaps
+
+// Get all available colorscales from the imported JSON
+const availableColorscales = Object.keys(plotlyColorscales);
+
+// Cyclical colormaps - should have warnings
+const CYCLICAL_COLORSCALES = ["edge", "phase", "twilight", "mrybm", "mygbm"];
+
+// Organize colorscales by category
+interface ColorscaleOption {
+  label: string;
+  value: string;
+  warning?: boolean;
+}
+
+interface ColorscaleCategory {
+  label: string;
+  options: ColorscaleOption[];
+}
+
+const COLORSCALE_CATEGORIES: ColorscaleCategory[] = [
+  {
+    label: "Sequential (Recommended)",
+    options: [
+      { label: "Viridis", value: "viridis" },
+      { label: "Plasma", value: "plasma" },
+      { label: "Inferno", value: "inferno" },
+      { label: "Magma", value: "magma" },
+      { label: "Turbo", value: "turbo" },
+      { label: "Cividis", value: "cividis" },
+    ].filter((opt) => availableColorscales.includes(opt.value)),
+  },
+  {
+    label: "Sequential (Single-hue)",
+    options: [
+      { label: "Blues", value: "blues" },
+      { label: "Greens", value: "greens" },
+      { label: "Greys", value: "greys" },
+      { label: "Reds", value: "reds" },
+      { label: "Oranges", value: "oranges" },
+      { label: "Purples", value: "purples" },
+      { label: "Teal", value: "teal" },
+      { label: "Mint", value: "mint" },
+      { label: "Burg", value: "burg" },
+      { label: "Peach", value: "peach" },
+      { label: "Pinkyl", value: "pinkyl" },
+    ].filter((opt) => availableColorscales.includes(opt.value)),
+  },
+  {
+    label: "Sequential (Multi-hue)",
+    options: [
+      { label: "YlOrRd", value: "ylorrd" },
+      { label: "YlGnBu", value: "ylgnbu" },
+      { label: "YlGn", value: "ylgn" },
+      { label: "BuGn", value: "bugn" },
+      { label: "BuPu", value: "bupu" },
+      { label: "GnBu", value: "gnbu" },
+      { label: "OrRd", value: "orrd" },
+      { label: "PuBuGn", value: "pubugn" },
+      { label: "PuBu", value: "pubu" },
+      { label: "PuRd", value: "purd" },
+      { label: "RdPu", value: "rdpu" },
+      { label: "YlOrBr", value: "ylorbr" },
+      { label: "Aggrnyl", value: "aggrnyl" },
+      { label: "Agsunset", value: "agsunset" },
+      { label: "Blugrn", value: "blugrn" },
+      { label: "Bluyl", value: "bluyl" },
+      { label: "Brwnyl", value: "brwnyl" },
+      { label: "Burgyl", value: "burgyl" },
+      { label: "Darkmint", value: "darkmint" },
+      { label: "Emrld", value: "emrld" },
+      { label: "Oryel", value: "oryel" },
+      { label: "Purpor", value: "purpor" },
+      { label: "Redor", value: "redor" },
+      { label: "Sunset", value: "sunset" },
+      { label: "Sunsetdark", value: "sunsetdark" },
+      { label: "Tealgrn", value: "tealgrn" },
+    ].filter((opt) => availableColorscales.includes(opt.value)),
+  },
+  {
+    label: "Diverging",
+    options: [
+      { label: "RdBu", value: "rdbu" },
+      { label: "Spectral", value: "spectral" },
+      { label: "RdYlBu", value: "rdylbu" },
+      { label: "RdYlGn", value: "rdylgn" },
+      { label: "PiYG", value: "piyg" },
+      { label: "PRGn", value: "prgn" },
+      { label: "BrBG", value: "brbg" },
+      { label: "PuOr", value: "puor" },
+      { label: "RdGy", value: "rdgy" },
+      { label: "Armyrose", value: "armyrose" },
+      { label: "Earth", value: "earth" },
+      { label: "Fall", value: "fall" },
+      { label: "Geyser", value: "geyser" },
+      { label: "Temps", value: "temps" },
+      { label: "Tropic", value: "tropic" },
+      { label: "Balance", value: "balance" },
+      { label: "Curl", value: "curl" },
+      { label: "Delta", value: "delta" },
+      { label: "Oxy", value: "oxy" },
+      { label: "Tealrose", value: "tealrose" },
+    ].filter((opt) => availableColorscales.includes(opt.value)),
+  },
+  {
+    label: "Cyclical",
+    options: [
+      { label: "Twilight", value: "twilight", warning: true },
+      { label: "Phase", value: "phase", warning: true },
+      { label: "Edge", value: "edge", warning: true },
+      { label: "Mrybm", value: "mrybm", warning: true },
+      { label: "Mygbm", value: "mygbm", warning: true },
+    ].filter((opt) => availableColorscales.includes(opt.value)),
+  },
+  {
+    label: "Other",
+    options: [
+      { label: "Hot", value: "hot" },
+      { label: "Jet", value: "jet" },
+      { label: "Rainbow", value: "rainbow" },
+      { label: "Blackbody", value: "blackbody" },
+      { label: "Bluered", value: "bluered" },
+      { label: "Electric", value: "electric" },
+      { label: "Picnic", value: "picnic" },
+      { label: "Portland", value: "portland" },
+    ].filter((opt) => availableColorscales.includes(opt.value)),
+  },
 ];
 
 // Default settings based on Python backend
@@ -1128,13 +1216,46 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                     title="Heatmap colorscale"
                     aria-label="Heatmap colorscale"
                   >
-                    {/* TODOLATER: Can we show a preview of the colorscales ? */}
-                    {COLORSCALE_OPTS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
+                    {COLORSCALE_CATEGORIES.map((category) => (
+                      <optgroup key={category.label} label={category.label}>
+                        {category.options.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.warning ? (
+                              <AlertTriangle
+                                size={14}
+                                className="flex-shrink-0 mt-0.5"
+                              />
+                            ) : (
+                              ""
+                            )}
+                            {option.label}
+                            {option.warning ? " (Cyclical)" : ""}
+                          </option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
+                  {localSettings.hmap?.colorscale &&
+                    CYCLICAL_COLORSCALES.includes(
+                      localSettings.hmap.colorscale
+                    ) && (
+                      <div className="mt-2 flex items-start gap-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+                        <AlertTriangle
+                          size={14}
+                          className="flex-shrink-0 mt-0.5"
+                        />
+                        <span>
+                          <strong>Warning:</strong> This is a cyclical colormap
+                          designed for phase or periodic data. Because it wraps
+                          around, it may be misleading for continuous heatmaps.
+                        </span>
+                      </div>
+                    )}
+                </div>
+
+                <div className="text-xs text-gray-500 italic mb-3">
+                  Tip: Sequential colormaps (Viridis, Plasma, etc.) are
+                  recommended for continuous data.
                 </div>
 
                 <div>
