@@ -95,6 +95,7 @@ build_qimchi_exe:
   tags:
     - saas-windows-medium-amd64
   script:
+    - 'dir env:'
     # Extract version from pyproject.toml
     - $VERSION = (Select-String -Path "backend/pyproject.toml" -Pattern 'version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
     - echo "Building Qimchi v$VERSION for Windows"
@@ -156,6 +157,71 @@ build_qimchi_exe:
     - $exeSize = (Get-Item "packaging/build/qimchi.exe").Length / 1MB
     - echo "Successfully built qimchi.exe ($([math]::Round($exeSize, 2)) MB)"
     
+    # Decode certificate from base64 and save as .p12 file
+    - |
+      if ($SIGN_CERT) {
+        echo "Decoding certificate from file: $SIGN_CERT"
+        # GitLab passes protected variables as file paths
+        if (Test-Path $SIGN_CERT) {
+          $certBase64 = Get-Content $SIGN_CERT -Raw
+          $certBytes = [System.Convert]::FromBase64String($certBase64.Trim())
+          $certPath = Join-Path (Get-Location) "packaging\build\cert.p12"
+          [System.IO.File]::WriteAllBytes($certPath, $certBytes)
+          echo "Certificate decoded successfully to $certPath"
+        } else {
+          echo "ERROR: Certificate file not found at $SIGN_CERT"
+        }
+      } else {
+        echo "WARNING: SIGN_CERT variable not set, skipping code signing"
+      }
+    
+    # Sign the EXE with the certificate
+    - |
+      if (Test-Path "packaging/build/cert.p12") {
+        echo "Signing qimchi.exe..."
+        # Use signtool from Windows SDK to sign the executable
+        $signtoolPath = "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe"
+        $signtool = Get-Item $signtoolPath | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        
+        if ($signtool) {
+          $signArgs = @(
+            "sign",
+            "/f", "packaging/build/cert.p12",
+            "/fd", "SHA256",
+            "/tr", "http://timestamp.digicert.com",
+            "/td", "SHA256"
+          )
+          
+          # Add password if provided - GitLab passes it as a file path
+          if ($SIGN_PASS) {
+            if (Test-Path $SIGN_PASS) {
+              $password = Get-Content $SIGN_PASS -Raw
+              $signArgs += "/p"
+              $signArgs += $password.Trim()
+            } else {
+              echo "WARNING: SIGN_PASS file not found at $SIGN_PASS"
+            }
+          }
+          
+          $signArgs += "packaging/build/qimchi.exe"
+          
+          & $signtool.FullName $signArgs
+          
+          if ($LASTEXITCODE -eq 0) {
+            echo "Successfully signed qimchi.exe"
+          } else {
+            throw "Failed to sign qimchi.exe (exit code: $LASTEXITCODE)"
+          }
+        } else {
+          throw "signtool.exe not found - cannot sign executable"
+        }
+        
+        # Clean up certificate file
+        Remove-Item "packaging/build/cert.p12" -Force
+      } else {
+        echo "Skipping code signing (no certificate available)"
+      }
+    
   artifacts:
     name: "qimchi-v$VERSION-windows"
     paths:
@@ -179,8 +245,8 @@ release_windows:
   release:
     tag_name: "$CI_COMMIT_TAG"
     name: "Qimchi $CI_COMMIT_TAG"
-    description: |
-      # <img src="https://gitlab.com/squad-lab/qimchi/-/raw/main/frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi $CI_COMMIT_TAG - Windows Release
+    description: |-
+      # Qimchi $CI_COMMIT_TAG - Windows Release
       
       ### Installation
       1. Download `qimchi.exe` above or click [here](${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi.exe?job=build_qimchi_exe).
