@@ -715,6 +715,20 @@ const Metadata = ({ basketItems }: MetadataProps) => {
   );
 };
 
+// Inside MetadataCard file, above the component:
+const parseMetadataValue = (value: unknown) => {
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      // Not valid JSON string, just return as-is
+      return value;
+    }
+  }
+
+  // Already an object/array/number/etc
+  return value;
+};
 // Memoized metadata card component for better performance
 const MetadataCard = memo(
   ({
@@ -767,20 +781,24 @@ const MetadataCard = memo(
             </div>
           )}
           {metadata &&
-            Object.entries(metadata).map(([key, value]) => (
-              <div key={key} className="mb-3">
-                <strong className="text-sm">{key}:</strong>
-                <JsonView
-                  value={JSON.parse(value) as object}
-                  style={metadataCustomTheme as React.CSSProperties}
-                  indentWidth={10}
-                  displayDataTypes={false}
-                  enableClipboard={true}
-                  displayObjectSize={true}
-                  collapsed={key === "Instruments Snapshot" ? 0 : 2}
-                />
-              </div>
-            ))}
+            Object.entries(metadata).map(([key, value]) => {
+              const parsedValue = parseMetadataValue(value);
+
+              return (
+                <div key={key} className="mb-3">
+                  <strong className="text-sm">{key}:</strong>
+                  <JsonView
+                    value={parsedValue as object}
+                    style={metadataCustomTheme as React.CSSProperties}
+                    indentWidth={10}
+                    displayDataTypes={false}
+                    enableClipboard={true}
+                    displayObjectSize={true}
+                    collapsed={key === "Instruments Snapshot" ? 0 : 2}
+                  />
+                </div>
+              );
+            })}
         </div>
       )}
     </div>
