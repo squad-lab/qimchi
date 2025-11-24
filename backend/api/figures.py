@@ -299,18 +299,6 @@ class Line(QimchiFigure):
         # Handle metadata access safely for hover template
         dep_var = self.deps[0] if isinstance(self.deps, list) else self.deps
 
-        if self.ind[0] in self.metadata and dep_var in self.metadata:
-            # Update hover template to match the axis labels
-            self.traces["hovertemplate"] = (
-                f"{self.metadata[self.ind[0]]['label']} ({self.metadata[self.ind[0]]['unit']}): %{{x}}<br>"
-                f"{self.metadata[dep_var]['label']} ({self.metadata[dep_var]['unit']}): %{{y}}<extra></extra>"
-            )
-        else:
-            # Fallback hover template
-            self.traces["hovertemplate"] = (
-                f"{self.ind[0]}: %{{x}}<br>{dep_var}: %{{y}}<extra></extra>"
-            )
-
         # logger.debug(
         # f"Line || independents: {independents} | dependent: {dependents}"  # | theme: {theme}"
         # )
@@ -321,18 +309,28 @@ class Line(QimchiFigure):
     def plot(self) -> go.Figure:
         theme = self.theme
         # Create safe titles for axes
-        if self.ind[0] in self.metadata:
-            x_title = f"{self.metadata[self.ind[0]]['label']} ({self.metadata[self.ind[0]]['unit']})"
+        if "label" in self.data.coords[self.ind[0]].attrs and "unit" in self.data.coords[self.ind[0]].attrs:
+            logger.debug(f"Line || X-axis label and unit found in data coords attrs.")
+            self.x_title = f"{self.data.coords[self.ind[0]].attrs['label']} ({self.data.coords[self.ind[0]].attrs['unit']})"
+        elif self.ind[0] in self.metadata and "label" in self.metadata[self.ind[0]] and "unit" in self.metadata[self.ind[0]]:
+            logger.debug(f"Line || X-axis label and unit found in metadata.")
+            self.x_title = f"{self.metadata[self.ind[0]]['label']} ({self.metadata[self.ind[0]]['unit']})"
         else:
-            x_title = self.ind[0]
+            logger.debug(f"Line || X-axis label and unit NOT found; using variable name.")
+            self.x_title = self.ind[0]
 
         dep_var = self.deps[0] if isinstance(self.deps, list) else self.deps
-        if dep_var in self.metadata:
-            y_title = (
+        if "label" in self.data[dep_var].attrs and "unit" in self.data[dep_var].attrs:
+            logger.debug(f"Line || Y-axis label and unit found in data attrs.")
+            self.y_title = f"{self.data[dep_var].attrs['label']} ({self.data[dep_var].attrs['unit']})"
+        elif dep_var in self.metadata and "label" in self.metadata[dep_var] and "unit" in self.metadata[dep_var]:
+            logger.debug(f"Line || Y-axis label and unit found in metadata.")
+            self.y_title = (
                 f"{self.metadata[dep_var]['label']} ({self.metadata[dep_var]['unit']})"
             )
         else:
-            y_title = dep_var
+            logger.debug(f"Line || Y-axis label and unit NOT found; using variable name.")
+            self.y_title = dep_var
 
         # Create safe plot title
         if "Device Type" in self.meta and "Wafer ID" in self.meta:
@@ -352,7 +350,7 @@ class Line(QimchiFigure):
                 "y": 0.97,
             },
             "xaxis": {
-                "title": x_title,
+                "title": self.x_title,
                 "ticks": "outside",
                 "showline": True,
                 "mirror": True,
@@ -383,7 +381,7 @@ class Line(QimchiFigure):
                 },
             },
             "yaxis": {
-                "title": y_title,
+                "title": self.y_title,
                 "ticks": "outside",
                 "showline": True,
                 "mirror": True,
@@ -433,8 +431,22 @@ class Line(QimchiFigure):
             y=dep_var,
         )
         fig.update_layout(layout)
+        self.traces["hovertemplate"] = (
+                f"{self.x_title}: %{{x}}<br>"
+                f"{self.y_title}: %{{y}}<extra></extra>"
+            )
+        # if self.ind[0] in self.metadata and dep_var in self.metadata:
+        #     # Update hover template to match the axis labels
+        #     self.traces["hovertemplate"] = (
+        #         f"{self.ytitle}: %{{x}}<br>"
+        #         f"{self.metadata[dep_var]['label']} ({self.metadata[dep_var]['unit']}): %{{y}}<extra></extra>"
+        #     )
+        # else:
+        #     # Fallback hover template
+        #     self.traces["hovertemplate"] = (
+        #         f"{self.ind[0]}: %{{x}}<br>{dep_var}: %{{y}}<extra></extra>"
+        #     )
         fig.update_traces(self.traces)
-
         logger.debug("Line || PLOTTED")
 
         return fig
@@ -501,26 +513,43 @@ class HeatMap(QimchiFigure):
 
         # Create safe titles for axes
         if len(self.ind) >= 2:
-            if self.ind[1] in self.metadata:
-                x_title = f"{self.metadata[self.ind[1]]['label']} ({self.metadata[self.ind[1]]['unit']})"
+            if "label" in self.data.coords[self.ind[1]].attrs and "unit" in self.data.coords[self.ind[1]].attrs:
+                logger.info(f"HeatMap || X-axis label and unit found in data coords attrs.")
+                self.x_title = f"{self.data.coords[self.ind[1]].attrs['label']} ({self.data.coords[self.ind[1]].attrs['unit']})"
+            elif self.ind[1] in self.metadata and "label" in self.metadata[self.ind[1]] and "unit" in self.metadata[self.ind[1]]:
+                logger.info(f"HeatMap || X-axis label and unit found in metadata.")
+                self.x_title = f"{self.metadata[self.ind[1]]['label']} ({self.metadata[self.ind[1]]['unit']})"
             else:
-                x_title = self.ind[1]
+                logger.info(f"HeatMap || X-axis label and unit NOT found; using variable name.")
+                self.x_title = self.ind[1]
+                
+            if "label" in self.data.coords[self.ind[0]].attrs and "unit" in self.data.coords[self.ind[0]].attrs:
+                logger.info(f"HeatMap || Y-axis label and unit found in data coords attrs.")
+                self.y_title = f"{self.data.coords[self.ind[0]].attrs['label']} ({self.data.coords[self.ind[0]].attrs['unit']})"
+            elif self.ind[0] in self.metadata and "label" in self.metadata[self.ind[0]] and "unit" in self.metadata[self.ind[0]]:
+                logger.info(f"HeatMap || Y-axis label and unit found in metadata.")
+                self.y_title = f"{self.metadata[self.ind[0]]['label']} ({self.metadata[self.ind[0]]['unit']})"
+            else:
+                logger.info(f"HeatMap || Y-axis label and unit NOT found; using variable name.")
+                self.y_title = self.ind[0]
 
-            if self.ind[0] in self.metadata:
-                y_title = f"{self.metadata[self.ind[0]]['label']} ({self.metadata[self.ind[0]]['unit']})"
-            else:
-                y_title = self.ind[0]
         else:
-            x_title = self.ind[0] if len(self.ind) > 0 else "X"
-            y_title = "Y"
+            self.x_title = self.ind[0] if len(self.ind) > 0 else "X"
+            self.y_title = "Y"
 
+        # Create safe title for color axis
         dep_var = self.deps[0] if isinstance(self.deps, list) else self.deps
-        if dep_var in self.metadata:
-            z_title = (
+        if "label" in self.data[dep_var].attrs and "unit" in self.data[dep_var].attrs:
+            logger.info(f"HeatMap || Color axis label and unit found in data attrs.")
+            self.z_title = f"{self.data[dep_var].attrs['label']} ({self.data[dep_var].attrs['unit']})"
+        elif dep_var in self.metadata and "label" in self.metadata[dep_var] and "unit" in self.metadata[dep_var]:
+            logger.info(f"HeatMap || Color axis label and unit found in metadata.")
+            self.z_title = (
                 f"{self.metadata[dep_var]['label']} ({self.metadata[dep_var]['unit']})"
             )
         else:
-            z_title = dep_var
+            logger.info(f"HeatMap || Color axis label and unit NOT found; using variable name.")
+            self.z_title = dep_var
 
         # Create safe plot title
         if "Device Type" in self.meta and "Wafer ID" in self.meta:
@@ -540,7 +569,7 @@ class HeatMap(QimchiFigure):
                 "y": 0.97,
             },
             "xaxis": {
-                "title": x_title,
+                "title": self.x_title,
                 "ticks": "outside",
                 "showline": True,
                 "mirror": True,
@@ -562,7 +591,7 @@ class HeatMap(QimchiFigure):
                 },
             },
             "yaxis": {
-                "title": y_title,
+                "title": self.y_title,
                 "ticks": "outside",
                 "showline": True,
                 "mirror": True,
@@ -587,7 +616,7 @@ class HeatMap(QimchiFigure):
                 "size": 16,
             },
             "coloraxis": {
-                "colorbar_title": z_title,
+                "colorbar_title": self.z_title,
                 "colorscale": colors.get_colorscale(self.colorscale),
                 "cmin": self.rangecolor[0],
                 "cmax": self.rangecolor[1],
@@ -637,9 +666,9 @@ class HeatMap(QimchiFigure):
             # TODOLATER: Custom hover template
             # hoverinfo="none",
             # hovertemplate=None,  # No native hover box
-            hovertemplate=f"{self.metadata[self.ind[1]]['label']} ({self.metadata[self.ind[1]]['unit']}): %{{x}}<br>"
-            f"{self.metadata[self.ind[0]]['label']} ({self.metadata[self.ind[0]]['unit']}): %{{y}}<br>"
-            f"{self.metadata[dep_var]['label']} ({self.metadata[dep_var]['unit']}): %{{z}}<extra></extra>",
+            hovertemplate=f"{self.x_title}: %{{x}}<br>"
+            f"{self.y_title}: %{{y}}<br>"
+            f"{self.z_title}: %{{z}}<extra></extra>",
             # NOTE: "<extra></extra>" is required to remove the trace index from the hover info
         )
         # logger.debug("HeatMap || PLOTTED")
