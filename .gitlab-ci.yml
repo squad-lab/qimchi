@@ -157,20 +157,15 @@ build_qimchi_exe:
     - $exeSize = (Get-Item "packaging/build/qimchi.exe").Length / 1MB
     - echo "Successfully built qimchi.exe ($([math]::Round($exeSize, 2)) MB)"
     
-    # Decode certificate from base64 and save as .p12 file
+    # Recreate certificate from base64 SIGN_CERT variable (normal CI var, not file)
     - |
       if ($SIGN_CERT) {
-        echo "Decoding certificate from file: $SIGN_CERT"
-        # GitLab passes protected variables as file paths
-        if (Test-Path $SIGN_CERT) {
-          $certBase64 = Get-Content $SIGN_CERT -Raw
-          $certBytes = [System.Convert]::FromBase64String($certBase64.Trim())
-          $certPath = Join-Path (Get-Location) "packaging\build\cert.p12"
-          [System.IO.File]::WriteAllBytes($certPath, $certBytes)
-          echo "Certificate decoded successfully to $certPath"
-        } else {
-          echo "ERROR: Certificate file not found at $SIGN_CERT"
-        }
+        echo "Decoding certificate from SIGN_CERT variable"
+        $certBase64 = $SIGN_CERT
+        $certBytes = [System.Convert]::FromBase64String($certBase64.Trim())
+        $certPath = Join-Path (Get-Location) "packaging\build\cert.p12"
+        [System.IO.File]::WriteAllBytes($certPath, $certBytes)
+        echo "Certificate written to $certPath"
       } else {
         echo "WARNING: SIGN_CERT variable not set, skipping code signing"
       }
@@ -186,24 +181,14 @@ build_qimchi_exe:
         if ($signtool) {
           $signArgs = @(
             "sign",
+            "/debug",
             "/f", "packaging/build/cert.p12",
             "/fd", "SHA256",
             "/tr", "http://timestamp.digicert.com",
-            "/td", "SHA256"
+            "/td", "SHA256",
+            "/p", "$SIGN_PASS",
+            "packaging/build/qimchi.exe"
           )
-          
-          # Add password if provided - GitLab passes it as a file path
-          if ($SIGN_PASS) {
-            if (Test-Path $SIGN_PASS) {
-              $password = Get-Content $SIGN_PASS -Raw
-              $signArgs += "/p"
-              $signArgs += $password.Trim()
-            } else {
-              echo "WARNING: SIGN_PASS file not found at $SIGN_PASS"
-            }
-          }
-          
-          $signArgs += "packaging/build/qimchi.exe"
           
           & $signtool.FullName $signArgs
           
