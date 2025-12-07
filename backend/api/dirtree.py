@@ -119,6 +119,7 @@ def _get_file_timestamp(path: Path) -> str:
         return datetime.datetime.fromtimestamp(timestamp).isoformat()
 
     except (OSError, IOError):
+        logger.error(f"_get_file_timestamp | Failed to stat path for timestamp: {path}")
         raise OSError(f"Failed to stat path {path}")
 
 
@@ -177,9 +178,11 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
     path = Path(path)
 
     if not path.exists():
+        logger.error(f"get_directory_tree_zarr | Path does not exist: {path}")
         raise FileNotFoundError("Path does not exist")
 
     if not path.is_dir():
+        logger.error(f"get_directory_tree_zarr | Path is not a directory: {path}")
         raise NotADirectoryError("Path is not a folder")
 
     # Check fd availability from config
@@ -194,6 +197,9 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
     #     missing_tools.append("xargs")
 
     if missing_tools:
+        logger.error(
+            f"get_directory_tree_zarr | Missing required system utilities: {', '.join(missing_tools)}"
+        )
         raise RuntimeError(
             f"Missing required system utilities: {', '.join(missing_tools)}"
         )
@@ -229,9 +235,6 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
         str(path),
     ]
 
-    # logger.debug(f"Running fd command: {' '.join(cmd)}")
-    # print(f"Running fd command: {' '.join(cmd)}")  # DEBUG:
-
     # Windows compat - use subprocess.run instead of asyncio subprocess
     # rc, out, err = await _run_subprocess(cmd)
     result = subprocess.run(
@@ -247,13 +250,18 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
     err = result.stderr.decode("utf-8", errors="replace")
 
     if rc != 0:
-        # print(f"fd error: {err.strip() or out.strip()}")  # DEBUG:
+        logger.error(
+            f"get_directory_tree_zarr | fd error: {err.strip() or out.strip()}"
+        )
         raise RuntimeError(f"fd error: {err.strip() or out.strip()}")
 
     paths = [line.strip() for line in out.splitlines() if line.strip()]
 
     # If paths is empty, raise an error
     if not paths:
+        logger.error(
+            "get_directory_tree_zarr | No .zarr dataset (sub-)directories found at this level."
+        )
         raise RuntimeError(
             f"No .zarr dataset (sub-)directories found at this level. MAX_DEPTH={MAX_DEPTH} may be too low."
         )
@@ -537,6 +545,7 @@ def _build_memory_tree(path_str: str) -> Dict[str, object]:
 
     measurement_id = _extract_measurement_id(path_str)
     if not measurement_id:
+        logger.error(f"_build_memory_tree | Missing measurement id in path: {path_str}")
         raise HTTPException(status_code=400, detail="Missing measurement id in path")
 
     entry = entries.get(measurement_id)
@@ -545,6 +554,9 @@ def _build_memory_tree(path_str: str) -> Dict[str, object]:
 
     node = _memory_dataset_node(measurement_id, entry)
     if node is None:
+        logger.error(
+            f"_build_memory_tree | Live dataset {measurement_id} is not available in memory"
+        )
         raise HTTPException(
             status_code=404,
             detail=f"Live dataset {measurement_id} is not available in memory",
@@ -622,6 +634,7 @@ async def load_directory(path: PathData) -> Dict:
         try:
             return _build_memory_tree(memory_path)
         except HTTPException:
+            logger.error("load_directory | HTTPException raised in _build_memory_tree")
             raise
         except Exception as exc:
             logger.error("load_directory | Failed to build memory tree: %s", exc)
@@ -644,6 +657,9 @@ async def load_directory(path: PathData) -> Dict:
         tree = await get_directory_tree_zarr(path=str(fs_path))
         return tree
     except Exception as e:
+        logger.error(
+            f"load_directory | Error loading directory: {str(e)}", exc_info=True
+        )
         raise HTTPException(
             status_code=500, detail=f"Error loading directory: {str(e)}"
         )
@@ -670,6 +686,7 @@ async def get_meta_attrs(path: PathData) -> Dict:
     if memory_path is not None:
         measurement_id = _extract_measurement_id(memory_path)
         if not measurement_id:
+            logger.error("get_meta_attrs | Memory path must include a measurement id")
             raise HTTPException(
                 status_code=400, detail="Memory path must include a measurement id"
             )
@@ -701,6 +718,9 @@ async def get_meta_attrs(path: PathData) -> Dict:
         # Fallback to disk path from SQLite DB
         if data is None:
             if not disk_path:
+                logger.error(
+                    f"get_meta_attrs | Live dataset {measurement_id} has no disk path available"
+                )
                 raise HTTPException(
                     status_code=404,
                     detail=f"Live dataset {measurement_id} has no disk path available",
@@ -709,12 +729,18 @@ async def get_meta_attrs(path: PathData) -> Dict:
             try:
                 fs_path = Path(disk_path)
                 if not fs_path.exists() or not fs_path.is_dir():
+                    logger.error(
+                        f"get_meta_attrs | Disk path does not exist or is not a directory: {fs_path}"
+                    )
                     raise HTTPException(
                         status_code=404,
                         detail="Disk path does not exist or is not a directory",
                     )
                 data = xr.open_zarr(str(fs_path))
             except HTTPException:
+                logger.error(
+                    f"get_meta_attrs | HTTPException when loading dataset {measurement_id} from disk"
+                )
                 raise
             except Exception as exc:
                 logger.error(
@@ -794,8 +820,8 @@ async def get_meta_attrs(path: PathData) -> Dict:
         logger.error(
             f"get_meta_attrs | Error loading metadata: {str(e)}", exc_info=True
         )
-
         raise HTTPException(status_code=500, detail=f"Error loading metadata: {str(e)}")
+
     finally:
         if data is not None:
             data.close()
@@ -823,6 +849,9 @@ async def get_metadata(path: PathData) -> Dict:
     if memory_path is not None:
         measurement_id = _extract_measurement_id(memory_path)
         if not measurement_id:
+            logger.error(
+                f"get_meta_attrs | Memory path must include a measurement id: {memory_path}"
+            )
             raise HTTPException(
                 status_code=400, detail="Memory path must include a measurement id"
             )
@@ -854,6 +883,9 @@ async def get_metadata(path: PathData) -> Dict:
         # Fallback to disk path from SQLite DB
         if data is None:
             if not disk_path:
+                logger.error(
+                    f"get_metadata | Live dataset {measurement_id} has no disk path available"
+                )
                 raise HTTPException(
                     status_code=404,
                     detail=f"Live dataset {measurement_id} has no disk path available",
@@ -862,12 +894,18 @@ async def get_metadata(path: PathData) -> Dict:
             try:
                 fs_path = Path(disk_path)
                 if not fs_path.exists() or not fs_path.is_dir():
+                    logger.error(
+                        f"get_metadata | Disk path does not exist or is not a directory: {fs_path}"
+                    )
                     raise HTTPException(
                         status_code=404,
                         detail="Disk path does not exist or is not a directory",
                     )
                 data = xr.open_zarr(str(fs_path))
             except HTTPException:
+                logger.error(
+                    f"get_metadata | HTTPException when loading dataset {measurement_id} from disk"
+                )
                 raise
             except Exception as exc:
                 logger.error(
@@ -948,9 +986,11 @@ async def get_dataset_status(data: PathData) -> Dict:
         path = Path(data.path)
 
         if not path.exists():
+            logger.error(f"get_dataset_status | Dataset path does not exist: {path}")
             raise HTTPException(status_code=404, detail="Dataset not found")
 
         if not path.name.endswith(".zarr"):
+            logger.error(f"get_dataset_status | Path is not a zarr dataset: {path}")
             raise HTTPException(status_code=400, detail="Path is not a zarr dataset")
 
         last_modified = _get_dataset_last_modified(path)
@@ -965,10 +1005,13 @@ async def get_dataset_status(data: PathData) -> Dict:
         }
 
     except HTTPException:
+        logger.error(f"get_dataset_status | HTTPException raised for path: {data.path}")
         raise
 
     except Exception as e:
-        logger.error(f"Error getting dataset status for {data.path}: {str(e)}")
+        logger.error(
+            f"get_dataset_status | Error getting dataset status for {data.path}: {str(e)}"
+        )
         raise HTTPException(
             status_code=500, detail=f"Error getting dataset status: {str(e)}"
         )
