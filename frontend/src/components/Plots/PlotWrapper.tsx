@@ -209,60 +209,30 @@ const getColorscaleData = (
 };
 
 const swapAxesInPlotJson = (plotJson: PlotlyJSON): PlotlyJSON => {
-  console.log("[swapAxesInPlotJson] Function called!");
   const swapped = JSON.parse(JSON.stringify(plotJson)) as PlotlyJSON;
 
   if (swapped.data && swapped.data.length > 0) {
-    console.log(
-      "[swapAxesInPlotJson] Processing",
-      swapped.data.length,
-      "traces",
-    );
-    swapped.data = swapped.data.map((trace, idx) => {
-      console.log("[swapAxesInPlotJson] Trace", idx, "type:", trace.type);
+    swapped.data = swapped.data.map((trace) => {
       const swappedTrace = { ...trace } as Record<string, unknown>;
       const traceAny = trace as Record<string, unknown>;
 
       if (trace.type === "heatmap" || trace.type === "heatmapgl") {
-        console.log("[swapAxesInPlotJson] Processing heatmap/heatmapgl");
-
         // For heatmaps, swap x and y coordinates
         const xObj = traceAny.x as Record<string, unknown> | undefined;
         const yObj = traceAny.y as Record<string, unknown> | undefined;
         const zObj = traceAny.z as Record<string, unknown> | undefined;
 
-        console.log(
-          "[swapAxesInPlotJson] xObj:",
-          !!xObj,
-          "yObj:",
-          !!yObj,
-          "zObj:",
-          !!zObj,
-        );
-        console.log(
-          "[swapAxesInPlotJson] zObj keys:",
-          zObj ? Object.keys(zObj) : "N/A",
-        );
-
         if (xObj && yObj) {
           swappedTrace.x = { ...yObj };
           swappedTrace.y = { ...xObj };
-          console.log("[swapAxesInPlotJson] Swapped x and y objects");
         }
 
         // Use Plotly's transpose property
         if (zObj) {
-          console.log(
-            "[swapAxesInPlotJson] Setting transpose property on heatmap",
-          );
           swappedTrace.transpose = true;
         }
       } else {
         // For line plots and other types, just swap x and y
-        console.log(
-          "[swapAxesInPlotJson] Processing non-heatmap trace:",
-          trace.type,
-        );
         const x = traceAny.x;
         const y = traceAny.y;
         if (x !== undefined && y !== undefined) {
@@ -282,13 +252,24 @@ const swapAxesInPlotJson = (plotJson: PlotlyJSON): PlotlyJSON => {
       const tempXaxis = { ...(layoutAny.xaxis as object) };
       layoutAny.xaxis = { ...(layoutAny.yaxis as object) };
       layoutAny.yaxis = tempXaxis;
-      console.log("[swapAxesInPlotJson] Swapped layout xaxis and yaxis");
+
+      // Remove range properties to force autoscale after swap
+      // This ensures Plotly recalculates the correct axis ranges
+      const xaxisAny = layoutAny.xaxis as Record<string, unknown>;
+      const yaxisAny = layoutAny.yaxis as Record<string, unknown>;
+      if ("range" in xaxisAny) {
+        delete xaxisAny.range;
+      }
+      if ("range" in yaxisAny) {
+        delete yaxisAny.range;
+      }
+      xaxisAny.autorange = true;
+      yaxisAny.autorange = true;
     }
     const now = Date.now();
     (swapped.layout as Record<string, unknown>).datarevision = now;
   }
 
-  console.log("[swapAxesInPlotJson] Function completed");
   return swapped;
 };
 
