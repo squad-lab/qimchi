@@ -167,20 +167,16 @@ const Viewer = ({
           return;
         }
 
-        // Find the first existing heatmap and lineplot to copy their filters
-        const existingHeatmap = plotConfigs.find(
-          (config) => config.plotType === "HeatMap",
-        );
-        const existingLineplot = plotConfigs.find(
-          (config) => config.plotType === "LinePlot",
-        );
+        // Find the first heatmap and lineplot that have filters to copy
+        const heatmapFilters = plotConfigs
+          .filter((config) => config.plotType === "HeatMap")
+          .map((config) => getPlotState(config.id)?.applied_filters)
+          .find((filters) => filters && filters.length > 0);
 
-        const heatmapFilters = existingHeatmap
-          ? getPlotState(existingHeatmap.id)?.applied_filters
-          : undefined;
-        const lineplotFilters = existingLineplot
-          ? getPlotState(existingLineplot.id)?.applied_filters
-          : undefined;
+        const lineplotFilters = plotConfigs
+          .filter((config) => config.plotType === "LinePlot")
+          .map((config) => getPlotState(config.id)?.applied_filters)
+          .find((filters) => filters && filters.length > 0);
 
         // Mark as processed
         processedAutoPlotItems.current.add(item.id);
