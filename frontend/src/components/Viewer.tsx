@@ -11,6 +11,7 @@ import { AttrData } from "./interfaces";
 import PlotComposer, { PlotComposerConfig } from "./PlotComposer";
 import PlotContainer from "./PlotContainer";
 import { usePlotCollection } from "../hooks/usePlotCollection";
+import { usePlotStore } from "../stores/plotStore";
 import { useToast } from "../hooks/useToast";
 import Tooltip from "./Tooltip";
 import { generateAutoPlotConfigs } from "../utils/autoPlot";
@@ -41,6 +42,7 @@ const Viewer = ({
 }: ViewerProps) => {
   const { plotConfigs, addPlot, removePlot, clearPlots, updatePlotDataSource } =
     usePlotCollection();
+  const { getPlotState } = usePlotStore();
   const { showToast } = useToast();
   // Global default percent and per-plot overrides
   const [plotWidthPercent, setPlotWidthPercent] = useState<number>(50);
@@ -50,7 +52,7 @@ const Viewer = ({
   // Global squarify toggle affecting all plots
   const [isSquareModeGlobal, setIsSquareModeGlobal] = useState<boolean>(false);
   const [viewerHeight, setViewerHeight] = useState<string>(
-    "calc(100vh - 200px)"
+    "calc(100vh - 200px)",
   );
 
   const basketRef = useRef<HTMLDivElement>(null);
@@ -62,10 +64,10 @@ const Viewer = ({
   // Monitor basket changes for dataset cycling
   useEffect(() => {
     const zarrItems = basketItems.filter(
-      (item) => item.type === "file" && item.path.endsWith(".zarr")
+      (item) => item.type === "file" && item.path.endsWith(".zarr"),
     );
     const prevZarrItems = previousBasketItems.current.filter(
-      (item) => item.type === "file" && item.path.endsWith(".zarr")
+      (item) => item.type === "file" && item.path.endsWith(".zarr"),
     );
 
     const buildMemoryPath = (item: BasketItem): string | null => {
@@ -118,12 +120,12 @@ const Viewer = ({
 
       updatePlotDataSource(preferredPath, { preferMemory });
       console.log(
-        `Updated ${plotConfigs.length} plots with new dataset: ${preferredPath}`
+        `Updated ${plotConfigs.length} plots with new dataset: ${preferredPath}`,
       );
 
       // Keep the "previous" snapshot aligned with the path we actually applied to avoid flip-flop churn
       nextPreviousItems = basketItems.map((item) =>
-        item.id === newItem.id ? { ...item, path: preferredPath } : item
+        item.id === newItem.id ? { ...item, path: preferredPath } : item,
       );
     }
 
@@ -164,31 +166,84 @@ const Viewer = ({
           processedAutoPlotItems.current.add(item.id);
           return;
         }
-      }
 
-      // Mark as processed
-      processedAutoPlotItems.current.add(item.id);
+        // Find the first existing heatmap and lineplot to copy their filters
+        const existingHeatmap = plotConfigs.find(
+          (config) => config.plotType === "HeatMap",
+        );
+        const existingLineplot = plotConfigs.find(
+          (config) => config.plotType === "LinePlot",
+        );
 
-      // Generate auto-plot configs
-      const result = generateAutoPlotConfigs(item);
+        const heatmapFilters = existingHeatmap
+          ? getPlotState(existingHeatmap.id)?.applied_filters
+          : undefined;
+        const lineplotFilters = existingLineplot
+          ? getPlotState(existingLineplot.id)?.applied_filters
+          : undefined;
 
-      if (result.success && result.plotConfigs.length > 0) {
-        // Add each generated plot config to the viewer
-        result.plotConfigs.forEach((config) => {
-          addPlot(config);
-        });
-        showToast(result.message, "success");
+        // Mark as processed
+        processedAutoPlotItems.current.add(item.id);
+
+        // Generate auto-plot configs with copied filters
+        const result = generateAutoPlotConfigs(
+          item,
+          heatmapFilters,
+          lineplotFilters,
+        );
+
+        if (result.success && result.plotConfigs.length > 0) {
+          // Add each generated plot config to the viewer
+          result.plotConfigs.forEach((config) => {
+            addPlot(config);
+          });
+          const filterMsg =
+            (heatmapFilters?.length ?? 0) > 0 ||
+            (lineplotFilters?.length ?? 0) > 0
+              ? " with copied filters"
+              : "";
+          showToast(result.message + filterMsg, "success");
+        } else {
+          // Only show error if there were actual issues (not just non-qualifying items)
+          if (
+            !result.message.includes("not a valid measurement") &&
+            !result.message.includes("no independents or dependents")
+          ) {
+            showToast(result.message, "error");
+          }
+        }
       } else {
-        // Only show error if there were actual issues (not just non-qualifying items)
-        if (
-          !result.message.includes("not a valid measurement") &&
-          !result.message.includes("no independents or dependents")
-        ) {
-          showToast(result.message, "error");
+        // No existing plots - mark as processed
+        processedAutoPlotItems.current.add(item.id);
+
+        // Generate auto-plot configs without copied filters (first dataset)
+        const result = generateAutoPlotConfigs(item);
+
+        if (result.success && result.plotConfigs.length > 0) {
+          // Add each generated plot config to the viewer
+          result.plotConfigs.forEach((config) => {
+            addPlot(config);
+          });
+          showToast(result.message, "success");
+        } else {
+          // Only show error if there were actual issues (not just non-qualifying items)
+          if (
+            !result.message.includes("not a valid measurement") &&
+            !result.message.includes("no independents or dependents")
+          ) {
+            showToast(result.message, "error");
+          }
         }
       }
     });
-  }, [basketItems, loadingAttributes, addPlot, showToast, plotConfigs]);
+  }, [
+    basketItems,
+    loadingAttributes,
+    addPlot,
+    showToast,
+    plotConfigs,
+    getPlotState,
+  ]);
 
   // Calculate dynamic height based on actual rendered heights
   const updateViewerHeight = () => {
@@ -292,7 +347,7 @@ const Viewer = ({
   const handleCreatePlot = (config: PlotComposerConfig) => {
     console.log(
       `[Viewer] handleCreatePlot received config:`,
-      JSON.stringify(config, null, 2)
+      JSON.stringify(config, null, 2),
     );
     // live dataset flags removed; just add the provided config
     addPlot({ ...config });
@@ -304,7 +359,7 @@ const Viewer = ({
 
       // Filter only .zarr files
       const zarrItems = items.filter(
-        (item) => item.type === "file" && item.path.endsWith(".zarr")
+        (item) => item.type === "file" && item.path.endsWith(".zarr"),
       );
 
       if (zarrItems.length === 0) {
@@ -320,7 +375,7 @@ const Viewer = ({
       const response = await axios.post(
         `${PROD_BACKEND_URL}/download-selected/`,
         paths,
-        { responseType: "blob" }
+        { responseType: "blob" },
       );
 
       // Create a download link
@@ -329,7 +384,7 @@ const Viewer = ({
       link.href = url;
       link.setAttribute(
         "download",
-        `selected_datasets_${zarrItems.length}_files.zip`
+        `selected_datasets_${zarrItems.length}_files.zip`,
       );
       document.body.appendChild(link);
       link.click();
@@ -360,7 +415,7 @@ const Viewer = ({
         console.log(
           "Attributes loaded for dropped item:",
           item.id,
-          response.data
+          response.data,
         );
 
         // Update the basket item with the loaded attributes (this also removes from loading state)
@@ -442,7 +497,7 @@ const Viewer = ({
                         window.dispatchEvent(
                           new CustomEvent("plot-squarify", {
                             detail: { enabled: next },
-                          })
+                          }),
                         );
                       } catch {
                         /* ignore */
@@ -500,7 +555,7 @@ const Viewer = ({
                             window.dispatchEvent(
                               new CustomEvent("plot-size-preset", {
                                 detail: { id: null, percent: pct },
-                              })
+                              }),
                             );
                           } catch {
                             /* ignore */

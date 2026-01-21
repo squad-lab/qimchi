@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { X, AlertCircle, CheckCircle, Info, AlertTriangle } from "lucide-react";
 import { ToastContext } from "../hooks/useToast";
 
@@ -22,7 +22,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
 }) => {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
-  const showToast = (
+  const showToast = useCallback((
     message: string,
     type: "success" | "error" | "warning" | "info" = "info",
     duration: number = 3000
@@ -36,11 +36,11 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
     setTimeout(() => {
       setToasts((prev) => prev.filter((toast) => toast.id !== id));
     }, duration);
-  };
+  }, []); // No dependencies - uses setToasts functional update
 
-  const removeToast = (id: string) => {
+  const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
-  };
+  }, []); // No dependencies - uses setToasts functional update
 
   return (
     <ToastContext.Provider value={{ showToast }}>

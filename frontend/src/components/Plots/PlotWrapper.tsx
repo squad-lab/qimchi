@@ -132,7 +132,7 @@ const DEFAULT_APPEARANCE_SETTINGS: PlotAppearanceSettings = {
 // Recursively merge persisted appearance settings with defaults, while validating shapes.
 const mergeAppearanceDefaults = (
   defaults: PlotAppearanceSettings,
-  persisted: unknown
+  persisted: unknown,
 ): PlotAppearanceSettings => {
   if (!persisted || typeof persisted !== "object") return defaults;
 
@@ -161,7 +161,7 @@ const mergeAppearanceDefaults = (
 
 // Helper function to get colorscale data from name
 const getColorscaleData = (
-  name: string
+  name: string,
 ): string | Array<[number, string]> | Array<Array<number | string>> => {
   const key = name.toLowerCase();
 
@@ -291,8 +291,10 @@ const PlotWrapper: React.FC<Props> = ({
     }
 
     try {
-      // Use axios to post and accept either blob or json response
-      const axiosResponse = await axios.post(
+      showToast("Starting export... This may take a moment.", "info");
+
+      // Step 1: Start the export task
+      const startResponse = await axios.post(
         `${PROD_BACKEND_URL}/export-plot-images`,
         {
           plot_json: customizedPlotJson,
@@ -300,79 +302,69 @@ const PlotWrapper: React.FC<Props> = ({
         },
         {
           headers: { "Content-Type": "application/json" },
-          responseType: "arraybuffer",
-          validateStatus: (status) =>
-            (status >= 200 && status < 300) || status === 400 || status === 500,
-        }
+        },
       );
 
-      // Determine content-type from response headers
-      const contentType = axiosResponse.headers["content-type"] || "";
-
-      // If server returns a zip file, trigger download
-      if (contentType.includes("application/zip")) {
-        const disposition = axiosResponse.headers["content-disposition"] || "";
-        let filename = "plot_images.zip";
-        const filenameMatch =
-          /filename\*=UTF-8''([^;\n\r]+)/.exec(disposition) ||
-          /filename="?([^";]+)"?/.exec(disposition);
-        if (filenameMatch && filenameMatch[1]) {
-          try {
-            filename = decodeURIComponent(filenameMatch[1]);
-          } catch {
-            filename = filenameMatch[1];
-          }
-        }
-
-        const blob = new Blob([axiosResponse.data], { type: contentType });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-
-        showToast(`Downloaded ${filename}`, "success");
-        return;
+      if (startResponse.status !== 202 || !startResponse.data.task_id) {
+        throw new Error(startResponse.data.message || "Failed to start export");
       }
 
-      // Try to parse JSON from arraybuffer
-      type ExportImagesResponse = {
-        success?: boolean;
-        message?: string;
-        md_line?: string;
-      } | null;
+      const taskId = startResponse.data.task_id;
 
-      let data: ExportImagesResponse = null;
-      try {
-        const text = new TextDecoder().decode(axiosResponse.data);
-        const parsed = JSON.parse(text);
-        // Basic runtime validation: only accept objects as our response shape
-        if (parsed && typeof parsed === "object") {
-          data = parsed as {
-            success?: boolean;
-            message?: string;
-            md_line?: string;
-          };
-        } else {
-          data = null;
-        }
-      } catch {
-        data = null;
-      }
+      // Step 2: Poll for completion
+      const pollInterval = 500; // 500ms
+      const maxPolls = 120; // 60 seconds max
+      let pollCount = 0;
 
-      if (axiosResponse.status >= 200 && data && data.success) {
-        showToast(data.message || "Plot images saved!", "success");
-      } else {
-        showToast(
-          (data && data.message) || "Failed to save plot images.",
-          "error"
+      while (pollCount < maxPolls) {
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+        pollCount++;
+
+        const statusResponse = await axios.get(
+          `${PROD_BACKEND_URL}/export-plot-images/status/${taskId}`,
         );
+
+        const status = statusResponse.data.status;
+
+        if (status === "completed") {
+          // Download the zip file
+          const downloadUrl = `${PROD_BACKEND_URL}${statusResponse.data.download_url}`;
+          const filename =
+            statusResponse.data.zip_filename || "plot_images.zip";
+
+          const downloadResponse = await axios.get(downloadUrl, {
+            responseType: "blob",
+          });
+
+          const blob = new Blob([downloadResponse.data], {
+            type: "application/zip",
+          });
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          window.URL.revokeObjectURL(url);
+
+          showToast(`Downloaded ${filename}`, "success");
+          return;
+        } else if (status === "failed") {
+          throw new Error(statusResponse.data.error || "Export failed");
+        }
+        // status === "pending", continue polling
       }
-    } catch (err) {
-      showToast(`Failed to save plot images: ${err}`, "error");
+
+      throw new Error("Export timed out after 60 seconds");
+    } catch (error: any) {
+      console.error("Export error:", error);
+      showToast(
+        error.response?.data?.message ||
+          error.message ||
+          "Failed to export plot images",
+        "error",
+      );
     }
   };
 
@@ -393,7 +385,7 @@ const PlotWrapper: React.FC<Props> = ({
         {
           headers: { "Content-Type": "application/json" },
           responseType: "json",
-        }
+        },
       );
 
       const data = axiosResponse.data;
@@ -408,7 +400,7 @@ const PlotWrapper: React.FC<Props> = ({
                   datasetPath: plotConfig.fpath,
                   md_line: data.md_line,
                 },
-              })
+              }),
             );
           } catch {
             // ignore dispatch errors
@@ -417,7 +409,7 @@ const PlotWrapper: React.FC<Props> = ({
       } else {
         showToast(
           (data && data.message) || "Failed to send to notes.",
-          "error"
+          "error",
         );
       }
     } catch (err) {
@@ -453,7 +445,7 @@ const PlotWrapper: React.FC<Props> = ({
 
   // Dataset update error state
   const [datasetUpdateError, setDatasetUpdateError] = useState<string | null>(
-    null
+    null,
   );
 
   // Track previous fpath to detect dataset changes
@@ -473,7 +465,7 @@ const PlotWrapper: React.FC<Props> = ({
         if (plotState.appearance_settings) {
           const normalized = mergeAppearanceDefaults(
             getInitialSettings(plotType),
-            plotState.appearance_settings
+            plotState.appearance_settings,
           );
           setAppearanceSettings(normalized);
         }
@@ -497,7 +489,7 @@ const PlotWrapper: React.FC<Props> = ({
             (filterName) => ({
               name: filterName,
               options: plotConfig.filters_opts?.[filterName] || {},
-            })
+            }),
           ) as AppliedFilter[];
 
           console.log("Loaded filters from plot config:", filtersFromConfig);
@@ -537,7 +529,7 @@ const PlotWrapper: React.FC<Props> = ({
   const applyAppearanceSettings = useCallback(
     (
       originalPlotJson: PlotlyJSON,
-      settings: PlotAppearanceSettings
+      settings: PlotAppearanceSettings,
     ): PlotlyJSON => {
       const updatedPlotJson = JSON.parse(JSON.stringify(originalPlotJson));
 
@@ -555,7 +547,7 @@ const PlotWrapper: React.FC<Props> = ({
             // If trace is not using a shared coloraxis, set per-trace fallback
             // Note: When coloraxis is used (our backend does), layout.coloraxis takes precedence.
             updatedTrace.colorscale = getColorscaleData(
-              settings.hmap.colorscale
+              settings.hmap.colorscale,
             );
             if (settings.hmap.rangecolor) {
               updatedTrace.zmin = settings.hmap.rangecolor[0];
@@ -608,7 +600,7 @@ const PlotWrapper: React.FC<Props> = ({
         // When using heatmaps built by the backend, traces use a shared coloraxis.
         // Update layout.coloraxis so the colorscale actually changes.
         const hasHeatmap = (updatedPlotJson.data || []).some(
-          (t: Data) => t.type === "heatmap" || t.type === "heatmapgl"
+          (t: Data) => t.type === "heatmap" || t.type === "heatmapgl",
         );
         if (hasHeatmap && settings.hmap) {
           type LayoutWithColorAxis = {
@@ -701,7 +693,7 @@ const PlotWrapper: React.FC<Props> = ({
 
       return updatedPlotJson;
     },
-    []
+    [],
   );
 
   // Apply current appearance settings when a new plot loads or when appearance settings change
@@ -756,7 +748,7 @@ const PlotWrapper: React.FC<Props> = ({
         onUpdateConfig(config);
       }, 300);
     },
-    [onUpdateConfig]
+    [onUpdateConfig],
   );
 
   // Cleanup timeout on unmount
@@ -791,7 +783,7 @@ const PlotWrapper: React.FC<Props> = ({
   const filtersOrSlidersChanged = useCallback(
     (
       newFilters: AppliedFilter[],
-      newSliders?: Record<string, SliderConfig>
+      newSliders?: Record<string, SliderConfig>,
     ): boolean => {
       // Compare filters
       if (newFilters.length !== appliedFilters.length) {
@@ -831,7 +823,7 @@ const PlotWrapper: React.FC<Props> = ({
 
       return false;
     },
-    [appliedFilters, sliderConfig]
+    [appliedFilters, sliderConfig],
   );
 
   // Core function that executes filter/slider operations
@@ -840,7 +832,7 @@ const PlotWrapper: React.FC<Props> = ({
       updateRequest: {
         filters: AppliedFilter[];
         sliders?: Record<string, SliderConfig>;
-      } | null
+      } | null,
     ) => {
       if (!updateRequest) return;
 
@@ -871,12 +863,15 @@ const PlotWrapper: React.FC<Props> = ({
 
         // Prepare filters for backend
         const filtersOrder = filters.map((f) => f.name);
-        const filtersOpts = filters.reduce((acc, filter) => {
-          if (filter.options) {
-            acc[filter.name] = filter.options;
-          }
-          return acc;
-        }, {} as Record<string, unknown>);
+        const filtersOpts = filters.reduce(
+          (acc, filter) => {
+            if (filter.options) {
+              acc[filter.name] = filter.options;
+            }
+            return acc;
+          },
+          {} as Record<string, unknown>,
+        );
 
         // For filter-only changes, always use filter API even if sliders exist
         // Only use slider path when sliders are actually being changed
@@ -900,7 +895,7 @@ const PlotWrapper: React.FC<Props> = ({
           try {
             if (!plotConfig) {
               throw new Error(
-                "Plot configuration not available for slider operation"
+                "Plot configuration not available for slider operation",
               );
             }
 
@@ -925,7 +920,7 @@ const PlotWrapper: React.FC<Props> = ({
             const appliedSliderConfig = sliders || sliderConfig;
             const slicedWithAppearance = applyAppearanceSettings(
               result.sliced_plot_json,
-              appearanceSettings
+              appearanceSettings,
             );
 
             // Update all related state in one batch using concurrent features for smoother updates
@@ -944,7 +939,7 @@ const PlotWrapper: React.FC<Props> = ({
             setTimeout(() => {
               // if (fallbackTimer) clearTimeout(fallbackTimer);
               console.log(
-                "[PlotWrapper] Clearing isApplyingFilters after successful operation"
+                "[PlotWrapper] Clearing isApplyingFilters after successful operation",
               );
               setIsApplyingFilters(false);
             }, 100);
@@ -975,7 +970,7 @@ const PlotWrapper: React.FC<Props> = ({
               try {
                 if (!plotConfig) {
                   throw new Error(
-                    "Plot configuration not available for slider operation"
+                    "Plot configuration not available for slider operation",
                   );
                 }
 
@@ -997,7 +992,7 @@ const PlotWrapper: React.FC<Props> = ({
                 // Batch ALL state updates together to prevent flickering
                 const slicedWithAppearance = applyAppearanceSettings(
                   result.sliced_plot_json,
-                  appearanceSettings
+                  appearanceSettings,
                 );
 
                 // Update all related state in one batch using concurrent features for smoother updates
@@ -1024,11 +1019,11 @@ const PlotWrapper: React.FC<Props> = ({
               } catch (error) {
                 console.error(
                   "Error applying sliders after filter reset:",
-                  error
+                  error,
                 );
                 showToast(
                   "Failed to apply sliders after filter reset",
-                  "error"
+                  "error",
                 );
                 // Clear loading state on error
                 setIsApplyingFilters(false);
@@ -1037,7 +1032,7 @@ const PlotWrapper: React.FC<Props> = ({
               // No filters, no sliders - reset to original
               const resetPlotWithAppearance = applyAppearanceSettings(
                 originalPlotJson,
-                appearanceSettings
+                appearanceSettings,
               );
 
               // Update all related state in one batch using concurrent features for smoother updates
@@ -1094,7 +1089,7 @@ const PlotWrapper: React.FC<Props> = ({
             const filteredPlotJson = result.filtered_plot_json as PlotlyJSON;
             const filteredWithAppearance = applyAppearanceSettings(
               filteredPlotJson,
-              appearanceSettings
+              appearanceSettings,
             );
 
             // Update all related state in one batch
@@ -1141,7 +1136,7 @@ const PlotWrapper: React.FC<Props> = ({
             error instanceof Error ? error.message : "Unknown error"
           }`,
           "error",
-          5000
+          5000,
         );
         // Clear loading overlay immediately on error
         // if (fallbackTimer) clearTimeout(fallbackTimer);
@@ -1161,14 +1156,14 @@ const PlotWrapper: React.FC<Props> = ({
       setPlotSliders,
       plotType,
       applyAppearanceSettings,
-    ]
+    ],
   );
 
   // Simplified filter/slider handler with smart comparison to prevent unnecessary operations
   const handleFiltersApply = useCallback(
     async (
       filters: AppliedFilter[],
-      sliders?: Record<string, SliderConfig>
+      sliders?: Record<string, SliderConfig>,
     ) => {
       // Prevent overlapping operations
       if (isApplyingFilters) {
@@ -1179,19 +1174,19 @@ const PlotWrapper: React.FC<Props> = ({
       // Smart comparison to prevent unnecessary operations when values haven't changed
       if (!filtersOrSlidersChanged(filters, sliders)) {
         console.log(
-          "[PlotWrapper] Filters/sliders unchanged, skipping operation"
+          "[PlotWrapper] Filters/sliders unchanged, skipping operation",
         );
         return;
       }
 
       console.log(
-        "[PlotWrapper] Filters/sliders changed, proceeding with operation"
+        "[PlotWrapper] Filters/sliders changed, proceeding with operation",
       );
 
       // Execute immediately without debouncing to fix refresh loop
       await executeFiltersApply({ filters, sliders });
     },
-    [executeFiltersApply, isApplyingFilters, filtersOrSlidersChanged]
+    [executeFiltersApply, isApplyingFilters, filtersOrSlidersChanged],
   );
 
   // Function to update the plot's data source without recreating the plot component
@@ -1238,18 +1233,21 @@ const PlotWrapper: React.FC<Props> = ({
             console.log(
               `[PlotWrapper] Applying ${appliedFilters.length} filters and ${
                 Object.keys(sliderConfig).length
-              } sliders to new dataset before display`
+              } sliders to new dataset before display`,
             );
 
             // Apply filters/sliders immediately to prevent flicker
             // Use the same logic as handleFiltersApply but synchronously
             const filtersOrder = appliedFilters.map((f) => f.name);
-            const filtersOpts = appliedFilters.reduce((acc, filter) => {
-              if (filter.options) {
-                acc[filter.name] = filter.options;
-              }
-              return acc;
-            }, {} as Record<string, unknown>);
+            const filtersOpts = appliedFilters.reduce(
+              (acc, filter) => {
+                if (filter.options) {
+                  acc[filter.name] = filter.options;
+                }
+                return acc;
+              },
+              {} as Record<string, unknown>,
+            );
 
             const isSliderChange = Object.keys(sliderConfig).length > 0;
 
@@ -1274,7 +1272,7 @@ const PlotWrapper: React.FC<Props> = ({
                 setBasePlotJson(slicedPlotJson);
                 const slicedWithAppearance = applyAppearanceSettings(
                   slicedPlotJson,
-                  appearanceSettings
+                  appearanceSettings,
                 );
                 setCustomizedPlotJson(slicedWithAppearance);
               } else if (appliedFilters.length > 0) {
@@ -1293,20 +1291,20 @@ const PlotWrapper: React.FC<Props> = ({
                 setBasePlotJson(filteredPlotJson);
                 const filteredWithAppearance = applyAppearanceSettings(
                   filteredPlotJson,
-                  appearanceSettings
+                  appearanceSettings,
                 );
                 setCustomizedPlotJson(filteredWithAppearance);
               }
             } catch (filterError) {
               console.error(
                 `[PlotWrapper] Error applying filters/sliders to new dataset:`,
-                filterError
+                filterError,
               );
               // Fallback to showing unfiltered plot
               setBasePlotJson(newPlot.plotJson);
               const plotWithAppearance = applyAppearanceSettings(
                 newPlot.plotJson,
-                appearanceSettings
+                appearanceSettings,
               );
               setCustomizedPlotJson(plotWithAppearance);
             }
@@ -1315,7 +1313,7 @@ const PlotWrapper: React.FC<Props> = ({
             setBasePlotJson(newPlot.plotJson);
             const plotWithAppearance = applyAppearanceSettings(
               newPlot.plotJson,
-              appearanceSettings
+              appearanceSettings,
             );
             setCustomizedPlotJson(plotWithAppearance);
           }
@@ -1323,12 +1321,12 @@ const PlotWrapper: React.FC<Props> = ({
           console.log(
             `[PlotWrapper] Successfully updated data source to ${newFpath}${
               hasFiltersOrSliders ? " with filters/sliders applied" : ""
-            }`
+            }`,
           );
         } else {
           console.error(
             `[PlotWrapper] Failed to fetch plot data for ${newFpath}:`,
-            response.message
+            response.message,
           );
 
           // Check if it's a variable not found error and provide helpful message
@@ -1342,21 +1340,21 @@ const PlotWrapper: React.FC<Props> = ({
               : [];
             setDatasetUpdateError(
               `Cannot update to new dataset: Variables [${missingVars.join(
-                ", "
-              )}] not found in the selected dataset. Please select a dataset that contains these variables or create a new plot.`
+                ", ",
+              )}] not found in the selected dataset. Please select a dataset that contains these variables or create a new plot.`,
             );
           } else {
             setDatasetUpdateError(
               `Failed to update to new dataset: ${
                 response.message || "Unknown error"
-              }`
+              }`,
             );
           }
         }
       } catch (error) {
         console.error(
           `[PlotWrapper] Error updating data source to ${newFpath}:`,
-          error
+          error,
         );
 
         // Provide user-friendly error message for variable compatibility issues
@@ -1370,7 +1368,7 @@ const PlotWrapper: React.FC<Props> = ({
               ? [...plotConfig.indeps, ...plotConfig.deps]
               : [];
             errorMessage = `Cannot update to new dataset: Variables [${missingVars.join(
-              ", "
+              ", ",
             )}] not found in the selected dataset. Please select a dataset that contains these variables or create a new plot.`;
           } else {
             errorMessage = `Failed to update to new dataset: ${error.message}`;
@@ -1386,7 +1384,7 @@ const PlotWrapper: React.FC<Props> = ({
       appliedFilters,
       sliderConfig,
       applyAppearanceSettings,
-    ]
+    ],
   );
 
   // Watch for dataset changes and update data source without recreating the plot
@@ -1396,7 +1394,7 @@ const PlotWrapper: React.FC<Props> = ({
     // Skip updates if filters are currently being applied to prevent race conditions
     if (isApplyingFilters) {
       console.log(
-        `[PlotWrapper] Skipping dataset update while filters are being applied`
+        `[PlotWrapper] Skipping dataset update while filters are being applied`,
       );
       return;
     }
@@ -1408,10 +1406,10 @@ const PlotWrapper: React.FC<Props> = ({
       currentFpath !== prevFpathRef.current
     ) {
       console.log(
-        `[PlotWrapper] Dataset path changed from ${prevFpathRef.current} to ${currentFpath}`
+        `[PlotWrapper] Dataset path changed from ${prevFpathRef.current} to ${currentFpath}`,
       );
       console.log(
-        `[PlotWrapper] Updating data source to new dataset while preserving UI state`
+        `[PlotWrapper] Updating data source to new dataset while preserving UI state`,
       );
 
       // Update the data source by fetching fresh plot data from the new dataset
@@ -1463,7 +1461,7 @@ const PlotWrapper: React.FC<Props> = ({
     // Apply default appearance to original plot
     const resetPlotJson = applyAppearanceSettings(
       originalPlotJson,
-      defaultSettings
+      defaultSettings,
     );
     setCustomizedPlotJson(resetPlotJson);
 
@@ -1496,7 +1494,7 @@ const PlotWrapper: React.FC<Props> = ({
     activateTheme(plotConfig.id, plotType, appearanceSettings);
     showToast(
       "Theme selected — hold Shift and click target plots to apply",
-      "info"
+      "info",
     );
   }, [activateTheme, plotConfig?.id, plotType, appearanceSettings, showToast]);
 
@@ -1505,7 +1503,7 @@ const PlotWrapper: React.FC<Props> = ({
     activateFilter(plotConfig.id, plotType, appliedFilters, sliderConfig);
     showToast(
       "Filter selection made — hold Shift and click target plots to apply",
-      "info"
+      "info",
     );
   }, [
     activateFilter,
@@ -1577,7 +1575,7 @@ const PlotWrapper: React.FC<Props> = ({
       // The appearance will be applied by the useMemo and useEffect that watches customizedPlotJsonMemo
       // This ensures we always apply appearance to the currently filtered data without triggering unnecessary re-renders
     },
-    [plotConfig?.id, setPlotAppearance]
+    [plotConfig?.id, setPlotAppearance],
   );
 
   // When maximized, render as a modal overlay

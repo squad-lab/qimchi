@@ -317,24 +317,24 @@ const DirTree = ({
             setApiData((prevData) => {
               // Create a map of existing measurements by ID for quick lookup
               const existingMap = new Map(
-                prevData.map((node) => [node.id, node])
+                prevData.map((node) => [node.id, node]),
               );
 
               // Create a map of new measurements by ID
               const newMap = new Map(
-                newMeasurements.map((node: TreeNode) => [node.id, node])
+                newMeasurements.map((node: TreeNode) => [node.id, node]),
               );
 
               // Find measurements to add (in new but not in existing)
               const toAdd = newMeasurements.filter(
-                (node: TreeNode) => !existingMap.has(node.id)
+                (node: TreeNode) => !existingMap.has(node.id),
               );
 
               // Find measurements to remove (in existing but not in new)
               const toRemove = new Set(
                 prevData
                   .filter((node) => !newMap.has(node.id))
-                  .map((node) => node.id)
+                  .map((node) => node.id),
               );
 
               // Update existing nodes and add new ones
@@ -627,7 +627,7 @@ const DirTree = ({
           console.log(
             "Auto-expanding tree with",
             rootNodes.length,
-            "root nodes"
+            "root nodes",
           );
           // Force a collapse/expand cycle to ensure tree shows items
           tree.collapseAll();
@@ -667,7 +667,7 @@ const DirTree = ({
       // Check if the dragged item is selected
       const selectedNodes = getSelectedNodes();
       const isNodeSelected = selectedNodes.some(
-        (selectedNode) => selectedNode.id === node.id
+        (selectedNode) => selectedNode.id === node.id,
       );
 
       // If the dragged item is selected and there are multiple selected items, drag all selected
@@ -687,7 +687,7 @@ const DirTree = ({
           // For folders, add all direct children that are dataset files (.zarr)
           const folderChildren = item.children || [];
           const datasetChildren = folderChildren.filter(
-            (child) => child.type === "file" && child.path.endsWith(".zarr")
+            (child) => child.type === "file" && child.path.endsWith(".zarr"),
           );
           validItemsToDrag.push(...datasetChildren);
         }
@@ -781,14 +781,14 @@ const DirTree = ({
     try {
       console.log(
         "Downloading selected items:",
-        selectedNodes.map((n) => n.path)
+        selectedNodes.map((n) => n.path),
       );
 
       // Call the backend download endpoint with multiple paths
       const response = await axios.post(
         `${PROD_BACKEND_URL}/download-multiple/`,
         { paths: selectedNodes.map((node) => node.path) },
-        { responseType: "blob" }
+        { responseType: "blob" },
       );
 
       // Create a download link
@@ -821,7 +821,7 @@ const DirTree = ({
       const response = await axios.post(
         `${PROD_BACKEND_URL}/download-folder/`,
         { path: node.path },
-        { responseType: "blob" }
+        { responseType: "blob" },
       );
 
       // Create a download link
@@ -849,7 +849,7 @@ const DirTree = ({
     return (
       selectedFiles.length > 0 &&
       selectedFiles.every((node) =>
-        basketItems.some((item) => item.id === node.id)
+        basketItems.some((item) => item.id === node.id),
       )
     );
   };
@@ -858,7 +858,7 @@ const DirTree = ({
   const isCyclingEnabled = (): boolean => {
     // Only enable if there's exactly one dataset in basket and onCycleDataset is provided
     const zarrItems = basketItems.filter(
-      (item) => item.type === "file" && item.path.endsWith(".zarr")
+      (item) => item.type === "file" && item.path.endsWith(".zarr"),
     );
     return zarrItems.length === 1 && !!onCycleDataset;
   };
@@ -868,12 +868,12 @@ const DirTree = ({
     if (!isCyclingEnabled()) return -1;
 
     const zarrItem = basketItems.find(
-      (item) => item.type === "file" && item.path.endsWith(".zarr")
+      (item) => item.type === "file" && item.path.endsWith(".zarr"),
     );
     if (!zarrItem) return -1;
 
     const zarrNodes = Array.from(processedData.allNodes.values()).filter(
-      (node) => node.type === "file" && node.path.endsWith(".zarr")
+      (node) => node.type === "file" && node.path.endsWith(".zarr"),
     );
 
     return zarrNodes.findIndex((node) => node.path === zarrItem.path);
@@ -882,7 +882,7 @@ const DirTree = ({
   // Get total number of datasets
   const getTotalDatasets = (): number => {
     const zarrNodes = Array.from(processedData.allNodes.values()).filter(
-      (node) => node.type === "file" && node.path.endsWith(".zarr")
+      (node) => node.type === "file" && node.path.endsWith(".zarr"),
     );
     return zarrNodes.length;
   };
@@ -892,7 +892,7 @@ const DirTree = ({
     if (!isCyclingEnabled() || !onCycleDataset) return;
 
     const zarrNodes = Array.from(processedData.allNodes.values()).filter(
-      (node) => node.type === "file" && node.path.endsWith(".zarr")
+      (node) => node.type === "file" && node.path.endsWith(".zarr"),
     );
 
     if (zarrNodes.length === 0) return;
@@ -911,7 +911,7 @@ const DirTree = ({
     if (nextNode) {
       // Remove current dataset from basket
       const currentItem = basketItems.find(
-        (item) => item.type === "file" && item.path.endsWith(".zarr")
+        (item) => item.type === "file" && item.path.endsWith(".zarr"),
       );
       if (currentItem) {
         onRemoveBasketItem?.(currentItem.id);
@@ -1041,8 +1041,8 @@ const DirTree = ({
                         {sort === "timestamp"
                           ? "date"
                           : sort === "chrono"
-                          ? "Chrono"
-                          : sort}
+                            ? "Chrono"
+                            : sort}
                       </span>
                       {sortBy === sort &&
                         (sortDirection === "asc" ? (
@@ -1051,7 +1051,7 @@ const DirTree = ({
                           <SortDesc size={10} />
                         ))}
                     </button>
-                  )
+                  ),
                 )}
               </div>
             </div>
@@ -1126,8 +1126,8 @@ const DirTree = ({
                   sortBy === "chrono"
                     ? "Unavailable in chronological view"
                     : isExpanded
-                    ? "Collapse all"
-                    : "Expand all"
+                      ? "Collapse all"
+                      : "Expand all"
                 }
                 position="top"
               >
@@ -1148,8 +1148,8 @@ const DirTree = ({
                     sortBy === "chrono"
                       ? "Unavailable in chronological view"
                       : isExpanded
-                      ? "Collapse all"
-                      : "Expand all"
+                        ? "Collapse all"
+                        : "Expand all"
                   }
                 >
                   {isExpanded ? <Minimize size={16} /> : <Expand size={16} />}
@@ -1181,16 +1181,16 @@ const DirTree = ({
                   0
                     ? "Select files first"
                     : selectedInBasket()
-                    ? "All selected files already in basket"
-                    : `Add ${
-                        getSelectedNodes().filter((n) => n.type === "file")
-                          .length
-                      } selected file${
-                        getSelectedNodes().filter((n) => n.type === "file")
-                          .length > 1
-                          ? "s"
-                          : ""
-                      } to basket`
+                      ? "All selected files already in basket"
+                      : `Add ${
+                          getSelectedNodes().filter((n) => n.type === "file")
+                            .length
+                        } selected file${
+                          getSelectedNodes().filter((n) => n.type === "file")
+                            .length > 1
+                            ? "s"
+                            : ""
+                        } to basket`
                 }
                 position="top"
               >
@@ -1366,7 +1366,7 @@ const VirtualizedTreeView = forwardRef<
       basketItems,
       path,
     },
-    ref
+    ref,
   ) => {
     const parentRef = useRef<HTMLDivElement | null>(null);
 
@@ -1459,7 +1459,7 @@ const VirtualizedTreeView = forwardRef<
         )}
       </div>
     );
-  }
+  },
 );
 
 VirtualizedTreeView.displayName = "VirtualizedTreeView";
@@ -1508,7 +1508,7 @@ const TreeItemComponent = ({
 
   // Check if this item is in the basket
   const isInBasket = basketItems.some(
-    (basketItem) => basketItem.id === nodeData.id
+    (basketItem) => basketItem.id === nodeData.id,
   );
 
   // Skip rendering the root item
@@ -1531,7 +1531,7 @@ const TreeItemComponent = ({
         </mark>
       ) : (
         part
-      )
+      ),
     );
   };
 
@@ -1542,10 +1542,10 @@ const TreeItemComponent = ({
         isInBasket
           ? "border-l-green-500 bg-green-50"
           : isFocused
-          ? "border-l-blue-300 bg-blue-50"
-          : isSelected
-          ? "border-l-blue-500 bg-blue-100"
-          : "border-transparent"
+            ? "border-l-blue-300 bg-blue-50"
+            : isSelected
+              ? "border-l-blue-500 bg-blue-100"
+              : "border-transparent"
       } ${draggedItem === nodeData.id ? "dragging opacity-50" : ""}`}
       data-level={item.getItemMeta().level}
       draggable={true} // Allow both files and folders to be draggable

@@ -6,12 +6,14 @@ FastAPI endpoint to export Plotly plots as PNG, PDF and SVG.
 import os
 import time
 import json
+import uuid
+import asyncio
 import zipfile
 import tempfile
 import plotly.io as pio
 
 from typing import Dict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from plotly import graph_objects as go
 from fastapi import APIRouter, Request
@@ -21,9 +23,269 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Local imports
 from .logger import logger
+from . import live_measurements
+
+MEMORY_PROTOCOL = "memory://"
 
 
 router = APIRouter()
+
+
+# In-memory task registry for export tasks
+# Structure: { task_id: { "status": "pending|completed|failed", "result": {...}, "error": str, "created_at": datetime, "zip_path": str } }
+_export_tasks: Dict[str, Dict] = {}
+
+
+def _cleanup_old_tasks() -> None:
+    """
+    Remove tasks older than 5 minutes to prevent memory leak.
+
+    """
+    cutoff = datetime.now() - timedelta(minutes=5)
+    to_remove = [
+        task_id
+        for task_id, task in _export_tasks.items()
+        if task.get("created_at", datetime.now()) < cutoff
+    ]
+    for task_id in to_remove:
+        task = _export_tasks.pop(task_id, None)
+        # Clean up zip file if exists
+        if task and task.get("zip_path"):
+            try:
+                os.unlink(task["zip_path"])
+            except Exception:
+                pass
+    if to_remove:
+        logger.debug(f"Cleaned up {len(to_remove)} old export tasks")
+
+
+def _export_plot_images_sync(
+    plot_json: Dict, disk_fpath: str, export_pool=None
+) -> Dict:
+    """
+    Synchronous function to export plot images (runs in executor).
+
+    Returns dict with:
+        - zip_path: path to created zip file
+        - saved_paths: dict of individual image paths
+        - timings: performance metrics
+
+    """
+    # Determine folder to save - "extras" (same as notes.py logic)
+    dataset_path = Path(disk_fpath)
+    dataset_uuid = dataset_path.stem
+    extras_dir = dataset_path.parent / dataset_uuid
+    extras_dir.mkdir(parents=True, exist_ok=True)
+
+    # Base filename with timestamp
+    ts = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    base_filename = extras_dir / f"{dataset_uuid}__{ts}__plot"
+
+    # Convert incoming JSON to a Figure
+    try:
+        fig = go.Figure(plot_json)
+    except Exception:
+        fig = go.Figure(plot_json)
+
+    # Ensure transparent background
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+
+    # Prepare output paths for light and dark variants
+    saved_paths = {}
+    outs = []
+    for variant in ("light", "dark"):
+        for fmt in ("png", "svg"):
+            name = f"{base_filename.name}_{variant}.{fmt}"
+            path = base_filename.with_name(name)
+            outs.append((variant, fmt, path))
+
+    # Build dark figure once
+    axis_style_dark = {
+        "title": {"font": {"color": "white"}},
+        "linecolor": "white",
+        "tickfont": {"color": "white"},
+        "tickcolor": "white",
+        "minor": {"tickcolor": "white"},
+    }
+    dark_fig = go.Figure(fig.to_dict())
+    dark_fig.update_layout(
+        title_font_color="white",
+        font=dict(color="white"),
+        xaxis=axis_style_dark,
+        yaxis=axis_style_dark,
+    )
+    dark_fig.update_coloraxes(
+        colorbar=dict(
+            title=dict(font=dict(color="white")),
+            tickfont=dict(color="white"),
+            tickcolor="white",
+            outlinecolor="white",
+        )
+    )
+
+    # helper to write and time a single write
+    def _write_and_time(local_fig, local_path_str):
+        _width = 1920
+        _height = 1080
+        _scale = 300.0 / 96.0
+        start = time.perf_counter()
+        pio.write_image(
+            local_fig, local_path_str, width=_width, height=_height, scale=_scale
+        )
+        elapsed = time.perf_counter() - start
+        return local_path_str, elapsed
+
+    # figure metadata
+    timings = {}
+    try:
+        ser_start = time.perf_counter()
+        fig_dict = fig.to_dict()
+        ser_elapsed = time.perf_counter() - ser_start
+        trace_count = len(fig_dict.get("data", []))
+        total_points = 0
+        for tr in fig_dict.get("data", []):
+            for k in ("x", "y", "z", "value"):
+                if k in tr and hasattr(tr[k], "__len__"):
+                    try:
+                        total_points += len(tr[k])
+                    except Exception:
+                        pass
+        ser_size = len(json.dumps(fig_dict))
+        timings["fig_trace_count"] = trace_count
+        timings["fig_total_points"] = total_points
+        timings["fig_serialization_size_bytes"] = ser_size
+        timings["fig_serialization_time_s"] = ser_elapsed
+    except Exception as e:
+        logger.error(f"Failed to compute figure metadata: {e}")
+
+    # Submit all 6 writes concurrently
+    future_map = {}
+    if export_pool:
+        fig_dict = fig.to_dict()
+        for variant, fmt, path in outs:
+            local_fig_dict = fig_dict if variant == "light" else dark_fig.to_dict()
+            future = export_pool.submit(_write_image_worker, local_fig_dict, str(path))
+            future_map[future] = (variant, fmt, path)
+
+        for fut in as_completed(future_map):
+            variant, fmt, path = future_map[fut]
+            try:
+                path_str, elapsed = fut.result()
+                key = f"{fmt}_{variant}"
+                saved_paths[key] = path_str
+                timings[key] = elapsed
+            except Exception as e:
+                logger.error(f"Failed to write {variant} {fmt} via process pool: {e}")
+                timings[f"{fmt}_{variant}"] = None
+    else:
+        # Fallback to ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(6, (os.cpu_count() or 1))) as ex:
+            for variant, fmt, path in outs:
+                local_fig = dark_fig if variant == "dark" else fig
+                future = ex.submit(_write_and_time, local_fig, str(path))
+                future_map[future] = (variant, fmt, path)
+
+            for fut in as_completed(future_map):
+                variant, fmt, path = future_map[fut]
+                try:
+                    path_str, elapsed = fut.result()
+                    key = f"{fmt}_{variant}"
+                    saved_paths[key] = path_str
+                    timings[key] = elapsed
+                except Exception as e:
+                    logger.error(
+                        f"Failed to write {variant} {fmt} via thread pool: {e}"
+                    )
+                    timings[f"{fmt}_{variant}"] = None
+
+    # Create a zip archive
+    tmp_zip = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    tmp_zip.close()
+    with zipfile.ZipFile(tmp_zip.name, "w", zipfile.ZIP_DEFLATED) as zf:
+        for p in saved_paths.values():
+            zf.write(p, arcname=Path(p).name)
+        try:
+            timings_bytes = json.dumps(timings, indent=2).encode("utf-8")
+            zf.writestr("timings.json", timings_bytes)
+        except Exception as e:
+            logger.error(f"Failed to write timings.json into zip: {e}")
+
+    return {
+        "zip_path": tmp_zip.name,
+        "zip_filename": f"{dataset_uuid}__{ts}__plot_images.zip",
+        "saved_paths": saved_paths,
+        "timings": timings,
+    }
+
+
+async def _run_export_task(
+    task_id: str, plot_json: Dict, disk_fpath: str, export_pool=None
+) -> None:
+    """
+    Background task to run export in executor.
+
+    """
+    try:
+        logger.info(f"Starting export task {task_id}")
+        loop = asyncio.get_event_loop()
+
+        # Run the blocking export function in executor
+        result = await loop.run_in_executor(
+            None,  # Use default executor
+            _export_plot_images_sync,
+            plot_json,
+            disk_fpath,
+            export_pool,
+        )
+
+        # Update task status
+        _export_tasks[task_id]["status"] = "completed"
+        _export_tasks[task_id]["result"] = result
+        _export_tasks[task_id]["zip_path"] = result["zip_path"]
+        _export_tasks[task_id]["zip_filename"] = result["zip_filename"]
+        logger.info(f"Export task {task_id} completed successfully")
+
+    except Exception as e:
+        logger.error(f"Export task {task_id} failed: {e}", exc_info=True)
+        _export_tasks[task_id]["status"] = "failed"
+        _export_tasks[task_id]["error"] = str(e)
+
+
+def _resolve_fpath_to_disk(fpath: str) -> str:
+    """
+    Resolve a file path to its disk location.
+
+    For memory:// paths (live measurements), query the live_measurements DB
+    to get the actual disk path. For regular paths, return as-is.
+
+    Args:
+        fpath: File path, may be memory://measurement_id or regular disk path
+
+    Returns:
+        Disk path to the dataset
+
+    Raises:
+        ValueError: If memory:// path cannot be resolved to disk
+
+    """
+    if fpath.startswith(MEMORY_PROTOCOL):
+        # Extract measurement ID from memory://
+        measurement_id = fpath[len(MEMORY_PROTOCOL) :]
+
+        # Query DB for disk path
+        info = live_measurements.get_measurement_info(measurement_id)
+        if not info or not info.fpath:
+            raise ValueError(
+                f"Cannot resolve memory path '{measurement_id}' to disk. "
+                f"Measurement not found in database or has no disk path."
+            )
+
+        disk_path = info.fpath
+        logger.info(f"Resolved memory://{measurement_id} to disk path: {disk_path}")
+        return disk_path
+
+    # Regular disk path, return as-is
+    return fpath
 
 
 # NOTE: Worker function must be module-level (picklable) for ProcessPoolExecutor on Windows
@@ -68,7 +330,7 @@ def _save_light_dark_pngs(
 
     Args:
         plot_json: Plotly figure JSON
-        fpath: dataset .zarr path
+        fpath: dataset .zarr path (may be memory:// path)
         ts: optional timestamp string to include in filename; if None, use current time
         only_light: if True, only save the light variant PNG
 
@@ -76,7 +338,10 @@ def _save_light_dark_pngs(
         Dict: keys: 'png_light', 'png_dark' (if only_light is False)
 
     """
-    dataset_path = Path(fpath)
+    # Resolve memory:// paths to disk paths
+    disk_fpath = _resolve_fpath_to_disk(fpath)
+
+    dataset_path = Path(disk_fpath)
     dataset_uuid = dataset_path.stem
     extras_dir = dataset_path.parent / dataset_uuid
     extras_dir.mkdir(parents=True, exist_ok=True)
@@ -134,8 +399,20 @@ def _save_light_dark_pngs(
     dark_fig = go.Figure(fig.to_dict())  # Copy of the original
     dark_fig.update_layout(
         title_font_color="white",
+        font=dict(
+            color="white"
+        ),  # Set global font color to white for all text including colorbar
         xaxis=axis_style_dark,
         yaxis=axis_style_dark,
+    )
+    # Update coloraxis for heatmap colorbar labels
+    dark_fig.update_coloraxes(
+        colorbar=dict(
+            title=dict(font=dict(color="white")),
+            tickfont=dict(color="white"),
+            tickcolor="white",
+            outlinecolor="white",
+        )
     )
 
     # Write light & dark PNGs in parallel to avoid repeated engine startup overhead
@@ -201,12 +478,18 @@ def _save_light_dark_pngs(
 @router.post("/export-plot-images")
 async def export_plot_images(request: Request) -> JSONResponse:
     """
-    Endpoint to export Plotly plot images in multiple formats.
+    Endpoint to export Plotly plot images in multiple formats (non-blocking).
+
+    Returns immediately with a task_id. Client should poll /export-plot-images/status/{task_id}
+    to check completion and get download URL.
 
     Expects JSON payload with:
     - plot_json: JSON representation of the Plotly figure
-
+    - fpath: dataset path (supports memory:// paths)
     """
+    # Clean up old tasks periodically
+    _cleanup_old_tasks()
+
     data = await request.json()
     plot_json = data.get("plot_json")
     fpath = data.get("fpath")
@@ -217,173 +500,120 @@ async def export_plot_images(request: Request) -> JSONResponse:
         )
 
     try:
-        # Determine folder to save - "extras" (same as notes.py logic)
-        dataset_path = Path(fpath)
-        dataset_uuid = dataset_path.stem
-        extras_dir = dataset_path.parent / dataset_uuid
-        extras_dir.mkdir(parents=True, exist_ok=True)
+        # Resolve memory:// paths to disk paths
+        disk_fpath = _resolve_fpath_to_disk(fpath)
 
-        # Base filename with timestamp
-        ts = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        base_filename = extras_dir / f"{dataset_uuid}__{ts}__plot"
-
-        # Convert incoming JSON to a Figure
-        try:
-            fig = go.Figure(plot_json)
-        except Exception:
-            fig = go.Figure(plot_json)
-
-        # Ensure transparent background
-        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-
-        # Prepare output paths for light and dark variants
-        saved_paths = {}
-        outs = []
-        for variant in ("light", "dark"):
-            for fmt in ("png", "svg"):
-                name = f"{base_filename.name}_{variant}.{fmt}"
-                path = base_filename.with_name(name)
-                # choose fig: dark uses dark_fig (constructed below)
-                outs.append((variant, fmt, path))
-
-        # Build dark figure once
-        axis_style_dark = {
-            "title": {"font": {"color": "white"}},
-            "linecolor": "white",
-            "tickfont": {"color": "white"},
-            "tickcolor": "white",
-            "minor": {"tickcolor": "white"},
+        # Create task
+        task_id = str(uuid.uuid4())
+        _export_tasks[task_id] = {
+            "status": "pending",
+            "created_at": datetime.now(),
+            "result": None,
+            "error": None,
+            "zip_path": None,
         }
-        dark_fig = go.Figure(fig.to_dict())
-        dark_fig.update_layout(
-            title_font_color="white",
-            xaxis=axis_style_dark,
-            yaxis=axis_style_dark,
+
+        # Get export pool if available
+        export_pool = None
+        try:
+            export_pool = request.app.state.export_pool
+        except Exception:
+            pass
+
+        # Start background task
+        asyncio.create_task(
+            _run_export_task(task_id, plot_json, disk_fpath, export_pool)
         )
 
-        # helper to write and time a single write
-        def _write_and_time(local_fig, local_path_str):
-            _width = 1920
-            _height = 1080
-            _scale = 300.0 / 96.0
-            start = time.perf_counter()
-            pio.write_image(
-                local_fig, local_path_str, width=_width, height=_height, scale=_scale
-            )
-            elapsed = time.perf_counter() - start
-            return local_path_str, elapsed
+        logger.info(f"Created export task {task_id} for {fpath}")
 
-        # figure metadata: trace count, total points (approx), serialized size and time
-        timings = {}
-        try:
-            ser_start = time.perf_counter()
-            fig_dict = fig.to_dict()
-            ser_elapsed = time.perf_counter() - ser_start
-            trace_count = len(fig_dict.get("data", []))
-            total_points = 0
-            for tr in fig_dict.get("data", []):
-                # best-effort count points from common array fields
-                for k in ("x", "y", "z", "value"):
-                    if k in tr and hasattr(tr[k], "__len__"):
-                        try:
-                            total_points += len(tr[k])
-                        except Exception:
-                            pass
-            ser_size = len(json.dumps(fig_dict))
-            timings["fig_trace_count"] = trace_count
-            timings["fig_total_points"] = total_points
-            timings["fig_serialization_size_bytes"] = ser_size
-            timings["fig_serialization_time_s"] = ser_elapsed
-        except Exception as e:
-            logger.error(f"Failed to compute figure metadata: {e}")
-        # Submit all 6 writes concurrently. Prefer a pre-spawned ProcessPoolExecutor
-        # available on the app state (created at startup) to avoid per-request spawn cost.
-        future_map = {}
-        pool = None
-        try:
-            pool = request.app.state.export_pool
-        except Exception:
-            pool = None
+        return JSONResponse(
+            status_code=202,  # Accepted
+            content={
+                "success": True,
+                "task_id": task_id,
+                "status": "pending",
+                "message": "Export started. Poll /export-plot-images/status/{task_id} for status.",
+            },
+        )
 
-        if pool:
-            # Submit picklable jobs to the process pool using fig.to_dict()
-            fig_dict = fig.to_dict()
-            for variant, fmt, path in outs:
-                local_fig_dict = fig_dict if variant == "light" else dark_fig.to_dict()
-                future = pool.submit(_write_image_worker, local_fig_dict, str(path))
-                future_map[future] = (variant, fmt, path)
-
-            for fut in as_completed(future_map):
-                variant, fmt, path = future_map[fut]
-                try:
-                    path_str, elapsed = fut.result()
-                    key = f"{fmt}_{variant}"
-                    saved_paths[key] = path_str
-                    timings[key] = elapsed
-                except Exception as e:
-                    logger.error(
-                        f"Failed to write {variant} {fmt} via process pool: {e}"
-                    )
-                    timings[f"{fmt}_{variant}"] = None
-        else:
-            # Fallback to a local ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=min(6, (os.cpu_count() or 1))) as ex:
-                for variant, fmt, path in outs:
-                    local_fig = dark_fig if variant == "dark" else fig
-                    future = ex.submit(_write_and_time, local_fig, str(path))
-                    future_map[future] = (variant, fmt, path)
-
-                for fut in as_completed(future_map):
-                    variant, fmt, path = future_map[fut]
-                    try:
-                        path_str, elapsed = fut.result()
-                        key = f"{fmt}_{variant}"
-                        saved_paths[key] = path_str
-                        timings[key] = elapsed
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to write {variant} {fmt} via thread pool: {e}"
-                        )
-                        timings[f"{fmt}_{variant}"] = None
-
-        # Create a zip archive of all exported images and send as a download
-        try:
-            tmp_zip = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
-            tmp_zip.close()
-            with zipfile.ZipFile(tmp_zip.name, "w", zipfile.ZIP_DEFLATED) as zf:
-                # add written files and a timings.json to the archive
-                for p in saved_paths.values():
-                    # add file with just the filename inside the archive
-                    zf.write(p, arcname=Path(p).name)
-
-                # include timings.json for inspection
-                try:
-                    timings_bytes = json.dumps(timings, indent=2).encode("utf-8")
-                    zf.writestr("timings.json", timings_bytes)
-                except Exception as e:
-                    logger.error(f"Failed to write timings.json into zip: {e}")
-
-            zip_filename = f"{dataset_uuid}__{ts}__plot_images.zip"
-            return FileResponse(
-                path=tmp_zip.name, media_type="application/zip", filename=zip_filename
-            )
-        except Exception as e:
-            logger.error(f"Failed to create zip archive: {e}")
-            # Fall back to returning JSON paths if zipping failed
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "success": True,
-                    "message": "Plot images saved, but failed to create zip.",
-                    "paths": saved_paths,
-                },
-            )
-
+    except ValueError as e:
+        # Path resolution error
+        logger.error(f"Failed to resolve path {fpath}: {e}")
+        return JSONResponse(
+            status_code=400, content={"success": False, "message": str(e)}
+        )
     except Exception as e:
-        logger.error(f"Failed to export plot images: {e}")
+        logger.error(f"Failed to start export task: {e}", exc_info=True)
         return JSONResponse(
             status_code=500, content={"success": False, "message": str(e)}
         )
+
+
+@router.get("/export-plot-images/status/{task_id}")
+async def get_export_status(task_id: str) -> JSONResponse:
+    """
+    Check the status of an export task.
+
+    Returns:
+        - status: "pending", "completed", or "failed"
+        - download_url: URL to download zip (if completed)
+        - error: error message (if failed)
+    """
+    task = _export_tasks.get(task_id)
+    if not task:
+        return JSONResponse(
+            status_code=404, content={"success": False, "message": "Task not found"}
+        )
+
+    response = {
+        "success": True,
+        "task_id": task_id,
+        "status": task["status"],
+    }
+
+    if task["status"] == "completed":
+        response["download_url"] = f"/export-plot-images/download/{task_id}"
+        response["zip_filename"] = task.get("result", {}).get(
+            "zip_filename", "plot_images.zip"
+        )
+    elif task["status"] == "failed":
+        response["error"] = task.get("error", "Unknown error")
+
+    return JSONResponse(content=response)
+
+
+@router.get("/export-plot-images/download/{task_id}")
+async def download_export(task_id: str):
+    """
+    Download the exported zip file for a completed task.
+    """
+    task = _export_tasks.get(task_id)
+    if not task:
+        return JSONResponse(
+            status_code=404, content={"success": False, "message": "Task not found"}
+        )
+
+    if task["status"] != "completed":
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "message": f"Task status is {task['status']}, not completed",
+            },
+        )
+
+    zip_path = task.get("zip_path")
+    if not zip_path or not os.path.exists(zip_path):
+        return JSONResponse(
+            status_code=404,
+            content={"success": False, "message": "Export file not found"},
+        )
+
+    zip_filename = task.get("zip_filename", "plot_images.zip")
+    return FileResponse(
+        path=zip_path, media_type="application/zip", filename=zip_filename
+    )
 
 
 @router.post("/export-plot-images/send-to-notes")
@@ -409,8 +639,11 @@ async def export_and_send_to_notes(request: Request) -> JSONResponse:
         ts = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
         saved = _save_light_dark_pngs(plot_json, fpath, ts=ts)
 
+        # Resolve memory:// paths to disk paths for notes file operations
+        disk_fpath = _resolve_fpath_to_disk(fpath)
+
         # Append markdown image link for the light image to the notes.md
-        dataset_path = Path(fpath)
+        dataset_path = Path(disk_fpath)
         dataset_uuid = dataset_path.stem
         notes_dir = dataset_path.parent / dataset_uuid
         notes_dir.mkdir(parents=True, exist_ok=True)
@@ -459,7 +692,10 @@ async def export_send_to_notes_get(fpath: str) -> JSONResponse:
 
     """
     try:
-        dataset_path = Path(fpath)
+        # Resolve memory:// paths to disk paths
+        disk_fpath = _resolve_fpath_to_disk(fpath)
+
+        dataset_path = Path(disk_fpath)
         dataset_uuid = dataset_path.stem
         extras_dir = dataset_path.parent / dataset_uuid
         if not extras_dir.exists():

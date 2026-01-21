@@ -1,5 +1,5 @@
 import { BasketItem } from "../components/Basket";
-import type { PlotConfiguration } from "../components/interfaces";
+import type { PlotConfiguration, AppliedFilter } from "../components/interfaces";
 
 interface AutoPlotResult {
   success: boolean;
@@ -11,12 +11,18 @@ interface AutoPlotResult {
  * Generates plot configurations for automatic plot creation when a measurement is added to the basket.
  * - HeatMap: if there are at least 2 independents and 1 dependent
  * - LinePlot: if there is at least 1 independent and 1 dependent
- * 
+ *
  * Takes the first N independents/dependents in the order they appear in the dataset.
  * Returns plot configurations that can be added to the viewer using addPlot().
+ *
+ * @param item - The basket item to generate plots for
+ * @param sourceHeatmapFilters - Optional filters from an existing heatmap to apply
+ * @param sourceLineplotFilters - Optional filters from an existing lineplot to apply
  */
 export function generateAutoPlotConfigs(
-  item: BasketItem
+  item: BasketItem,
+  sourceHeatmapFilters?: AppliedFilter[],
+  sourceLineplotFilters?: AppliedFilter[]
 ): AutoPlotResult {
   try {
     // Only process .zarr files (disk) or memory:// paths (live) with attributes
@@ -51,13 +57,23 @@ export function generateAutoPlotConfigs(
 
     // Attempt to create HeatMap config if we have at least 2 indeps and 1 dep
     if (independents.length >= 2 && dependents.length >= 1) {
+      const filters_order: string[] = [];
+      const filters_opts: Record<string, unknown> = {};
+
+      if (sourceHeatmapFilters && sourceHeatmapFilters.length > 0) {
+        sourceHeatmapFilters.forEach((filter) => {
+          filters_order.push(filter.name);
+          filters_opts[filter.name] = filter.options ?? {};
+        });
+      }
+
       plotConfigs.push({
         fpath,
         indeps: independents.slice(0, 2), // Take first 2 independents
         deps: [dependents[0]], // Take first dependent
         plotType: "HeatMap" as const,
-        filters_order: [],
-        filters_opts: {},
+        filters_order,
+        filters_opts,
         slider: {},
         source,
         preferredSource,
@@ -66,13 +82,23 @@ export function generateAutoPlotConfigs(
 
     // Attempt to create LinePlot config if we have at least 1 indep and 1 dep
     if (independents.length >= 1 && dependents.length >= 1) {
+      const filters_order: string[] = [];
+      const filters_opts: Record<string, unknown> = {};
+
+      if (sourceLineplotFilters && sourceLineplotFilters.length > 0) {
+        sourceLineplotFilters.forEach((filter) => {
+          filters_order.push(filter.name);
+          filters_opts[filter.name] = filter.options ?? {};
+        });
+      }
+
       plotConfigs.push({
         fpath,
         indeps: [independents[0]], // Take first independent
         deps: [dependents[0]], // Take first dependent
         plotType: "LinePlot" as const,
-        filters_order: [],
-        filters_opts: {},
+        filters_order,
+        filters_opts,
         slider: {},
         source,
         preferredSource,

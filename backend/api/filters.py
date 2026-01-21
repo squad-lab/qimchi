@@ -4,6 +4,7 @@ The filters are adapted from the Qimchi Dash app.
 
 """
 
+import re
 import base64
 import numpy as np
 from copy import deepcopy
@@ -247,7 +248,12 @@ class Filter:
         # Extract labels and title from the dict
         self.x_label = figure["layout"]["xaxis"]["title"]["text"]
         self.y_label = figure["layout"]["yaxis"]["title"]["text"]
-        self.title = figure["layout"]["title"]["text"]
+        # Handle title that might be a string or a dict with 'text' key
+        title_obj = figure["layout"].get("title", "")
+        if isinstance(title_obj, dict):
+            self.title = title_obj.get("text", "")
+        else:
+            self.title = str(title_obj) if title_obj else ""
         if self.num_axes == 2:
             # Extract z-axis data for 2D plots
             self.z_axis = _extract_axis_data(dat, "z")
@@ -297,18 +303,27 @@ class Filter:
             fil (str): Filter name to append to plot title.
 
         """
-        ttl = self.title
-        title_default = " ".join(ttl.split(" ")[:4])
-        tfl: str = fil
-        if "Filt." in ttl:
-            # NOTE: plot_title - Filt.: fil1 fil2 ...
-            # Default title - f"{_state.device_type} {_state.wafer_id} {_state.device_id} {_state.measurement}",
-            # [4] is "Fil:"
-            tfl: list[str] = ttl.split(" ")[6:]
-            tfl.insert(0, fil)
-            tfl: str = " ".join(tfl)
+        ttl = self.title or "Plot"  # Fallback to "Plot" if title is empty
+        title_parts = ttl.split(" ")
+        # Keep first 4 parts of title (typically: DeviceType WaferID SampleName MeasurementID)
+        title_default = " ".join(title_parts[:4]) if len(title_parts) >= 4 else ttl
 
-        # Update the title
+        # Build the new filter-list preserving existing filters in order.
+        # The title may contain a suffix like "<br> Filt.: f1 f2". We extract any
+        # existing filter names after the "Filt." marker and prepend the new one.
+        tfl = fil
+        # Regex looks for "Filt." or "Filt.:" followed by the rest of the line
+        m = re.search(r"Filt\.?\:??\s*(.*)$", ttl)
+        if m:
+            existing = m.group(1).strip()
+            # Remove any leading HTML breaks or separators
+            existing = existing.lstrip("<br>").strip()
+            if existing:
+                existing_parts = existing.split()
+                # Prepend the newly applied filter to preserve application order
+                tfl = " ".join([fil] + existing_parts)
+
+        # Update the title, preserving the base title
         self.new_fig.update_layout(
             title=dict(text=f"{title_default} <br> Filt.: {tfl}")
         )
