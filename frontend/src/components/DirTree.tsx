@@ -56,6 +56,7 @@ import { useToast } from "../hooks/useToast";
 import { useSidebarStore } from "../stores/sidebarStore";
 import Tooltip from "./Tooltip";
 import { BasketItem } from "./Basket";
+import type { AttrData } from "./interfaces";
 
 // NOTE: API for items that will go on the Tree
 export interface TreeNode {
@@ -91,6 +92,8 @@ interface DirTreeProps {
   onOpenNotes?: (node: TreeNode) => void; // For opening notes
   onDownload?: (node: TreeNode) => void; // For downloading datasets
   onCycleDataset?: (direction: "prev" | "next") => void; // For cycling through datasets
+  onStartLoadingAttributes?: (itemId: string) => void;
+  onUpdateBasketItemAttributes?: (itemId: string, attributes: AttrData) => void;
 }
 
 /**
@@ -117,6 +120,8 @@ const DirTree = ({
   onOpenNotes,
   onDownload,
   onCycleDataset,
+  onStartLoadingAttributes,
+  onUpdateBasketItemAttributes,
 }: DirTreeProps) => {
   const { showToast } = useToast();
 
@@ -139,6 +144,7 @@ const DirTree = ({
   const [treeError, setTreeError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [apiData, setApiData] = useState<TreeNode[]>([]);
+  const autoAddedMeasurements = useRef<Set<string>>(new Set());
 
   // Debounce search input
   useEffect(() => {
@@ -352,9 +358,61 @@ const DirTree = ({
               // Log changes for debugging
               if (toAdd.length > 0) {
                 console.log(`Added ${toAdd.length} new live measurement(s)`);
+
+                // Auto-add new live measurements to basket
+                toAdd.forEach((node: TreeNode) => {
+                  // Check if already in basket or already auto-added
+                  const inBasket = basketItems?.some(
+                    (item) => item.id === node.id,
+                  );
+                  const alreadyAutoAdded = autoAddedMeasurements.current.has(
+                    node.id,
+                  );
+
+                  if (!inBasket && !alreadyAutoAdded && onAddToBasket) {
+                    console.log(
+                      `Auto-adding live measurement to basket: ${node.name}`,
+                    );
+                    onAddToBasket(node);
+                    autoAddedMeasurements.current.add(node.id);
+
+                    // Load attributes for the new live measurement
+                    if (
+                      node.type === "file" &&
+                      onStartLoadingAttributes &&
+                      onUpdateBasketItemAttributes
+                    ) {
+                      onStartLoadingAttributes(node.id);
+                      axios
+                        .post(`${PROD_BACKEND_URL}/load-attrs/`, {
+                          path: node.path,
+                        })
+                        .then((response) => {
+                          console.log(
+                            "Attributes loaded for auto-added live measurement:",
+                            node.id,
+                            response.data,
+                          );
+                          onUpdateBasketItemAttributes(node.id, response.data);
+                        })
+                        .catch((error) => {
+                          console.error(
+                            "Error loading attributes for auto-added live measurement:",
+                            error,
+                          );
+                          onUpdateBasketItemAttributes(node.id, {});
+                        });
+                    }
+                  }
+                });
               }
               if (toRemove.size > 0) {
                 console.log(`Removed ${toRemove.size} ended measurement(s)`);
+
+                // Clean up auto-added tracking for removed measurements
+                toRemove.forEach((id) => {
+                  autoAddedMeasurements.current.delete(id);
+                });
               }
 
               return result;

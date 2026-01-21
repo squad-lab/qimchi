@@ -149,7 +149,7 @@ const Explorer = ({
       {/* Directory tree - only show when path is provided */}
       <div className="flex-1 overflow-y-auto">
         {submittedPath && submittedPath.trim() ? (
-          <DirTree
+        <DirTree
             path={submittedPath}
             onSelectNode={handleSelectNode}
             basketItems={basketItems}
@@ -159,6 +159,8 @@ const Explorer = ({
             onOpenNotes={onOpenNotes}
             onDownload={handleDownload}
             onCycleDataset={onCycleDataset}
+            onStartLoadingAttributes={onStartLoadingAttributes}
+            onUpdateBasketItemAttributes={onUpdateBasketItemAttributes}
           />
         ) : (
           <div className="h-32 flex flex-col items-center justify-center text-gray-500">
