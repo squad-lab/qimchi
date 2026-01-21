@@ -17,6 +17,7 @@ interface PlotStoreState {
     plotId: string,
     sliders: Record<string, SliderConfig>
   ) => void;
+  setPlotAxesSwapped: (plotId: string, swapped: boolean) => void;
   getPlotState: (plotId: string) => PlotPersistentState | undefined;
   removePlotState: (plotId: string) => void;
   clearAllStates: () => void;
@@ -64,6 +65,19 @@ export const usePlotStore = create<PlotStoreState>()(
               ...state.plotStates[plotId],
               id: plotId,
               slider_settings: sliders,
+            },
+          },
+        }));
+      },
+
+      setPlotAxesSwapped: (plotId: string, swapped: boolean) => {
+        set((state) => ({
+          plotStates: {
+            ...state.plotStates,
+            [plotId]: {
+              ...state.plotStates[plotId],
+              id: plotId,
+              axes_swapped: swapped,
             },
           },
         }));

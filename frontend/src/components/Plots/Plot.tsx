@@ -132,7 +132,7 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson }) => {
       },
       ...deferredPlotJson.config,
     }),
-    [deferredPlotJson.config, dimensions.height, dimensions.width]
+    [deferredPlotJson.config, dimensions.height, dimensions.width],
   );
 
   // Function to update plot using Plotly.react for efficient updates
@@ -144,13 +144,13 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson }) => {
     try {
       if (structureChanged) {
         console.log(
-          "[Plot] Structure changed, using Plotly.react for full update"
+          "[Plot] Structure changed, using Plotly.react for full update",
         );
         lastPlotStructureRef.current = plotStructureHash;
         dataRevisionRef.current = 0; // Reset data revision for new structure
       } else {
         console.log(
-          "[Plot] Structure unchanged, using Plotly.react for efficient update"
+          "[Plot] Structure unchanged, using Plotly.react for efficient update",
         );
       }
 
@@ -159,7 +159,7 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson }) => {
         plotRef.current,
         deferredPlotJson.data,
         enhancedLayout,
-        enhancedConfig
+        enhancedConfig,
       );
 
       // If MathJax is loaded, typeset the container so TeX axis labels render.
@@ -313,24 +313,32 @@ const plotPropsAreEqual = (prevProps: Props, nextProps: Props): boolean => {
     return false;
   }
 
-  // For filter/slider changes, do a simpler but effective comparison
-  // Check if the JSON representation of data changed significantly
-  try {
-    // Quick check: if data arrays are the same reference, no change needed
-    const dataStringPrev = JSON.stringify(prevData);
-    const dataStringNext = JSON.stringify(nextData);
-
-    // Only update if there's an actual difference
-    if (dataStringPrev === dataStringNext) {
-      return true; // Same data, no need to re-render
+  // Check for axis swap by comparing x and y data arrays
+  for (let i = 0; i < prevData.length; i++) {
+    const prevTrace = prevData[i];
+    const nextTrace = nextData[i];
+    const prevX = (prevTrace as Record<string, unknown>).x;
+    const prevY = (prevTrace as Record<string, unknown>).y;
+    const nextX = (nextTrace as Record<string, unknown>).x;
+    const nextY = (nextTrace as Record<string, unknown>).y;
+    if (
+      JSON.stringify(prevX) !== JSON.stringify(nextX) ||
+      JSON.stringify(prevY) !== JSON.stringify(nextY)
+    ) {
+      return false;
     }
-  } catch (error) {
-    // If JSON.stringify fails, allow the update
-    console.warn("[Plot] Comparison failed, allowing update:", error);
   }
 
-  // Always update if we reach here - either data changed or comparison failed
-  return false;
+  // Check layout changes (axis titles, ranges, etc.)
+  const prevLayout = prevProps.plotJson.layout || {};
+  const nextLayout = nextProps.plotJson.layout || {};
+  const prevLayoutStr = JSON.stringify(prevLayout);
+  const nextLayoutStr = JSON.stringify(nextLayout);
+  if (prevLayoutStr !== nextLayoutStr) {
+    return false;
+  }
+
+  return true;
 };
 
 export default React.memo(PlotComponent, plotPropsAreEqual);

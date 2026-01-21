@@ -18,6 +18,7 @@ import {
   Paintbrush,
   ImageDown,
   ImagePlus,
+  ArrowLeftRight,
 } from "lucide-react";
 import { Data, Layout, Config } from "plotly.js";
 
@@ -205,6 +206,90 @@ const getColorscaleData = (
     sinebow: "Sinebow",
   };
   return builtInMap[key] || name.charAt(0).toUpperCase() + name.slice(1);
+};
+
+const swapAxesInPlotJson = (plotJson: PlotlyJSON): PlotlyJSON => {
+  console.log("[swapAxesInPlotJson] Function called!");
+  const swapped = JSON.parse(JSON.stringify(plotJson)) as PlotlyJSON;
+
+  if (swapped.data && swapped.data.length > 0) {
+    console.log(
+      "[swapAxesInPlotJson] Processing",
+      swapped.data.length,
+      "traces",
+    );
+    swapped.data = swapped.data.map((trace, idx) => {
+      console.log("[swapAxesInPlotJson] Trace", idx, "type:", trace.type);
+      const swappedTrace = { ...trace } as Record<string, unknown>;
+      const traceAny = trace as Record<string, unknown>;
+
+      if (trace.type === "heatmap" || trace.type === "heatmapgl") {
+        console.log("[swapAxesInPlotJson] Processing heatmap/heatmapgl");
+
+        // For heatmaps, swap x and y coordinates
+        const xObj = traceAny.x as Record<string, unknown> | undefined;
+        const yObj = traceAny.y as Record<string, unknown> | undefined;
+        const zObj = traceAny.z as Record<string, unknown> | undefined;
+
+        console.log(
+          "[swapAxesInPlotJson] xObj:",
+          !!xObj,
+          "yObj:",
+          !!yObj,
+          "zObj:",
+          !!zObj,
+        );
+        console.log(
+          "[swapAxesInPlotJson] zObj keys:",
+          zObj ? Object.keys(zObj) : "N/A",
+        );
+
+        if (xObj && yObj) {
+          swappedTrace.x = { ...yObj };
+          swappedTrace.y = { ...xObj };
+          console.log("[swapAxesInPlotJson] Swapped x and y objects");
+        }
+
+        // Use Plotly's transpose property
+        if (zObj) {
+          console.log(
+            "[swapAxesInPlotJson] Setting transpose property on heatmap",
+          );
+          swappedTrace.transpose = true;
+        }
+      } else {
+        // For line plots and other types, just swap x and y
+        console.log(
+          "[swapAxesInPlotJson] Processing non-heatmap trace:",
+          trace.type,
+        );
+        const x = traceAny.x;
+        const y = traceAny.y;
+        if (x !== undefined && y !== undefined) {
+          swappedTrace.x = y;
+          swappedTrace.y = x;
+        }
+      }
+
+      return swappedTrace as Data;
+    });
+  }
+
+  if (swapped.layout) {
+    const layoutAny = swapped.layout as Record<string, unknown>;
+    // Swap xaxis and yaxis properties
+    if (layoutAny.xaxis && layoutAny.yaxis) {
+      const tempXaxis = { ...(layoutAny.xaxis as object) };
+      layoutAny.xaxis = { ...(layoutAny.yaxis as object) };
+      layoutAny.yaxis = tempXaxis;
+      console.log("[swapAxesInPlotJson] Swapped layout xaxis and yaxis");
+    }
+    const now = Date.now();
+    (swapped.layout as Record<string, unknown>).datarevision = now;
+  }
+
+  console.log("[swapAxesInPlotJson] Function completed");
+  return swapped;
 };
 
 const PlotWrapper: React.FC<Props> = ({
@@ -451,9 +536,17 @@ const PlotWrapper: React.FC<Props> = ({
   // Track previous fpath to detect dataset changes
   const prevFpathRef = useRef<string | undefined>(undefined);
 
+  // State to track if axes are swapped (per-plot)
+  const [areAxesSwapped, setAreAxesSwapped] = useState(false);
+
   // Persistence hook
-  const { getPlotState, setPlotAppearance, setPlotFilters, setPlotSliders } =
-    usePlotStore();
+  const {
+    getPlotState,
+    setPlotAppearance,
+    setPlotFilters,
+    setPlotSliders,
+    setPlotAxesSwapped,
+  } = usePlotStore();
 
   // Load persisted state when component mounts or plot config changes
   useEffect(() => {
@@ -479,6 +572,9 @@ const PlotWrapper: React.FC<Props> = ({
           setSliderConfig(plotState.slider_settings);
           // Initialize lastAppliedSliders to prevent "off by one" issues
           lastAppliedSliders.current = { ...plotState.slider_settings };
+        }
+        if (typeof plotState.axes_swapped === "boolean") {
+          setAreAxesSwapped(plotState.axes_swapped);
         }
       } else {
         // No persisted state, but check if plotConfig has filter settings from backend
@@ -699,10 +795,18 @@ const PlotWrapper: React.FC<Props> = ({
   // Apply current appearance settings when a new plot loads or when appearance settings change
   // Use useMemo to prevent unnecessary re-calculations
   const customizedPlotJsonMemo = useMemo(() => {
-    const result = applyAppearanceSettings(basePlotJson, appearanceSettings);
+    let result = applyAppearanceSettings(basePlotJson, appearanceSettings);
+    if (areAxesSwapped) {
+      result = swapAxesInPlotJson(result);
+    }
     // console.log(`[PlotWrapper] Calculated new customizedPlotJsonMemo`);
     return result;
-  }, [basePlotJson, appearanceSettings, applyAppearanceSettings]);
+  }, [
+    basePlotJson,
+    appearanceSettings,
+    applyAppearanceSettings,
+    areAxesSwapped,
+  ]);
 
   // Update customized plot JSON only when memo changes (but not during filter operations)
   // Use React 18's concurrent features to batch updates and prevent intermediate renders
@@ -1446,6 +1550,8 @@ const PlotWrapper: React.FC<Props> = ({
 
   // Reset handler to clear all filters and appearance modifications
   const handleReset = async () => {
+    setAreAxesSwapped(false);
+
     // Always use local reset to avoid plot reload and maintain consistency with filter approach
     const defaultSettings = getInitialSettings(plotType);
     setAppearanceSettings(defaultSettings);
@@ -1479,10 +1585,34 @@ const PlotWrapper: React.FC<Props> = ({
       setPlotAppearance(plotConfig.id, defaultSettings);
       setPlotFilters(plotConfig.id, []);
       setPlotSliders(plotConfig.id, {});
+      setPlotAxesSwapped(plotConfig.id, false);
     }
 
     showToast("Plot reset to original state", "success");
   };
+
+  const handleSwapAxes = () => {
+    const newSwapped = !areAxesSwapped;
+    setAreAxesSwapped(newSwapped);
+    if (plotConfig?.id) {
+      setPlotAxesSwapped(plotConfig.id, newSwapped);
+    }
+  };
+
+  const handleAppearanceSettingsChange = useCallback(
+    (newSettings: PlotAppearanceSettings) => {
+      setAppearanceSettings(newSettings);
+
+      // Save to store if available
+      if (plotConfig?.id) {
+        setPlotAppearance(plotConfig.id, newSettings);
+      }
+
+      // The appearance will be applied by the useMemo and useEffect that watches customizedPlotJsonMemo
+      // This ensures we always apply appearance to the currently filtered data without triggering unnecessary re-renders
+    },
+    [plotConfig?.id, setPlotAppearance],
+  );
 
   // Painter interactions (use store selectors)
   const deactivatePainter = usePainterStore((s) => s.deactivate);
@@ -1562,21 +1692,6 @@ const PlotWrapper: React.FC<Props> = ({
     setPlotSliders,
     showToast,
   ]);
-
-  const handleAppearanceSettingsChange = useCallback(
-    (newSettings: PlotAppearanceSettings) => {
-      setAppearanceSettings(newSettings);
-
-      // Save to store if available
-      if (plotConfig?.id) {
-        setPlotAppearance(plotConfig.id, newSettings);
-      }
-
-      // The appearance will be applied by the useMemo and useEffect that watches customizedPlotJsonMemo
-      // This ensures we always apply appearance to the currently filtered data without triggering unnecessary re-renders
-    },
-    [plotConfig?.id, setPlotAppearance],
-  );
 
   // When maximized, render as a modal overlay
   if (isMaximized) {
@@ -1855,6 +1970,26 @@ const PlotWrapper: React.FC<Props> = ({
                       <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                     </div>
                   )}
+                </button>
+              </Tooltip>
+
+              {/* Swap X & Y Axes */}
+              <Tooltip content="Swap X & Y Axes" position="left">
+                <button
+                  onClick={handleSwapAxes}
+                  className={`relative p-1.5 rounded transition-colors duration-150 ${
+                    areAxesSwapped
+                      ? "bg-blue-100 text-blue-600"
+                      : "hover:bg-gray-200"
+                  }`}
+                  title="Swap X & Y Axes"
+                >
+                  <ArrowLeftRight
+                    size={16}
+                    className={
+                      areAxesSwapped ? "text-blue-600" : "text-gray-600"
+                    }
+                  />
                 </button>
               </Tooltip>
 

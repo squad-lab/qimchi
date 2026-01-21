@@ -109,6 +109,7 @@ export interface PlotPersistentState {
   appearance_settings?: unknown;
   applied_filters?: AppliedFilter[];
   slider_settings?: Record<string, SliderConfig>;
+  axes_swapped?: boolean;
 }
 
 // Plot configuration used across hooks/components
