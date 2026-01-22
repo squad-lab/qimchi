@@ -343,11 +343,19 @@ const PlotWrapper: React.FC<Props> = ({
   const [customizedPlotJson, setCustomizedPlotJson] =
     useState<PlotlyJSON>(plotJson);
   const [isHoveredOrFocused, setIsHoveredOrFocused] = useState(false);
+  const [relayoutData, setRelayoutData] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
 
   // Store the original plot JSON (never modified, always the raw data from backend)
   const [originalPlotJson, setOriginalPlotJson] =
     useState<PlotlyJSON>(plotJson);
   // Store the base plot JSON (original or filtered, before appearance modifications)
+
+  const handleRelayout = (data: Record<string, unknown>) => {
+    setRelayoutData(data);
+  };
 
   // Save plot as PNG, PDF & SVG
   const handleSavePlotImages = async () => {
@@ -365,6 +373,7 @@ const PlotWrapper: React.FC<Props> = ({
         {
           plot_json: customizedPlotJson,
           fpath: plotConfig.fpath,
+          relayout_data: relayoutData,
         },
         {
           headers: { "Content-Type": "application/json" },
@@ -447,6 +456,7 @@ const PlotWrapper: React.FC<Props> = ({
         {
           plot_json: customizedPlotJson,
           fpath: plotConfig.fpath,
+          relayout_data: relayoutData,
         },
         {
           headers: { "Content-Type": "application/json" },
@@ -1716,7 +1726,10 @@ const PlotWrapper: React.FC<Props> = ({
                 isSquareMode ? "square-mode" : ""
               }`}
             >
-              <PlotComponent plotJson={customizedPlotJson} />
+              <PlotComponent
+                plotJson={customizedPlotJson}
+                onRelayout={handleRelayout}
+              />
 
               {/* Dataset update error overlay */}
               {datasetUpdateError && (
@@ -1763,7 +1776,10 @@ const PlotWrapper: React.FC<Props> = ({
           <div
             className={`p-2 pb-0 relative ${isSquareMode ? "square-mode" : ""}`}
           >
-            <PlotComponent plotJson={customizedPlotJson} />
+            <PlotComponent
+              plotJson={customizedPlotJson}
+              onRelayout={handleRelayout}
+            />
 
             {/* Dataset update error overlay */}
             {datasetUpdateError && (

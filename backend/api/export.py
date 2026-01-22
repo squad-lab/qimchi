@@ -3,27 +3,27 @@ FastAPI endpoint to export Plotly plots as PNG, PDF and SVG.
 
 """
 
-import os
-import time
-import json
-import uuid
 import asyncio
-import zipfile
+import json
+import os
 import tempfile
-import plotly.io as pio
-
-from typing import Dict
+import time
+import uuid
+import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
-from plotly import graph_objects as go
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, FileResponse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict
 
+import plotly.io as pio
+from fastapi import APIRouter, Request
+from fastapi.responses import FileResponse, JSONResponse
+from plotly import graph_objects as go
+
+from . import live_measurements
 
 # Local imports
 from .logger import logger
-from . import live_measurements
 
 MEMORY_PROTOCOL = "memory://"
 
@@ -60,12 +60,22 @@ def _cleanup_old_tasks() -> None:
 
 
 def _export_plot_images_sync(
-    plot_json: Dict, disk_fpath: str, export_pool=None
+    plot_json: Dict,
+    disk_fpath: str,
+    relayout_data: Dict | None = None,
+    export_pool=None,
 ) -> Dict:
     """
     Synchronous function to export plot images (runs in executor).
 
-    Returns dict with:
+    Args:
+        plot_json (Dict): Plotly figure JSON
+        disk_fpath (str): dataset .zarr path on disk
+        relayout_data (Dict | None): optional relayout data to apply
+        export_pool: optional ProcessPoolExecutor for parallel writes
+
+    Returns:
+        Returns dict with:
         - zip_path: path to created zip file
         - saved_paths: dict of individual image paths
         - timings: performance metrics
@@ -86,6 +96,45 @@ def _export_plot_images_sync(
         fig = go.Figure(plot_json)
     except Exception:
         fig = go.Figure(plot_json)
+
+    # Apply relayout data if provided (preserves zoom/pan state)
+    if relayout_data:
+        try:
+            # Convert flat relayout keys to nested structure
+            nested_layout: Dict = {}
+            for key, value in relayout_data.items():
+                # Handle array index notation like 'xaxis.range[0]'
+                if "[" in key and "]" in key:
+                    base_key, index_part = key.split("[", 1)
+                    index = int(index_part.rstrip("]"))
+                    # Handle nested keys like 'xaxis.range'
+                    if "." in base_key:
+                        parts = base_key.split(".")
+                        current = nested_layout
+                        for part in parts[:-1]:
+                            if part not in current:
+                                current[part] = {}
+                            current = current[part]
+                        if parts[-1] not in current:
+                            current[parts[-1]] = []
+                        array = current[parts[-1]]
+                    else:
+                        if base_key not in nested_layout:
+                            nested_layout[base_key] = []
+                        array = nested_layout[base_key]
+
+                    # Extend array if needed
+                    while len(array) <= index:
+                        array.append(None)
+                    array[index] = value
+                else:
+                    # Simple key-value pairs
+                    nested_layout[key] = value
+
+            fig.update_layout(nested_layout)
+        except Exception as e:
+            logger.error(f"Failed to apply relayout data: {e}")
+            # Continue without relayout data
 
     # Ensure transparent background
     fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
@@ -219,7 +268,11 @@ def _export_plot_images_sync(
 
 
 async def _run_export_task(
-    task_id: str, plot_json: Dict, disk_fpath: str, export_pool=None
+    task_id: str,
+    plot_json: Dict,
+    disk_fpath: str,
+    relayout_data: Dict | None = None,
+    export_pool=None,
 ) -> None:
     """
     Background task to run export in executor.
@@ -235,6 +288,7 @@ async def _run_export_task(
             _export_plot_images_sync,
             plot_json,
             disk_fpath,
+            relayout_data,
             export_pool,
         )
 
@@ -302,6 +356,7 @@ def _write_image_worker(fig_dict: Dict, path_str: str) -> tuple[str, float]:
 
     """
     import time
+
     import plotly.io as pio
     from plotly import graph_objects as go
 
@@ -323,7 +378,11 @@ def _write_image_worker(fig_dict: Dict, path_str: str) -> tuple[str, float]:
 
 
 def _save_light_dark_pngs(
-    plot_json, fpath, ts: str | None = None, only_light: bool = False
+    plot_json: Dict,
+    fpath: str,
+    ts: str | None = None,
+    only_light: bool = False,
+    relayout_data: Dict | None = None,
 ) -> Dict:
     """
     Save only PNGs for light and dark variants and return paths dict.
@@ -333,6 +392,7 @@ def _save_light_dark_pngs(
         fpath: dataset .zarr path (may be memory:// path)
         ts: optional timestamp string to include in filename; if None, use current time
         only_light: if True, only save the light variant PNG
+        relayout_data: optional relayout data to apply
 
     Returns:
         Dict: keys: 'png_light', 'png_dark' (if only_light is False)
@@ -356,6 +416,45 @@ def _save_light_dark_pngs(
         fig = go.Figure(plot_json)
     except Exception:
         fig = go.Figure(plot_json)
+
+    # Apply relayout data if provided (preserves zoom/pan state)
+    if relayout_data:
+        try:
+            # Convert flat relayout keys to nested structure
+            nested_layout: Dict = {}
+            for key, value in relayout_data.items():
+                # Handle array index notation like 'xaxis.range[0]'
+                if "[" in key and "]" in key:
+                    base_key, index_part = key.split("[", 1)
+                    index = int(index_part.rstrip("]"))
+                    # Handle nested keys like 'xaxis.range'
+                    if "." in base_key:
+                        parts = base_key.split(".")
+                        current = nested_layout
+                        for part in parts[:-1]:
+                            if part not in current:
+                                current[part] = {}
+                            current = current[part]
+                        if parts[-1] not in current:
+                            current[parts[-1]] = []
+                        array = current[parts[-1]]
+                    else:
+                        if base_key not in nested_layout:
+                            nested_layout[base_key] = []
+                        array = nested_layout[base_key]
+
+                    # Extend array if needed
+                    while len(array) <= index:
+                        array.append(None)
+                    array[index] = value
+                else:
+                    # Simple key-value pairs
+                    nested_layout[key] = value
+
+            fig.update_layout(nested_layout)
+        except Exception as e:
+            logger.error(f"Failed to apply relayout data: {e}")
+            # Continue without relayout data
 
     # Ensure transparent background
     fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
@@ -486,6 +585,8 @@ async def export_plot_images(request: Request) -> JSONResponse:
     Expects JSON payload with:
     - plot_json: JSON representation of the Plotly figure
     - fpath: dataset path (supports memory:// paths)
+    - relayout_data: Optional dict with zoom/pan layout changes to preserve in export
+
     """
     # Clean up old tasks periodically
     _cleanup_old_tasks()
@@ -493,6 +594,7 @@ async def export_plot_images(request: Request) -> JSONResponse:
     data = await request.json()
     plot_json = data.get("plot_json")
     fpath = data.get("fpath")
+    relayout_data = data.get("relayout_data")
     if not plot_json or not fpath:
         return JSONResponse(
             status_code=400,
@@ -522,7 +624,7 @@ async def export_plot_images(request: Request) -> JSONResponse:
 
         # Start background task
         asyncio.create_task(
-            _run_export_task(task_id, plot_json, disk_fpath, export_pool)
+            _run_export_task(task_id, plot_json, disk_fpath, relayout_data, export_pool)
         )
 
         logger.info(f"Created export task {task_id} for {fpath}")
@@ -624,11 +726,13 @@ async def export_and_send_to_notes(request: Request) -> JSONResponse:
     Expects JSON payload with:
     - plot_json: Plotly figure JSON
     - fpath: dataset .zarr path
+    - relayout_data: Optional dict with zoom/pan layout changes to preserve in export
 
     """
     data = await request.json()
     plot_json = data.get("plot_json")
     fpath = data.get("fpath")
+    relayout_data = data.get("relayout_data")
     if not plot_json or not fpath:
         return JSONResponse(
             status_code=400,
@@ -637,7 +741,9 @@ async def export_and_send_to_notes(request: Request) -> JSONResponse:
 
     try:
         ts = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        saved = _save_light_dark_pngs(plot_json, fpath, ts=ts)
+        saved = _save_light_dark_pngs(
+            plot_json, fpath, ts=ts, relayout_data=relayout_data
+        )
 
         # Resolve memory:// paths to disk paths for notes file operations
         disk_fpath = _resolve_fpath_to_disk(fpath)
