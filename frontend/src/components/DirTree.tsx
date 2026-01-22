@@ -3,6 +3,7 @@ import {
   useMemo,
   useEffect,
   useRef,
+  useCallback,
   forwardRef,
   useImperativeHandle,
 } from "react";
@@ -161,134 +162,137 @@ const DirTree = ({
   }, [searchTerm, sortBy, sortDirection, filterBy]);
 
   // Load data from API
-  const loadDirectoryData = (path: string, forceReload: boolean = false) => {
-    // If showLiveOnly is true, load from /load-live/ endpoint instead
-    if (showLiveOnly) {
+  const loadDirectoryData = useCallback(
+    (path: string, forceReload: boolean = false) => {
+      // If showLiveOnly is true, load from /load-live/ endpoint instead
+      if (showLiveOnly) {
+        setIsLoading(true);
+        setTreeError(null);
+        console.log("Loading live measurements...");
+
+        axios
+          .post(`${PROD_BACKEND_URL}/load-live/`)
+          .then((response) => {
+            if (response.data.success && response.data.children) {
+              const children = response.data.children;
+              setApiData(children);
+              console.log(`Loaded ${children.length} live measurements`);
+            } else {
+              setApiData([]);
+              console.log("No live measurements found");
+            }
+          })
+          .catch((error) => {
+            console.error("Error loading live measurements:", error);
+            let errorMessage = "Failed to load live measurements";
+            if (error.response) {
+              errorMessage = error.response.data.detail || errorMessage;
+            } else if (error.request) {
+              errorMessage = "Server not responding";
+            } else {
+              errorMessage = error.message;
+            }
+            setTreeError(errorMessage);
+          })
+          .finally(() => {
+            setIsLoading(false);
+          });
+        return;
+      }
+
+      // Check global cache first
+      const cached = globalDirTreeCache.get(path);
+      const now = Date.now();
+
+      if (!forceReload && cached && now - cached.timestamp < CACHE_DURATION) {
+        console.log("Using cached directory data for:", path);
+        setApiData(cached.data);
+        setIsLoading(false);
+        return;
+      }
+
       setIsLoading(true);
       setTreeError(null);
-      console.log("Loading live measurements...");
+      console.log("Loading directory data from:", path);
 
       axios
-        .post(`${PROD_BACKEND_URL}/load-live/`)
+        .post(`${PROD_BACKEND_URL}/load/`, {
+          path,
+        })
         .then((response) => {
-          if (response.data.success && response.data.children) {
-            const children = response.data.children;
-            setApiData(children);
-            console.log(`Loaded ${children.length} live measurements`);
-          } else {
-            setApiData([]);
-            console.log("No live measurements found");
+          console.log("API Response status:", response.status);
+          console.log("API Response data:", response.data);
+
+          // Convert the API response to TreeNode format
+          interface ApiNode {
+            id: string;
+            name: string;
+            path: string;
+            type: "file" | "folder";
+            size?: number;
+            timestamp?: string;
+            tags?: string[];
+            children?: ApiNode[];
+            lastModified?: number;
           }
+
+          const convertApiData = (apiNode: ApiNode): TreeNode => {
+            return {
+              id: apiNode.id,
+              name: apiNode.name,
+              path: apiNode.path,
+              type: apiNode.type,
+              size: apiNode.size,
+              timestamp: apiNode.timestamp
+                ? new Date(apiNode.timestamp)
+                : undefined,
+              tags: apiNode.tags,
+              children: apiNode.children
+                ? apiNode.children.map(convertApiData)
+                : undefined,
+              lastModified: apiNode.lastModified,
+            };
+          };
+
+          // If the response is a single node, wrap it in an array
+          const treeData = Array.isArray(response.data)
+            ? response.data.map(convertApiData)
+            : [convertApiData(response.data)];
+          console.log("Converted tree data:", treeData);
+
+          // Store in global cache
+          globalDirTreeCache.set(path, {
+            data: treeData,
+            timestamp: Date.now(),
+          });
+
+          setApiData(treeData);
+          // live dataset logic removed
         })
         .catch((error) => {
-          console.error("Error loading live measurements:", error);
-          let errorMessage = "Failed to load live measurements";
-          if (error.response) {
-            errorMessage = error.response.data.detail || errorMessage;
-          } else if (error.request) {
-            errorMessage = "Server not responding";
-          } else {
-            errorMessage = error.message;
+          console.error("Error loading directory data:", error);
+          showToast("Failed to load directory data", "error");
+
+          // Extract the detail message from the backend response
+          let errorMessage = "Unknown error";
+
+          if (error instanceof Error) {
+            // Check if it's an axios error with response data
+            if (axios.isAxiosError(error) && error.response?.data?.detail) {
+              errorMessage = error.response.data.detail;
+            } else {
+              errorMessage = error.message;
+            }
           }
-          setTreeError(errorMessage);
+
+          setTreeError(`Failed to load directory: ${errorMessage}`);
         })
         .finally(() => {
           setIsLoading(false);
         });
-      return;
-    }
-
-    // Check global cache first
-    const cached = globalDirTreeCache.get(path);
-    const now = Date.now();
-
-    if (!forceReload && cached && now - cached.timestamp < CACHE_DURATION) {
-      console.log("Using cached directory data for:", path);
-      setApiData(cached.data);
-      setIsLoading(false);
-      return;
-    }
-
-    setIsLoading(true);
-    setTreeError(null);
-    console.log("Loading directory data from:", path);
-
-    axios
-      .post(`${PROD_BACKEND_URL}/load/`, {
-        path,
-      })
-      .then((response) => {
-        console.log("API Response status:", response.status);
-        console.log("API Response data:", response.data);
-
-        // Convert the API response to TreeNode format
-        interface ApiNode {
-          id: string;
-          name: string;
-          path: string;
-          type: "file" | "folder";
-          size?: number;
-          timestamp?: string;
-          tags?: string[];
-          children?: ApiNode[];
-          lastModified?: number;
-        }
-
-        const convertApiData = (apiNode: ApiNode): TreeNode => {
-          return {
-            id: apiNode.id,
-            name: apiNode.name,
-            path: apiNode.path,
-            type: apiNode.type,
-            size: apiNode.size,
-            timestamp: apiNode.timestamp
-              ? new Date(apiNode.timestamp)
-              : undefined,
-            tags: apiNode.tags,
-            children: apiNode.children
-              ? apiNode.children.map(convertApiData)
-              : undefined,
-            lastModified: apiNode.lastModified,
-          };
-        };
-
-        // If the response is a single node, wrap it in an array
-        const treeData = Array.isArray(response.data)
-          ? response.data.map(convertApiData)
-          : [convertApiData(response.data)];
-        console.log("Converted tree data:", treeData);
-
-        // Store in global cache
-        globalDirTreeCache.set(path, {
-          data: treeData,
-          timestamp: Date.now(),
-        });
-
-        setApiData(treeData);
-        // live dataset logic removed
-      })
-      .catch((error) => {
-        console.error("Error loading directory data:", error);
-        showToast("Failed to load directory data", "error");
-
-        // Extract the detail message from the backend response
-        let errorMessage = "Unknown error";
-
-        if (error instanceof Error) {
-          // Check if it's an axios error with response data
-          if (axios.isAxiosError(error) && error.response?.data?.detail) {
-            errorMessage = error.response.data.detail;
-          } else {
-            errorMessage = error.message;
-          }
-        }
-
-        setTreeError(`Failed to load directory: ${errorMessage}`);
-      })
-      .finally(() => {
-        setIsLoading(false);
-      });
-  };
+    },
+    [showLiveOnly, showToast],
+  );
 
   // Load data when path or showLiveOnly changes
   useEffect(() => {
@@ -994,6 +998,21 @@ const DirTree = ({
     }
   }, [tree, processedData.allNodes, onSelectNode]);
 
+  // Global Shift+R keybind to refresh directory
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.shiftKey && (e.key === "r" || e.key === "R")) {
+        e.preventDefault();
+        if (path && path.trim() && !isLoading) {
+          loadDirectoryData(path, true);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [path, isLoading, loadDirectoryData]);
+
   // Show error state if there's a tree error
   if (treeError) {
     return (
@@ -1040,6 +1059,7 @@ const DirTree = ({
         <div>• Drag folders to add all its contents to basket</div>
         <div>• Use ↑/↓ buttons to cycle through datasets</div>
         <div>• Toggle button to view live measurements (auto-refreshes)</div>
+        <div>• Shift + R to refresh directory</div>
       </div>
     </div>
   );
@@ -1168,7 +1188,7 @@ const DirTree = ({
                     }
                   }}
                   disabled={isLoading || !path || !path.trim()}
-                  className="px-2 py-1 text-gray-600 hover:bg-blue-200 rounded disabled:opacity-50 transition-colors"
+                  className="px-2 py-1 text-[#6ea030] bg-[#f4fae8] hover:bg-[#dff1bd] rounded disabled:opacity-50 transition-colors"
                   title="Refresh directory"
                 >
                   <RefreshCw
