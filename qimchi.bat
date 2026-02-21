@@ -650,10 +650,18 @@ echo Press any key to stop the server and exit...
 echo ============================================
 pause >nul
 
-:: Kill the uvicorn process when user presses a key
+:: Kill all the QIMCHI processes when user presses a key
 echo Stopping server...
-taskkill /f /im python.exe 2>nul
-taskkill /f /im uvicorn.exe 2>nul
+echo Terminating QIMCHI server processes (port %PORT%)...
+
+:: Find the process listening on the port and kill its entire tree
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":%PORT% " ^| findstr "LISTENING"') do (
+    echo Killing process tree for PID %%p
+    taskkill /f /t /pid %%p 2>nul
+)
+
+:: Give processes time to terminate
+timeout /t 2 /nobreak >nul
 
 :: If we get here, the server has stopped
 echo.
