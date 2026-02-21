@@ -157,46 +157,46 @@ build_qimchi_exe:
     - $exeSize = (Get-Item "packaging/build/qimchi.exe").Length / 1MB
     - echo "Successfully built qimchi.exe ($([math]::Round($exeSize, 2)) MB)"
     
-    # Download certificate from GitLab secure files
-    - |
-      echo "Downloading certificate from GitLab secure files..."
-      glab securefile download cert.p12 -o packaging/build/cert.p12
-      if (!(Test-Path "packaging/build/cert.p12")) {
-        throw "Failed to download cert.p12 from GitLab secure files"
-      }
-      echo "Certificate downloaded successfully"
+    # # Download certificate from GitLab secure files
+    # - |
+    #   echo "Downloading certificate from GitLab secure files..."
+    #   glab securefile download cert.p12 -o packaging/build/cert.p12
+    #   if (!(Test-Path "packaging/build/cert.p12")) {
+    #     throw "Failed to download cert.p12 from GitLab secure files"
+    #   }
+    #   echo "Certificate downloaded successfully"
     
-    # Sign the EXE with the certificate
-    - |
-      echo "Signing qimchi.exe..."
-      # Use signtool from Windows SDK to sign the executable
-      $signtoolPath = "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe"
-      $signtool = Get-Item $signtoolPath | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    # # Sign the EXE with the certificate
+    # - |
+    #   echo "Signing qimchi.exe..."
+    #   # Use signtool from Windows SDK to sign the executable
+    #   $signtoolPath = "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe"
+    #   $signtool = Get-Item $signtoolPath | Sort-Object LastWriteTime -Descending | Select-Object -First 1
       
-      if (!$signtool) {
-        throw "signtool.exe not found - cannot sign executable"
-      }
+    #   if (!$signtool) {
+    #     throw "signtool.exe not found - cannot sign executable"
+    #   }
       
-      $signArgs = @(
-        "sign",
-        "/debug",
-        "/f", "packaging/build/cert.p12",
-        "/fd", "SHA256",
-        "/tr", "http://timestamp.digicert.com",
-        "/td", "SHA256",
-        "/p", "$SIGN_PASS",
-        "packaging/build/qimchi.exe"
-      )
+    #   $signArgs = @(
+    #     "sign",
+    #     "/debug",
+    #     "/f", "packaging/build/cert.p12",
+    #     "/fd", "SHA256",
+    #     "/tr", "http://timestamp.digicert.com",
+    #     "/td", "SHA256",
+    #     "/p", "$SIGN_PASS",
+    #     "packaging/build/qimchi.exe"
+    #   )
       
-      & $signtool.FullName $signArgs
+    #   & $signtool.FullName $signArgs
       
-      if ($LASTEXITCODE -ne 0) {
-        throw "Failed to sign qimchi.exe (exit code: $LASTEXITCODE)"
-      }
-      echo "Successfully signed qimchi.exe"
+    #   if ($LASTEXITCODE -ne 0) {
+    #     throw "Failed to sign qimchi.exe (exit code: $LASTEXITCODE)"
+    #   }
+    #   echo "Successfully signed qimchi.exe"
       
-      # Clean up certificate file
-      Remove-Item "packaging/build/cert.p12" -Force
+    #   # Clean up certificate file
+    #   Remove-Item "packaging/build/cert.p12" -Force
     
   artifacts:
     name: "qimchi-v$VERSION-windows"
