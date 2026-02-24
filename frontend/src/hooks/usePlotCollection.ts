@@ -47,34 +47,34 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
 
   const addPlot = useCallback(
     (config: Omit<PlotConfiguration, "id">) => {
-      console.log(
-        `[usePlotCollection] addPlot called with config:`,
-        JSON.stringify(config, null, 2)
-      );
+      // console.log(
+      //   `[usePlotCollection] addPlot called with config:`,
+      //   JSON.stringify(config, null, 2)
+      // );
 
       const prefersMemory =
         config.preferredSource === "memory" ||
         config.source === "memory" ||
         config.fpath.startsWith("memory://");
 
-      console.log(
-        `[usePlotCollection] prefersMemory=${prefersMemory}, fpath=${config.fpath}`
-      );
+      // console.log(
+      //   `[usePlotCollection] prefersMemory=${prefersMemory}, fpath=${config.fpath}`
+      // );
 
       const normalizedFpath = prefersMemory
         ? toMemoryPath(config.fpath) ?? config.fpath
         : config.fpath;
 
-      console.log(
-        `[usePlotCollection] normalizedFpath=${normalizedFpath} (original=${config.fpath})`
-      );
+      // console.log(
+      //   `[usePlotCollection] normalizedFpath=${normalizedFpath} (original=${config.fpath})`
+      // );
 
       const resolvedSource =
         config.source ?? inferSourceFromPath(normalizedFpath);
 
-      console.log(
-        `[usePlotCollection] resolvedSource=${resolvedSource}, config.source=${config.source}`
-      );
+      // console.log(
+      //   `[usePlotCollection] resolvedSource=${resolvedSource}, config.source=${config.source}`
+      // );
 
       const newPlot: PlotConfiguration = {
         ...config,
@@ -85,10 +85,10 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
         id: `plot_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       };
 
-      console.log(
-        `[usePlotCollection] Created newPlot:`,
-        JSON.stringify(newPlot, null, 2)
-      );
+      // console.log(
+      //   `[usePlotCollection] Created newPlot:`,
+      //   JSON.stringify(newPlot, null, 2)
+      // );
 
       setPlotConfigs((prev) => [...prev, newPlot]);
     },

@@ -76,17 +76,17 @@ const Explorer = ({
       onStartLoadingAttributes(node.id);
 
       try {
-        console.log("Loading attributes for:", node.path);
+        // console.log("Loading attributes for:", node.path);
         const response = await axios.post(`${PROD_BACKEND_URL}/load-attrs/`, {
           path: node.path,
         });
-        console.log("Attributes loaded for item:", node.id, response.data);
+        // console.log("Attributes loaded for item:", node.id, response.data);
 
         // Update the basket item with the loaded attributes (this also removes from loading state)
         onUpdateBasketItemAttributes(node.id, response.data);
-      } catch (error) {
+      } catch {
         showToast("Failed to load file attributes", "error");
-        console.error("Error loading attributes for item:", error);
+        // console.error("Error loading attributes for item:", error);
         // Remove from loading state even if there's an error
         onUpdateBasketItemAttributes(node.id, {});
       }
@@ -102,7 +102,7 @@ const Explorer = ({
       const response = await axios.post(
         `${PROD_BACKEND_URL}/download/`,
         { path: node.path },
-        { responseType: "blob" }
+        { responseType: "blob" },
       );
 
       // Create a download link
@@ -149,7 +149,7 @@ const Explorer = ({
       {/* Directory tree - only show when path is provided */}
       <div className="flex-1 overflow-y-auto">
         {submittedPath && submittedPath.trim() ? (
-        <DirTree
+          <DirTree
             path={submittedPath}
             onSelectNode={handleSelectNode}
             basketItems={basketItems}

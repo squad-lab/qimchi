@@ -17,6 +17,7 @@ export interface PlotRequest {
   filters_opts?: Record<string, unknown>;
   slider?: Record<string, SliderConfig>;
   source?: "memory" | "disk"; // Source of the data (memory for live, disk for ended measurements)
+  signal?: AbortSignal; // For request cancellation
 }
 
 // SliderConfig imported from centralized interfaces
@@ -39,6 +40,7 @@ export interface PlotResponse {
   plots: PlotData[];
   success: boolean;
   message: string;
+  skip_update?: boolean; // E.g., transient error
 }
 
 export interface SliderRequest {
@@ -63,13 +65,20 @@ export class PlotAPI {
   static async createPlots(request: PlotRequest): Promise<PlotResponse> {
     try {
       // console.debug("[PlotAPI] createPlots request:", request);
-      const resp = await axios.post(`${API_BASE_URL}/plot/`, request, {
+      const { signal, ...requestData } = request; // Extract signal separately
+      const resp = await axios.post(`${API_BASE_URL}/plot/`, requestData, {
         headers: { "Content-Type": "application/json" },
         responseType: "json",
+        signal: signal,
       });
 
       return resp.data as PlotResponse;
     } catch (error) {
+      // Handle abort errors gracefully
+      if (axios.isCancel(error) || (error as any).name === 'AbortError') {
+        console.log("[PlotAPI] Request cancelled");
+        throw error; // Re-throw to let caller handle
+      }
       console.error("Error creating plots:", error);
       return {
         plots: [],

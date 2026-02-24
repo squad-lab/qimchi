@@ -351,7 +351,7 @@ const Viewer = ({
 
   const handleDownload = async (items: BasketItem[]) => {
     try {
-      console.log("Downloading items:", items);
+      // console.log("Downloading items:", items);
 
       // Filter only .zarr files
       const zarrItems = items.filter(
@@ -388,8 +388,8 @@ const Viewer = ({
       window.URL.revokeObjectURL(url);
 
       console.log("Download initiated successfully");
-    } catch (error) {
-      console.error("Error downloading selected items:", error);
+    } catch {
+      // console.error("Error downloading selected items:", error);
       showToast("Failed to download selected items", "error");
     }
   };
@@ -408,17 +408,17 @@ const Viewer = ({
         const response = await axios.post(`${PROD_BACKEND_URL}/load-attrs/`, {
           path: item.path,
         });
-        console.log(
-          "Attributes loaded for dropped item:",
-          item.id,
-          response.data,
-        );
+        // console.log(
+        //   "Attributes loaded for dropped item:",
+        //   item.id,
+        //   response.data,
+        // );
 
         // Update the basket item with the loaded attributes (this also removes from loading state)
         onUpdateBasketItemAttributes(item.id, response.data);
-      } catch (error) {
+      } catch {
         showToast("Failed to load file attributes", "error");
-        console.error("Error loading attributes for dropped item:", error);
+        // console.error("Error loading attributes for dropped item:", error);
         // Remove from loading state even if there's an error
         onUpdateBasketItemAttributes(item.id, {});
       }

@@ -77,7 +77,7 @@ const ProgressBar = ({ progress }: { progress: number }) => {
 const retryRequest = async function <T>(
   fn: () => Promise<T>,
   maxRetries = 2,
-  delay = 1000
+  delay = 1000,
 ): Promise<T> {
   let lastError: Error;
 
@@ -90,7 +90,7 @@ const retryRequest = async function <T>(
       if (attempt < maxRetries) {
         // Wait before retrying with exponential backoff
         await new Promise((resolve) =>
-          setTimeout(resolve, delay * Math.pow(2, attempt))
+          setTimeout(resolve, delay * Math.pow(2, attempt)),
         );
       }
     }
@@ -103,7 +103,7 @@ const retryRequest = async function <T>(
 const searchInObject = (
   obj: unknown,
   query: string,
-  path: string[] = []
+  path: string[] = [],
 ): Array<{ key: string; value: string; path: string[] }> => {
   const results: Array<{ key: string; value: string; path: string[] }> = [];
   const lowerQuery = query.toLowerCase();
@@ -153,13 +153,13 @@ const Metadata = ({ basketItems }: MetadataProps) => {
 
   // State for metadata - now stores metadata for each basket item
   const [metadataMap, setMetadataMap] = useState<Map<string, Metadata>>(
-    new Map()
+    new Map(),
   );
   const [loadingMetadata, setLoadingMetadata] = useState<Set<string>>(
-    new Set()
+    new Set(),
   );
   const [metadataErrors, setMetadataErrors] = useState<Map<string, string>>(
-    new Map()
+    new Map(),
   );
   const [collapsedCards, setCollapsedCards] = useState<Set<string>>(new Set());
 
@@ -292,7 +292,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
           item.type === "file" &&
           !metadataMap.has(item.id) &&
           !loadingMetadata.has(item.id) &&
-          !ongoingRequests.has(item.id)
+          !ongoingRequests.has(item.id),
       );
 
       if (newItems.length === 0) {
@@ -301,7 +301,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
 
       // Set loading state for all new items at once
       setLoadingMetadata(
-        (prev) => new Set([...prev, ...newItems.map((item) => item.id)])
+        (prev) => new Set([...prev, ...newItems.map((item) => item.id)]),
       );
 
       // Clear any previous errors for these items
@@ -341,22 +341,22 @@ const Metadata = ({ basketItems }: MetadataProps) => {
               // Update metadata map for successful response
               setMetadataMap(
                 (prev) =>
-                  new Map([...prev, [item.id, response.data as Metadata]])
+                  new Map([...prev, [item.id, response.data as Metadata]]),
               );
-              console.log("Metadata loaded for item:", item.id);
+              // console.log("Metadata loaded for item:", item.id);
 
               return { success: true, itemId: item.id };
             } catch (error) {
-              console.error(
-                "Error fetching metadata for item:",
-                item.id,
-                error
-              );
+              // console.error(
+              //   "Error fetching metadata for item:",
+              //   item.id,
+              //   error
+              // );
 
               // Update error state for failed response
               setMetadataErrors(
                 (prev) =>
-                  new Map([...prev, [item.id, "Failed to load metadata"]])
+                  new Map([...prev, [item.id, "Failed to load metadata"]]),
               );
 
               return { success: false, itemId: item.id, error };
@@ -377,7 +377,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
 
           // Track the ongoing request
           setOngoingRequests(
-            (prev) => new Map([...prev, [item.id, requestPromise]])
+            (prev) => new Map([...prev, [item.id, requestPromise]]),
           );
 
           return requestPromise;
@@ -471,11 +471,12 @@ const Metadata = ({ basketItems }: MetadataProps) => {
                 <ProgressBar
                   progress={
                     basketItems.filter(
-                      (item) => item.type === "file" && metadataMap.has(item.id)
+                      (item) =>
+                        item.type === "file" && metadataMap.has(item.id),
                     ).length /
                     Math.max(
                       1,
-                      basketItems.filter((item) => item.type === "file").length
+                      basketItems.filter((item) => item.type === "file").length,
                     )
                   }
                 />
@@ -551,11 +552,11 @@ const Metadata = ({ basketItems }: MetadataProps) => {
               >
                 {(() => {
                   const fileItems = basketItems.filter(
-                    (item) => item.type === "file"
+                    (item) => item.type === "file",
                   );
                   const fileItemIds = fileItems.map((item) => item.id);
                   const allCollapsed = fileItemIds.every((id) =>
-                    collapsedCards.has(id)
+                    collapsedCards.has(id),
                   );
 
                   return allCollapsed ? (
@@ -656,7 +657,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
                                 value: string;
                                 path: string[];
                               },
-                              index: number
+                              index: number,
                             ) => (
                               <div
                                 key={index}
@@ -676,7 +677,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
                                   </span>
                                 </div>
                               </div>
-                            )
+                            ),
                           )}
                         </div>
                       </div>
@@ -802,7 +803,7 @@ const MetadataCard = memo(
         </div>
       )}
     </div>
-  )
+  ),
 );
 
 MetadataCard.displayName = "MetadataCard";

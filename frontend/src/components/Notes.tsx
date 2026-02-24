@@ -60,7 +60,7 @@ export default function Notes({
         Number(d),
         Number(hh),
         Number(mm),
-        Number(ss)
+        Number(ss),
       );
     }
 
@@ -109,7 +109,7 @@ export default function Notes({
 
   // Filter basket items to only show .zarr files
   const zarrItems = basketItems.filter(
-    (item) => item.type === "file" && item.path.endsWith(".zarr")
+    (item) => item.type === "file" && item.path.endsWith(".zarr"),
   );
 
   // Handle selection change
@@ -123,7 +123,7 @@ export default function Notes({
         setInternalSelectedItemId(itemId);
       }
     },
-    [externalSelectedItemId, onSelectedItemChange]
+    [externalSelectedItemId, onSelectedItemChange],
   );
 
   // Close dropdown when clicking outside
@@ -175,7 +175,7 @@ export default function Notes({
         {
           signal: controller.signal,
           timeout: 10000, // 10 second timeout
-        }
+        },
       );
 
       // Use server-provided last_saved when possible
@@ -200,12 +200,12 @@ export default function Notes({
         return;
       }
 
-      console.error("Error saving notes:", err);
+      // console.error("Error saving notes:", err);
       setSaveStatus("error");
       setError(
         axios.isAxiosError(err)
           ? err.response?.data?.detail || err.message
-          : "Failed to save notes"
+          : "Failed to save notes",
       );
 
       // Reset status after a delay
@@ -242,7 +242,7 @@ export default function Notes({
     return () => {
       window.removeEventListener(
         "notes:append",
-        handleNotesAppend as EventListener
+        handleNotesAppend as EventListener,
       );
     };
   }, [saveNotes, selectedItem]);
@@ -268,7 +268,7 @@ export default function Notes({
         {
           signal: controller.signal,
           timeout: 10000, // 10 second timeout
-        }
+        },
       );
 
       // Response contains notes and optional last_saved/filename
@@ -285,11 +285,11 @@ export default function Notes({
         return;
       }
 
-      console.error("Error loading notes:", err);
+      // console.error("Error loading notes:", err);
       setError(
         axios.isAxiosError(err)
           ? err.response?.data?.detail || err.message
-          : "Failed to load notes"
+          : "Failed to load notes",
       );
       setNotes("");
     } finally {
@@ -435,8 +435,8 @@ export default function Notes({
       setNotes(newNotes);
       setHasUnsavedChanges(true);
       setSaveStatus("idle");
-    } catch (error) {
-      console.error("Error processing dropped items:", error);
+    } catch {
+      // console.error("Error processing dropped items:", error);
       setError("Failed to process dropped items");
     }
   };

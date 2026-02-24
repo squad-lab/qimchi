@@ -32,8 +32,8 @@ export const useCopyToClipboard = () => {
         }
         return success;
       }
-    } catch (error) {
-      console.error('Failed to copy to clipboard:', error);
+    } catch {
+      // console.error('Failed to copy to clipboard:', error);
       return false;
     }
   }, []);

@@ -50,7 +50,7 @@ const PlotComposer = ({
   const [plotType, setPlotType] = useState<PlotType>("LinePlot");
   const [isPlotTypeDropdownOpen, setIsPlotTypeDropdownOpen] = useState(false);
   const [dragOverField, setDragOverField] = useState<"x" | "y" | "z" | null>(
-    null
+    null,
   );
   const [isExpanded, setIsExpanded] = useState(true);
   const [draggedFieldType, setDraggedFieldType] = useState<
@@ -151,7 +151,7 @@ const PlotComposer = ({
   // Enhanced validation function
   const validateDrop = (
     fieldType: "independent" | "dependent" | null,
-    field: "x" | "y" | "z"
+    field: "x" | "y" | "z",
   ): boolean => {
     if (!fieldType) return true; // Allow if we can't determine type
 
@@ -271,7 +271,7 @@ const PlotComposer = ({
         case "y":
           setYFields((prev) => {
             const filtered = prev.filter(
-              (f) => !plotFields.some((pf) => pf.id === f.id)
+              (f) => !plotFields.some((pf) => pf.id === f.id),
             );
             return [...filtered, ...plotFields];
           });
@@ -279,16 +279,16 @@ const PlotComposer = ({
         case "z":
           setZFields((prev) => {
             const filtered = prev.filter(
-              (f) => !plotFields.some((pf) => pf.id === f.id)
+              (f) => !plotFields.some((pf) => pf.id === f.id),
             );
             // Z-axis is only enabled for HeatMap (multiple fields allowed)
             return [...filtered, ...plotFields];
           });
           break;
       }
-    } catch (error) {
+    } catch {
       showToast("Failed to handle dropped plot field", "error");
-      console.error("Error handling dropped plot field:", error);
+      // console.error("Error handling dropped plot field:", error);
     }
   };
 
@@ -332,7 +332,7 @@ const PlotComposer = ({
       // Extract unique source paths from all fields
       const allFields = [...xFields, ...yFields, ...zFields];
       const fpaths = Array.from(
-        new Set(allFields.map((field) => field.source))
+        new Set(allFields.map((field) => field.source)),
       );
 
       // For LinePlot, we typically want X as independent and Y as dependent
@@ -364,17 +364,17 @@ const PlotComposer = ({
           preferredSource: source,
         };
 
-        console.log(
-          `[PlotComposer] Creating plot with config:`,
-          JSON.stringify(config, null, 2)
-        );
+        // console.log(
+        //   `[PlotComposer] Creating plot with config:`,
+        //   JSON.stringify(config, null, 2)
+        // );
         onCreatePlot(config);
       });
     } else if (onCreatePlotLegacy) {
       // Backward compatibility with old PlotRequest format
       const allFields = [...xFields, ...yFields, ...zFields];
       const fpaths = Array.from(
-        new Set(allFields.map((field) => field.source))
+        new Set(allFields.map((field) => field.source)),
       );
 
       let finalIndeps: string[] = [];
@@ -406,7 +406,7 @@ const PlotComposer = ({
     fields: PlotField[],
     label: string,
     color: string,
-    bgColor: string
+    bgColor: string,
   ) => {
     const isActive = dragOverField === field;
     const isInvalid = invalidDropField === field;
@@ -533,10 +533,10 @@ const PlotComposer = ({
                   {field === "x"
                     ? "Drag any field here (max 1)"
                     : field === "y"
-                    ? plotType === "LinePlot"
-                      ? "Drag dependents here"
-                      : "Drag any field here"
-                    : "Drag dependents here"}
+                      ? plotType === "LinePlot"
+                        ? "Drag dependents here"
+                        : "Drag any field here"
+                      : "Drag dependents here"}
                 </div>
               ) : (
                 <div className="flex flex-wrap gap-2">
@@ -544,7 +544,7 @@ const PlotComposer = ({
                     // Extract the source ID from the plotField ID (format: basketItemId-fieldName)
                     const sourceId = plotField.id.substring(
                       0,
-                      plotField.id.lastIndexOf("-")
+                      plotField.id.lastIndexOf("-"),
                     );
 
                     return (
@@ -611,10 +611,10 @@ const PlotComposer = ({
                 {field === "x"
                   ? "Drag any field here (max 1)"
                   : field === "y"
-                  ? plotType === "LinePlot"
-                    ? "Drag dependents here"
-                    : "Drag any field here"
-                  : "Drag dependents here"}
+                    ? plotType === "LinePlot"
+                      ? "Drag dependents here"
+                      : "Drag any field here"
+                    : "Drag dependents here"}
               </div>
             ) : (
               <div className="flex flex-wrap gap-2">
@@ -622,7 +622,7 @@ const PlotComposer = ({
                   // Extract the source ID from the plotField ID (format: basketItemId-fieldName)
                   const sourceId = plotField.id.substring(
                     0,
-                    plotField.id.lastIndexOf("-")
+                    plotField.id.lastIndexOf("-"),
                   );
 
                   return (

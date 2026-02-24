@@ -109,7 +109,7 @@ const FieldItem = ({
 
     e.dataTransfer.setData(
       "application/plot-fields",
-      JSON.stringify(itemsToDrag)
+      JSON.stringify(itemsToDrag),
     );
     e.dataTransfer.effectAllowed = "copy";
   };
@@ -201,7 +201,7 @@ const Basket = ({
   const copyToClipboard = async (
     text: string,
     itemId: string,
-    type: "filename" | "path"
+    type: "filename" | "path",
   ): Promise<boolean> => {
     try {
       // Modern API
@@ -210,7 +210,7 @@ const Basket = ({
         setCopiedItems((prev) => ({ ...prev, [itemId]: type }));
         setTimeout(
           () => setCopiedItems((prev) => ({ ...prev, [itemId]: null })),
-          2000
+          2000,
         );
         return true;
       }
@@ -232,7 +232,7 @@ const Basket = ({
           setCopiedItems((prev) => ({ ...prev, [itemId]: type }));
           setTimeout(
             () => setCopiedItems((prev) => ({ ...prev, [itemId]: null })),
-            2000
+            2000,
           );
         }
         return success;
@@ -286,7 +286,7 @@ const Basket = ({
                   <span className="font-medium text-blue-200">{key}:</span>{" "}
                   <span className="text-white">{value}</span>
                 </div>
-              )
+              ),
           )}
       </div>
     ) : (
@@ -569,7 +569,7 @@ const Basket = ({
                                 await copyToClipboard(
                                   item.name,
                                   item.id,
-                                  "filename"
+                                  "filename",
                                 )
                               }
                               className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
@@ -591,16 +591,16 @@ const Basket = ({
                                   const response = await axios.post(
                                     `${PROD_BACKEND_URL}/download-multiple/`,
                                     { paths: [item.path] },
-                                    { responseType: "blob" }
+                                    { responseType: "blob" },
                                   );
                                   const url = window.URL.createObjectURL(
-                                    new Blob([response.data])
+                                    new Blob([response.data]),
                                   );
                                   const link = document.createElement("a");
                                   link.href = url;
                                   link.setAttribute(
                                     "download",
-                                    `${item.name}.zip`
+                                    `${item.name}.zip`,
                                   );
                                   document.body.appendChild(link);
                                   link.click();
@@ -609,7 +609,7 @@ const Basket = ({
                                 } catch (error) {
                                   console.error(
                                     "Error downloading item:",
-                                    error
+                                    error,
                                   );
                                   showToast("Failed to download item", "error");
                                 }

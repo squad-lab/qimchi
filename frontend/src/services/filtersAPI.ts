@@ -27,9 +27,9 @@ export const applyFilters = async (
   } catch (error) {
     if (axios.isAxiosError(error)) {
       if (error.code === "ECONNABORTED") {
-        console.error(
-          "[FiltersAPI] applyFilters request timed out after 10 seconds"
-        );
+        // console.error(
+        //   "[FiltersAPI] applyFilters request timed out after 10 seconds"
+        // );
         throw new Error("Request timed out after 10 seconds");
       }
       if (error.response) {
@@ -40,7 +40,7 @@ export const applyFilters = async (
         );
       }
     }
-    console.error("[FiltersAPI] Error applying filters:", error);
+    // console.error("[FiltersAPI] Error applying filters:", error);
     throw error;
   }
 };

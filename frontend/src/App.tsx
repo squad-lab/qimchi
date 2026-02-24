@@ -23,7 +23,7 @@ const App: React.FC = () => {
   );
 
   const handleSelectNode = (node: TreeNode) => {
-    console.log("Selected node:", node);
+    // console.log("Selected node:", node);
     setSelectedNode(node);
   };
 

@@ -536,6 +536,18 @@ async def create_plots(request: PlotRequest) -> PlotResponse:
                 dataset.attrs["path"] = fpath
                 datasets.append(dataset)
             except Exception as e:
+                # For live measurements, silently skip update on transient errors (file locking, permission issues)
+                if fpath.startswith(MEMORY_PROTOCOL):
+                    logger.warning(
+                        f"Transient file access error for live dataset {fpath}: {type(e).__name__}: {e}. Skipping update."
+                    )
+                    return PlotResponse(
+                        plots=[],
+                        success=True,
+                        message="Skipping update due to transient file access error",
+                        skip_update=True,
+                    )
+                # For disk measurements, return error as before
                 return PlotResponse(
                     plots=[],
                     success=False,

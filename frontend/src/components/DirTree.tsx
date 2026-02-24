@@ -221,7 +221,7 @@ const DirTree = ({
         })
         .then((response) => {
           console.log("API Response status:", response.status);
-          console.log("API Response data:", response.data);
+          // console.log("API Response data:", response.data);
 
           // Convert the API response to TreeNode format
           interface ApiNode {
@@ -258,7 +258,7 @@ const DirTree = ({
           const treeData = Array.isArray(response.data)
             ? response.data.map(convertApiData)
             : [convertApiData(response.data)];
-          console.log("Converted tree data:", treeData);
+          // console.log("Converted tree data:", treeData);
 
           // Store in global cache
           globalDirTreeCache.set(path, {
@@ -395,7 +395,7 @@ const DirTree = ({
                           console.log(
                             "Attributes loaded for auto-added live measurement:",
                             node.id,
-                            response.data,
+                            // response.data,
                           );
                           onUpdateBasketItemAttributes(node.id, response.data);
                         })
@@ -686,11 +686,11 @@ const DirTree = ({
       const timeoutId = setTimeout(() => {
         // Don't expand in chrono mode since we only have leaf nodes
         if (sortBy !== "chrono") {
-          console.log(
-            "Auto-expanding tree with",
-            rootNodes.length,
-            "root nodes",
-          );
+          // console.log(
+          //   "Auto-expanding tree with",
+          //   rootNodes.length,
+          //   "root nodes",
+          // );
           // Force a collapse/expand cycle to ensure tree shows items
           tree.collapseAll();
           setTimeout(() => {
@@ -806,7 +806,7 @@ const DirTree = ({
       onRemoveBasketItem?.(node.id);
     } else {
       // Else, add to basket only if file, not folder
-      console.log("Adding to basket:", node);
+      // console.log("Adding to basket:", node);
       onAddToBasket?.(node);
     }
   };
@@ -841,10 +841,10 @@ const DirTree = ({
     if (selectedNodes.length === 0) return;
 
     try {
-      console.log(
-        "Downloading selected items:",
-        selectedNodes.map((n) => n.path),
-      );
+      // console.log(
+      //   "Downloading selected items:",
+      //   selectedNodes.map((n) => n.path),
+      // );
 
       // Call the backend download endpoint with multiple paths
       const response = await axios.post(

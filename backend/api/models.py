@@ -40,6 +40,7 @@ class PlotResponse(BaseModel):
     plots: List[Dict]
     success: bool
     message: str = ""
+    skip_update: bool = False  # E.g., transient file locks or other transient errors
 
 
 class FilterRequest(BaseModel):
