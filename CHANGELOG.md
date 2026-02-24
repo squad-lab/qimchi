@@ -10,6 +10,7 @@
 - [Fix] Ensure autoscaling of axes after swapping
 - [Fix] Corrected targeting of Qimchi processes while exiting
 - [Misc] Updated help bulb text to reflect current commands available in DirTree
+- [Misc] Removed build signing from CI for now
 
 ### v0.3.3 - 2026-01-21
 
