@@ -128,7 +128,7 @@ const Explorer = ({
       <div className="flex mb-4 w-full">
         <input
           type="text"
-          className="w-full border border-gray-300 px-3 py-2 rounded-l shadow-sm focus:outline-none focus:ring focus:ring-blue-300 focus:border-blue-300 text-sm"
+          className="flex-1 min-w-0 border border-gray-300 px-3 py-2 rounded-l shadow-sm focus:outline-none focus:ring focus:ring-blue-300 focus:border-blue-300 text-sm"
           placeholder="Enter folder path"
           value={path}
           onChange={(e) => updateExplorerState({ path: e.target.value })}

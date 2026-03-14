@@ -1001,7 +1001,14 @@ const DirTree = ({
   // Global Shift+R keybind to refresh directory
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.shiftKey && (e.key === "r" || e.key === "R")) {
+      const isExactShiftR =
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.metaKey &&
+        (e.key === "r" || e.key === "R");
+
+      if (isExactShiftR) {
         e.preventDefault();
         if (path && path.trim() && !isLoading) {
           loadDirectoryData(path, true);
