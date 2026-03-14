@@ -685,7 +685,7 @@ class Normalize(Filter):
         Applies the normalization filter to a 1D plot.
 
         """
-        self.new_fig.data[0].y = self.y_axis / np.nanmax(self.y_axis)
+        self.new_fig.data[0].y = self.y_axis / np.nanmax(np.abs(self.y_axis))
         self.new_fig.update_layout(yaxis=dict(title=dict(text=f"Norm {self.y_label}")))
         self._update_title("Norm")
 
@@ -698,14 +698,14 @@ class Normalize(Filter):
 
         match self.axis:
             case "z":
-                z_data = self.z_axis / np.nanmax(self.z_axis)
+                z_data = self.z_axis / np.nanmax(np.abs(self.z_axis))
             # NOTE: [i, j] = [row, col] = [y, x]
             case "x":
                 # Normalize each column (along x-axis)
-                z_data = self.z_axis / np.nanmax(self.z_axis, axis=0)
+                z_data = self.z_axis / np.nanmax(np.abs(self.z_axis), axis=0)
             case "y":
                 # Normalize each row (along y-axis)
-                z_data = self.z_axis / np.nanmax(self.z_axis, axis=1)[..., np.newaxis]
+                z_data = self.z_axis / np.nanmax(np.abs(self.z_axis), axis=1)[..., np.newaxis]
             case _:
                 err = f"Invalid value of `axis={self.axis}` for normalization."
                 logger.error(err)
