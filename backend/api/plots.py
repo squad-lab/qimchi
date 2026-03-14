@@ -5,7 +5,7 @@ FastAPI endpoints for creating and managing plots based on xarray datasets.
 
 from pathlib import Path
 from typing import Dict, List
-
+import numpy as np
 import xarray as xr
 from fastapi import APIRouter, HTTPException
 
@@ -204,14 +204,20 @@ def gen_slider_config(dataset: xr.Dataset, indeps: List[str]) -> Dict:
         if dim not in indeps:
             try:
                 vals = dataset.coords[dim].values
-                if len(vals) > 1:
-                    # Calculate step as difference between consecutive values - assumes regular spacing
-                    step = float(vals[1] - vals[0])
+                unique_vals = np.unique(vals)
+                if len(unique_vals) > 1:
+                    # Calculate step as the median difference between consecutive sorted values to handle float noise reliably 
+                    diffs = np.diff(unique_vals)
+                    # Use the median to avoid tiny differences from float imprecision
+                    step = float(np.median(diffs))
+                    # Ensure step is positive and not virtually zero
+                    if step <= 0 or np.isnan(step):
+                        step = 1.0
                     slider_config[dim] = {
-                        "min": float(vals.min()),
-                        "max": float(vals.max()),
+                        "min": float(unique_vals.min()),
+                        "max": float(unique_vals.max()),
                         "step": step,
-                        "value": float(vals.min()),  # Default to minimum value
+                        "value": float(unique_vals.min()),  # Default to minimum value
                     }
                     logger.debug(
                         f"Generated slider for dimension '{dim}': {slider_config[dim]}"
