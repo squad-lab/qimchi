@@ -44,6 +44,7 @@ interface AppearanceModalProps {
   onChange: (settings: PlotAppearanceSettings) => void;
   plotType?: string;
   plotTitle?: string;
+  plotJson?: any;
 }
 
 // Options based on the Python backend
@@ -408,8 +409,9 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
   onClose,
   settings,
   onChange,
-  plotType = "line",
+  plotType = "line", // Fallback if detecting fails
   plotTitle,
+  plotJson,
 }) => {
   const [localSettings, setLocalSettings] =
     useState<PlotAppearanceSettings>(settings);
@@ -1275,10 +1277,10 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                             onClick={() =>
                               updateSetting(["hmap", "rangecolor"], null)
                             }
-                            className="p-1 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                            className="p-1 rounded text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                             aria-label="Reset color range"
                           >
-                            <RotateCcw size={14} />
+                            <RotateCcw size={16} />
                           </button>
                         </Tooltip>
                       )}
@@ -1290,20 +1292,87 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                     </div>
                   </div>
                   <div className="mb-2 mt-2 px-1">
-                    <DualThumbSlider
-                      min={0}
-                      max={100}
-                      step={1}
-                      value={localSettings.hmap?.rangecolor || [0, 100]}
-                      onChange={(value: [number, number]) => {
-                        updateSetting(["hmap", "rangecolor"], value);
-                      }}
-                      title="Color Range Percentages (Min, Max)"
-                    />
-                    <div className="flex justify-between text-xs text-gray-400 mt-1">
-                      <span>{(localSettings.hmap?.rangecolor?.[0] ?? 0)}%</span>
-                      <span>{(localSettings.hmap?.rangecolor?.[1] ?? 100)}%</span>
-                    </div>
+                    {(() => {
+                      // Extract bounds to display
+                      let zMin = Infinity;
+                      let zMax = -Infinity;
+                      
+                      if (plotJson) {
+                        const origLayout = plotJson.layout as any;
+                        if (
+                          typeof origLayout?.coloraxis?.cmin === "number" &&
+                          typeof origLayout?.coloraxis?.cmax === "number" &&
+                          !isNaN(origLayout.coloraxis.cmin) &&
+                          !isNaN(origLayout.coloraxis.cmax)
+                        ) {
+                          zMin = origLayout.coloraxis.cmin;
+                          zMax = origLayout.coloraxis.cmax;
+                        } else {
+                          (plotJson.data || []).forEach((trace: any) => {
+                            if (trace.type === "heatmap" || trace.type === "heatmapgl") {
+                              if (typeof trace.zmin === "number" && typeof trace.zmax === "number") {
+                                if (trace.zmin < zMin) zMin = trace.zmin;
+                                if (trace.zmax > zMax) zMax = trace.zmax;
+                              } else if (trace.z) {
+                                const zData = trace.z as any;
+                                const isNested = Array.isArray(zData[0]) || (ArrayBuffer.isView(zData[0]) && !(zData[0] instanceof DataView));
+                                if (isNested) {
+                                  for (let i = 0; i < zData.length; i++) {
+                                    for (let j = 0; j < zData[i].length; j++) {
+                                      const val = +zData[i][j];
+                                      if (!isNaN(val)) {
+                                        if (val < zMin) zMin = val;
+                                        if (val > zMax) zMax = val;
+                                      }
+                                    }
+                                  }
+                                } else if (Array.isArray(zData) || ArrayBuffer.isView(zData)) {
+                                  for (let i = 0; i < (zData as any).length; i++) {
+                                    const val = +(zData as any)[i];
+                                    if (!isNaN(val)) {
+                                      if (val < zMin) zMin = val;
+                                      if (val > zMax) zMax = val;
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          });
+                        }
+                      }
+
+                      const hasValidBounds = zMin !== Infinity && zMax !== -Infinity;
+                      const range = hasValidBounds ? (zMax - zMin) : 0;
+                      
+                      const pctMin = localSettings.hmap?.rangecolor?.[0] ?? 0;
+                      const pctMax = localSettings.hmap?.rangecolor?.[1] ?? 100;
+
+                      const displayMin = hasValidBounds ? (zMin + (range * pctMin) / 100).toFixed(2) : `${pctMin}%`;
+                      const displayMax = hasValidBounds ? (zMin + (range * pctMax) / 100).toFixed(2) : `${pctMax}%`;
+
+                      return (
+                        <>
+                          <DualThumbSlider
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={localSettings.hmap?.rangecolor || [0, 100]}
+                            onChange={(value: [number, number]) => {
+                              updateSetting(["hmap", "rangecolor"], value);
+                            }}
+                            title={`Color Range: ${displayMin} to ${displayMax}`}
+                            displayMin={displayMin}
+                            displayMax={displayMax}
+                          />
+                          {hasValidBounds && (
+                            <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+                              <span>Data min: {zMin.toFixed(2)}</span>
+                              <span>Data max: {zMax.toFixed(2)}</span>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>

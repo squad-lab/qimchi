@@ -2250,6 +2250,7 @@ const PlotWrapper: React.FC<Props> = ({
         onChange={handleAppearanceSettingsChange}
         plotType={plotType}
         plotTitle={plotTitle}
+        plotJson={basePlotJson}
       />
 
       {/* Filters Modal */}
