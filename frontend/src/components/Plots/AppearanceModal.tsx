@@ -206,7 +206,15 @@ interface ColorscaleCategory {
 
 const COLORSCALE_CATEGORIES: ColorscaleCategory[] = [
   {
-    label: "Sequential (Recommended)",
+    label: "Recommended",
+    options: [
+      { label: "Viridis", value: "viridis" },
+      { label: "Inferno", value: "inferno" },
+      { label: "Balance", value: "balance" },
+    ].filter((opt) => availableColorscales.includes(opt.value)),
+  },
+  {
+    label: "Sequential (Uniform)",
     options: [
       { label: "Viridis", value: "viridis" },
       { label: "Plasma", value: "plasma" },
@@ -448,7 +456,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
         onChange(newSettings);
       }, 50); // Reduced from 150ms to 50ms for more responsive appearance updates
     },
-    [onChange]
+    [onChange],
   );
 
   // Simple direct history update
@@ -612,7 +620,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
   };
 
   const mergeWithDefaults = (
-    imported: Partial<PlotAppearanceSettings>
+    imported: Partial<PlotAppearanceSettings>,
   ): PlotAppearanceSettings => {
     return {
       hmap: {
@@ -677,7 +685,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
         console.error("Error importing theme:", error);
         showToast(
           "Error parsing theme file. Please check the file format.",
-          "error"
+          "error",
         );
       }
     };
@@ -717,7 +725,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
 
     const files = Array.from(e.dataTransfer.files);
     const jsonFile = files.find(
-      (file) => file.type === "application/json" || file.name.endsWith(".json")
+      (file) => file.type === "application/json" || file.name.endsWith(".json"),
     );
 
     if (jsonFile) {
@@ -884,7 +892,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                     key={tab.key}
                     onClick={() =>
                       setActiveTab(
-                        tab.key as "style" | "x-axis" | "y-axis" | "heatmap"
+                        tab.key as "style" | "x-axis" | "y-axis" | "heatmap",
                       )
                     }
                     className={`px-4 py-2 text-sm font-medium transition-colors ${
@@ -906,7 +914,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                     key={tab.key}
                     onClick={() =>
                       setActiveTab(
-                        tab.key as "style" | "x-axis" | "y-axis" | "heatmap"
+                        tab.key as "style" | "x-axis" | "y-axis" | "heatmap",
                       )
                     }
                     className={`px-4 py-2 text-sm font-medium transition-colors ${
@@ -996,7 +1004,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["line", "width"],
-                            parseFloat(e.target.value)
+                            parseFloat(e.target.value),
                           )
                         }
                         className="w-full"
@@ -1021,7 +1029,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["line", "opacity"],
-                            parseFloat(e.target.value)
+                            parseFloat(e.target.value),
                           )
                         }
                         className="w-full"
@@ -1078,7 +1086,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["line", "smoothing"],
-                            parseFloat(e.target.value)
+                            parseFloat(e.target.value),
                           )
                         }
                         className="w-full"
@@ -1163,7 +1171,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["marker", "size"],
-                            parseInt(e.target.value)
+                            parseInt(e.target.value),
                           )
                         }
                         className="w-full"
@@ -1188,7 +1196,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["marker", "opacity"],
-                            parseFloat(e.target.value)
+                            parseFloat(e.target.value),
                           )
                         }
                         className="w-full"
@@ -1237,7 +1245,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                   </select>
                   {localSettings.hmap?.colorscale &&
                     CYCLICAL_COLORSCALES.includes(
-                      localSettings.hmap.colorscale
+                      localSettings.hmap.colorscale,
                     ) && (
                       <div className="mt-2 flex items-start gap-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
                         <AlertTriangle
@@ -1288,7 +1296,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                             ?.rangecolor || [null, null];
                           updateSetting(
                             ["hmap", "rangecolor"],
-                            [value, currentRange[1]]
+                            [value, currentRange[1]],
                           );
                         }}
                         className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -1314,7 +1322,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                             ?.rangecolor || [null, null];
                           updateSetting(
                             ["hmap", "rangecolor"],
-                            [currentRange[0], value]
+                            [currentRange[0], value],
                           );
                         }}
                         className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -1359,7 +1367,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                           onChange={(e) =>
                             updateSetting(
                               ["x", "maj", "showgrid"],
-                              e.target.checked
+                              e.target.checked,
                             )
                           }
                           className="sr-only peer"
@@ -1401,7 +1409,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                             onChange={(e) =>
                               updateSetting(
                                 ["x", "maj", "gridcolor"],
-                                e.target.value
+                                e.target.value,
                               )
                             }
                             className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
@@ -1443,7 +1451,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                               onChange={(e) =>
                                 updateSetting(
                                   ["x", "maj", "gridwidth"],
-                                  parseFloat(e.target.value)
+                                  parseFloat(e.target.value),
                                 )
                               }
                               className="w-full"
@@ -1467,7 +1475,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["x", "maj", "nticks"],
-                            parseInt(e.target.value)
+                            parseInt(e.target.value),
                           )
                         }
                         className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -1486,7 +1494,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["x", "maj", "tickcolor"],
-                            e.target.value
+                            e.target.value,
                           )
                         }
                         className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
@@ -1511,7 +1519,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["x", "maj", "tickwidth"],
-                            parseFloat(e.target.value)
+                            parseFloat(e.target.value),
                           )
                         }
                         className="w-full"
@@ -1536,7 +1544,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["x", "maj", "ticklen"],
-                            parseInt(e.target.value)
+                            parseInt(e.target.value),
                           )
                         }
                         className="w-full"
@@ -1561,7 +1569,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["x", "maj", "tickangle"],
-                            parseInt(e.target.value)
+                            parseInt(e.target.value),
                           )
                         }
                         className="w-full"
@@ -1594,7 +1602,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                           onChange={(e) =>
                             updateSetting(
                               ["x", "min", "showgrid"],
-                              e.target.checked
+                              e.target.checked,
                             )
                           }
                           className="sr-only peer"
@@ -1620,7 +1628,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                             onChange={(e) =>
                               updateSetting(
                                 ["x", "min", "gridcolor"],
-                                e.target.value
+                                e.target.value,
                               )
                             }
                             className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
@@ -1662,7 +1670,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                               onChange={(e) =>
                                 updateSetting(
                                   ["x", "min", "gridwidth"],
-                                  parseFloat(e.target.value)
+                                  parseFloat(e.target.value),
                                 )
                               }
                               className="w-full"
@@ -1686,7 +1694,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["x", "min", "nticks"],
-                            parseInt(e.target.value)
+                            parseInt(e.target.value),
                           )
                         }
                         className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -1705,7 +1713,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["x", "min", "tickcolor"],
-                            e.target.value
+                            e.target.value,
                           )
                         }
                         className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
@@ -1730,7 +1738,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["x", "min", "tickwidth"],
-                            parseFloat(e.target.value)
+                            parseFloat(e.target.value),
                           )
                         }
                         className="w-full"
@@ -1755,7 +1763,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["x", "min", "ticklen"],
-                            parseInt(e.target.value)
+                            parseInt(e.target.value),
                           )
                         }
                         className="w-full"
@@ -1789,7 +1797,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                           onChange={(e) =>
                             updateSetting(
                               ["y", "maj", "showgrid"],
-                              e.target.checked
+                              e.target.checked,
                             )
                           }
                           className="sr-only peer"
@@ -1831,7 +1839,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                             onChange={(e) =>
                               updateSetting(
                                 ["y", "maj", "gridcolor"],
-                                e.target.value
+                                e.target.value,
                               )
                             }
                             className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
@@ -1873,7 +1881,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                               onChange={(e) =>
                                 updateSetting(
                                   ["y", "maj", "gridwidth"],
-                                  parseFloat(e.target.value)
+                                  parseFloat(e.target.value),
                                 )
                               }
                               className="w-full"
@@ -1897,7 +1905,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["y", "maj", "nticks"],
-                            parseInt(e.target.value)
+                            parseInt(e.target.value),
                           )
                         }
                         className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -1916,7 +1924,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["y", "maj", "tickcolor"],
-                            e.target.value
+                            e.target.value,
                           )
                         }
                         className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
@@ -1941,7 +1949,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["y", "maj", "tickwidth"],
-                            parseFloat(e.target.value)
+                            parseFloat(e.target.value),
                           )
                         }
                         className="w-full"
@@ -1966,7 +1974,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["y", "maj", "ticklen"],
-                            parseInt(e.target.value)
+                            parseInt(e.target.value),
                           )
                         }
                         className="w-full"
@@ -1991,7 +1999,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["y", "maj", "tickangle"],
-                            parseInt(e.target.value)
+                            parseInt(e.target.value),
                           )
                         }
                         className="w-full"
@@ -2024,7 +2032,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                           onChange={(e) =>
                             updateSetting(
                               ["y", "min", "showgrid"],
-                              e.target.checked
+                              e.target.checked,
                             )
                           }
                           className="sr-only peer"
@@ -2050,7 +2058,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                             onChange={(e) =>
                               updateSetting(
                                 ["y", "min", "gridcolor"],
-                                e.target.value
+                                e.target.value,
                               )
                             }
                             className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
@@ -2092,7 +2100,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                               onChange={(e) =>
                                 updateSetting(
                                   ["y", "min", "gridwidth"],
-                                  parseFloat(e.target.value)
+                                  parseFloat(e.target.value),
                                 )
                               }
                               className="w-full"
@@ -2116,7 +2124,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["y", "min", "nticks"],
-                            parseInt(e.target.value)
+                            parseInt(e.target.value),
                           )
                         }
                         className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -2135,7 +2143,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["y", "min", "tickcolor"],
-                            e.target.value
+                            e.target.value,
                           )
                         }
                         className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
@@ -2160,7 +2168,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["y", "min", "tickwidth"],
-                            parseFloat(e.target.value)
+                            parseFloat(e.target.value),
                           )
                         }
                         className="w-full"
@@ -2185,7 +2193,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         onChange={(e) =>
                           updateSetting(
                             ["y", "min", "ticklen"],
-                            parseInt(e.target.value)
+                            parseInt(e.target.value),
                           )
                         }
                         className="w-full"

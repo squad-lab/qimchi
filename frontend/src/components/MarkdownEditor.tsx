@@ -39,6 +39,8 @@ export default function MarkdownEditor({
       <MDEditor
         value={currentValue}
         onChange={handleChange}
+        preview="edit"
+        visibleDragbar={false}
         previewOptions={{
           rehypePlugins: [[rehypeSanitize]], // Ensure safe HTML rendering
         }}
@@ -49,7 +51,7 @@ export default function MarkdownEditor({
         data-color-mode="light" // TODOLATER: THEME:
         tabSize={4}
         height={height}
-        className="w-full h-full"
+        className="w-full h-full notes-markdown-editor" // Custom class for additional styling
         style={{ height: "100%" }}
       />
     </div>

@@ -45,6 +45,14 @@ export interface BasketItem {
   attributes?: AttrData; // Optional attributes for files
   lastModified?: number;
 }
+
+export interface BasketFieldSelection {
+  id: string;
+  source: string;
+  name: string;
+  type: "independent" | "dependent";
+}
+
 interface BasketProps {
   items: BasketItem[];
   onRemoveItem: (id: string) => void;
@@ -53,6 +61,7 @@ interface BasketProps {
   onDropItem?: (item: BasketItem) => void;
   externalLoadingAttributes?: Set<string>; // External loading state for items added via Plus/double-click
   highlightedFields?: Set<string>; // Fields to highlight (from PlotComposer)
+  onAutofillComposerField?: (field: BasketFieldSelection) => void;
 }
 
 // Component to display the independents and dependents as draggable items with unified styling
@@ -64,6 +73,7 @@ const FieldItem = ({
   selectedItems,
   onToggleSelect,
   isHighlighted = false,
+  onAutofillComposerField,
 }: {
   item: string;
   basketItemId: string;
@@ -72,6 +82,7 @@ const FieldItem = ({
   selectedItems?: Set<string>;
   onToggleSelect?: (itemId: string, ctrlPressed: boolean) => void;
   isHighlighted?: boolean;
+  onAutofillComposerField?: (field: BasketFieldSelection) => void;
 }) => {
   const itemId = `${basketItemId}-${item}`;
   const isSelected = selectedItems?.has(itemId) || false;
@@ -119,6 +130,16 @@ const FieldItem = ({
     onToggleSelect?.(itemId, ctrlPressed);
   };
 
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    onAutofillComposerField?.({
+      id: itemId,
+      source: basketItemPath,
+      name: item,
+      type,
+    });
+  };
+
   // Compact styling with better width handling and consistent sizing
   const maxDisplayLength = 8; // Reduced for more compact display
   const displayName =
@@ -160,6 +181,7 @@ const FieldItem = ({
       draggable
       onDragStart={handleDragStart}
       onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
     >
       <IconComponent
         size={15}
@@ -188,6 +210,7 @@ const Basket = ({
   onDropItem,
   externalLoadingAttributes = new Set(),
   highlightedFields = new Set(),
+  onAutofillComposerField,
 }: BasketProps) => {
   const { showToast } = useToast();
   const [isExpanded, setIsExpanded] = useState(true);
@@ -433,6 +456,14 @@ const Basket = ({
                       <SquareFunction size={15} className="text-red-300" />
                       <span className="text-white">Dependents</span>
                     </div>
+                    <div className="text-white text-sm">
+                      Double-click any field chip to autofill Composer (X,
+                      then Y, then Z in HeatMap).
+                    </div>
+                    <div className="text-white text-sm">
+                      Shortcuts: Alt+Shift+B Clear Basket, Shift+E Toggle Side
+                      Panel.
+                    </div>
                   </div>
                 }
                 position="bottom"
@@ -670,6 +701,9 @@ const Basket = ({
                                   selectedItems={selectedItems}
                                   onToggleSelect={handleToggleSelect}
                                   isHighlighted={highlightedFields.has(fieldId)}
+                                  onAutofillComposerField={
+                                    onAutofillComposerField
+                                  }
                                 />
                               );
                             })
@@ -705,6 +739,9 @@ const Basket = ({
                                   selectedItems={selectedItems}
                                   onToggleSelect={handleToggleSelect}
                                   isHighlighted={highlightedFields.has(fieldId)}
+                                  onAutofillComposerField={
+                                    onAutofillComposerField
+                                  }
                                 />
                               );
                             })

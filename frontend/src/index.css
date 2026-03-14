@@ -204,6 +204,22 @@ select {
   scrollbar-color: #d1d5db #f3f4f6;
 }
 
+/* Notes markdown editor readability tweaks */
+.notes-markdown-editor .w-md-editor-text-pre > code,
+.notes-markdown-editor .w-md-editor-text-input {
+  font-size: 15px !important;
+  line-height: 1.4 !important;
+}
+
+.notes-markdown-editor .w-md-editor-toolbar {
+  padding: 5px 0;
+}
+
+.notes-markdown-editor .w-md-editor-toolbar svg {
+  width: 15px;
+  height: 15px;
+}
+
 /* Global media rules */
 /* @layer base {
   @media (max-width: 1920px) {

@@ -5,16 +5,38 @@ import { Panel } from "react-resizable-panels";
 import { ChartScatter, Lightbulb } from "lucide-react";
 
 // Local imports
-import Basket, { BasketItem } from "./Basket";
+import Basket, { BasketFieldSelection, BasketItem } from "./Basket";
 import { TreeNode } from "./DirTree";
 import { AttrData } from "./interfaces";
-import PlotComposer, { PlotComposerConfig } from "./PlotComposer";
+import PlotComposer, {
+  PlotComposerConfig,
+  PlotComposerHandle,
+  PlotField,
+} from "./PlotComposer";
 import PlotContainer from "./PlotContainer";
 import { usePlotCollection } from "../hooks/usePlotCollection";
 import { usePlotStore } from "../stores/plotStore";
+import { useSidebarStore } from "../stores/sidebarStore";
 import { useToast } from "../hooks/useToast";
 import Tooltip from "./Tooltip";
 import { generateAutoPlotConfigs } from "../utils/autoPlot";
+
+const isEditableTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  const tagName = target.tagName.toLowerCase();
+  if (tagName === "input" || tagName === "textarea" || tagName === "select") {
+    return true;
+  }
+
+  if (target.isContentEditable) {
+    return true;
+  }
+
+  return Boolean(target.closest("[contenteditable='true'], [role='textbox']"));
+};
 
 interface ViewerProps {
   defaultWidth?: number; // In percentage (0-100)
@@ -43,6 +65,14 @@ const Viewer = ({
   const { plotConfigs, addPlot, removePlot, clearPlots, updatePlotDataSource } =
     usePlotCollection();
   const { getPlotState } = usePlotStore();
+  const {
+    sidebarCollapsed,
+    metadataCollapsed,
+    notesCollapsed,
+    setSidebarCollapsed,
+    setMetadataCollapsed,
+    setNotesCollapsed,
+  } = useSidebarStore();
   const { showToast } = useToast();
   // Global default percent and per-plot overrides
   const [plotWidthPercent, setPlotWidthPercent] = useState<number>(50);
@@ -58,6 +88,7 @@ const Viewer = ({
   const basketRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const composerActionRef = useRef<PlotComposerHandle | null>(null);
   const previousBasketItems = useRef<BasketItem[]>([]);
   const processedAutoPlotItems = useRef<Set<string>>(new Set());
 
@@ -320,6 +351,83 @@ const Viewer = ({
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat || isEditableTarget(e.target)) {
+        return;
+      }
+
+      const key = e.key.toLowerCase();
+      const isShiftOnly = e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey;
+      const isAltShiftOnly = e.shiftKey && e.altKey && !e.ctrlKey && !e.metaKey;
+
+      if (isShiftOnly && key === "h") {
+        e.preventDefault();
+        composerActionRef.current?.setComposerPlotType("HeatMap");
+        return;
+      }
+
+      if (isShiftOnly && key === "l") {
+        e.preventDefault();
+        composerActionRef.current?.setComposerPlotType("LinePlot");
+        return;
+      }
+
+      if (isShiftOnly && key === "p") {
+        e.preventDefault();
+        composerActionRef.current?.createPlotFromComposer();
+        return;
+      }
+
+      if (isShiftOnly && key === "e") {
+        e.preventDefault();
+        setSidebarCollapsed(!sidebarCollapsed);
+        return;
+      }
+
+      if (isShiftOnly && key === "m") {
+        e.preventDefault();
+        setMetadataCollapsed(!metadataCollapsed);
+        return;
+      }
+
+      if (isShiftOnly && key === "n") {
+        e.preventDefault();
+        setNotesCollapsed(!notesCollapsed);
+        return;
+      }
+
+      if (isAltShiftOnly && key === "c") {
+        e.preventDefault();
+        composerActionRef.current?.clearComposer();
+        return;
+      }
+
+      if (isAltShiftOnly && key === "b") {
+        e.preventDefault();
+        onClearBasket();
+        return;
+      }
+
+      if (isAltShiftOnly && key === "v") {
+        e.preventDefault();
+        clearPlots();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    clearPlots,
+    metadataCollapsed,
+    notesCollapsed,
+    onClearBasket,
+    setMetadataCollapsed,
+    setNotesCollapsed,
+    setSidebarCollapsed,
+    sidebarCollapsed,
+  ]);
+
   const VIEWER_TIPS = (
     <div className="space-y-1 text-sm">
       <div>• Click Appearance / Filters to edit a plot.</div>
@@ -337,8 +445,26 @@ const Viewer = ({
       <div>
         • Use the Squarify button to force a 1:1 aspect ratio for all plots.
       </div>
+      <div>
+        • Shortcuts: Shift+H HeatMap, Shift+L LinePlot, Shift+P Plot,
+        Alt+Shift+C Clear Composer.
+      </div>
+      <div>
+        • Shortcuts: Alt+Shift+B Clear Basket, Alt+Shift+V Clear Viewer, Shift+E
+        Toggle Side Panel, Shift+M Toggle Metadata, Shift+N Toggle Notes.
+      </div>
     </div>
   );
+
+  const handleAutofillComposerField = (field: BasketFieldSelection) => {
+    const normalizedField: PlotField = {
+      id: field.id,
+      source: field.source,
+      name: field.name,
+      type: field.type,
+    };
+    composerActionRef.current?.autofillFromField(normalizedField);
+  };
 
   const handleCreatePlot = (config: PlotComposerConfig) => {
     console.log(
@@ -438,6 +564,7 @@ const Viewer = ({
               onDownload={handleDownload}
               onDropItem={handleDropItem}
               externalLoadingAttributes={loadingAttributes}
+              onAutofillComposerField={handleAutofillComposerField}
             />
           </div>
 
@@ -446,7 +573,10 @@ const Viewer = ({
             ref={composerRef}
             className="flex-shrink-0 border border-gray-200 rounded-lg"
           >
-            <PlotComposer onCreatePlot={handleCreatePlot} />
+            <PlotComposer
+              ref={composerActionRef}
+              onCreatePlot={handleCreatePlot}
+            />
           </div>
 
           {/* Main Content Area - Plots Viewer */}

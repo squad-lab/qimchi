@@ -1067,6 +1067,15 @@ const DirTree = ({
         <div>• Use ↑/↓ buttons to cycle through datasets</div>
         <div>• Toggle button to view live measurements (auto-refreshes)</div>
         <div>• Shift + R to refresh directory</div>
+        <div>
+          • Global: Shift+H HeatMap, Shift+L LinePlot, Shift+P Plot,
+          Alt+Shift+C Clear Composer
+        </div>
+        <div>
+          • Global: Alt+Shift+B Clear Basket, Alt+Shift+V Clear Viewer,
+          Shift+E Toggle Side Panel, Shift+M Toggle Metadata, Shift+N Toggle
+          Notes
+        </div>
       </div>
     </div>
   );
