@@ -113,10 +113,10 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
     <div ref={wrapperRef} className="fixed inset-0 pointer-events-none">
       <Rnd
         default={{
-          x: window.innerWidth - 424,
-          y: window.innerHeight - 578,
+          x: window.innerWidth - 384 - 28,
+          y: window.innerHeight - 550 - 28,
           width: 384,
-          height: 500,
+          height: 550,
         }}
         minWidth={300}
         minHeight={200}
@@ -128,7 +128,7 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
       >
         <div className="bg-white rounded-lg shadow-2xl border-2 border-slate-300 w-full h-full flex flex-col overflow-hidden">
           {/* Header */}
-          <div className="flex bg-slate-100 items-center justify-between p-3 border-b border-slate-300 drag-handle cursor-move">
+          <div className="flex bg-gray-200 items-center justify-between p-2 border-b border-slate-300 drag-handle cursor-move">
             <h3 className="font-semibold text-slate-800 flex items-center gap-2">
               <History size={18} className="text-blue-600" />
               Notifications Log
