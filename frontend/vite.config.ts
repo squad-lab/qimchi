@@ -5,6 +5,10 @@ import react from "@vitejs/plugin-react-swc";
 export default defineConfig({
   plugins: [react()],
 
+  // build: {
+  // For debug
+  //   minify: false, // Disables minification for both JavaScript and CSS
+  // },
   resolve: {
     alias: {
       stream: "stream-browserify",

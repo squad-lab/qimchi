@@ -50,6 +50,13 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
   const { showToast } = useToast();
   const fetchInFlight = useRef(false);
   const autoRefreshTimer = useRef<number | null>(null);
+  // Count consecutive responses where is_live===false. A transient WebSocket
+  // failure makes the backend fall back to disk and return is_live=false for
+  // just one or two polls before reconnecting. A truly ended measurement keeps
+  // returning false indefinitely. Switch to disk only after this many consecutive
+  // non-live responses to avoid stopping the poll on a transient WS blip.
+  const consecutiveNonLiveCount = useRef(0);
+  const CONSECUTIVE_NON_LIVE_THRESHOLD = 50;
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -59,7 +66,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
   const createPlot = useCallback(
     async (
       configToUse?: PlotConfiguration,
-      options: CreatePlotOptions = {}
+      options: CreatePlotOptions = {},
     ) => {
       if (options.skipIfPending && fetchInFlight.current) {
         return;
@@ -74,7 +81,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
       try {
         const plotConfig = configToUse || currentConfigRef.current;
         console.log(
-          `[IndividualPlot] Creating plot with dataset: ${plotConfig.fpath}`
+          `[IndividualPlot] Creating plot with dataset: ${plotConfig.fpath}`,
         );
         const request: PlotRequest = {
           fpaths: [plotConfig.fpath], // Convert single path to array for backend compatibility
@@ -92,23 +99,29 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
           // Take the first plot from the response
           const plot = response.plots[0];
 
-          // If measurement has ended (is_live=false) and we're using memory source, switch to disk
-          // BUT: Respect preferredSource - only switch if we don't have a strong preference for memory
+          // Track consecutive non-live responses. The backend returns is_live=false
+          // both for transient WebSocket failures (recovers next poll) and for
+          // permanently ended measurements. Only switch to disk after several
+          // consecutive non-live responses to avoid killing the poll on a blip.
+          if (plot.is_live === false) {
+            consecutiveNonLiveCount.current += 1;
+          } else {
+            consecutiveNonLiveCount.current = 0;
+          }
+
           if (
             plot.is_live === false &&
-            currentConfigRef.current.source === "memory" &&
-            currentConfigRef.current.preferredSource !== "memory"
+            consecutiveNonLiveCount.current >= CONSECUTIVE_NON_LIVE_THRESHOLD &&
+            currentConfigRef.current.source === "memory"
           ) {
             console.log(
-              "[IndividualPlot] Measurement ended, switching source to disk"
+              `[IndividualPlot] Measurement ended (${consecutiveNonLiveCount.current} consecutive non-live responses), switching source to disk`,
             );
             setCurrentConfig((prev) => ({ ...prev, source: "disk" }));
             // Continue to update the plot with the disk data
           }
 
-          const clonedPlotJson: PlotlyJSON = JSON.parse(
-            JSON.stringify(plot.plotJson)
-          );
+          const clonedPlotJson: PlotlyJSON = structuredClone(plot.plotJson);
           if (Array.isArray(clonedPlotJson.data)) {
             clonedPlotJson.data = clonedPlotJson.data.map((trace, idx) => {
               if (!trace || typeof trace !== "object") {
@@ -132,7 +145,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
                     (trace as { name?: string; type?: string }).name ||
                     (trace as { type?: string }).type ||
                     "unknown"
-                  }) has hovertemplate referencing %{{z}} but no z data; sanitizing template`
+                  }) has hovertemplate referencing %{{z}} but no z data; sanitizing template`,
                 );
                 let sanitizedTemplate = hovertemplate
                   .split("<br>")
@@ -150,12 +163,13 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
               return trace;
             });
           }
-          const now = Date.now();
           clonedPlotJson.layout = {
             ...(clonedPlotJson.layout || {}),
             // Ensure Plotly.react sees a revision bump even if data arrays compare equal
-            datarevision: now,
-            uirevision: now,
+            datarevision: Date.now(),
+            // Keep uirevision stable so Plotly preserves the user's zoom/pan state
+            // across live refresh cycles. Changing it would reset zoom every 500 ms.
+            uirevision: currentConfigRef.current.fpath,
           };
           setPlotJson(clonedPlotJson);
           setError(null);
@@ -186,9 +200,9 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
           ) {
             const config = currentConfigRef.current;
             errorMessage = `Variable not found in dataset. The plot uses variables [${config.indeps.join(
-              ", "
+              ", ",
             )}] → [${config.deps.join(
-              ", "
+              ", ",
             )}] which may not exist in this dataset.`;
           } else if (
             errorMessage.includes("dimension") ||
@@ -213,7 +227,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         fetchInFlight.current = false;
       }
     },
-    [showToast]
+    [showToast],
   ); // No dependency on currentConfig, use ref instead
 
   // Special refresh function for slider changes that preserves PlotWrapper state
@@ -268,7 +282,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
           if (shouldDeriveSource) {
             const inferred = inferSourceFromPath(updates.fpath);
             console.log(
-              `[IndividualPlot] handleConfigUpdate inferred source ${inferred} for ${updates.fpath}`
+              `[IndividualPlot] handleConfigUpdate inferred source ${inferred} for ${updates.fpath}`,
             );
             newConfig.source = inferred;
           }
@@ -276,20 +290,20 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
 
         if (typeof updates.source === "string") {
           console.log(
-            `[IndividualPlot] handleConfigUpdate received explicit source ${updates.source}`
+            `[IndividualPlot] handleConfigUpdate received explicit source ${updates.source}`,
           );
           newConfig.source = updates.source;
         }
 
         console.log(
           "[IndividualPlot] handleConfigUpdate next config",
-          newConfig
+          newConfig,
         );
         return newConfig;
       });
       // Don't automatically refresh - let the PlotWrapper handle refresh via onRefresh
     },
-    []
+    [],
   );
 
   const handleRetryClick = useCallback(() => {
@@ -305,7 +319,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
     // Let PlotWrapper handle the dataset change by updating data source in place
     if (hasInitialized.current && previousFpath !== config.fpath) {
       console.log(
-        `[IndividualPlot] Dataset changed from ${previousFpath} to ${config.fpath}, NOT recreating plot`
+        `[IndividualPlot] Dataset changed from ${previousFpath} to ${config.fpath}, NOT recreating plot`,
       );
       setError(null);
       // Don't call createPlot() - preserve the existing plot and let PlotWrapper handle data source change
@@ -319,12 +333,12 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
 
     // Log current source and fpath
     console.log(
-      `[IndividualPlot] auto-refresh check: fpath=${currentConfig.fpath} | source=${currentConfig.source} | isMemorySource=${isMemorySource}`
+      `[IndividualPlot] auto-refresh check: fpath=${currentConfig.fpath} | source=${currentConfig.source} | isMemorySource=${isMemorySource}`,
     );
 
     if (!isMemorySource) {
       console.log(
-        `[IndividualPlot] auto-refresh disabled for source=${currentConfig.source}`
+        `[IndividualPlot] auto-refresh disabled for source=${currentConfig.source}`,
       );
       if (autoRefreshTimer.current !== null) {
         window.clearInterval(autoRefreshTimer.current);
@@ -335,25 +349,25 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
 
     if (autoRefreshTimer.current !== null) {
       console.log(
-        "[IndividualPlot] Clearing existing auto-refresh interval before creating new one"
+        "[IndividualPlot] Clearing existing auto-refresh interval before creating new one",
       );
       window.clearInterval(autoRefreshTimer.current);
     }
 
     const intervalId = window.setInterval(() => {
       console.log(
-        "[IndividualPlot] auto-refresh interval firing for memory dataset"
+        "[IndividualPlot] auto-refresh interval firing for memory dataset",
       );
       createPlot(undefined, { silent: true, skipIfPending: true });
     }, MEMORY_REFRESH_INTERVAL_MS);
     console.log(
-      `[IndividualPlot] auto-refresh interval set (id=${intervalId}) for source=${currentConfig.source} fpath=${currentConfig.fpath}`
+      `[IndividualPlot] auto-refresh interval set (id=${intervalId}) for source=${currentConfig.source} fpath=${currentConfig.fpath}`,
     );
     autoRefreshTimer.current = intervalId;
 
     return () => {
       console.log(
-        "[IndividualPlot] auto-refresh effect cleanup running, clearing interval"
+        "[IndividualPlot] auto-refresh effect cleanup running, clearing interval",
       );
       if (autoRefreshTimer.current !== null) {
         window.clearInterval(autoRefreshTimer.current);

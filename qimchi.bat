@@ -582,7 +582,7 @@ echo.
 :: Start the FastAPI server using uvicorn in background
 cd /d "%QIMCHI_DIR%\qimchi\backend"
 echo Starting server...
-start /min cmd /c "uvicorn main:app --host 127.0.0.1 --port %PORT% --workers %NUM_WORKERS% --log-level info --ws-max-size 20000000 --ws-ping-interval 20 --ws-ping-timeout 20"
+start /min cmd /c "uvicorn main:app --host 127.0.0.1 --port %PORT% --workers %NUM_WORKERS% --log-level info --ws-max-size 200000000 --ws-ping-interval 20 --ws-ping-timeout 20"
 
 :: Wait for server health endpoint to become ready (wait up to 300 seconds)
 echo Waiting for server to report healthy status (waiting up to 300s)...

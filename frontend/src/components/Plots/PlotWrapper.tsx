@@ -21,6 +21,7 @@ import {
   ArrowLeftRight,
 } from "lucide-react";
 import { Data, Layout, Config } from "plotly.js";
+import type { AxisType, Dash } from "plotly.js";
 
 // Local imports
 import plotlyColorscales from "./plotly_colorscales_plotlyjs.json";
@@ -209,10 +210,11 @@ const getColorscaleData = (
 };
 
 const swapAxesInPlotJson = (plotJson: PlotlyJSON): PlotlyJSON => {
-  const swapped = JSON.parse(JSON.stringify(plotJson)) as PlotlyJSON;
+  // Shallow-clone with shared references
+  const swapped: PlotlyJSON = { ...plotJson };
 
-  if (swapped.data && swapped.data.length > 0) {
-    swapped.data = swapped.data.map((trace) => {
+  if (plotJson.data && plotJson.data.length > 0) {
+    swapped.data = plotJson.data.map((trace) => {
       const swappedTrace = { ...trace } as Record<string, unknown>;
       const traceAny = trace as Record<string, unknown>;
 
@@ -245,7 +247,8 @@ const swapAxesInPlotJson = (plotJson: PlotlyJSON): PlotlyJSON => {
     });
   }
 
-  if (swapped.layout) {
+  if (plotJson.layout) {
+    swapped.layout = { ...plotJson.layout };
     const layoutAny = swapped.layout as Record<string, unknown>;
     // Swap xaxis and yaxis properties
     if (layoutAny.xaxis && layoutAny.yaxis) {
@@ -353,9 +356,9 @@ const PlotWrapper: React.FC<Props> = ({
     useState<PlotlyJSON>(plotJson);
   // Store the base plot JSON (original or filtered, before appearance modifications)
 
-  const handleRelayout = (data: Record<string, unknown>) => {
+  const handleRelayout = useCallback((data: Record<string, unknown>) => {
     setRelayoutData(data);
-  };
+  }, []);
 
   // Save plot as PNG, PDF & SVG
   const handleSavePlotImages = async () => {
@@ -618,12 +621,15 @@ const PlotWrapper: React.FC<Props> = ({
       originalPlotJson: PlotlyJSON,
       settings: PlotAppearanceSettings,
     ): PlotlyJSON => {
-      const updatedPlotJson = JSON.parse(JSON.stringify(originalPlotJson));
+      // Shallow-clone the top level so trace metadata (colorscale, zmin, line…) and
+      // layout properties can be updated without mutating the source object, and
+      // without deep-cloning the large data arrays.
+      const updatedPlotJson: PlotlyJSON = { ...originalPlotJson };
 
       // Apply to data traces
-      if (updatedPlotJson.data && updatedPlotJson.data.length > 0) {
+      if (originalPlotJson.data && originalPlotJson.data.length > 0) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        updatedPlotJson.data = updatedPlotJson.data.map((trace: any) => {
+        updatedPlotJson.data = originalPlotJson.data.map((trace: any) => {
           const updatedTrace = { ...trace };
 
           // Apply heatmap settings
@@ -675,8 +681,10 @@ const PlotWrapper: React.FC<Props> = ({
         });
       }
 
-      // Apply to layout - add safety checks for undefined properties
+      // Apply to layout - shallow-clone first so property assignments below
+      // don't mutate the original layout object.
       if (updatedPlotJson.layout) {
+        updatedPlotJson.layout = { ...updatedPlotJson.layout };
         // Ensure layout has required structure
         if (!updatedPlotJson.layout.xaxis) {
           updatedPlotJson.layout.xaxis = {};
@@ -726,11 +734,11 @@ const PlotWrapper: React.FC<Props> = ({
         if (updatedPlotJson.layout.xaxis) {
           updatedPlotJson.layout.xaxis = {
             ...updatedPlotJson.layout.xaxis,
-            type: settings.x.maj.type,
+            type: settings.x.maj.type as AxisType,
             showgrid: settings.x.maj.showgrid,
             nticks: settings.x.maj.nticks,
             gridcolor: settings.x.maj.gridcolor,
-            griddash: settings.x.maj.griddash,
+            griddash: settings.x.maj.griddash as Dash,
             gridwidth: settings.x.maj.gridwidth,
             tickcolor: settings.x.maj.tickcolor,
             tickwidth: settings.x.maj.tickwidth,
@@ -741,7 +749,7 @@ const PlotWrapper: React.FC<Props> = ({
               showgrid: settings.x.min.showgrid,
               nticks: settings.x.min.nticks,
               gridcolor: settings.x.min.gridcolor,
-              griddash: settings.x.min.griddash,
+              griddash: settings.x.min.griddash as Dash,
               gridwidth: settings.x.min.gridwidth,
               tickcolor: settings.x.min.tickcolor,
               tickwidth: settings.x.min.tickwidth,
@@ -753,11 +761,11 @@ const PlotWrapper: React.FC<Props> = ({
         if (updatedPlotJson.layout.yaxis) {
           updatedPlotJson.layout.yaxis = {
             ...updatedPlotJson.layout.yaxis,
-            type: settings.y.maj.type,
+            type: settings.y.maj.type as AxisType,
             showgrid: settings.y.maj.showgrid,
             nticks: settings.y.maj.nticks,
             gridcolor: settings.y.maj.gridcolor,
-            griddash: settings.y.maj.griddash,
+            griddash: settings.y.maj.griddash as Dash,
             gridwidth: settings.y.maj.gridwidth,
             tickcolor: settings.y.maj.tickcolor,
             tickwidth: settings.y.maj.tickwidth,
@@ -768,7 +776,7 @@ const PlotWrapper: React.FC<Props> = ({
               showgrid: settings.y.min.showgrid,
               nticks: settings.y.min.nticks,
               gridcolor: settings.y.min.gridcolor,
-              griddash: settings.y.min.griddash,
+              griddash: settings.y.min.griddash as Dash,
               gridwidth: settings.y.min.gridwidth,
               tickcolor: settings.y.min.tickcolor,
               tickwidth: settings.y.min.tickwidth,

@@ -687,6 +687,10 @@ class HeatMap(QimchiFigure):
         if data_array.shape[0] != self.data.coords[self.ind[0]].shape[0]:
             data_array = data_array.T
 
+        # CONCERN: Cast to float32: halves payload size (~4 MB vs ~8 MB for 1000×1000) | @Spandan Check.
+        # while retaining more than sufficient precision for colormapped display.
+        data_array = data_array.astype("float32")
+
         fig = imshow(
             data_array.transpose(self.ind[0], self.ind[1]),
             x=self.data.coords[self.ind[1]],

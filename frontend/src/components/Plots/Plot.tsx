@@ -47,6 +47,15 @@ const PlotComponent: React.FC<Props> = React.memo(
     const lastPlotStructureRef = useRef<string>("");
     const dataRevisionRef = useRef<number>(0);
 
+    // Keep a ref to the latest onRelayout callback so the listener never needs
+    // to be re-registered when the parent re-creates the callback function.
+    const onRelayoutRef = useRef(onRelayout);
+    const relayoutListenerRef = useRef<
+      ((event: Plotly.PlotRelayoutEvent) => void) | null
+    >(null);
+    // Synchronous ref update – safe to do during render.
+    onRelayoutRef.current = onRelayout;
+
     // Create a structural hash to detect when plot needs full recreation vs just data update
     const plotStructureHash = useMemo(() => {
       return JSON.stringify({
@@ -203,7 +212,19 @@ const PlotComponent: React.FC<Props> = React.memo(
           }
         }
 
-        // After plot is created/updated, we can safely attach event listeners
+        // Attach the plotly_relayout listener the first time the plot is ready.
+        // Guard prevents duplicate registration across multiple updatePlot calls.
+        if (!relayoutListenerRef.current) {
+          const plotEl = plotRef.current as any;
+          if (typeof plotEl.on === "function") {
+            const handler = (event: Plotly.PlotRelayoutEvent) => {
+              onRelayoutRef.current?.(event as Record<string, unknown>);
+            };
+            relayoutListenerRef.current = handler;
+            plotEl.on("plotly_relayout", handler);
+          }
+        }
+
         return true;
       } catch (error) {
         console.error("[Plot] Error updating plot:", error);
@@ -224,31 +245,22 @@ const PlotComponent: React.FC<Props> = React.memo(
       updatePlot();
     }, [updatePlot]);
 
-    // Listen for plotly_relayout events (zoom, pan, etc.)
+    // Clean up the plotly_relayout listener when the component unmounts.
+    // The listener itself is registered inside updatePlot after Plotly initialises,
+    // so there is exactly one listener per mounted Plot instance.
     useEffect(() => {
-      if (!plotRef.current || !onRelayout) {
-        return;
-      }
-
-      const handleRelayout = (event: Plotly.PlotRelayoutEvent) => {
-        onRelayout(event as Record<string, unknown>);
-      };
-
-      // The on() method is added to plot element by Plotly after plotting
-      const plotElement = plotRef.current as any;
-
-      // Check if Plotly has already attached on() method
-      if (typeof plotElement.on === "function") {
-        plotElement.on("plotly_relayout", handleRelayout);
-      }
-
       return () => {
-        // Only call off() if method exists
-        if (plotElement && typeof plotElement.off === "function") {
-          plotElement.off("plotly_relayout", handleRelayout);
+        const plotEl = plotRef.current as any;
+        if (
+          plotEl &&
+          relayoutListenerRef.current &&
+          typeof plotEl.off === "function"
+        ) {
+          plotEl.off("plotly_relayout", relayoutListenerRef.current);
+          relayoutListenerRef.current = null;
         }
       };
-    }, [onRelayout]);
+    }, []);
 
     useEffect(() => {
       const updateDimensions = () => {

@@ -123,9 +123,9 @@ const Explorer = ({
   };
 
   return (
-    <div className="flex flex-col h-full p-3">
+    <div className="flex flex-col h-full p-2">
       {/* Path input section */}
-      <div className="flex mb-4">
+      <div className="flex mb-4 w-full">
         <input
           type="text"
           className="w-full border border-gray-300 px-3 py-2 rounded-l shadow-sm focus:outline-none focus:ring focus:ring-blue-300 focus:border-blue-300 text-sm"

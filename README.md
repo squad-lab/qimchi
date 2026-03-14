@@ -265,7 +265,7 @@ For manual installation with full control over the setup process, follow these s
    cd ..\backend
    $env:PYTHONPATH="$PWD"
    $env:SERVE_STATIC_FILES="true"
-   uvicorn main:app --host 127.0.0.1 --port 8001 --workers 8 --log-level info --ws-max-size 20000000 --ws-ping-interval 20 --ws-ping-timeout 20
+   uvicorn main:app --host 127.0.0.1 --port 8001 --workers 8 --log-level info --ws-max-size 200000000 --ws-ping-interval 20 --ws-ping-timeout 20
    ```
 
 #### Linux/macOS
@@ -358,7 +358,7 @@ For manual installation with full control over the setup process, follow these s
    cd ../backend
    export PYTHONPATH="$PWD"
    export SERVE_STATIC_FILES="true"
-   uvicorn main:app --host 0.0.0.0 --port 8001 --workers 8 --log-level info --ws-max-size 20000000 --ws-ping-interval 20 --ws-ping-timeout 20
+   uvicorn main:app --host 0.0.0.0 --port 8001 --workers 8 --log-level info --ws-max-size 200000000 --ws-ping-interval 20 --ws-ping-timeout 20
    ```
 
 **Access the application:**

@@ -46,8 +46,9 @@ async def _ensure_connection(ws_url: str = DEFAULT_WS_URL):
 
         if needs_reconnect:
             try:
+                # Use a 100 MB limit to match the server side (default is 1 MB).
                 _ws_connection = await asyncio.wait_for(
-                    websockets.connect(ws_url), timeout=2.0
+                    websockets.connect(ws_url, max_size=100 * 1024 * 1024), timeout=2.0
                 )
                 logger.info(f"Connected to live data server at {ws_url}")
             except (asyncio.TimeoutError, ConnectionRefusedError, OSError) as e:
