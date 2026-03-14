@@ -1266,7 +1266,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                 </div>
 
                 <div>
-                  <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center justify-between mb-1.5 h-7">
                     <label className="block text-sm font-medium text-gray-700">
                       Color Range
                     </label>
@@ -1291,7 +1291,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                       </Tooltip>
                     </div>
                   </div>
-                  <div className="mb-2 mt-2 px-1">
+                  <div className="mb-2 mt-6 px-1">
                     {(() => {
                       // Extract bounds to display
                       let zMin = Infinity;
@@ -1365,7 +1365,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                             displayMax={displayMax}
                           />
                           {hasValidBounds && (
-                            <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+                            <div className="flex justify-between text-[10px] text-gray-400 mt-1 pb-1">
                               <span>Data min: {zMin.toFixed(2)}</span>
                               <span>Data max: {zMax.toFixed(2)}</span>
                             </div>

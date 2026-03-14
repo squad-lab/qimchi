@@ -31,7 +31,7 @@ const DualThumbSlider: React.FC<DualThumbSliderProps> = ({
   // Convert to percentage
   const getPercent = useCallback(
     (value: number) => Math.round(((value - min) / (max - min)) * 100),
-    [min, max]
+    [min, max],
   );
 
   // Set width of the range to decrease from the left side
@@ -100,10 +100,11 @@ const DualThumbSlider: React.FC<DualThumbSliderProps> = ({
 
       {displayMin && (
         <div
-          className="absolute text-[10px] font-medium text-gray-700 bg-white/90 border border-gray-200 px-1 py-0.5 rounded shadow-sm whitespace-nowrap z-50 transform -translate-x-1/2 pointer-events-none"
+          className="absolute text-[10px] font-medium text-gray-700 bg-white/90 border border-gray-200 px-1 py-0.5 rounded shadow-sm whitespace-nowrap z-50 pointer-events-none"
           style={{
             left: `${getPercent(minVal)}%`,
             top: "-1.5rem",
+            transform: `translateX(-${getPercent(minVal)}%)`,
           }}
         >
           {displayMin}
@@ -112,10 +113,11 @@ const DualThumbSlider: React.FC<DualThumbSliderProps> = ({
 
       {displayMax && (
         <div
-          className="absolute text-[10px] font-medium text-gray-700 bg-white/90 border border-gray-200 px-1 py-0.5 rounded shadow-sm whitespace-nowrap z-50 transform -translate-x-1/2 pointer-events-none"
+          className="absolute text-[10px] font-medium text-gray-700 bg-white/90 border border-gray-200 px-1 py-0.5 rounded shadow-sm whitespace-nowrap z-50 pointer-events-none"
           style={{
             left: `${getPercent(maxVal)}%`,
             top: "-1.5rem",
+            transform: `translateX(-${getPercent(maxVal)}%)`,
           }}
         >
           {displayMax}
@@ -124,10 +126,7 @@ const DualThumbSlider: React.FC<DualThumbSliderProps> = ({
 
       <div className="dual-thumb-slider-rail">
         <div className="dual-thumb-slider-track" />
-        <div
-          ref={range}
-          className="dual-thumb-slider-range"
-        />
+        <div ref={range} className="dual-thumb-slider-range" />
       </div>
     </div>
   );
