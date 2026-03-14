@@ -365,17 +365,38 @@ const plotPropsAreEqual = (prevProps: Props, nextProps: Props): boolean => {
     return false;
   }
 
-  // Check for axis swap by comparing x and y data arrays
+  // Check for trace changes (axis swap, styling updates)
   for (let i = 0; i < prevData.length; i++) {
-    const prevTrace = prevData[i];
-    const nextTrace = nextData[i];
-    const prevX = (prevTrace as Record<string, unknown>).x;
-    const prevY = (prevTrace as Record<string, unknown>).y;
-    const nextX = (nextTrace as Record<string, unknown>).x;
-    const nextY = (nextTrace as Record<string, unknown>).y;
+    const prevTrace = prevData[i] as Record<string, unknown>;
+    const nextTrace = nextData[i] as Record<string, unknown>;
+
+    // Quick reference check for the entire trace
+    if (prevTrace === nextTrace) continue;
+
+    // Check style properties that may have been updated by AppearanceSettings
+    const styleProps = [
+      "mode",
+      "line",
+      "marker",
+      "opacity",
+      "colorscale",
+      "zmin",
+      "zmax",
+    ];
+    for (const prop of styleProps) {
+      if (JSON.stringify(prevTrace[prop]) !== JSON.stringify(nextTrace[prop])) {
+        return false;
+      }
+    }
+
+    // Check data arrays, optimizing with reference equality first
     if (
-      JSON.stringify(prevX) !== JSON.stringify(nextX) ||
-      JSON.stringify(prevY) !== JSON.stringify(nextY)
+      (prevTrace.x !== nextTrace.x &&
+        JSON.stringify(prevTrace.x) !== JSON.stringify(nextTrace.x)) ||
+      (prevTrace.y !== nextTrace.y &&
+        JSON.stringify(prevTrace.y) !== JSON.stringify(nextTrace.y)) ||
+      (prevTrace.z !== nextTrace.z &&
+        JSON.stringify(prevTrace.z) !== JSON.stringify(nextTrace.z))
     ) {
       return false;
     }
