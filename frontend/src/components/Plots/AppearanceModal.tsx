@@ -34,6 +34,7 @@ import {
   IconDropdown,
   LogChartIcon,
 } from "./UtilComponents";
+import DualThumbSlider from "./DualThumbSlider";
 import Tooltip from "../Tooltip";
 
 interface AppearanceModalProps {
@@ -579,9 +580,8 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
       str.replace(/[^a-z0-9-_]/gi, "_").substring(0, 50);
 
     const titleForFilename = plotTitle ? sanitizeFilename(plotTitle) : "plot";
-    const exportFileDefaultName = `${
-      new Date().toISOString().split("T")[0]
-    }-${plotType}-${titleForFilename}-theme.json`;
+    const exportFileDefaultName = `${new Date().toISOString().split("T")[0]
+      }-${plotType}-${titleForFilename}-theme.json`;
 
     const linkElement = document.createElement("a");
     linkElement.setAttribute("href", dataUri);
@@ -789,14 +789,13 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
         enableResizing={false}
         dragHandleClassName="drag-handle"
         bounds="parent"
-        style={{ pointerEvents: "auto" }}
+        style={{ pointerEvents: "auto" }}e
         onMouseDown={() => bringToFront()}
         onPointerDown={() => bringToFront()}
       >
         <div
-          className={`bg-gray-100 rounded-lg shadow-2xl border-2 w-full h-full overflow-hidden flex flex-col transition-colors ${
-            isDragging ? "border-blue-500 bg-blue-50" : "border-gray-300"
-          }`}
+          className={`bg-gray-100 rounded-lg shadow-2xl border-2 w-full h-full overflow-hidden flex flex-col transition-colors ${isDragging ? "border-blue-500 bg-blue-50" : "border-gray-300"
+            }`}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
@@ -883,49 +882,47 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
           <div className="flex border-b-2 border-gray-300 bg-gray-50 flex-shrink-0">
             {plotType === "heatmap"
               ? // Heatmap-specific tabs
-                [
-                  { key: "heatmap", label: "Colormap" },
-                  { key: "x-axis", label: "X-Axis" },
-                  { key: "y-axis", label: "Y-Axis" },
-                ].map((tab) => (
-                  <button
-                    key={tab.key}
-                    onClick={() =>
-                      setActiveTab(
-                        tab.key as "style" | "x-axis" | "y-axis" | "heatmap",
-                      )
-                    }
-                    className={`px-4 py-2 text-sm font-medium transition-colors ${
-                      activeTab === tab.key
-                        ? "text-blue-600 border-b-2 border-blue-600"
-                        : "text-gray-600 hover:text-gray-800"
+              [
+                { key: "heatmap", label: "Colormap" },
+                { key: "x-axis", label: "X-Axis" },
+                { key: "y-axis", label: "Y-Axis" },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() =>
+                    setActiveTab(
+                      tab.key as "style" | "x-axis" | "y-axis" | "heatmap",
+                    )
+                  }
+                  className={`px-4 py-2 text-sm font-medium transition-colors ${activeTab === tab.key
+                    ? "text-blue-600 border-b-2 border-blue-600"
+                    : "text-gray-600 hover:text-gray-800"
                     }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))
+                >
+                  {tab.label}
+                </button>
+              ))
               : // Line plot tabs
-                [
-                  { key: "style", label: "Style" },
-                  { key: "x-axis", label: "X-Axis" },
-                  { key: "y-axis", label: "Y-Axis" },
-                ].map((tab) => (
-                  <button
-                    key={tab.key}
-                    onClick={() =>
-                      setActiveTab(
-                        tab.key as "style" | "x-axis" | "y-axis" | "heatmap",
-                      )
-                    }
-                    className={`px-4 py-2 text-sm font-medium transition-colors ${
-                      activeTab === tab.key
-                        ? "text-blue-600 border-b-2 border-blue-600"
-                        : "text-gray-600 hover:text-gray-800"
+              [
+                { key: "style", label: "Style" },
+                { key: "x-axis", label: "X-Axis" },
+                { key: "y-axis", label: "Y-Axis" },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() =>
+                    setActiveTab(
+                      tab.key as "style" | "x-axis" | "y-axis" | "heatmap",
+                    )
+                  }
+                  className={`px-4 py-2 text-sm font-medium transition-colors ${activeTab === tab.key
+                    ? "text-blue-600 border-b-2 border-blue-600"
+                    : "text-gray-600 hover:text-gray-800"
                     }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
+                >
+                  {tab.label}
+                </button>
+              ))}
           </div>
 
           {/* Content */}
@@ -949,263 +946,263 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                 {/* Line Settings - Show when mode includes "lines" */}
                 {(localSettings.line.mode === "lines" ||
                   localSettings.line.mode === "lines+markers") && (
-                  <>
-                    <div className="border-t border-gray-200 pt-4">
-                      <h4 className="text-md font-medium text-gray-800 mb-3">
-                        Line Settings
-                      </h4>
-                    </div>
+                    <>
+                      <div className="border-t border-gray-200 pt-4">
+                        <h4 className="text-md font-medium text-gray-800 mb-3">
+                          Line Settings
+                        </h4>
+                      </div>
 
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                        Color
-                      </label>
-                      <div className="flex gap-2 items-center">
-                        <input
-                          type="color"
-                          value={localSettings.line.color}
-                          onChange={(e) =>
-                            updateSetting(["line", "color"], e.target.value)
-                          }
-                          className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
-                          title="Line color"
-                          aria-label="Line color"
-                        />
-                        <div className="flex flex-wrap gap-1 flex-1">
-                          {LINE_COLOR_OPTS.map((color) => (
-                            <button
-                              key={color}
-                              onClick={() =>
-                                updateSetting(["line", "color"], color)
-                              }
-                              className="w-6 h-6 rounded border border-gray-300 hover:scale-110 transition-transform"
-                              style={{ backgroundColor: color }}
-                              title={`Select color ${color}`}
-                              aria-label={`Select color ${color}`}
-                            />
-                          ))}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                          Color
+                        </label>
+                        <div className="flex gap-2 items-center">
+                          <input
+                            type="color"
+                            value={localSettings.line.color}
+                            onChange={(e) =>
+                              updateSetting(["line", "color"], e.target.value)
+                            }
+                            className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
+                            title="Line color"
+                            aria-label="Line color"
+                          />
+                          <div className="flex flex-wrap gap-1 flex-1">
+                            {LINE_COLOR_OPTS.map((color) => (
+                              <button
+                                key={color}
+                                onClick={() =>
+                                  updateSetting(["line", "color"], color)
+                                }
+                                className="w-6 h-6 rounded border border-gray-300 hover:scale-110 transition-transform"
+                                style={{ backgroundColor: color }}
+                                title={`Select color ${color}`}
+                                aria-label={`Select color ${color}`}
+                              />
+                            ))}
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div>
-                      <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
-                        Width
-                        <span className="text-xs text-gray-500">
-                          {localSettings.line.width}px
-                        </span>
-                      </label>
-                      <input
-                        type="range"
-                        min="1"
-                        max="10"
-                        step="0.5"
-                        value={localSettings.line.width}
-                        onChange={(e) =>
-                          updateSetting(
-                            ["line", "width"],
-                            parseFloat(e.target.value),
-                          )
-                        }
-                        className="w-full"
-                        title="Line width"
-                        aria-label="Line width"
-                      />
-                    </div>
+                      <div>
+                        <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
+                          Width
+                          <span className="text-xs text-gray-500">
+                            {localSettings.line.width}px
+                          </span>
+                        </label>
+                        <input
+                          type="range"
+                          min="1"
+                          max="10"
+                          step="0.5"
+                          value={localSettings.line.width}
+                          onChange={(e) =>
+                            updateSetting(
+                              ["line", "width"],
+                              parseFloat(e.target.value),
+                            )
+                          }
+                          className="w-full"
+                          title="Line width"
+                          aria-label="Line width"
+                        />
+                      </div>
 
-                    <div>
-                      <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
-                        Opacity
-                        <span className="text-xs text-gray-500">
-                          {localSettings.line.opacity}
-                        </span>
-                      </label>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.1"
-                        value={localSettings.line.opacity}
-                        onChange={(e) =>
-                          updateSetting(
-                            ["line", "opacity"],
-                            parseFloat(e.target.value),
-                          )
-                        }
-                        className="w-full"
-                        title="Line opacity"
-                        aria-label="Line opacity"
-                      />
-                    </div>
+                      <div>
+                        <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
+                          Opacity
+                          <span className="text-xs text-gray-500">
+                            {localSettings.line.opacity}
+                          </span>
+                        </label>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.1"
+                          value={localSettings.line.opacity}
+                          onChange={(e) =>
+                            updateSetting(
+                              ["line", "opacity"],
+                              parseFloat(e.target.value),
+                            )
+                          }
+                          className="w-full"
+                          title="Line opacity"
+                          aria-label="Line opacity"
+                        />
+                      </div>
 
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                        Dash Style
-                      </label>
-                      <IconDropdown
-                        value={localSettings.line.dash}
-                        onChange={(value) =>
-                          updateSetting(["line", "dash"], value)
-                        }
-                        options={LINE_DASH_OPTS}
-                        className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        title="Line dash style"
-                        aria-label="Line dash style"
-                      />
-                    </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                          Dash Style
+                        </label>
+                        <IconDropdown
+                          value={localSettings.line.dash}
+                          onChange={(value: string) =>
+                            updateSetting(["line", "dash"], value)
+                          }
+                          options={LINE_DASH_OPTS}
+                          className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          title="Line dash style"
+                          aria-label="Line dash style"
+                        />
+                      </div>
 
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                        Shape
-                      </label>
-                      <IconDropdown
-                        value={localSettings.line.shape}
-                        onChange={(value) =>
-                          updateSetting(["line", "shape"], value)
-                        }
-                        options={LINE_SHAPE_OPTS}
-                        className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        title="Line shape"
-                        aria-label="Line shape"
-                      />
-                    </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                          Shape
+                        </label>
+                        <IconDropdown
+                          value={localSettings.line.shape}
+                          onChange={(value: string) =>
+                            updateSetting(["line", "shape"], value)
+                          }
+                          options={LINE_SHAPE_OPTS}
+                          className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          title="Line shape"
+                          aria-label="Line shape"
+                        />
+                      </div>
 
-                    <div>
-                      <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
-                        Smoothing
-                        <span className="text-xs text-gray-500">
-                          {localSettings.line.smoothing}
-                        </span>
-                      </label>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.1"
-                        value={localSettings.line.smoothing}
-                        onChange={(e) =>
-                          updateSetting(
-                            ["line", "smoothing"],
-                            parseFloat(e.target.value),
-                          )
-                        }
-                        className="w-full"
-                        title="Line smoothing (for spline shapes)"
-                        aria-label="Line smoothing"
-                      />
-                    </div>
-                  </>
-                )}
+                      <div>
+                        <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
+                          Smoothing
+                          <span className="text-xs text-gray-500">
+                            {localSettings.line.smoothing}
+                          </span>
+                        </label>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.1"
+                          value={localSettings.line.smoothing}
+                          onChange={(e) =>
+                            updateSetting(
+                              ["line", "smoothing"],
+                              parseFloat(e.target.value),
+                            )
+                          }
+                          className="w-full"
+                          title="Line smoothing (for spline shapes)"
+                          aria-label="Line smoothing"
+                        />
+                      </div>
+                    </>
+                  )}
 
                 {/* Marker Settings - Show when mode includes "markers" */}
                 {(localSettings.line.mode === "markers" ||
                   localSettings.line.mode === "lines+markers") && (
-                  <>
-                    <div className="border-t border-gray-200 pt-4">
-                      <h4 className="text-md font-medium text-gray-800 mb-3">
-                        Marker Settings
-                      </h4>
-                    </div>
+                    <>
+                      <div className="border-t border-gray-200 pt-4">
+                        <h4 className="text-md font-medium text-gray-800 mb-3">
+                          Marker Settings
+                        </h4>
+                      </div>
 
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                        Symbol
-                      </label>
-                      <IconDropdown
-                        value={localSettings.marker.symbol}
-                        onChange={(value) =>
-                          updateSetting(["marker", "symbol"], value)
-                        }
-                        options={MARKER_SYMBOL_OPTS}
-                        className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        title="Marker symbol"
-                        aria-label="Marker symbol"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                        Color
-                      </label>
-                      <div className="flex gap-2 items-center">
-                        <input
-                          type="color"
-                          value={localSettings.marker.color}
-                          onChange={(e) =>
-                            updateSetting(["marker", "color"], e.target.value)
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                          Symbol
+                        </label>
+                        <IconDropdown
+                          value={localSettings.marker.symbol}
+                          onChange={(value: string) =>
+                            updateSetting(["marker", "symbol"], value)
                           }
-                          className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
-                          title="Marker color"
-                          aria-label="Marker color"
+                          options={MARKER_SYMBOL_OPTS}
+                          className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          title="Marker symbol"
+                          aria-label="Marker symbol"
                         />
-                        <div className="flex flex-wrap gap-1 flex-1">
-                          {LINE_COLOR_OPTS.map((color) => (
-                            <button
-                              key={color}
-                              onClick={() =>
-                                updateSetting(["marker", "color"], color)
-                              }
-                              className="w-6 h-6 rounded border border-gray-300 hover:scale-110 transition-transform"
-                              style={{ backgroundColor: color }}
-                              title={`Select marker color ${color}`}
-                              aria-label={`Select marker color ${color}`}
-                            />
-                          ))}
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                          Color
+                        </label>
+                        <div className="flex gap-2 items-center">
+                          <input
+                            type="color"
+                            value={localSettings.marker.color}
+                            onChange={(e) =>
+                              updateSetting(["marker", "color"], e.target.value)
+                            }
+                            className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
+                            title="Marker color"
+                            aria-label="Marker color"
+                          />
+                          <div className="flex flex-wrap gap-1 flex-1">
+                            {LINE_COLOR_OPTS.map((color) => (
+                              <button
+                                key={color}
+                                onClick={() =>
+                                  updateSetting(["marker", "color"], color)
+                                }
+                                className="w-6 h-6 rounded border border-gray-300 hover:scale-110 transition-transform"
+                                style={{ backgroundColor: color }}
+                                title={`Select marker color ${color}`}
+                                aria-label={`Select marker color ${color}`}
+                              />
+                            ))}
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div>
-                      <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
-                        Size
-                        <span className="text-xs text-gray-500">
-                          {localSettings.marker.size}px
-                        </span>
-                      </label>
-                      <input
-                        type="range"
-                        min="2"
-                        max="20"
-                        step="1"
-                        value={localSettings.marker.size}
-                        onChange={(e) =>
-                          updateSetting(
-                            ["marker", "size"],
-                            parseInt(e.target.value),
-                          )
-                        }
-                        className="w-full"
-                        title="Marker size"
-                        aria-label="Marker size"
-                      />
-                    </div>
+                      <div>
+                        <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
+                          Size
+                          <span className="text-xs text-gray-500">
+                            {localSettings.marker.size}px
+                          </span>
+                        </label>
+                        <input
+                          type="range"
+                          min="2"
+                          max="20"
+                          step="1"
+                          value={localSettings.marker.size}
+                          onChange={(e) =>
+                            updateSetting(
+                              ["marker", "size"],
+                              parseInt(e.target.value),
+                            )
+                          }
+                          className="w-full"
+                          title="Marker size"
+                          aria-label="Marker size"
+                        />
+                      </div>
 
-                    <div>
-                      <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
-                        Opacity
-                        <span className="text-xs text-gray-500">
-                          {localSettings.marker.opacity}
-                        </span>
-                      </label>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.1"
-                        value={localSettings.marker.opacity}
-                        onChange={(e) =>
-                          updateSetting(
-                            ["marker", "opacity"],
-                            parseFloat(e.target.value),
-                          )
-                        }
-                        className="w-full"
-                        title="Marker opacity"
-                        aria-label="Marker opacity"
-                      />
-                    </div>
-                  </>
-                )}
+                      <div>
+                        <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
+                          Opacity
+                          <span className="text-xs text-gray-500">
+                            {localSettings.marker.opacity}
+                          </span>
+                        </label>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.1"
+                          value={localSettings.marker.opacity}
+                          onChange={(e) =>
+                            updateSetting(
+                              ["marker", "opacity"],
+                              parseFloat(e.target.value),
+                            )
+                          }
+                          className="w-full"
+                          title="Marker opacity"
+                          aria-label="Marker opacity"
+                        />
+                      </div>
+                    </>
+                  )}
               </div>
             )}
 
@@ -1271,77 +1268,43 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                     <label className="block text-sm font-medium text-gray-700">
                       Color Range
                     </label>
-                    <Tooltip content="Leave empty for automatic range, or set min and max values">
-                      <span className="inline-flex items-center gap-1 text-xs text-gray-600">
-                        <Info size={16} className="text-blue-500" />
-                      </span>
-                    </Tooltip>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1.5">
-                        Min
-                      </label>
-                      <input
-                        type="number"
-                        step="any"
-                        placeholder="Auto"
-                        value={localSettings.hmap?.rangecolor?.[0] ?? ""}
-                        onChange={(e) => {
-                          const value =
-                            e.target.value === ""
-                              ? null
-                              : parseFloat(e.target.value);
-                          const currentRange = localSettings.hmap
-                            ?.rangecolor || [null, null];
-                          updateSetting(
-                            ["hmap", "rangecolor"],
-                            [value, currentRange[1]],
-                          );
-                        }}
-                        className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        title="Minimum color range value"
-                        aria-label="Minimum color range value"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1.5">
-                        Max
-                      </label>
-                      <input
-                        type="number"
-                        step="any"
-                        placeholder="Auto"
-                        value={localSettings.hmap?.rangecolor?.[1] ?? ""}
-                        onChange={(e) => {
-                          const value =
-                            e.target.value === ""
-                              ? null
-                              : parseFloat(e.target.value);
-                          const currentRange = localSettings.hmap
-                            ?.rangecolor || [null, null];
-                          updateSetting(
-                            ["hmap", "rangecolor"],
-                            [currentRange[0], value],
-                          );
-                        }}
-                        className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        title="Maximum color range value"
-                        aria-label="Maximum color range value"
-                      />
+                    <div className="flex items-center gap-1">
+                      {(localSettings.hmap?.rangecolor && (localSettings.hmap.rangecolor[0] !== 0 || localSettings.hmap.rangecolor[1] !== 100)) && (
+                        <Tooltip content="Reset to automatic range">
+                          <button
+                            onClick={() =>
+                              updateSetting(["hmap", "rangecolor"], null)
+                            }
+                            className="p-1 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                            aria-label="Reset color range"
+                          >
+                            <RotateCcw size={14} />
+                          </button>
+                        </Tooltip>
+                      )}
+                      <Tooltip content="Percentage of the data range (0% = data min, 100% = data max)">
+                        <span className="inline-flex items-center gap-1 text-xs text-gray-600">
+                          <Info size={16} className="text-blue-500" />
+                        </span>
+                      </Tooltip>
                     </div>
                   </div>
-                  {localSettings.hmap?.rangecolor && (
-                    <button
-                      onClick={() =>
-                        updateSetting(["hmap", "rangecolor"], null)
-                      }
-                      className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 hover:text-blue-800 transition-colors"
-                    >
-                      <RotateCcw size={16} className="text-blue-500" />
-                      Reset to automatic range
-                    </button>
-                  )}
+                  <div className="mb-2 mt-2 px-1">
+                    <DualThumbSlider
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={localSettings.hmap?.rangecolor || [0, 100]}
+                      onChange={(value: [number, number]) => {
+                        updateSetting(["hmap", "rangecolor"], value);
+                      }}
+                      title="Color Range Percentages (Min, Max)"
+                    />
+                    <div className="flex justify-between text-xs text-gray-400 mt-1">
+                      <span>{(localSettings.hmap?.rangecolor?.[0] ?? 0)}%</span>
+                      <span>{(localSettings.hmap?.rangecolor?.[1] ?? 100)}%</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -1386,7 +1349,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                       </label>
                       <IconDropdown
                         value={localSettings.x.maj.type}
-                        onChange={(value) =>
+                        onChange={(value: string) =>
                           updateSetting(["x", "maj", "type"], value)
                         }
                         options={AXIS_TYPE_OPTS}
@@ -1424,7 +1387,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                           </label>
                           <IconDropdown
                             value={localSettings.x.maj.griddash}
-                            onChange={(value) =>
+                            onChange={(value: string) =>
                               updateSetting(["x", "maj", "griddash"], value)
                             }
                             options={GRID_DASH_OPTS}
@@ -1643,7 +1606,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                           </label>
                           <IconDropdown
                             value={localSettings.x.min.griddash}
-                            onChange={(value) =>
+                            onChange={(value: string) =>
                               updateSetting(["x", "min", "griddash"], value)
                             }
                             options={GRID_DASH_OPTS}
@@ -1816,7 +1779,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                       </label>
                       <IconDropdown
                         value={localSettings.y.maj.type}
-                        onChange={(value) =>
+                        onChange={(value: string) =>
                           updateSetting(["y", "maj", "type"], value)
                         }
                         options={AXIS_TYPE_OPTS}
@@ -1854,7 +1817,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                           </label>
                           <IconDropdown
                             value={localSettings.y.maj.griddash}
-                            onChange={(value) =>
+                            onChange={(value: string) =>
                               updateSetting(["y", "maj", "griddash"], value)
                             }
                             options={GRID_DASH_OPTS}
@@ -2073,7 +2036,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                           </label>
                           <IconDropdown
                             value={localSettings.y.min.griddash}
-                            onChange={(value) =>
+                            onChange={(value: string) =>
                               updateSetting(["y", "min", "griddash"], value)
                             }
                             options={GRID_DASH_OPTS}

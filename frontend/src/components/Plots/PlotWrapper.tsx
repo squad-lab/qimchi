@@ -37,7 +37,6 @@ import type {
   PlotConfiguration,
   SliderConfig,
 } from "../../components/interfaces";
-import { applyFilters } from "../../services/filtersAPI";
 import { useToast } from "../../hooks/useToast";
 import { usePlotStore } from "../../stores/plotStore";
 import type { PlotPersistentState } from "../../components/interfaces";
@@ -50,14 +49,17 @@ type PlotlyJSON = {
   config?: Partial<Config>;
 };
 
+type PlotLiveStatus = "live" | "paused" | "error" | "completed";
+
 type Props = {
   plotJson: PlotlyJSON;
+  plotRef?: string;
+  plotStatus?: PlotLiveStatus;
   onClose?: () => void;
   plotConfig?: PlotConfiguration;
   onUpdateConfig?: (config: Partial<PlotConfiguration>) => void;
+  onFiltersModalOpenChange?: (isOpen: boolean) => void;
   availableSliders?: Record<string, SliderConfig>; // Sliders from backend
-  isLoading?: boolean; // Loading state for slider refreshes
-  // live dataset props removed
 };
 
 // Default appearance settings based on backend
@@ -278,11 +280,13 @@ const swapAxesInPlotJson = (plotJson: PlotlyJSON): PlotlyJSON => {
 
 const PlotWrapper: React.FC<Props> = ({
   plotJson,
+  plotRef,
+  plotStatus = "completed",
   onClose,
   plotConfig,
   onUpdateConfig,
+  onFiltersModalOpenChange,
   availableSliders = {},
-  // live dataset props removed
 }) => {
   const { showToast } = useToast();
 
@@ -350,11 +354,18 @@ const PlotWrapper: React.FC<Props> = ({
     string,
     unknown
   > | null>(null);
+  const [activePlotRef, setActivePlotRef] = useState<string | undefined>(
+    plotRef,
+  );
 
   // Store the original plot JSON (never modified, always the raw data from backend)
   const [originalPlotJson, setOriginalPlotJson] =
     useState<PlotlyJSON>(plotJson);
   // Store the base plot JSON (original or filtered, before appearance modifications)
+
+  useEffect(() => {
+    setActivePlotRef(plotRef);
+  }, [plotRef]);
 
   const handleRelayout = useCallback((data: Record<string, unknown>) => {
     setRelayoutData(data);
@@ -527,6 +538,24 @@ const PlotWrapper: React.FC<Props> = ({
     null,
   );
 
+  const displayStatus: PlotLiveStatus = datasetUpdateError
+    ? "error"
+    : plotStatus;
+
+  const statusLabel: Record<PlotLiveStatus, string> = {
+    live: "Live",
+    paused: "Paused",
+    error: "Error",
+    completed: "Completed",
+  };
+
+  const statusClass: Record<PlotLiveStatus, string> = {
+    live: "bg-emerald-500 animate-pulse",
+    paused: "bg-amber-400",
+    error: "bg-red-500",
+    completed: "bg-sky-500",
+  };
+
   // Track previous fpath to detect dataset changes
   const prevFpathRef = useRef<string | undefined>(undefined);
 
@@ -638,17 +667,74 @@ const PlotWrapper: React.FC<Props> = ({
             settings.hmap
           ) {
             // If trace is not using a shared coloraxis, set per-trace fallback
-            // Note: When coloraxis is used (our backend does), layout.coloraxis takes precedence.
             updatedTrace.colorscale = getColorscaleData(
               settings.hmap.colorscale,
             );
             if (settings.hmap.rangecolor) {
-              updatedTrace.zmin = settings.hmap.rangecolor[0];
-              updatedTrace.zmax = settings.hmap.rangecolor[1];
+              // Convert percentages (0-100) to actual z-values.
+              // Try multiple sources for the data bounds in priority order:
+              //   1. Existing per-trace zmin/zmax (set by backend)
+              //   2. Scan the z array (if it's a plain JS array)
+              let zMin = Infinity;
+              let zMax = -Infinity;
+
+              // Source 1: backend-provided per-trace zmin/zmax
+              if (
+                typeof (trace as any).zmin === "number" &&
+                typeof (trace as any).zmax === "number" &&
+                !isNaN((trace as any).zmin) &&
+                !isNaN((trace as any).zmax)
+              ) {
+                zMin = (trace as any).zmin;
+                zMax = (trace as any).zmax;
+              } else if (trace.z) {
+                // Source 2: scan the z array
+                const zData = trace.z as any;
+                const isNested =
+                  Array.isArray(zData[0]) ||
+                  (ArrayBuffer.isView(zData[0]) &&
+                    !(zData[0] instanceof DataView));
+
+                if (isNested) {
+                  for (let i = 0; i < zData.length; i++) {
+                    const row = zData[i];
+                    for (let j = 0; j < row.length; j++) {
+                      const val = +row[j];
+                      if (!isNaN(val)) {
+                        if (val < zMin) zMin = val;
+                        if (val > zMax) zMax = val;
+                      }
+                    }
+                  }
+                } else if (Array.isArray(zData) || ArrayBuffer.isView(zData)) {
+                  for (let i = 0; i < (zData as any).length; i++) {
+                    const val = +(zData as any)[i];
+                    if (!isNaN(val)) {
+                      if (val < zMin) zMin = val;
+                      if (val > zMax) zMax = val;
+                    }
+                  }
+                }
+              }
+
+              if (zMin !== Infinity && zMax !== -Infinity) {
+                const range = zMax - zMin;
+                updatedTrace.zmin =
+                  zMin + (range * settings.hmap.rangecolor[0]) / 100;
+                updatedTrace.zmax =
+                  zMin + (range * settings.hmap.rangecolor[1]) / 100;
+                updatedTrace.zauto = false;
+              } else {
+                // Could not determine data bounds – let Plotly auto-range.
+                delete updatedTrace.zmin;
+                delete updatedTrace.zmax;
+                updatedTrace.zauto = true;
+              }
             } else {
               // Remove manual range settings to use auto
               delete updatedTrace.zmin;
               delete updatedTrace.zmax;
+              updatedTrace.zauto = true;
             }
           }
 
@@ -719,14 +805,117 @@ const PlotWrapper: React.FC<Props> = ({
             getColorscaleData(settings.hmap.colorscale);
           // Update or clear range
           if (settings.hmap.rangecolor) {
-            (newColoraxis as { cmin?: number }).cmin =
-              settings.hmap.rangecolor[0];
-            (newColoraxis as { cmax?: number }).cmax =
-              settings.hmap.rangecolor[1];
+            // Map percentages to actual data-space bounds.
+            // Try multiple sources for global min/max in priority order:
+            //   1. layout.coloraxis.cmin/cmax already computed by Plotly on
+            //      the previous render (most reliable — avoids having to parse z)
+            //   2. Per-trace zmin/zmax set by the backend
+            //   3. Scan the z arrays (plain JS arrays / TypedArrays)
+            let combinedMin = Infinity;
+            let combinedMax = -Infinity;
+
+            // Source 1: existing Plotly-computed coloraxis bounds in the
+            // _original_ (unmodified) plot JSON's layout
+            const origLayout = originalPlotJson.layout as any;
+            if (
+              typeof origLayout?.coloraxis?.cmin === "number" &&
+              typeof origLayout?.coloraxis?.cmax === "number" &&
+              !isNaN(origLayout.coloraxis.cmin) &&
+              !isNaN(origLayout.coloraxis.cmax)
+            ) {
+              combinedMin = origLayout.coloraxis.cmin;
+              combinedMax = origLayout.coloraxis.cmax;
+            } else {
+              // Source 2 + 3: per-trace zmin/zmax or z-array scan
+              (originalPlotJson.data || []).forEach((trace: any) => {
+                if (
+                  (trace.type === "heatmap" || trace.type === "heatmapgl")
+                ) {
+                  // Source 2: backend-provided per-trace zmin/zmax
+                  if (
+                    typeof trace.zmin === "number" &&
+                    typeof trace.zmax === "number" &&
+                    !isNaN(trace.zmin) &&
+                    !isNaN(trace.zmax)
+                  ) {
+                    if (trace.zmin < combinedMin) combinedMin = trace.zmin;
+                    if (trace.zmax > combinedMax) combinedMax = trace.zmax;
+                  } else if (trace.z) {
+                    // Source 3: scan the z array
+                    const zData = trace.z as any;
+                    const isNested =
+                      Array.isArray(zData[0]) ||
+                      (ArrayBuffer.isView(zData[0]) &&
+                        !(zData[0] instanceof DataView));
+
+                    if (isNested) {
+                      for (let i = 0; i < zData.length; i++) {
+                        const row = zData[i];
+                        for (let j = 0; j < row.length; j++) {
+                          const val = +row[j];
+                          if (!isNaN(val)) {
+                            if (val < combinedMin) combinedMin = val;
+                            if (val > combinedMax) combinedMax = val;
+                          }
+                        }
+                      }
+                    } else if (
+                      Array.isArray(zData) ||
+                      ArrayBuffer.isView(zData)
+                    ) {
+                      for (let i = 0; i < (zData as any).length; i++) {
+                        const val = +(zData as any)[i];
+                        if (!isNaN(val)) {
+                          if (val < combinedMin) combinedMin = val;
+                          if (val > combinedMax) combinedMax = val;
+                        }
+                      }
+                    }
+                  }
+                }
+              });
+            }
+
+            console.log(
+              "[HeatmapRange] combinedMin:",
+              combinedMin,
+              "combinedMax:",
+              combinedMax,
+              "rangecolor:",
+              settings.hmap.rangecolor,
+            );
+
+            if (combinedMin !== Infinity && combinedMax !== -Infinity) {
+              const range = combinedMax - combinedMin;
+              (newColoraxis as { cmin?: number }).cmin =
+                combinedMin + (range * settings.hmap.rangecolor[0]) / 100;
+              (newColoraxis as { cmax?: number }).cmax =
+                combinedMin + (range * settings.hmap.rangecolor[1]) / 100;
+              console.log(
+                "[HeatmapRange] Setting cmin:",
+                (newColoraxis as any).cmin,
+                "cmax:",
+                (newColoraxis as any).cmax,
+              );
+              // Force Plotly to respect our explicit range
+              (newColoraxis as Record<string, unknown>).cauto = false;
+              (newColoraxis as Record<string, unknown>).autocolorscale = false;
+            } else {
+              // Could not determine data bounds – fall back to auto-range
+              delete (newColoraxis as Record<string, unknown>).cmin;
+              delete (newColoraxis as Record<string, unknown>).cmax;
+              (newColoraxis as Record<string, unknown>).cauto = true;
+              (newColoraxis as Record<string, unknown>).autocolorscale = false;
+              console.log(
+                "[HeatmapRange] FALLBACK - could not compute data bounds, using auto-range",
+              );
+            }
           } else {
             // Remove to let Plotly auto-range
             delete (newColoraxis as Record<string, unknown>).cmin;
             delete (newColoraxis as Record<string, unknown>).cmax;
+            (newColoraxis as Record<string, unknown>).cauto = true;
+            (newColoraxis as Record<string, unknown>).autocolorscale = false;
           }
           layoutRef.coloraxis = newColoraxis;
         }
@@ -1001,28 +1190,30 @@ const PlotWrapper: React.FC<Props> = ({
                 "Plot configuration not available for slider operation",
               );
             }
+            if (!activePlotRef) {
+              throw new Error(
+                "Plot reference not available for transform operation",
+              );
+            }
 
             console.log("[PlotWrapper] Starting slider API call");
-            const result = await PlotAPI.applySliders({
+            const result = await PlotAPI.transformPlot({
+              plot_ref: activePlotRef,
               filters_order: filtersOrder,
               filters_opts: filtersOpts,
               slider: sliders || sliderConfig,
-              fpath: plotConfig.fpath,
-              indeps: plotConfig.indeps,
-              deps: plotConfig.deps,
-              plotType: plotConfig.plotType,
             });
             console.log("[PlotWrapper] Slider API call completed successfully");
 
             // Ensure the returned plot JSON has proper structure
-            if (!result.sliced_plot_json.layout) {
-              result.sliced_plot_json.layout = {};
+            if (!result.plot_json.layout) {
+              result.plot_json.layout = {};
             }
 
             // Batch ALL state updates together to prevent flickering
             const appliedSliderConfig = sliders || sliderConfig;
             const slicedWithAppearance = applyAppearanceSettings(
-              result.sliced_plot_json,
+              result.plot_json,
               appearanceSettings,
             );
 
@@ -1033,7 +1224,7 @@ const PlotWrapper: React.FC<Props> = ({
                 if (sliders) {
                   setSliderConfig(sliders);
                 }
-                setBasePlotJson(result.sliced_plot_json);
+                setBasePlotJson(result.plot_json);
                 setCustomizedPlotJson(slicedWithAppearance);
               });
             });
@@ -1076,25 +1267,27 @@ const PlotWrapper: React.FC<Props> = ({
                     "Plot configuration not available for slider operation",
                   );
                 }
+                if (!activePlotRef) {
+                  throw new Error(
+                    "Plot reference not available for transform operation",
+                  );
+                }
 
-                const result = await PlotAPI.applySliders({
+                const result = await PlotAPI.transformPlot({
+                  plot_ref: activePlotRef,
                   filters_order: [],
                   filters_opts: {},
                   slider: sliders,
-                  fpath: plotConfig.fpath,
-                  indeps: plotConfig.indeps,
-                  deps: plotConfig.deps,
-                  plotType: plotConfig.plotType,
                 });
 
                 // Ensure the returned plot JSON has proper structure
-                if (!result.sliced_plot_json.layout) {
-                  result.sliced_plot_json.layout = {};
+                if (!result.plot_json.layout) {
+                  result.plot_json.layout = {};
                 }
 
                 // Batch ALL state updates together to prevent flickering
                 const slicedWithAppearance = applyAppearanceSettings(
-                  result.sliced_plot_json,
+                  result.plot_json,
                   appearanceSettings,
                 );
 
@@ -1103,7 +1296,7 @@ const PlotWrapper: React.FC<Props> = ({
                   flushSync(() => {
                     setAppliedFilters(filters); // This should be empty array for this path
                     setSliderConfig(sliders);
-                    setBasePlotJson(result.sliced_plot_json);
+                    setBasePlotJson(result.plot_json);
                     setCustomizedPlotJson(slicedWithAppearance);
                   });
                 });
@@ -1176,20 +1369,24 @@ const PlotWrapper: React.FC<Props> = ({
             }, 200);
           } else {
             // Filters but no sliders - use filter API
-            const numAxes = plotType === "heatmap" ? 2 : 1;
+            if (!activePlotRef) {
+              throw new Error(
+                "Plot reference not available for transform operation",
+              );
+            }
 
             console.log("[PlotWrapper] Starting filter API call");
-            const result = await applyFilters({
-              plot_json: originalPlotJson,
+            const result = await PlotAPI.transformPlot({
+              plot_ref: activePlotRef,
               filters_order: filtersOrder,
               filters_opts: filtersOpts,
-              num_axes: numAxes,
+              slider: {},
             });
             console.log("[PlotWrapper] Filter API call completed successfully");
 
             // Batch ALL state updates together to prevent flickering
             // Cast backend response to PlotlyJSON (assume backend contract)
-            const filteredPlotJson = result.filtered_plot_json as PlotlyJSON;
+            const filteredPlotJson = result.plot_json as PlotlyJSON;
             const filteredWithAppearance = applyAppearanceSettings(
               filteredPlotJson,
               appearanceSettings,
@@ -1259,6 +1456,7 @@ const PlotWrapper: React.FC<Props> = ({
       setPlotSliders,
       plotType,
       applyAppearanceSettings,
+      activePlotRef,
     ],
   );
 
@@ -1318,6 +1516,8 @@ const PlotWrapper: React.FC<Props> = ({
 
         if (response.success && response.plots.length > 0) {
           const newPlot = response.plots[0];
+          const nextPlotRef = newPlot.plot_ref || activePlotRef;
+          setActivePlotRef(nextPlotRef);
 
           // Update the original plot JSON with the new dataset
           setOriginalPlotJson(newPlot.plotJson);
@@ -1356,22 +1556,25 @@ const PlotWrapper: React.FC<Props> = ({
 
             try {
               if (isSliderChange) {
-                // Use slider API to apply both filters and sliders
-                const result = await PlotAPI.applySliders({
+                if (!nextPlotRef) {
+                  throw new Error(
+                    "Plot reference not available for transform operation",
+                  );
+                }
+
+                // Use unified transform API to apply both filters and sliders
+                const result = await PlotAPI.transformPlot({
+                  plot_ref: nextPlotRef,
                   filters_order: filtersOrder,
                   filters_opts: filtersOpts,
                   slider: sliderConfig,
-                  fpath: newFpath,
-                  indeps: plotConfig.indeps,
-                  deps: plotConfig.deps,
-                  plotType: plotConfig.plotType,
                 });
 
-                if (!result.sliced_plot_json.layout) {
-                  result.sliced_plot_json.layout = {};
+                if (!result.plot_json.layout) {
+                  result.plot_json.layout = {};
                 }
 
-                const slicedPlotJson = result.sliced_plot_json as PlotlyJSON;
+                const slicedPlotJson = result.plot_json as PlotlyJSON;
                 setBasePlotJson(slicedPlotJson);
                 const slicedWithAppearance = applyAppearanceSettings(
                   slicedPlotJson,
@@ -1379,18 +1582,21 @@ const PlotWrapper: React.FC<Props> = ({
                 );
                 setCustomizedPlotJson(slicedWithAppearance);
               } else if (appliedFilters.length > 0) {
-                // Use filter API for filters only
-                const numAxes = plotConfig.plotType === "HeatMap" ? 2 : 1;
+                if (!nextPlotRef) {
+                  throw new Error(
+                    "Plot reference not available for transform operation",
+                  );
+                }
 
-                const result = await applyFilters({
-                  plot_json: newPlot.plotJson,
+                // Use unified transform API for filters only
+                const result = await PlotAPI.transformPlot({
+                  plot_ref: nextPlotRef,
                   filters_order: filtersOrder,
                   filters_opts: filtersOpts,
-                  num_axes: numAxes,
+                  slider: {},
                 });
 
-                const filteredPlotJson =
-                  result.filtered_plot_json as PlotlyJSON;
+                const filteredPlotJson = result.plot_json as PlotlyJSON;
                 setBasePlotJson(filteredPlotJson);
                 const filteredWithAppearance = applyAppearanceSettings(
                   filteredPlotJson,
@@ -1487,6 +1693,7 @@ const PlotWrapper: React.FC<Props> = ({
       appliedFilters,
       sliderConfig,
       applyAppearanceSettings,
+      activePlotRef,
     ],
   );
 
@@ -1524,8 +1731,6 @@ const PlotWrapper: React.FC<Props> = ({
     prevFpathRef.current = currentFpath;
   }, [plotConfig?.fpath, updateDataSource, isApplyingFilters]);
 
-  // live dataset subscription and controls removed
-
   const handleMaximize = () => {
     setIsMaximized(!isMaximized);
   };
@@ -1541,10 +1746,12 @@ const PlotWrapper: React.FC<Props> = ({
   // Filters handlers
   const handleFiltersModalOpen = () => {
     setIsFiltersModalOpen(true);
+    onFiltersModalOpenChange?.(true);
   };
 
   const handleFiltersModalClose = () => {
     setIsFiltersModalOpen(false);
+    onFiltersModalOpenChange?.(false);
   };
 
   // Reset handler to clear all filters and appearance modifications
@@ -1734,6 +1941,18 @@ const PlotWrapper: React.FC<Props> = ({
                 isSquareMode ? "square-mode" : ""
               }`}
             >
+              <div
+                className="absolute top-3 left-3 z-20 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-2.5 py-1 shadow-sm"
+                aria-label={`Status: ${statusLabel[displayStatus]}`}
+              >
+                <span
+                  className={`block h-3.5 w-3.5 rounded-full border border-black/10 ${statusClass[displayStatus]}`}
+                ></span>
+                <span className="text-xs font-medium text-gray-700">
+                  {statusLabel[displayStatus]}
+                </span>
+              </div>
+
               <PlotComponent
                 plotJson={customizedPlotJson}
                 onRelayout={handleRelayout}
@@ -1779,11 +1998,21 @@ const PlotWrapper: React.FC<Props> = ({
       >
         {/* Plot content */}
         <div className="plot-content">
-          {/* Live dataset indicator removed */}
-
           <div
             className={`p-2 pb-0 relative ${isSquareMode ? "square-mode" : ""}`}
           >
+            <div
+              className="absolute top-3 left-3 z-20 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-2.5 py-1 shadow-sm"
+              aria-label={`Status: ${statusLabel[displayStatus]}`}
+            >
+              <span
+                className={`block h-3.5 w-3.5 rounded-full border border-black/10 ${statusClass[displayStatus]}`}
+              ></span>
+              <span className="text-xs font-medium text-gray-700">
+                {statusLabel[displayStatus]}
+              </span>
+            </div>
+
             <PlotComponent
               plotJson={customizedPlotJson}
               onRelayout={handleRelayout}
