@@ -34,8 +34,7 @@ export const applyFilters = async (
       }
       if (error.response) {
         throw new Error(
-          `HTTP error! status: ${error.response.status}, message: ${
-            error.response.data?.detail || "Unknown error"
+          `HTTP error! status: ${error.response.status}, message: ${error.response.data?.detail || "Unknown error"
           }`
         );
       }

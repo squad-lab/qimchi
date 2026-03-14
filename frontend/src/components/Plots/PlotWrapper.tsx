@@ -1987,7 +1987,7 @@ const PlotWrapper: React.FC<Props> = ({
                       ? "bg-blue-100 text-blue-600"
                       : "hover:bg-gray-200"
                   }`}
-                  title="Swap X & Y Axes"
+                  title="Swap X & Y Axes (Visual)" // TODOLATER: After filters are moved to frontend
                 >
                   <ArrowLeftRight
                     size={16}

@@ -1108,7 +1108,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                     </label>
                                     <div className="flex items-center space-x-2">
                                       <span className="text-sm text-gray-500 font-mono bg-white px-2 py-1 rounded">
-                                        {slider.value.toFixed(3)}
+                                        {slider.value.toFixed(6)}
                                       </span>
                                       <button
                                         onClick={() => resetSlider(key)}
@@ -1124,7 +1124,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                     <input
                                       type="range"
                                       title={`${key} slider value: ${slider.value.toFixed(
-                                        3
+                                        6
                                       )}`}
                                       min={available.min}
                                       max={available.max}
@@ -1151,8 +1151,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                     />
 
                                     <div className="flex justify-between text-xs text-gray-400">
-                                      <span>{available.min.toFixed(3)}</span>
-                                      <span>{available.max.toFixed(3)}</span>
+                                      <span>{available.min.toFixed(6)}</span>
+                                      <span>{available.max.toFixed(6)}</span>
                                     </div>
                                   </div>
                                 </div>
