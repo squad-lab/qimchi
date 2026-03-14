@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { X, AlertCircle, CheckCircle, Info, AlertTriangle } from "lucide-react";
-import { ToastContext } from "../hooks/useToast";
+import { ToastContext, LogItem } from "../hooks/useToast";
+import NotificationLogModal from "./NotificationLogModal";
 
 interface ToastProps {
   message: string;
@@ -21,31 +22,56 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [logs, setLogs] = useState<LogItem[]>([]);
+  const [isLogModalOpen, setIsLogModalOpen] = useState(false);
 
-  const showToast = useCallback((
-    message: string,
-    type: "success" | "error" | "warning" | "info" = "info",
-    duration: number = 3000
-  ) => {
-    const id = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-    const newToast: ToastItem = { id, message, type, duration };
+  const showToast = useCallback(
+    (
+      message: string,
+      type: "success" | "error" | "warning" | "info" = "info",
+      duration: number = 3000,
+    ) => {
+      const id =
+        Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      const newToast: ToastItem = { id, message, type, duration };
 
-    setToasts((prev) => [...prev, newToast]);
+      setToasts((prev) => [...prev, newToast]);
+      setLogs((prev) => [
+        { id, message, type, timestamp: new Date().toISOString() },
+        ...prev,
+      ]);
 
-    // Auto-remove toast after duration
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((toast) => toast.id !== id));
-    }, duration);
-  }, []); // No dependencies - uses setToasts functional update
+      // Auto-remove toast after duration
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((toast) => toast.id !== id));
+      }, duration);
+    },
+    [],
+  ); // No dependencies - uses setToasts functional update
 
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   }, []); // No dependencies - uses setToasts functional update
 
+  const openLogModal = useCallback(() => {
+    setIsLogModalOpen(true);
+  }, []);
+
+  const contextValue = useMemo(
+    () => ({ showToast, openLogModal }),
+    [showToast, openLogModal],
+  );
+
   return (
-    <ToastContext.Provider value={{ showToast }}>
+    <ToastContext.Provider value={contextValue}>
       {children}
       <ToastContainer toasts={toasts} onRemove={removeToast} />
+      <NotificationLogModal
+        isOpen={isLogModalOpen}
+        onClose={() => setIsLogModalOpen(false)}
+        logs={logs}
+        onClear={() => setLogs([])}
+      />
     </ToastContext.Provider>
   );
 };

@@ -1,5 +1,6 @@
-import { Gitlab, Link, ScrollText } from "lucide-react";
+import { Gitlab, Link, ScrollText, History } from "lucide-react";
 import { useSidebarStore } from "../stores/sidebarStore";
+import { useToast } from "../hooks/useToast";
 
 const brandingLinks = [
   {
@@ -21,6 +22,7 @@ const brandingLinks = [
 
 const BrandingFooter = () => {
   const { brandingCollapsed, setBrandingCollapsed } = useSidebarStore();
+  const { openLogModal } = useToast();
 
   return (
     <>
@@ -80,6 +82,14 @@ const BrandingFooter = () => {
                       <Icon size={17} strokeWidth={1.8} />
                     </a>
                   ))}
+                  <button
+                    onClick={openLogModal}
+                    aria-label="View notifications log"
+                    title="View notifications log"
+                    className="p-2.5 rounded-lg bg-blue-50/50 hover:bg-gradient-to-br hover:from-blue-100 hover:to-indigo-100 active:bg-blue-200 transition-all duration-300 text-blue-600 hover:text-blue-700 hover:shadow-md border border-blue-100 hover:border-blue-200"
+                  >
+                    <History size={17} strokeWidth={1.8} />
+                  </button>
                 </div>
               </div>
             </div>

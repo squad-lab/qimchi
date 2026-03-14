@@ -1,7 +1,15 @@
 import React from "react";
 
-interface ToastContextType {
+export interface LogItem {
+  id: string;
+  message: string;
+  type: "success" | "error" | "warning" | "info";
+  timestamp: string;
+}
+
+export interface ToastContextType {
   showToast: (message: string, type?: "success" | "error" | "warning" | "info", duration?: number) => void;
+  openLogModal: () => void;
 }
 
 export const ToastContext = React.createContext<ToastContextType | null>(null);
