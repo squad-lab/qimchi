@@ -24,7 +24,9 @@ export interface PlotRequest {
 
 export interface PlotData {
   id: string;
+  plot_ref?: string;
   clientId?: string; // Client-side unique identifier as backup
+  resolved_fpath?: string; // Canonical dataset path used by backend (disk path when live has ended)
   plotJson: {
     data: Data[];
     layout: Partial<Layout>;
@@ -43,22 +45,20 @@ export interface PlotResponse {
   skip_update?: boolean; // E.g., transient error
 }
 
-export interface SliderRequest {
+export interface TransformPlotRequest {
+  plot_ref: string;
   filters_order: string[];
   filters_opts: Record<string, unknown>;
-  slider: Record<string, SliderConfig>;
-  fpath: string;
-  indeps: string[];
-  deps: string[];
-  plotType: string;
+  slider?: Record<string, SliderConfig>;
 }
 
-export interface SliderResponse {
-  sliced_plot_json: {
+export interface TransformPlotResponse {
+  plot_json: {
     data: Data[];
     layout: Partial<Layout>;
     config?: Partial<Config>;
   };
+  plot_ref: string;
 }
 
 export class PlotAPI {
@@ -89,29 +89,18 @@ export class PlotAPI {
     }
   }
 
-  static async applySliders(request: SliderRequest): Promise<SliderResponse> {
+  static async transformPlot(
+    request: TransformPlotRequest,
+  ): Promise<TransformPlotResponse> {
     try {
-      console.log("[PlotAPI] Starting applySliders request");
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-
-      const resp = await axios.post(`${API_BASE_URL}/apply-sliders`, request, {
+      const resp = await axios.post(`${API_BASE_URL}/transform-plot`, request, {
         headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
         responseType: "json",
       });
 
-      clearTimeout(timeoutId);
-      console.log("[PlotAPI] applySliders request completed successfully");
-      return resp.data as SliderResponse;
+      return resp.data as TransformPlotResponse;
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        console.error(
-          "[PlotAPI] applySliders request timed out after 10 seconds"
-        );
-        throw new Error("Request timed out after 10 seconds");
-      }
-      console.error("Error applying sliders:", error);
+      console.error("Error transforming plot:", error);
       throw error;
     }
   }

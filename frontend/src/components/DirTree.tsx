@@ -10,7 +10,6 @@ import {
 import axios from "axios";
 import { PROD_BACKEND_URL } from "../config";
 import { useVirtualizer, Virtualizer } from "@tanstack/react-virtual";
-// live dataset service removed
 import { useTree } from "@headless-tree/react";
 import type { TreeInstance } from "@headless-tree/core";
 import {
@@ -267,7 +266,6 @@ const DirTree = ({
           });
 
           setApiData(treeData);
-          // live dataset logic removed
         })
         .catch((error) => {
           console.error("Error loading directory data:", error);

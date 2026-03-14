@@ -19,6 +19,7 @@ from .config import FD_EXEC, MAX_DEPTH  #  DU_EXEC, XARGS_EXEC | Windows compat
 from .models import PathData
 from .logger import logger
 from .live_utils import get_live_dataset_entries, resolve_live_dataset
+from .json_utils import sanitize_for_json
 from . import live_client
 from . import live_measurements
 
@@ -814,7 +815,7 @@ async def get_meta_attrs(path: PathData) -> Dict:
         attr_json["independents"] = indeps
         attr_json["dependents"] = deps
 
-        return attr_json
+        return sanitize_for_json(attr_json)
 
     except Exception as e:
         logger.error(
@@ -959,7 +960,7 @@ async def get_metadata(path: PathData) -> Dict:
             else:
                 meta_json[k] = str(v)
 
-        return meta_json
+        return sanitize_for_json(meta_json)
 
     except Exception as e:
         logger.error(f"get_metadata | Error loading metadata: {str(e)}", exc_info=True)

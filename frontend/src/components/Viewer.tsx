@@ -49,7 +49,6 @@ interface ViewerProps {
   loadingAttributes: Set<string>;
   onStartLoadingAttributes: (itemId: string) => void;
   onUpdateBasketItemAttributes: (itemId: string, attributes: AttrData) => void;
-  // live dataset toggling removed
 }
 
 const Viewer = ({
@@ -471,7 +470,6 @@ const Viewer = ({
       `[Viewer] handleCreatePlot received config:`,
       JSON.stringify(config, null, 2),
     );
-    // live dataset flags removed; just add the provided config
     addPlot({ ...config });
   };
 

@@ -3,10 +3,12 @@ FastAPI endpoints for creating and managing plots based on xarray datasets.
 
 """
 
-from pathlib import Path
-from typing import Dict, List
+import hashlib
+import json
 import numpy as np
 import xarray as xr
+from pathlib import Path
+from typing import Dict, List
 from fastapi import APIRouter, HTTPException
 
 # Local imports
@@ -15,6 +17,7 @@ from .filters import apply_filters
 from .models import PlotRequest, PlotResponse
 from .logger import logger
 from .live_utils import resolve_live_dataset
+from .json_utils import sanitize_for_json
 from . import live_client
 
 
@@ -22,6 +25,26 @@ from . import live_client
 router = APIRouter()
 
 MEMORY_PROTOCOL = "memory://"
+
+# Runtime plot context registry used by unified transform endpoint.
+_PLOT_CONTEXTS: Dict[str, Dict] = {}
+
+
+def _build_plot_ref(context: Dict) -> str:
+    """
+    Create a stable reference key for a plot context.
+
+    """
+    payload = json.dumps(context, sort_keys=True, default=str)
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:24]
+
+
+def register_plot_context(plot_ref: str, context: Dict) -> None:
+    _PLOT_CONTEXTS[plot_ref] = context
+
+
+def get_plot_context(plot_ref: str) -> Dict | None:
+    return _PLOT_CONTEXTS.get(plot_ref)
 
 
 def _validate_paths(fpaths: List[str]) -> bool:
@@ -83,6 +106,8 @@ def load_dataset(fpath: str) -> xr.Dataset:
         info = resolve_live_dataset(measurement_id)
         ws_url = info.get("ws_url")
         disk_path = info.get("disk_path")
+        live_status = info.get("live_status")
+        ended_at = info.get("ended_at")
 
         # Try WebSocket first for in-memory access
         if ws_url:
@@ -92,6 +117,9 @@ def load_dataset(fpath: str) -> xr.Dataset:
                 )
                 dataset.attrs["path"] = fpath
                 dataset.attrs.setdefault("measurement_id", measurement_id)
+                dataset.attrs["loaded_from"] = "memory"
+                dataset.attrs["measurement_live_status"] = live_status
+                dataset.attrs["measurement_ended_at"] = ended_at
                 logger.info(
                     f"Loaded live dataset '{measurement_id}' via WebSocket from memory"
                 )
@@ -128,10 +156,21 @@ def load_dataset(fpath: str) -> xr.Dataset:
             dataset.attrs["path"] = fpath  # Keep memory:// path for consistency
             dataset.attrs["actual_path"] = disk_path  # Store actual disk path
             dataset.attrs["loaded_from"] = "disk"
-            logger.info(
-                f"❕Loaded dataset '{measurement_id}' from disk (measurement ended)"
-            )
             dataset.attrs.setdefault("measurement_id", measurement_id)
+            dataset.attrs["measurement_live_status"] = live_status
+            dataset.attrs["measurement_ended_at"] = ended_at
+            if live_status is True:
+                logger.info(
+                    f"❕Loaded dataset '{measurement_id}' from disk fallback while measurement is still live"
+                )
+            elif live_status is False:
+                logger.info(
+                    f"❕Loaded dataset '{measurement_id}' from disk (measurement ended)"
+                )
+            else:
+                logger.info(
+                    f"❕Loaded dataset '{measurement_id}' from disk (live status unknown)"
+                )
             return dataset
         except Exception as e:
             logger.error(
@@ -206,7 +245,7 @@ def gen_slider_config(dataset: xr.Dataset, indeps: List[str]) -> Dict:
                 vals = dataset.coords[dim].values
                 unique_vals = np.unique(vals)
                 if len(unique_vals) > 1:
-                    # Calculate step as the median difference between consecutive sorted values to handle float noise reliably 
+                    # Calculate step as the median difference between consecutive sorted values to handle float noise reliably
                     diffs = np.diff(unique_vals)
                     # Use the median to avoid tiny differences from float imprecision
                     step = float(np.median(diffs))
@@ -343,19 +382,45 @@ def create_line_plots(
                 plot_figure = line_plot.plot()
                 plot_json = plot_figure.to_dict()
 
-                dataset_name = Path(fpath).stem
+                is_memory_request = fpath.startswith(MEMORY_PROTOCOL)
+                loaded_from_disk = dataset.attrs.get("loaded_from") == "disk"
+                measurement_live_status = dataset.attrs.get("measurement_live_status")
 
-                # Check if dataset was loaded from disk (measurement ended)
-                is_live = dataset.attrs.get("loaded_from") != "disk"
+                if is_memory_request:
+                    if measurement_live_status is True:
+                        is_live = True
+                    elif measurement_live_status is False:
+                        is_live = False
+                    else:
+                        # Fallback when DB state is unavailable.
+                        is_live = not loaded_from_disk
+                else:
+                    is_live = False
+
+                context_fpath = (
+                    fpath if is_live else str(dataset.attrs.get("actual_path") or fpath)
+                )
+                dataset_name = Path(context_fpath).stem
+
+                context = {
+                    "fpath": context_fpath,
+                    "indeps": list(indeps),
+                    "deps": [dep],
+                    "plotType": "LinePlot",
+                }
+                plot_ref = _build_plot_ref(context)
+                register_plot_context(plot_ref, context)
 
                 plots.append(
                     {
                         "id": f"line_plot_{i}_{dataset_name}_{dep}",
+                        "plot_ref": plot_ref,
                         "plotJson": plot_json,
                         "title": f"Line Plot - {dataset_name}: {dep} vs {', '.join(indeps)}",
                         "type": "LinePlot",
                         "slider_config": auto_slider_config,  # Include auto-generated slider configuration for frontend
                         "is_live": is_live,  # Indicate if data is from live measurement or disk
+                        "resolved_fpath": context_fpath,
                     }
                 )
 
@@ -446,19 +511,45 @@ def create_heat_maps(
                 plot_figure = heat_map.plot()
                 plot_json = plot_figure.to_dict()
 
-                dataset_name = Path(fpath).stem
+                is_memory_request = fpath.startswith(MEMORY_PROTOCOL)
+                loaded_from_disk = dataset.attrs.get("loaded_from") == "disk"
+                measurement_live_status = dataset.attrs.get("measurement_live_status")
 
-                # Check if dataset was loaded from disk (measurement ended)
-                is_live = dataset.attrs.get("loaded_from") != "disk"
+                if is_memory_request:
+                    if measurement_live_status is True:
+                        is_live = True
+                    elif measurement_live_status is False:
+                        is_live = False
+                    else:
+                        # Fallback when DB state is unavailable.
+                        is_live = not loaded_from_disk
+                else:
+                    is_live = False
+
+                context_fpath = (
+                    fpath if is_live else str(dataset.attrs.get("actual_path") or fpath)
+                )
+                dataset_name = Path(context_fpath).stem
+
+                context = {
+                    "fpath": context_fpath,
+                    "indeps": [x_var, y_var],
+                    "deps": [dep],
+                    "plotType": "HeatMap",
+                }
+                plot_ref = _build_plot_ref(context)
+                register_plot_context(plot_ref, context)
 
                 plots.append(
                     {
                         "id": f"heat_map_{i}_{dataset_name}_{dep}",
+                        "plot_ref": plot_ref,
                         "plotJson": plot_json,
                         "title": f"Heat Map - {dataset_name}: {dep} vs {x_var}, {y_var}",
                         "type": "HeatMap",
                         "slider_config": auto_slider_config,
                         "is_live": is_live,  # Indicate if data is from live measurement or disk
+                        "resolved_fpath": context_fpath,
                     }
                 )
 
@@ -626,6 +717,7 @@ async def create_plots(request: PlotRequest) -> PlotResponse:
                 message="No plots were created. Please check your input parameters.",
             )
         else:
+            plots = sanitize_for_json(plots)
             return PlotResponse(
                 plots=plots,
                 success=True,

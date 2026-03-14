@@ -56,7 +56,7 @@ def resolve_live_dataset(measurement_id: str) -> Dict[str, Any]:
         measurement_id (str): Measurement ID to look up
 
     Returns:
-        Dict with keys: disk_path, ws_url, ws_port, started_at, ended_at
+        Dict with keys: disk_path, ws_url, ws_port, live_status, started_at, ended_at
         Returns dict with None values if not found.
 
     """
@@ -66,6 +66,7 @@ def resolve_live_dataset(measurement_id: str) -> Dict[str, Any]:
             "disk_path": None,
             "ws_url": None,
             "ws_port": None,
+            "live_status": None,
             "started_at": None,
             "ended_at": None,
         }
@@ -80,6 +81,7 @@ def resolve_live_dataset(measurement_id: str) -> Dict[str, Any]:
                 "disk_path": None,
                 "ws_url": None,
                 "ws_port": None,
+                "live_status": None,
                 "started_at": None,
                 "ended_at": None,
             }
@@ -88,6 +90,7 @@ def resolve_live_dataset(measurement_id: str) -> Dict[str, Any]:
             "disk_path": measurement.fpath,
             "ws_url": measurement.ws_url,
             "ws_port": measurement.ws_port,
+            "live_status": bool(measurement.live_status),
             "started_at": measurement.started_at,
             "ended_at": measurement.ended_at,
         }
@@ -97,6 +100,7 @@ def resolve_live_dataset(measurement_id: str) -> Dict[str, Any]:
             "disk_path": None,
             "ws_url": None,
             "ws_port": None,
+            "live_status": None,
             "started_at": None,
             "ended_at": None,
         }

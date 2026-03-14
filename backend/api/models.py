@@ -5,7 +5,7 @@ structures used for type safety and validation in the request and response bodie
 """
 
 from typing import Dict, List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class PathData(BaseModel):
@@ -31,9 +31,9 @@ class PlotRequest(BaseModel):
     indeps: List[str]
     deps: List[str]
     plotType: str
-    filters_order: List[str] = []
-    filters_opts: Dict = {}
-    slider: Dict = {}  # For data slicing/selection
+    filters_order: List[str] = Field(default_factory=list)
+    filters_opts: Dict = Field(default_factory=dict)
+    slider: Dict = Field(default_factory=dict)  # For data slicing/selection
 
 
 class PlotResponse(BaseModel):
@@ -43,29 +43,16 @@ class PlotResponse(BaseModel):
     skip_update: bool = False  # E.g., transient file locks or other transient errors
 
 
-class FilterRequest(BaseModel):
+class TransformPlotRequest(BaseModel):
+    plot_ref: str
+    filters_order: List[str] = Field(default_factory=list)
+    filters_opts: Dict[str, dict] = Field(default_factory=dict)
+    slider: Dict[str, dict] = Field(default_factory=dict)
+
+
+class TransformPlotResponse(BaseModel):
     plot_json: dict
-    filters_order: List[str]
-    filters_opts: Dict[str, dict]
-    num_axes: int
-
-
-class FilterResponse(BaseModel):
-    filtered_plot_json: dict
-
-
-class SliderRequest(BaseModel):
-    filters_order: List[str]
-    filters_opts: Dict[str, dict]
-    slider: Dict[str, dict]  # {dim: {min, max, step, value}}
-    fpath: str  # Dataset path for reloading data
-    indeps: List[str]  # Independent variables being plotted
-    deps: List[str]  # Dependent variables being plotted
-    plotType: str  # "LinePlot" or "HeatMap"
-
-
-class SliderResponse(BaseModel):
-    sliced_plot_json: dict
+    plot_ref: str
 
 
 class WatchPath(BaseModel):

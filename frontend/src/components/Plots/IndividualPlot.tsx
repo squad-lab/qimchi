@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from "react";
 import { Data, Layout, Config } from "plotly.js";
 import PlotWrapper from "./PlotWrapper";
 import { PlotAPI, PlotRequest } from "../../services/plotAPI";
@@ -32,31 +38,42 @@ interface IndividualPlotProps {
   onRemove: (id: string) => void;
 }
 
+type PlotLiveStatus = "live" | "paused" | "error" | "completed";
+
 const IndividualPlot: React.FC<IndividualPlotProps> = ({
   config,
   onRemove,
 }) => {
   const [plotJson, setPlotJson] = useState<PlotlyJSON | null>(null);
+  const [plotRef, setPlotRef] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentConfig, setCurrentConfig] = useState<PlotConfiguration>(config);
+  const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [availableSliders, setAvailableSliders] = useState<
     Record<string, SliderConfig>
   >({});
-  // Track if this is a slider-triggered refresh to avoid unmounting PlotWrapper
-  const [isSliderRefresh, setIsSliderRefresh] = useState(false);
   const currentConfigRef = useRef(currentConfig);
   const hasInitialized = useRef(false);
   const { showToast } = useToast();
   const fetchInFlight = useRef(false);
   const autoRefreshTimer = useRef<number | null>(null);
-  // Count consecutive responses where is_live===false. A transient WebSocket
-  // failure makes the backend fall back to disk and return is_live=false for
-  // just one or two polls before reconnecting. A truly ended measurement keeps
-  // returning false indefinitely. Switch to disk only after this many consecutive
-  // non-live responses to avoid stopping the poll on a transient WS blip.
+  // Guard against transient live read failures by requiring multiple
+  // consecutive non-live responses before marking the measurement completed.
   const consecutiveNonLiveCount = useRef(0);
-  const CONSECUTIVE_NON_LIVE_THRESHOLD = 50;
+  const CONSECUTIVE_NON_LIVE_THRESHOLD = 10;
+
+  const plotStatus: PlotLiveStatus = useMemo(() => {
+    if (error) {
+      return "error";
+    }
+
+    if (currentConfig.source !== "memory") {
+      return "completed";
+    }
+
+    return isFiltersModalOpen ? "paused" : "live";
+  }, [error, currentConfig.source, isFiltersModalOpen]);
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -98,6 +115,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         if (response.success && response.plots.length > 0) {
           // Take the first plot from the response
           const plot = response.plots[0];
+          setPlotRef(plot.plot_ref);
 
           // Track consecutive non-live responses. The backend returns is_live=false
           // both for transient WebSocket failures (recovers next poll) and for
@@ -111,14 +129,22 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
 
           if (
             plot.is_live === false &&
-            consecutiveNonLiveCount.current >= CONSECUTIVE_NON_LIVE_THRESHOLD &&
-            currentConfigRef.current.source === "memory"
+            currentConfigRef.current.source === "memory" &&
+            consecutiveNonLiveCount.current >= CONSECUTIVE_NON_LIVE_THRESHOLD
           ) {
+            const resolvedPath =
+              typeof plot.resolved_fpath === "string" &&
+              plot.resolved_fpath.length > 0
+                ? plot.resolved_fpath
+                : currentConfigRef.current.fpath;
             console.log(
-              `[IndividualPlot] Measurement ended (${consecutiveNonLiveCount.current} consecutive non-live responses), switching source to disk`,
+              `[IndividualPlot] Measurement completed (${consecutiveNonLiveCount.current} consecutive non-live responses), switching to disk source at: ${resolvedPath}`,
             );
-            setCurrentConfig((prev) => ({ ...prev, source: "disk" }));
-            // Continue to update the plot with the disk data
+            setCurrentConfig((prev) => ({
+              ...prev,
+              source: "disk",
+              fpath: resolvedPath,
+            }));
           }
 
           const clonedPlotJson: PlotlyJSON = structuredClone(plot.plotJson);
@@ -223,21 +249,11 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         if (!options.silent) {
           setIsLoading(false);
         }
-        setIsSliderRefresh(false); // Reset slider refresh flag
         fetchInFlight.current = false;
       }
     },
     [showToast],
   ); // No dependency on currentConfig, use ref instead
-
-  // Special refresh function for slider changes that preserves PlotWrapper state
-  // Note: This is no longer needed as PlotWrapper handles filter/slider application directly
-  // const refreshForSliders = useCallback(async () => {
-  //   const currentConfig = currentConfigRef.current;
-  //   console.log(`[IndividualPlot] refreshForSliders called - recreating plot with dataset: ${currentConfig.fpath}`);
-  //   setIsSliderRefresh(true);
-  //   await createPlot(currentConfig);
-  // }, [createPlot]);
 
   const handleConfigUpdate = useCallback(
     (updates: Partial<PlotConfiguration>) => {
@@ -336,9 +352,9 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
       `[IndividualPlot] auto-refresh check: fpath=${currentConfig.fpath} | source=${currentConfig.source} | isMemorySource=${isMemorySource}`,
     );
 
-    if (!isMemorySource) {
+    if (!isMemorySource || isFiltersModalOpen) {
       console.log(
-        `[IndividualPlot] auto-refresh disabled for source=${currentConfig.source}`,
+        `[IndividualPlot] auto-refresh disabled for source=${currentConfig.source}, filtersModalOpen=${isFiltersModalOpen}`,
       );
       if (autoRefreshTimer.current !== null) {
         window.clearInterval(autoRefreshTimer.current);
@@ -374,7 +390,12 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         autoRefreshTimer.current = null;
       }
     };
-  }, [currentConfig.fpath, currentConfig.source, createPlot]);
+  }, [
+    currentConfig.fpath,
+    currentConfig.source,
+    createPlot,
+    isFiltersModalOpen,
+  ]);
 
   // Only create plot on initial mount - prevent double execution
   useEffect(() => {
@@ -388,8 +409,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
     onRemove(config.id);
   };
 
-  // Show loading state for initial load or non-slider refreshes
-  if (isLoading && !isSliderRefresh) {
+  if (isLoading) {
     return (
       <div className="relative min-h-[400px] flex items-center justify-center bg-gray-50 rounded-lg">
         <div className="text-center">
@@ -440,18 +460,6 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
     );
   }
 
-  // Show loading state when plot data hasn't loaded yet and we're still loading
-  if (!plotJson && isLoading) {
-    return (
-      <div className="relative min-h-[400px] flex items-center justify-center bg-gray-50 rounded-lg">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-          <p className="text-sm text-gray-600">Creating plot...</p>
-        </div>
-      </div>
-    );
-  }
-
   if (!plotJson) {
     return (
       <div className="relative min-h-[400px] flex items-center justify-center bg-gray-50 rounded-lg">
@@ -467,12 +475,13 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
     <div className="relative min-h-[400px]">
       <PlotWrapper
         plotJson={plotJson}
+        plotRef={plotRef}
+        plotStatus={plotStatus}
         onClose={handleClose}
         plotConfig={currentConfig}
         onUpdateConfig={handleConfigUpdate}
+        onFiltersModalOpenChange={setIsFiltersModalOpen}
         availableSliders={availableSliders}
-        isLoading={isLoading && isSliderRefresh} // Pass loading state for slider refreshes
-        // live dataset props removed
       />
     </div>
   );

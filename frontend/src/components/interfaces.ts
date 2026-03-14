@@ -65,17 +65,6 @@ export interface AppliedFilter {
   options?: unknown;
 }
 
-export interface FilterRequest {
-  plot_json: unknown;
-  filters_order: string[];
-  filters_opts: Record<string, unknown>;
-  num_axes: number;
-}
-
-export interface FilterResponse {
-  filtered_plot_json: unknown;
-}
-
 export interface FilterDefinition {
   key: string;
   name: string;

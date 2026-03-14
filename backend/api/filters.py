@@ -18,7 +18,11 @@ from plotly import graph_objects as go
 
 # Local imports
 from .logger import logger
-from .models import FilterRequest, FilterResponse, SliderRequest, SliderResponse
+from .models import (
+    TransformPlotRequest,
+    TransformPlotResponse,
+)
+from .json_utils import sanitize_for_json
 
 
 # FastAPI Router
@@ -705,7 +709,10 @@ class Normalize(Filter):
                 z_data = self.z_axis / np.nanmax(np.abs(self.z_axis), axis=0)
             case "y":
                 # Normalize each row (along y-axis)
-                z_data = self.z_axis / np.nanmax(np.abs(self.z_axis), axis=1)[..., np.newaxis]
+                z_data = (
+                    self.z_axis
+                    / np.nanmax(np.abs(self.z_axis), axis=1)[..., np.newaxis]
+                )
             case _:
                 err = f"Invalid value of `axis={self.axis}` for normalization."
                 logger.error(err)
@@ -1215,104 +1222,90 @@ def apply_filters(
     return filt_fig
 
 
-@router.post("/apply-filters", response_model=FilterResponse)
-async def apply_filters_endpoint(request: FilterRequest) -> FilterResponse:
-    """
-    Apply filters to a plot and return the filtered plot JSON.
+def _generate_plot_json_for_transform(
+    *,
+    fpath: str,
+    indeps: list[str],
+    deps: list[str],
+    plot_type: str,
+    slider: dict,
+    filters_order: list[str],
+    filters_opts: dict,
+) -> dict:
+    """Generate a plot JSON from canonical plot context + transform settings."""
+    from .plots import create_line_plots, create_heat_maps, load_dataset
 
-    """
-    try:
-        # Apply filters using existing function
-        filtered_plot_json: dict = apply_filters(
-            filters_order=request.filters_order,
-            filters_opts=request.filters_opts,
-            fig=request.plot_json,
-            fig_num_axes=request.num_axes,
+    dataset = load_dataset(fpath)
+    logger.debug(f"Loaded dataset with dims: {list(dataset.dims)}")
+
+    if plot_type == "LinePlot":
+        plots_data = create_line_plots(
+            datasets=[dataset],
+            fpaths=[fpath],
+            indeps=indeps,
+            deps=deps,
+            slider=slider,
+        )
+    elif plot_type == "HeatMap":
+        plots_data = create_heat_maps(
+            datasets=[dataset],
+            fpaths=[fpath],
+            indeps=indeps,
+            deps=deps,
+            slider=slider,
+        )
+    else:
+        raise HTTPException(
+            status_code=400, detail=f"Unsupported plot type: {plot_type}"
         )
 
-        # Convert numpy arrays to lists for JSON serialization
-        for trace in filtered_plot_json.get("data", []):
-            for key, value in trace.items():
-                if isinstance(value, np.ndarray):
-                    trace[key] = value.tolist()
+    if not plots_data:
+        raise HTTPException(status_code=500, detail="Failed to generate plot data")
 
-        return FilterResponse(filtered_plot_json=filtered_plot_json)
+    plot_json = plots_data[0]["plotJson"]
 
-    except Exception as e:
-        logger.error(f"Error applying filters: {str(e)}")
-        logger.error(f"{e}", exc_info=True)
-        raise HTTPException(
-            status_code=500, detail=f"Failed to apply filters: {str(e)}"
+    if filters_order:
+        num_axes = 2 if plot_type == "HeatMap" else 1
+        plot_json = apply_filters(
+            filters_order=filters_order,
+            filters_opts=filters_opts,
+            fig=plot_json,
+            fig_num_axes=num_axes,
         )
 
+    return plot_json
 
-@router.post("/apply-sliders", response_model=SliderResponse)
-async def apply_sliders_endpoint(request: SliderRequest) -> SliderResponse:
-    """
-    Apply slider-based data slicing along with filters and return updated plot JSON.
-    This endpoint reuses the existing plot creation functions with updated slider values.
 
-    """
+@router.post("/transform-plot", response_model=TransformPlotResponse)
+async def transform_plot_endpoint(
+    request: TransformPlotRequest,
+) -> TransformPlotResponse:
+    """Unified endpoint for plot transforms (filters + optional slider)."""
     try:
-        from .plots import create_line_plots, create_heat_maps, load_dataset
+        from .plots import get_plot_context
 
-        logger.debug(f"Applying sliders: {request.slider}")
-        logger.debug(f"With filters: {request.filters_order}")
+        ctx = get_plot_context(request.plot_ref)
+        if not ctx:
+            raise HTTPException(status_code=404, detail="Unknown plot_ref")
 
-        # 1. Reload the original dataset
-        dataset = load_dataset(request.fpath)
-        logger.debug(f"Loaded dataset with dims: {list(dataset.dims)}")
+        plot_json = _generate_plot_json_for_transform(
+            fpath=ctx["fpath"],
+            indeps=list(ctx["indeps"]),
+            deps=list(ctx["deps"]),
+            plot_type=str(ctx["plotType"]),
+            slider=request.slider or {},
+            filters_order=request.filters_order or [],
+            filters_opts=request.filters_opts or {},
+        )
 
-        # 2. Use existing plot creation functions with slider config
-        if request.plotType == "LinePlot":
-            plots_data = create_line_plots(
-                datasets=[dataset],
-                fpaths=[request.fpath],
-                indeps=request.indeps,
-                deps=request.deps,
-                slider=request.slider,  # Pass slider config for slicing
-            )
-        elif request.plotType == "HeatMap":
-            plots_data = create_heat_maps(
-                datasets=[dataset],
-                fpaths=[request.fpath],
-                indeps=request.indeps,
-                deps=request.deps,
-                slider=request.slider,  # Pass slider config for slicing
-            )
-        else:
-            raise HTTPException(
-                status_code=400, detail=f"Unsupported plot type: {request.plotType}"
-            )
+        plot_json = sanitize_for_json(plot_json)
 
-        if not plots_data:
-            raise HTTPException(status_code=500, detail="Failed to generate plot data")
-
-        # Get the first (and should be only) plot
-        plot_json = plots_data[0]["plotJson"]
-
-        # 3. Apply filters to the sliced plot if any filters are specified
-        if request.filters_order and request.filters_opts:
-            num_axes = 2 if request.plotType == "HeatMap" else 1
-            plot_json = apply_filters(
-                filters_order=request.filters_order,
-                filters_opts=request.filters_opts,
-                fig=plot_json,
-                fig_num_axes=num_axes,
-            )
-
-        # Convert numpy arrays to lists for JSON serialization
-        for trace in plot_json.get("data", []):
-            for key, value in trace.items():
-                if isinstance(value, np.ndarray):
-                    trace[key] = value.tolist()
-
-        logger.debug("Successfully applied sliders and filters")
-        return SliderResponse(sliced_plot_json=plot_json)
-
+        return TransformPlotResponse(plot_json=plot_json, plot_ref=request.plot_ref)
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error applying sliders: {str(e)}")
+        logger.error(f"Error transforming plot: {str(e)}")
         logger.error(f"{e}", exc_info=True)
         raise HTTPException(
-            status_code=500, detail=f"Failed to apply sliders: {str(e)}"
+            status_code=500, detail=f"Failed to transform plot: {str(e)}"
         )
