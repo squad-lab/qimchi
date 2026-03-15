@@ -9,7 +9,6 @@
 - [Feature] Overhauled color scale range slider for HeatMaps - DualThumbSlider with responsive data-bounds display
 - [Feature] Added transient blip protection to prevent error spam in live plots
 - [Feature] Restored plot interactivity (zoom/pan) during live plots
-- [Feature] Restored plot interactivity (zoom/pan) during live plots
 - [Feature] Added toast notification log modal (check in footer)
 - [Feature] Appearance Modal now surfaces 3 recommended HeatMap colorscales
 - [Fix] [IMPORTANT] Fixed major post-mem-leak filter regressions
