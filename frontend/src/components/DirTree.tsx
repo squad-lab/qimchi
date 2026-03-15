@@ -42,7 +42,7 @@ import {
   SearchXIcon,
   Lightbulb,
   X,
-  FileText,
+  NotebookPen,
   LoaderCircle,
   Download,
   MoveUp,
@@ -51,25 +51,16 @@ import {
 } from "lucide-react";
 
 // Local imports
+import { TreeNode, convertApiNode } from "./treeUtils";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useToast } from "../hooks/useToast";
 import { useSidebarStore } from "../stores/sidebarStore";
 import Tooltip from "./Tooltip";
 import { BasketItem } from "./Basket";
 import type { AttrData } from "./interfaces";
+import { useShortcut } from "../hooks/useGlobalShortcuts";
 
-// NOTE: API for items that will go on the Tree
-export interface TreeNode {
-  id: string;
-  name: string;
-  path: string;
-  type: "file" | "folder";
-  size?: number;
-  timestamp?: Date;
-  tags?: string[];
-  children?: TreeNode[];
-  lastModified?: number;
-}
+
 
 // Global cache to persist data across component mounts/unmounts
 const globalDirTreeCache = new Map<
@@ -90,6 +81,7 @@ interface DirTreeProps {
   onRemoveBasketItem?: (id: string) => void;
   onPathChange?: (newPath: string) => void; // For folder double-click navigation
   onOpenNotes?: (node: TreeNode) => void; // For opening notes
+  onOpenSampleNotes?: (node: TreeNode) => void; // For opening pooled sample notes
   onDownload?: (node: TreeNode) => void; // For downloading datasets
   onCycleDataset?: (direction: "prev" | "next") => void; // For cycling through datasets
   onStartLoadingAttributes?: (itemId: string) => void;
@@ -118,6 +110,7 @@ const DirTree = ({
   onRemoveBasketItem,
   onPathChange,
   onOpenNotes,
+  onOpenSampleNotes,
   onDownload,
   onCycleDataset,
   onStartLoadingAttributes,
@@ -173,7 +166,7 @@ const DirTree = ({
           .post(`${PROD_BACKEND_URL}/load-live/`)
           .then((response) => {
             if (response.data.success && response.data.children) {
-              const children = response.data.children;
+              const children = response.data.children.map(convertApiNode);
               setApiData(children);
               console.log(`Loaded ${children.length} live measurements`);
             } else {
@@ -222,41 +215,10 @@ const DirTree = ({
           console.log("API Response status:", response.status);
           // console.log("API Response data:", response.data);
 
-          // Convert the API response to TreeNode format
-          interface ApiNode {
-            id: string;
-            name: string;
-            path: string;
-            type: "file" | "folder";
-            size?: number;
-            timestamp?: string;
-            tags?: string[];
-            children?: ApiNode[];
-            lastModified?: number;
-          }
-
-          const convertApiData = (apiNode: ApiNode): TreeNode => {
-            return {
-              id: apiNode.id,
-              name: apiNode.name,
-              path: apiNode.path,
-              type: apiNode.type,
-              size: apiNode.size,
-              timestamp: apiNode.timestamp
-                ? new Date(apiNode.timestamp)
-                : undefined,
-              tags: apiNode.tags,
-              children: apiNode.children
-                ? apiNode.children.map(convertApiData)
-                : undefined,
-              lastModified: apiNode.lastModified,
-            };
-          };
-
           // If the response is a single node, wrap it in an array
           const treeData = Array.isArray(response.data)
-            ? response.data.map(convertApiData)
-            : [convertApiData(response.data)];
+            ? response.data.map(convertApiNode)
+            : [convertApiNode(response.data)];
           // console.log("Converted tree data:", treeData);
 
           // Store in global cache
@@ -319,7 +281,7 @@ const DirTree = ({
         .post(`${PROD_BACKEND_URL}/load-live/`)
         .then((response) => {
           if (response.data.success && response.data.children) {
-            const newMeasurements = response.data.children;
+            const newMeasurements = response.data.children.map(convertApiNode);
 
             // Incrementally update apiData without full rebuild
             setApiData((prevData) => {
@@ -490,7 +452,9 @@ const DirTree = ({
           }
         }
 
-        return sortDirection === "desc" ? -comparison : comparison;
+        // Chrono sort is always descending (newest first)
+        const finalDirection = sortBy === "chrono" ? "desc" : sortDirection;
+        return finalDirection === "desc" ? -comparison : comparison;
       });
     };
 
@@ -707,14 +671,17 @@ const DirTree = ({
 
   const handleSort = (newSortBy: typeof sortBy) => {
     if (sortBy === newSortBy) {
+      // Don't toggle direction for chrono sort - it's always newest first
+      if (newSortBy === "chrono") return;
+
       updateDirTreeState({
         sortDirection: sortDirection === "asc" ? "desc" : "asc",
       });
     } else {
       updateDirTreeState({
         sortBy: newSortBy,
-        // TODOLATER: Fix changing directions
         // For chronological view, default to descending (newest first)
+        // For others, default to ascending
         sortDirection: newSortBy === "chrono" ? "desc" : "asc",
       });
     }
@@ -996,27 +963,12 @@ const DirTree = ({
     }
   }, [tree, processedData.allNodes, onSelectNode]);
 
-  // Global Shift+R keybind to refresh directory
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const isExactShiftR =
-        e.shiftKey &&
-        !e.ctrlKey &&
-        !e.altKey &&
-        !e.metaKey &&
-        (e.key === "r" || e.key === "R");
-
-      if (isExactShiftR) {
-        e.preventDefault();
-        if (path && path.trim() && !isLoading) {
-          loadDirectoryData(path, true);
-        }
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [path, isLoading, loadDirectoryData]);
+  // Global R keybind mapped to refresh-dir in useGlobalShortcuts
+  useShortcut("refresh-dir", () => {
+    if (path && path.trim() && !isLoading) {
+      loadDirectoryData(path, true);
+    }
+  });
 
   // Show error state if there's a tree error
   if (treeError) {
@@ -1066,13 +1018,11 @@ const DirTree = ({
         <div>• Toggle button to view live measurements (auto-refreshes)</div>
         <div>• Shift + R to refresh directory</div>
         <div>
-          • Global: Shift+H HeatMap, Shift+L LinePlot, Shift+P Plot,
-          Alt+Shift+C Clear Composer
+          • Global: H HeatMap, L LinePlot, P Plot, Alt+Shift+C Clear Composer
         </div>
         <div>
-          • Global: Alt+Shift+B Clear Basket, Alt+Shift+V Clear Viewer,
-          Shift+E Toggle Side Panel, Shift+M Toggle Metadata, Shift+N Toggle
-          Notes
+          • Global: Alt+Shift+B Clear Basket, Alt+Shift+V Clear Viewer, Shift+E
+          Toggle Side Panel, Shift+M Toggle Metadata, Shift+N Toggle Notes
         </div>
       </div>
     </div>
@@ -1123,6 +1073,11 @@ const DirTree = ({
                       type="button"
                       key={sort}
                       onClick={() => handleSort(sort)}
+                      title={
+                        sort === "chrono"
+                          ? "Chronological (Newest)"
+                          : `Sort by ${sort}`
+                      }
                       className={`px-2 py-1 text-xs rounded flex items-center space-x-1 ${
                         sortBy === sort
                           ? "bg-blue-100 text-blue-800"
@@ -1137,10 +1092,10 @@ const DirTree = ({
                             : sort}
                       </span>
                       {sortBy === sort &&
-                        (sortDirection === "asc" ? (
-                          <SortAsc size={10} />
-                        ) : (
+                        (sort === "chrono" || sortDirection === "desc" ? (
                           <SortDesc size={10} />
+                        ) : (
+                          <SortAsc size={10} />
                         ))}
                     </button>
                   ),
@@ -1402,6 +1357,7 @@ const DirTree = ({
           onAddToBasket={onAddToBasket}
           onRemoveBasketItem={onRemoveBasketItem}
           onOpenNotes={onOpenNotes}
+          onOpenSampleNotes={onOpenSampleNotes}
           onDownload={onDownload}
           onDownloadFolder={handleDownloadFolder}
           draggedItem={draggedItem}
@@ -1425,6 +1381,7 @@ interface VirtualizedTreeViewProps {
   onAddToBasket?: (node: TreeNode) => void;
   onRemoveBasketItem?: (id: string) => void;
   onOpenNotes?: (node: TreeNode) => void;
+  onOpenSampleNotes?: (node: TreeNode) => void;
   onDownload?: (node: TreeNode) => void;
   onDownloadFolder?: (node: TreeNode) => void;
   draggedItem: string | null;
@@ -1448,6 +1405,7 @@ const VirtualizedTreeView = forwardRef<
       onAddToBasket,
       onRemoveBasketItem,
       onOpenNotes,
+      onOpenSampleNotes,
       onDownload,
       onDownloadFolder,
       draggedItem,
@@ -1523,6 +1481,7 @@ const VirtualizedTreeView = forwardRef<
                     onAddToBasket={onAddToBasket}
                     onRemoveBasketItem={onRemoveBasketItem}
                     onOpenNotes={onOpenNotes}
+                    onOpenSampleNotes={onOpenSampleNotes}
                     onDownload={onDownload}
                     onDownloadFolder={onDownloadFolder}
                     draggedItem={draggedItem}
@@ -1562,6 +1521,7 @@ interface TreeItemComponentProps {
   onAddToBasket?: (node: TreeNode) => void;
   onRemoveBasketItem?: (id: string) => void;
   onOpenNotes?: (node: TreeNode) => void;
+  onOpenSampleNotes?: (node: TreeNode) => void;
   onDownload?: (node: TreeNode) => void;
   onDownloadFolder?: (node: TreeNode) => void;
   draggedItem: string | null;
@@ -1579,6 +1539,7 @@ const TreeItemComponent = ({
   onAddToBasket,
   onRemoveBasketItem,
   onOpenNotes,
+  onOpenSampleNotes,
   onDownload,
   onDownloadFolder,
   draggedItem,
@@ -1597,6 +1558,11 @@ const TreeItemComponent = ({
   const isFocused = item.isFocused();
   const isSelected = item.isSelected();
   const isFolder = item.isFolder();
+  const isSampleFolder =
+    isFolder &&
+    (nodeData.children || []).some(
+      (child) => child.type === "file" && child.path.endsWith(".zarr"),
+    );
 
   // Check if this item is in the basket
   const isInBasket = basketItems.some(
@@ -1780,7 +1746,7 @@ const TreeItemComponent = ({
                 className="p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors flex-shrink-0"
                 aria-label="Open notes"
               >
-                <FileText size={14} />
+                <NotebookPen size={14} />
               </button>
             </Tooltip>
           )}
@@ -1868,6 +1834,23 @@ const TreeItemComponent = ({
               <Download size={14} />
             </button>
           </Tooltip>
+
+          {/* Open pooled sample notes button - only for sample folders */}
+          {isSampleFolder && (
+            <Tooltip content="Open pooled sample notes" position="top">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenSampleNotes?.(nodeData);
+                }}
+                className="p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors flex-shrink-0"
+                aria-label="Open pooled sample notes"
+              >
+                <NotebookPen size={14} />
+              </button>
+            </Tooltip>
+          )}
         </div>
       )}
     </div>

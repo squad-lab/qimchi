@@ -6,7 +6,7 @@ import { ChartScatter, Lightbulb } from "lucide-react";
 
 // Local imports
 import Basket, { BasketFieldSelection, BasketItem } from "./Basket";
-import { TreeNode } from "./DirTree";
+import { TreeNode } from "./treeUtils";
 import { AttrData } from "./interfaces";
 import PlotComposer, {
   PlotComposerConfig,
@@ -20,23 +20,10 @@ import { useSidebarStore } from "../stores/sidebarStore";
 import { useToast } from "../hooks/useToast";
 import Tooltip from "./Tooltip";
 import { generateAutoPlotConfigs } from "../utils/autoPlot";
-
-const isEditableTarget = (target: EventTarget | null): boolean => {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-
-  const tagName = target.tagName.toLowerCase();
-  if (tagName === "input" || tagName === "textarea" || tagName === "select") {
-    return true;
-  }
-
-  if (target.isContentEditable) {
-    return true;
-  }
-
-  return Boolean(target.closest("[contenteditable='true'], [role='textbox']"));
-};
+import {
+  useGlobalShortcutsInit,
+  useShortcut,
+} from "../hooks/useGlobalShortcuts";
 
 interface ViewerProps {
   defaultWidth?: number; // In percentage (0-100)
@@ -49,6 +36,7 @@ interface ViewerProps {
   loadingAttributes: Set<string>;
   onStartLoadingAttributes: (itemId: string) => void;
   onUpdateBasketItemAttributes: (itemId: string, attributes: AttrData) => void;
+  onOpenNotesItem?: (item: BasketItem) => void;
 }
 
 const Viewer = ({
@@ -60,6 +48,7 @@ const Viewer = ({
   loadingAttributes,
   onStartLoadingAttributes,
   onUpdateBasketItemAttributes,
+  onOpenNotesItem,
 }: ViewerProps) => {
   const { plotConfigs, addPlot, removePlot, clearPlots, updatePlotDataSource } =
     usePlotCollection();
@@ -350,82 +339,27 @@ const Viewer = ({
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.repeat || isEditableTarget(e.target)) {
-        return;
-      }
+  useGlobalShortcutsInit();
 
-      const key = e.key.toLowerCase();
-      const isShiftOnly = e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey;
-      const isAltShiftOnly = e.shiftKey && e.altKey && !e.ctrlKey && !e.metaKey;
-
-      if (isShiftOnly && key === "h") {
-        e.preventDefault();
-        composerActionRef.current?.setComposerPlotType("HeatMap");
-        return;
-      }
-
-      if (isShiftOnly && key === "l") {
-        e.preventDefault();
-        composerActionRef.current?.setComposerPlotType("LinePlot");
-        return;
-      }
-
-      if (isShiftOnly && key === "p") {
-        e.preventDefault();
-        composerActionRef.current?.createPlotFromComposer();
-        return;
-      }
-
-      if (isShiftOnly && key === "e") {
-        e.preventDefault();
-        setSidebarCollapsed(!sidebarCollapsed);
-        return;
-      }
-
-      if (isShiftOnly && key === "m") {
-        e.preventDefault();
-        setMetadataCollapsed(!metadataCollapsed);
-        return;
-      }
-
-      if (isShiftOnly && key === "n") {
-        e.preventDefault();
-        setNotesCollapsed(!notesCollapsed);
-        return;
-      }
-
-      if (isAltShiftOnly && key === "c") {
-        e.preventDefault();
-        composerActionRef.current?.clearComposer();
-        return;
-      }
-
-      if (isAltShiftOnly && key === "b") {
-        e.preventDefault();
-        onClearBasket();
-        return;
-      }
-
-      if (isAltShiftOnly && key === "v") {
-        e.preventDefault();
-        clearPlots();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [
-    clearPlots,
-    metadataCollapsed,
-    notesCollapsed,
-    onClearBasket,
-    setMetadataCollapsed,
-    setNotesCollapsed,
-    setSidebarCollapsed,
-    sidebarCollapsed,
-  ]);
+  useShortcut("heatmap", () =>
+    composerActionRef.current?.setComposerPlotType("HeatMap"),
+  );
+  useShortcut("lineplot", () =>
+    composerActionRef.current?.setComposerPlotType("LinePlot"),
+  );
+  useShortcut("plot", () =>
+    composerActionRef.current?.createPlotFromComposer(),
+  );
+  useShortcut("toggle-sidebar", () => setSidebarCollapsed(!sidebarCollapsed));
+  useShortcut("toggle-metadata", () =>
+    setMetadataCollapsed(!metadataCollapsed),
+  );
+  useShortcut("toggle-notes", () => setNotesCollapsed(!notesCollapsed));
+  useShortcut("clear-composer", () =>
+    composerActionRef.current?.clearComposer(),
+  );
+  useShortcut("clear-basket", () => onClearBasket());
+  useShortcut("clear-viewer", () => clearPlots());
 
   const VIEWER_TIPS = (
     <div className="space-y-1 text-sm">
@@ -445,8 +379,7 @@ const Viewer = ({
         • Use the Squarify button to force a 1:1 aspect ratio for all plots.
       </div>
       <div>
-        • Shortcuts: Shift+H HeatMap, Shift+L LinePlot, Shift+P Plot,
-        Alt+Shift+C Clear Composer.
+        • Shortcuts: H HeatMap, L LinePlot, P Plot, Alt+Shift+C Clear Composer.
       </div>
       <div>
         • Shortcuts: Alt+Shift+B Clear Basket, Alt+Shift+V Clear Viewer, Shift+E
@@ -563,6 +496,7 @@ const Viewer = ({
               onDropItem={handleDropItem}
               externalLoadingAttributes={loadingAttributes}
               onAutofillComposerField={handleAutofillComposerField}
+              onOpenNotesItem={onOpenNotesItem}
             />
           </div>
 

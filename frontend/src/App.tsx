@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { PROD_BACKEND_URL } from "./config";
 
@@ -8,19 +8,42 @@ import Sidebar from "./components/Sidebar";
 import Viewer from "./components/Viewer";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ToastProvider } from "./components/Toast";
-import { TreeNode } from "./components/DirTree";
+import { TreeNode } from "./components/treeUtils";
 import { BasketItem } from "./components/Basket";
 import { AttrData } from "./components/interfaces";
+import { useSidebarStore } from "./stores/sidebarStore";
 
 const App: React.FC = () => {
   const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
   const [loadingAttributes, setLoadingAttributes] = useState<Set<string>>(
-    new Set()
+    new Set(),
   );
   const [notesSelectedItemId, setNotesSelectedItemId] = useState<string | null>(
-    null
+    null,
   );
+  const { setSidebarCollapsed, setNotesCollapsed } = useSidebarStore();
+
+  const datasetKeys = useMemo(
+    () =>
+      basketItems.map((item) => ({
+        id: item.id,
+        key: item.path
+          .replace(/\\/g, "/")
+          .replace(/^memory:\/\//, "")
+          .split("/")
+          .pop()
+          ?.replace(/\.zarr$/i, "")
+          .toLowerCase(),
+      })),
+    [basketItems],
+  );
+
+  const openNotesPanel = (openPanel: boolean) => {
+    if (!openPanel) return;
+    setSidebarCollapsed(false);
+    setNotesCollapsed(false);
+  };
 
   const handleSelectNode = (node: TreeNode) => {
     // console.log("Selected node:", node);
@@ -28,6 +51,8 @@ const App: React.FC = () => {
   };
 
   const handleOpenNotes = async (node: TreeNode) => {
+    openNotesPanel(true);
+
     // First, ensure the item is in the basket
     const existingItem = basketItems.find((item) => item.id === node.id);
     if (!existingItem) {
@@ -48,7 +73,7 @@ const App: React.FC = () => {
       try {
         handleStartLoadingAttributes(node.id);
 
-  const response = await axios.post(`${PROD_BACKEND_URL}/load-attrs/`, {
+        const response = await axios.post(`${PROD_BACKEND_URL}/load-attrs/`, {
           path: node.path,
         });
 
@@ -69,6 +94,20 @@ const App: React.FC = () => {
     setNotesSelectedItemId(node.id);
   };
 
+  const handleOpenSampleNotes = (node: TreeNode) => {
+    openNotesPanel(true);
+    window.dispatchEvent(
+      new CustomEvent("notes:select-sample", {
+        detail: { samplePath: node.path },
+      }),
+    );
+  };
+
+  const handleOpenNotesFromBasketItem = (item: BasketItem) => {
+    openNotesPanel(true);
+    setNotesSelectedItemId(item.id);
+  };
+
   const handleNotesSelectedItemChange = (itemId: string | null) => {
     setNotesSelectedItemId(itemId);
   };
@@ -81,6 +120,7 @@ const App: React.FC = () => {
         return;
       }
 
+      let added = false;
       setBasketItems((prev) => {
         // Check if item already exists in basket
         if (prev.some((existing) => existing.id === item.id)) {
@@ -88,13 +128,51 @@ const App: React.FC = () => {
           return prev;
         }
         console.log("Added to basket:", item.name);
-
+        added = true;
         return [...prev, item];
       });
+
+      // Keep Notes dropdown aligned to the latest added basket item.
+      if (added) {
+        setNotesSelectedItemId(item.id);
+      }
     } catch (error) {
       console.error("Error adding item to basket:", error);
     }
   };
+
+  useEffect(() => {
+    const handleNotesOpen = (event: Event) => {
+      const customEvent = event as CustomEvent<{
+        datasetPath?: string;
+        openPanel?: boolean;
+      }>;
+      const datasetPath = customEvent.detail?.datasetPath;
+      if (!datasetPath) return;
+
+      const key = datasetPath
+        .replace(/\\/g, "/")
+        .replace(/^memory:\/\//, "")
+        .split("/")
+        .pop()
+        ?.replace(/\.zarr$/i, "")
+        .toLowerCase();
+
+      const matched = datasetKeys.find((entry) => entry.key === key);
+      if (!matched) return;
+
+      openNotesPanel(customEvent.detail?.openPanel !== false);
+      setNotesSelectedItemId(matched.id);
+    };
+
+    window.addEventListener("notes:open", handleNotesOpen as EventListener);
+    return () => {
+      window.removeEventListener(
+        "notes:open",
+        handleNotesOpen as EventListener,
+      );
+    };
+  }, [datasetKeys]);
 
   const handleRemoveBasketItem = (id: string) => {
     setBasketItems((prev) => prev.filter((item) => item.id !== id));
@@ -106,10 +184,10 @@ const App: React.FC = () => {
 
   const handleUpdateBasketItemAttributes = (
     itemId: string,
-    attributes: AttrData
+    attributes: AttrData,
   ) => {
     setBasketItems((prev) =>
-      prev.map((item) => (item.id === itemId ? { ...item, attributes } : item))
+      prev.map((item) => (item.id === itemId ? { ...item, attributes } : item)),
     );
     // Remove from loading state when attributes are loaded
     setLoadingAttributes((prev) => {
@@ -145,6 +223,7 @@ const App: React.FC = () => {
                 onStartLoadingAttributes={handleStartLoadingAttributes}
                 loadingAttributes={loadingAttributes}
                 onOpenNotes={handleOpenNotes}
+                onOpenSampleNotes={handleOpenSampleNotes}
                 notesSelectedItemId={notesSelectedItemId}
                 onNotesSelectedItemChange={handleNotesSelectedItemChange}
                 onCycleDataset={handleCycleDataset}
@@ -163,6 +242,7 @@ const App: React.FC = () => {
                 loadingAttributes={loadingAttributes}
                 onStartLoadingAttributes={handleStartLoadingAttributes}
                 onUpdateBasketItemAttributes={handleUpdateBasketItemAttributes}
+                onOpenNotesItem={handleOpenNotesFromBasketItem}
               />
             </ErrorBoundary>
           }

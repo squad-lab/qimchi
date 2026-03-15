@@ -16,6 +16,7 @@ import {
   SquareFunction,
   ShoppingBasket,
   Lightbulb,
+  NotebookPen,
 } from "lucide-react";
 
 // Local imports
@@ -62,6 +63,7 @@ interface BasketProps {
   externalLoadingAttributes?: Set<string>; // External loading state for items added via Plus/double-click
   highlightedFields?: Set<string>; // Fields to highlight (from PlotComposer)
   onAutofillComposerField?: (field: BasketFieldSelection) => void;
+  onOpenNotesItem?: (item: BasketItem) => void;
 }
 
 // Component to display the independents and dependents as draggable items with unified styling
@@ -211,6 +213,7 @@ const Basket = ({
   externalLoadingAttributes = new Set(),
   highlightedFields = new Set(),
   onAutofillComposerField,
+  onOpenNotesItem,
 }: BasketProps) => {
   const { showToast } = useToast();
   const [isExpanded, setIsExpanded] = useState(true);
@@ -457,8 +460,8 @@ const Basket = ({
                       <span className="text-white">Dependents</span>
                     </div>
                     <div className="text-white text-sm">
-                      Double-click any field chip to autofill Composer (X,
-                      then Y, then Z in HeatMap).
+                      Double-click any field chip to autofill Composer (X, then
+                      Y, then Z in HeatMap).
                     </div>
                     <div className="text-white text-sm">
                       Shortcuts: Alt+Shift+B Clear Basket, Shift+E Toggle Side
@@ -651,6 +654,19 @@ const Basket = ({
                               <Download size={14} />
                             </button>
                           </Tooltip>
+
+                          {/* Open notes button */}
+                          {item.path.endsWith(".zarr") && onOpenNotesItem && (
+                            <Tooltip content="Open notes" position="top">
+                              <button
+                                onClick={() => onOpenNotesItem(item)}
+                                className="p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                                title="Open notes"
+                              >
+                                <NotebookPen size={14} />
+                              </button>
+                            </Tooltip>
+                          )}
 
                           {/* live toggle removed */}
 

@@ -6,7 +6,8 @@ import { AttrData } from "./interfaces";
 import { useToast } from "../hooks/useToast";
 import { PROD_BACKEND_URL } from "../config";
 import { BasketItem } from "./Basket";
-import DirTree, { TreeNode } from "./DirTree";
+import DirTree from "./DirTree";
+import { TreeNode } from "./treeUtils";
 import Tooltip from "./Tooltip";
 import { useSidebarStore } from "../stores/sidebarStore";
 
@@ -18,6 +19,7 @@ interface ExplorerProps {
   onUpdateBasketItemAttributes: (itemId: string, attributes: AttrData) => void;
   onStartLoadingAttributes: (itemId: string) => void;
   onOpenNotes: (node: TreeNode) => void;
+  onOpenSampleNotes?: (node: TreeNode) => void;
   onCycleDataset?: (direction: "prev" | "next") => void; // For cycling through datasets
 }
 
@@ -29,6 +31,7 @@ const Explorer = ({
   onUpdateBasketItemAttributes,
   onStartLoadingAttributes,
   onOpenNotes,
+  onOpenSampleNotes,
   onCycleDataset,
 }: ExplorerProps) => {
   // Use Zustand store for path and submittedPath
@@ -157,6 +160,7 @@ const Explorer = ({
             onRemoveBasketItem={onRemoveBasketItem}
             onPathChange={handlePathChange}
             onOpenNotes={onOpenNotes}
+            onOpenSampleNotes={onOpenSampleNotes}
             onDownload={handleDownload}
             onCycleDataset={onCycleDataset}
             onStartLoadingAttributes={onStartLoadingAttributes}

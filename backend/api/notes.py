@@ -6,8 +6,9 @@ FastAPI endpoints for loading and saving notes associated with .zarr datasets.
 import re
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Dict
+from typing import Dict, Tuple
 from fastapi import APIRouter, HTTPException
+import xarray as xr
 
 # Local imports
 from .models import PathData, NotesData
@@ -78,6 +79,326 @@ def _make_frontmatter(filename: str, when: datetime) -> str:
     return FRONTMATTER_TEMPLATE.format(timestamp=ts, filename=filename)
 
 
+def _measurement_notes_paths(path: Path) -> Tuple[str, Path, Path]:
+    """
+    Build measurement notes paths from a .zarr dataset path.
+
+    Returns:
+        Tuple[str, Path, Path]: (dataset_uuid, notes_dir, notes_path)
+
+    """
+    dataset_uuid = path.stem
+    notes_dir = path.parent / dataset_uuid
+    notes_path = notes_dir / f"{dataset_uuid}.md"
+    return dataset_uuid, notes_dir, notes_path
+
+
+def _infer_sample_dir_from_measurement_path(path: Path) -> Path:
+    """
+    Infer sample directory from a measurement path with layout:
+    .../<sample>/<experiment>/<measurement>.zarr
+
+    """
+    if path.parent and path.parent.parent:
+        return path.parent.parent
+    if path.parent:
+        return path.parent
+    return path
+
+
+def _read_dataset_names(path: Path) -> Tuple[str | None, str | None]:
+    """
+    Read (sample_name, cryostat_name) from dataset metadata when possible.
+
+    """
+    try:
+        ds = xr.open_dataset(path, engine="zarr")
+        attrs = ds.attrs if hasattr(ds, "attrs") else {}
+        sample_name = attrs.get("Sample Name") or attrs.get("sample_name")
+        cryostat_name = attrs.get("Cryostat") or attrs.get("cryostat")
+        ds.close()
+        return (
+            str(sample_name).strip() if sample_name else None,
+            str(cryostat_name).strip() if cryostat_name else None,
+        )
+    except Exception:
+        return None, None
+
+
+def _sample_notes_path(
+    path: Path,
+    sample_path: str | None = None,
+    sample_name: str | None = None,
+    cryostat_name: str | None = None,
+) -> Tuple[str, Path, Path]:
+    """
+    Build pooled sample notes path from either a sample folder path or measurement path.
+
+    Args:
+        path (Path): Measurement path or sample path fallback.
+        sample_path (str | None): Optional explicit sample folder path.
+
+    Returns:
+        Tuple[str, Path, Path]: (filename, sample_dir, sample_notes_path)
+
+    """
+    sample_dir = (
+        Path(sample_path)
+        if sample_path
+        else _infer_sample_dir_from_measurement_path(path)
+    )
+
+    meta_sample_name, meta_cryostat_name = _read_dataset_names(path)
+    resolved_sample_name = (
+        (sample_name or "").strip()
+        or (meta_sample_name or "").strip()
+        or sample_dir.name
+        or "sample"
+    )
+    resolved_cryostat_name = (
+        (cryostat_name or "").strip()
+        or (meta_cryostat_name or "").strip()
+        or "cryostat"
+    )
+
+    filename = f"{resolved_cryostat_name}_{resolved_sample_name}.md"
+    return filename, sample_dir, sample_dir / filename
+
+
+def _ensure_notes_file(notes_path: Path, filename: str) -> None:
+    """
+    Ensure a notes file exists and has frontmatter.
+
+    Args:
+        notes_path (Path): Notes file path.
+        filename (str): Filename value for frontmatter.
+
+    """
+    notes_path.parent.mkdir(parents=True, exist_ok=True)
+    if not notes_path.exists():
+        fm = _make_frontmatter(filename, datetime.now(timezone.utc))
+        with open(notes_path, "w", encoding="utf-8") as f:
+            f.write(fm)
+
+
+def _format_sample_rollup_entry(
+    when: datetime,
+    measurement_path: Path,
+    measurement_notes_path: Path,
+    measurement_notes_body: str,
+) -> str:
+    """
+    Build a pooled sample notes entry in the required markdown format.
+
+    """
+    ts = when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M")
+    header = (
+        f"[{ts}] [Measurement]({measurement_path}) [Notes]({measurement_notes_path})"
+    )
+    body = (measurement_notes_body or "").rstrip()
+    if body:
+        return f"{header}\n\n{body}"
+    return header
+
+
+_ROLLOUT_HEADER_RE = re.compile(
+    r"^\[(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2})\]\s+"
+    r"\[(?P<mtext>[^\]]+)\]\((?P<mpath>[^)]+)\)\s+"
+    r"\[(?P<ntext>[^\]]+)\]\((?P<npath>[^)]+)\)\s*$"
+)
+
+
+def _normalize_link_path(path: str) -> str:
+    """Normalize path strings for robust comparisons across slash styles."""
+    return path.replace("\\", "/").strip().lower()
+
+
+def _find_last_synced_measurement_body(
+    sample_notes_body: str,
+    measurement_path: Path,
+) -> str | None:
+    """
+    Return body of the latest pooled entry for this measurement path, if present.
+
+    """
+    if not sample_notes_body.strip():
+        return None
+
+    target_path = _normalize_link_path(str(measurement_path))
+    lines = sample_notes_body.splitlines()
+
+    entries: list[tuple[str, list[str]]] = []
+    current_path: str | None = None
+    current_body_lines: list[str] = []
+
+    for line in lines:
+        m = _ROLLOUT_HEADER_RE.match(line.strip())
+        if m:
+            if current_path is not None:
+                entries.append((current_path, current_body_lines))
+            current_path = _normalize_link_path(m.group("mpath"))
+            current_body_lines = []
+            continue
+
+        if current_path is not None:
+            current_body_lines.append(line)
+
+    if current_path is not None:
+        entries.append((current_path, current_body_lines))
+
+    for entry_path, body_lines in reversed(entries):
+        if entry_path == target_path:
+            return "\n".join(body_lines).strip()
+
+    return None
+
+
+def _compute_incremental_body(prev_body: str | None, new_body: str) -> str:
+    """
+    Compute body to append for pooled notes logfile semantics.
+
+    If content is unchanged, returns empty string.
+    If content changed, returns the full current body as a new log snapshot.
+
+    """
+    current = (new_body or "").rstrip()
+    previous = (prev_body or "").rstrip()
+
+    if not current:
+        return ""
+
+    if not previous:
+        return current
+
+    if current == previous:
+        return ""
+
+    return current
+
+
+def _build_initial_sample_pool_body(sample_dir: Path, when: datetime) -> str:
+    """
+    Build initial pooled sample body by collecting all existing measurement notes.
+
+    The same initialization timestamp is used for all imported entries.
+
+    """
+    entries: list[str] = []
+
+    try:
+        zarr_dirs = sorted([p for p in sample_dir.rglob("*.zarr") if p.is_dir()])
+    except Exception:
+        zarr_dirs = []
+
+    for measurement_path in zarr_dirs:
+        _, _, measurement_notes_path = _measurement_notes_paths(measurement_path)
+        if not measurement_notes_path.exists() or not measurement_notes_path.is_file():
+            continue
+
+        try:
+            with open(measurement_notes_path, "r", encoding="utf-8") as f:
+                measurement_text = f.read()
+            body, _, _ = _parse_frontmatter(measurement_text)
+            body = (body or "").rstrip()
+            if not body:
+                continue
+
+            entries.append(
+                _format_sample_rollup_entry(
+                    when,
+                    measurement_path,
+                    measurement_notes_path,
+                    body,
+                )
+            )
+        except Exception:
+            continue
+
+    if not entries:
+        return ""
+
+    return "\n\n".join(entries).rstrip() + "\n"
+
+
+def append_sample_rollup(
+    measurement_path: str | Path,
+    measurement_notes_body: str,
+    when: datetime | None = None,
+    sample_path: str | None = None,
+    sample_name: str | None = None,
+    cryostat_name: str | None = None,
+) -> Dict[str, str]:
+    """
+    Append a measurement snapshot to the pooled sample notes file.
+
+    This function rewrites frontmatter on each append so Last Saved remains accurate.
+
+    Args:
+        measurement_path (str | Path): Path to the measurement .zarr folder.
+        measurement_notes_body (str): Body of measurement notes (without frontmatter).
+        when (datetime | None): Optional timestamp override.
+
+    Returns:
+        Dict[str, str]: paths for created/updated note files.
+
+    """
+    now = when or datetime.now(timezone.utc)
+    path = Path(measurement_path)
+
+    dataset_uuid, _, measurement_notes_path = _measurement_notes_paths(path)
+    sample_filename, _, sample_notes_path = _sample_notes_path(
+        path,
+        sample_path=sample_path,
+        sample_name=sample_name,
+        cryostat_name=cryostat_name,
+    )
+
+    _ensure_notes_file(sample_notes_path, sample_filename)
+
+    with open(sample_notes_path, "r", encoding="utf-8") as f:
+        sample_text = f.read()
+
+    existing_body, _, _ = _parse_frontmatter(sample_text)
+    last_synced_body = _find_last_synced_measurement_body(existing_body, path)
+    incremental_body = _compute_incremental_body(
+        last_synced_body, measurement_notes_body
+    )
+
+    if not incremental_body:
+        return {
+            "measurement_path": str(path),
+            "measurement_notes_path": str(measurement_notes_path),
+            "sample_notes_path": str(sample_notes_path),
+            "dataset_uuid": dataset_uuid,
+            "appended": "false",
+        }
+
+    new_entry = _format_sample_rollup_entry(
+        now,
+        path,
+        measurement_notes_path,
+        incremental_body,
+    )
+
+    existing_body = existing_body.rstrip()
+    if existing_body:
+        merged_body = f"{existing_body}\n\n{new_entry}\n"
+    else:
+        merged_body = f"{new_entry}\n"
+
+    sample_frontmatter = _make_frontmatter(sample_filename, now)
+    with open(sample_notes_path, "w", encoding="utf-8") as f:
+        f.write(sample_frontmatter + merged_body)
+
+    return {
+        "measurement_path": str(path),
+        "measurement_notes_path": str(measurement_notes_path),
+        "sample_notes_path": str(sample_notes_path),
+        "dataset_uuid": dataset_uuid,
+        "appended": "true",
+    }
+
+
 @router.post("/load-notes/")
 async def load_notes(path: PathData) -> Dict:
     """
@@ -90,17 +411,26 @@ async def load_notes(path: PathData) -> Dict:
         Dict: Notes for the zarr dataset
 
     """
-    # NOTE: The notes are stored in the folder with the same name without the .zarr extension
-    # NOTE: The filepath is expected to be like: /path/to/{dataset_uuid}.zarr/../{dataset_uuid}/{dataset_uuid}.md
-    path = Path(path.path)
+    # NOTE: Measurement notes are stored in: /.../{dataset_uuid}.zarr/../{dataset_uuid}/{dataset_uuid}.md
+    # NOTE: Sample notes are stored in sample folder: /.../{sample}/{cryostat}_{sample}.md
+    resolved_path = Path(path.path)
 
-    # Get the dataset UUID without ext from the .zarr folder name
-    dataset_uuid = path.stem
+    if path.note_scope == "sample":
+        filename, sample_dir, notes_path = _sample_notes_path(
+            resolved_path,
+            path.sample_path,
+            path.sample_name,
+            path.cryostat_name,
+        )
+        frontmatter_filename = filename
+    else:
+        sample_dir = None
+        dataset_uuid, _, notes_path = _measurement_notes_paths(resolved_path)
+        frontmatter_filename = dataset_uuid
 
-    # Navigate to parent directory, then to the UUID folder, then to the .md file
-    notes_path = path.parent / dataset_uuid / f"{dataset_uuid}.md"
-
-    logger.debug(f"load_notes | POST path={path}, notes_path={notes_path}")
+    logger.debug(
+        f"load_notes | POST scope={path.note_scope} path={resolved_path}, notes_path={notes_path}"
+    )
 
     try:
         if notes_path.exists() and notes_path.is_file():
@@ -113,21 +443,27 @@ async def load_notes(path: PathData) -> Dict:
             return {"notes": body, "last_saved": last_saved, "filename": filename}
 
         else:
-            # Create a new directory + notes file if it doesn't exist
+            # Create a new notes file if it doesn't exist
             logger.debug(
                 f"load_notes | No notes file found at {notes_path}, creating new one"
             )
-            notes_dir = notes_path.parent
-            notes_dir.mkdir(parents=True, exist_ok=True)
-            logger.debug(f"load_notes | Created directory: {notes_dir}")
-
-            # Create an empty notes file with frontmatter
-            fm = _make_frontmatter(dataset_uuid, datetime.now(timezone.utc))
-            with open(notes_path, "w", encoding="utf-8") as f:
-                f.write(fm + "")
+            if path.note_scope == "sample" and sample_dir is not None:
+                now = datetime.now(timezone.utc)
+                initial_body = _build_initial_sample_pool_body(sample_dir, now)
+                notes_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(notes_path, "w", encoding="utf-8") as f:
+                    f.write(_make_frontmatter(frontmatter_filename, now) + initial_body)
+            else:
+                _ensure_notes_file(notes_path, frontmatter_filename)
             logger.debug(f"load_notes | Created empty notes file: {notes_path}")
 
-            return {"notes": "", "last_saved": None, "filename": dataset_uuid}
+            return {
+                "notes": "",
+                "last_saved": None,
+                "filename": frontmatter_filename,
+                "note_scope": path.note_scope,
+                "notes_path": str(notes_path),
+            }
 
     except Exception as e:
         logger.error(f"load_notes | Error loading notes: {str(e)}", exc_info=True)
@@ -146,18 +482,23 @@ async def save_notes(data: NotesData) -> Dict:
         Dict: Confirmation message
 
     """
-    # NOTE: The notes are stored in the folder with the same name without the .zarr extension
-    # NOTE: The filepath is expected to be like: /path/to/{dataset_uuid}.zarr/../{dataset_uuid}/{dataset_uuid}.md
-    path = Path(data.path)
+    resolved_path = Path(data.path)
 
-    # Get the dataset UUID without ext from the .zarr folder name
-    dataset_uuid = path.stem
+    if data.note_scope == "sample":
+        filename, notes_dir, notes_path = _sample_notes_path(
+            resolved_path,
+            data.sample_path,
+            data.sample_name,
+            data.cryostat_name,
+        )
+        frontmatter_filename = filename
+    else:
+        dataset_uuid, notes_dir, notes_path = _measurement_notes_paths(resolved_path)
+        frontmatter_filename = dataset_uuid
 
-    # Navigate to parent directory, then to the UUID folder, then to the .md file
-    notes_dir = path.parent / dataset_uuid
-    notes_path = notes_dir / f"{dataset_uuid}.md"
-
-    logger.debug(f"save_notes | POST path={path}, notes_path={notes_path}")
+    logger.debug(
+        f"save_notes | POST scope={data.note_scope} path={resolved_path}, notes_path={notes_path}"
+    )
 
     try:
         # Create the directory if it doesn't exist
@@ -165,7 +506,7 @@ async def save_notes(data: NotesData) -> Dict:
 
         # Build frontmatter and write the notes
         now = datetime.now(timezone.utc)
-        frontmatter = _make_frontmatter(dataset_uuid, now)
+        frontmatter = _make_frontmatter(frontmatter_filename, now)
         to_write = frontmatter + (data.notes or "")
 
         # Debug logging disabled
@@ -175,13 +516,26 @@ async def save_notes(data: NotesData) -> Dict:
         with open(notes_path, "w", encoding="utf-8") as f:
             f.write(to_write)
 
+        sample_rollup = None
+        if data.note_scope == "measurement":
+            sample_rollup = append_sample_rollup(
+                resolved_path,
+                data.notes or "",
+                now,
+                sample_path=data.sample_path,
+                sample_name=data.sample_name,
+                cryostat_name=data.cryostat_name,
+            )
+
         logger.debug(f"save_notes | Successfully saved notes to {notes_path}")
         return {
             "message": "Notes saved successfully.",
             "path": str(notes_path),
             "last_saved": now.isoformat(),
-            "filename": dataset_uuid,
+            "filename": frontmatter_filename,
+            "note_scope": data.note_scope,
             "frontmatter": frontmatter,
+            "sample_rollup": sample_rollup,
         }
 
     except Exception as e:

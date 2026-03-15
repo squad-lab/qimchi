@@ -4,12 +4,16 @@ structures used for type safety and validation in the request and response bodie
 
 """
 
-from typing import Dict, List
+from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
 class PathData(BaseModel):
     path: str
+    note_scope: Literal["measurement", "sample"] = "measurement"
+    sample_path: Optional[str] = None
+    sample_name: Optional[str] = None
+    cryostat_name: Optional[str] = None
 
 
 class PathsData(BaseModel):
@@ -24,6 +28,10 @@ class PathsData(BaseModel):
 class NotesData(BaseModel):
     path: str
     notes: str
+    note_scope: Literal["measurement", "sample"] = "measurement"
+    sample_path: Optional[str] = None
+    sample_name: Optional[str] = None
+    cryostat_name: Optional[str] = None
 
 
 class PlotRequest(BaseModel):
@@ -48,6 +56,7 @@ class TransformPlotRequest(BaseModel):
     filters_order: List[str] = Field(default_factory=list)
     filters_opts: Dict[str, dict] = Field(default_factory=dict)
     slider: Dict[str, dict] = Field(default_factory=dict)
+    swap_xy: bool = False
 
 
 class TransformPlotResponse(BaseModel):

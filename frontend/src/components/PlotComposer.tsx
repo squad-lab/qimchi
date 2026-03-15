@@ -772,7 +772,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
                         Z (HeatMap only).
                       </div>
                       <div className="text-sm text-white">
-                        Shortcuts: Shift+H HeatMap, Shift+L LinePlot, Shift+P
+                        Shortcuts: H HeatMap, L LinePlot, P
                         Plot, Alt+Shift+C Clear Composer.
                       </div>
                     </div>

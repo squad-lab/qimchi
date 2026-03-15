@@ -1,13 +1,17 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, {
+  useMemo,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+} from "react";
 import axios from "axios";
 import {
   Save,
-  FileText,
   AlertCircle,
   Check,
   Clock,
   Loader2,
-  ChevronDown,
   NotebookPen,
 } from "lucide-react";
 
@@ -27,14 +31,24 @@ interface DroppedItem {
   tags?: string[];
 }
 
+interface SampleGroup {
+  key: string;
+  sampleName: string;
+  samplePath: string;
+  cryostatName: string;
+  pooledFilename: string;
+  items: BasketItem[];
+}
+
 interface NotesProps {
   basketItems: BasketItem[];
   isCollapsed: boolean;
-  selectedItemId?: string | null; // External control over which item is selected
-  onSelectedItemChange?: (itemId: string | null) => void; // Callback when selection changes
+  selectedItemId?: string | null; // External control over which measurement item is selected
+  onSelectedItemChange?: (itemId: string | null) => void; // Callback when measurement selection changes
 }
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
+type NoteScope = "measurement" | "sample";
 
 export default function Notes({
   basketItems,
@@ -42,15 +56,69 @@ export default function Notes({
   selectedItemId: externalSelectedItemId,
   onSelectedItemChange,
 }: NotesProps) {
-  // Helper to parse backend timestamp strings of the form "YYYY-MM-DD HH:MM:SS"
-  // Returns a Date object in local time when possible, or null.
+  const [notes, setNotes] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [internalSelectedItemId, setInternalSelectedItemId] = useState<
+    string | null
+  >(null);
+  const [selectedSampleKey, setSelectedSampleKey] = useState<string | null>(
+    null,
+  );
+  const [selectedScope, setSelectedScope] = useState<NoteScope>("measurement");
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const notesContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-save delay in milliseconds
+  const AUTO_SAVE_DELAY = 2000;
+
+  const normalizePath = useCallback(
+    (path: string) => path.replace(/\\/g, "/"),
+    [],
+  );
+
+  const getAttrValue = useCallback(
+    (
+      item: BasketItem,
+      snakeKey: string,
+      titleKey: string,
+    ): string | undefined => {
+      const attrs = (item.attributes || {}) as Record<string, unknown>;
+      const snake = attrs[snakeKey];
+      if (typeof snake === "string" && snake.trim()) return snake.trim();
+      const title = attrs[titleKey];
+      if (typeof title === "string" && title.trim()) return title.trim();
+      return undefined;
+    },
+    [],
+  );
+
+  const inferSamplePath = useCallback(
+    (measurementPath: string): string => {
+      const normalized = normalizePath(measurementPath);
+      const parts = normalized.split("/").filter(Boolean);
+      if (parts.length >= 3) {
+        return parts.slice(0, -2).join("/");
+      }
+      if (parts.length >= 2) {
+        return parts.slice(0, -1).join("/");
+      }
+      return normalized;
+    },
+    [normalizePath],
+  );
+
   const parseBackendTimestamp = (ts?: string | null): Date | null => {
     if (!ts) return null;
-    // Prefer ISO 8601 parse
     const parsed = new Date(ts);
     if (!isNaN(parsed.getTime())) return parsed;
 
-    // Fallback: handle legacy 'YYYY-MM-DD HH:MM:SS' format
     const m = ts.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/);
     if (m) {
       const [, y, mo, d, hh, mm, ss] = m;
@@ -67,7 +135,6 @@ export default function Notes({
     return null;
   };
 
-  // Format Last Saved as YY-MM-DD | HH:MM:SS (24-hour)
   const formatLastSaved = (date: Date) => {
     const y = String(date.getFullYear());
     const mo = String(date.getMonth() + 1).padStart(2, "0");
@@ -78,78 +145,321 @@ export default function Notes({
     return `${y}-${mo}-${d} | ${hh}:${mm}:${ss}`;
   };
 
-  const [notes, setNotes] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
-  const [internalSelectedItemId, setInternalSelectedItemId] = useState<
-    string | null
-  >(null);
-  const [showDropdown, setShowDropdown] = useState(false);
-  const [isDragOver, setIsDragOver] = useState(false);
-
-  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const dropdownRef = useRef<HTMLDivElement | null>(null);
-  const notesContainerRef = useRef<HTMLDivElement | null>(null);
-
-  // Auto-save delay in milliseconds
-  const AUTO_SAVE_DELAY = 2000;
-
   // Use external selectedItemId if provided, otherwise use internal state
   const selectedItemId =
     externalSelectedItemId !== undefined
       ? externalSelectedItemId
       : internalSelectedItemId;
 
-  // Get the currently selected item
-  const selectedItem = basketItems.find((item) => item.id === selectedItemId);
-
-  // Filter basket items to only show .zarr files
-  const zarrItems = basketItems.filter(
-    (item) => item.type === "file" && item.path.endsWith(".zarr"),
+  const zarrItems = useMemo(
+    () =>
+      basketItems.filter(
+        (item) => item.type === "file" && item.path.endsWith(".zarr"),
+      ),
+    [basketItems],
   );
 
-  // Handle selection change
+  const sampleGroups = useMemo(() => {
+    const groups = new Map<string, SampleGroup>();
+
+    zarrItems.forEach((item) => {
+      const samplePath = inferSamplePath(item.path);
+      const samplePathParts = samplePath.split("/").filter(Boolean);
+
+      const sampleName =
+        getAttrValue(item, "sample_name", "Sample Name") ||
+        samplePathParts[samplePathParts.length - 1] ||
+        "sample";
+
+      const cryostatName =
+        getAttrValue(item, "cryostat", "Cryostat") || "cryostat";
+
+      const pooledFilename = `${cryostatName}_${sampleName}.md`;
+      const key = samplePath.toLowerCase();
+
+      const existing = groups.get(key);
+      if (existing) {
+        existing.items.push(item);
+        return;
+      }
+
+      groups.set(key, {
+        key,
+        sampleName,
+        samplePath,
+        cryostatName,
+        pooledFilename,
+        items: [item],
+      });
+    });
+
+    return Array.from(groups.values()).sort((a, b) =>
+      a.sampleName.localeCompare(b.sampleName),
+    );
+  }, [zarrItems, getAttrValue, inferSamplePath]);
+
+  const selectedSample = sampleGroups.find(
+    (group) => group.key === selectedSampleKey,
+  );
+
+  const selectedMeasurement =
+    selectedScope === "measurement"
+      ? zarrItems.find((item) => item.id === selectedItemId) || null
+      : null;
+
+  const selectedTarget = useMemo(() => {
+    if (selectedScope === "measurement" && selectedMeasurement) {
+      const group = sampleGroups.find((sample) =>
+        sample.items.some((item) => item.id === selectedMeasurement.id),
+      );
+      return {
+        scope: "measurement" as NoteScope,
+        path: selectedMeasurement.path,
+        samplePath: group?.samplePath,
+        sampleName: group?.sampleName,
+        cryostatName: group?.cryostatName,
+        displayName: selectedMeasurement.name,
+      };
+    }
+
+    if (selectedScope === "sample" && selectedSample) {
+      const fallbackMeasurement = selectedSample.items[0];
+      return {
+        scope: "sample" as NoteScope,
+        path: fallbackMeasurement?.path || selectedSample.samplePath,
+        samplePath: selectedSample.samplePath,
+        sampleName: selectedSample.sampleName,
+        cryostatName: selectedSample.cryostatName,
+        displayName: selectedSample.pooledFilename,
+      };
+    }
+
+    return null;
+  }, [selectedScope, selectedMeasurement, selectedSample, sampleGroups]);
+
   const handleSelectionChange = useCallback(
     (itemId: string | null) => {
       if (externalSelectedItemId !== undefined) {
-        // External control mode - notify parent
         onSelectedItemChange?.(itemId);
       } else {
-        // Internal control mode
         setInternalSelectedItemId(itemId);
       }
     },
     [externalSelectedItemId, onSelectedItemChange],
   );
 
-  // Close dropdown when clicking outside
+  // Keep sample dropdown aligned when a measurement is selected externally.
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target as Node)
-      ) {
-        setShowDropdown(false);
-      }
-    };
+    if (!selectedItemId) return;
 
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, []);
+    const selected = zarrItems.find((item) => item.id === selectedItemId);
+    if (!selected) return;
 
-  const saveNotes = useCallback(async () => {
-    if (!selectedItem || !selectedItem.path.endsWith(".zarr")) {
-      setError("No dataset selected");
+    const samplePath = inferSamplePath(selected.path).toLowerCase();
+    setSelectedSampleKey(samplePath);
+    setSelectedScope("measurement");
+  }, [selectedItemId, zarrItems, inferSamplePath]);
+
+  // Initialize sample + measurement selection when basket changes.
+  useEffect(() => {
+    if (sampleGroups.length === 0) {
+      setSelectedSampleKey(null);
+      handleSelectionChange(null);
       return;
     }
 
-    // Don't save if already saving
+    const hasCurrentSample =
+      selectedSampleKey &&
+      sampleGroups.some((group) => group.key === selectedSampleKey);
+
+    if (!hasCurrentSample) {
+      setSelectedSampleKey(sampleGroups[0].key);
+    }
+
+    if (selectedScope === "measurement") {
+      if (!selectedItemId) {
+        const firstMeasurement = (
+          hasCurrentSample
+            ? sampleGroups.find((group) => group.key === selectedSampleKey)
+            : sampleGroups[0]
+        )?.items[0];
+        if (firstMeasurement) {
+          handleSelectionChange(firstMeasurement.id);
+        }
+      } else if (!zarrItems.some((item) => item.id === selectedItemId)) {
+        const fallback = sampleGroups[0].items[0];
+        handleSelectionChange(fallback?.id || null);
+      }
+    }
+  }, [
+    sampleGroups,
+    selectedItemId,
+    selectedSampleKey,
+    selectedScope,
+    zarrItems,
+    handleSelectionChange,
+  ]);
+
+  // Support opening pooled sample notes from DirTree actions.
+  useEffect(() => {
+    const handleSelectSample = (event: Event) => {
+      const customEvent = event as CustomEvent<{ samplePath?: string }>;
+      const incomingPath = customEvent.detail?.samplePath;
+      if (!incomingPath) return;
+
+      const normalized = normalizePath(incomingPath).toLowerCase();
+      const matched = sampleGroups.find((group) => group.key === normalized);
+      if (!matched) return;
+
+      setSelectedSampleKey(matched.key);
+      setSelectedScope("sample");
+      handleSelectionChange(null);
+    };
+
+    window.addEventListener(
+      "notes:select-sample",
+      handleSelectSample as EventListener,
+    );
+    return () => {
+      window.removeEventListener(
+        "notes:select-sample",
+        handleSelectSample as EventListener,
+      );
+    };
+  }, [sampleGroups, handleSelectionChange, normalizePath]);
+
+  const loadNotes = useCallback(
+    async (
+      scope: NoteScope,
+      path: string,
+      samplePath?: string,
+      sampleName?: string,
+      cryostatName?: string,
+    ) => {
+      setLoading(true);
+      setError(null);
+      setSaveStatus("idle");
+
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      try {
+        const response = await axios.post(
+          `${PROD_BACKEND_URL}/load-notes/`,
+          {
+            path,
+            note_scope: scope,
+            sample_path: samplePath,
+            sample_name: sampleName,
+            cryostat_name: cryostatName,
+          },
+          {
+            signal: controller.signal,
+            timeout: 10000,
+          },
+        );
+
+        setNotes(response.data.notes || "");
+        setHasUnsavedChanges(false);
+        setLastSavedAt(
+          parseBackendTimestamp(response.data?.last_saved) || null,
+        );
+
+        if (response.data.error) {
+          setError(response.data.error);
+        }
+      } catch (err) {
+        if (axios.isCancel(err)) {
+          console.log("Load notes request cancelled");
+          return;
+        }
+
+        setError(
+          axios.isAxiosError(err)
+            ? err.response?.data?.detail || err.message
+            : "Failed to load notes",
+        );
+        setNotes("");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
+
+  // Refresh currently shown notes when external actions update backend note files.
+  useEffect(() => {
+    const handleRefresh = (event: Event) => {
+      const customEvent = event as CustomEvent<{ datasetPath?: string }>;
+      const datasetPath = customEvent.detail?.datasetPath;
+      if (!datasetPath || !selectedTarget) return;
+
+      // Avoid clobbering unsaved local edits.
+      if (hasUnsavedChanges) return;
+
+      const incomingSamplePath = inferSamplePath(datasetPath).toLowerCase();
+      const selectedSamplePath = (
+        selectedTarget.samplePath || ""
+      ).toLowerCase();
+
+      const shouldRefreshMeasurement =
+        selectedTarget.scope === "measurement" &&
+        normalizePath(selectedTarget.path)
+          .replace(/^memory:\/\//, "")
+          .split("/")
+          .pop()
+          ?.replace(/\.zarr$/i, "")
+          .toLowerCase() ===
+          normalizePath(datasetPath)
+            .replace(/^memory:\/\//, "")
+            .split("/")
+            .pop()
+            ?.replace(/\.zarr$/i, "")
+            .toLowerCase();
+
+      const shouldRefreshSample =
+        selectedTarget.scope === "sample" &&
+        Boolean(selectedSamplePath) &&
+        selectedSamplePath === incomingSamplePath;
+
+      if (!shouldRefreshMeasurement && !shouldRefreshSample) {
+        return;
+      }
+
+      loadNotes(
+        selectedTarget.scope,
+        selectedTarget.path,
+        selectedTarget.samplePath,
+        selectedTarget.sampleName,
+        selectedTarget.cryostatName,
+      );
+    };
+
+    window.addEventListener("notes:refresh", handleRefresh as EventListener);
+    return () => {
+      window.removeEventListener(
+        "notes:refresh",
+        handleRefresh as EventListener,
+      );
+    };
+  }, [
+    selectedTarget,
+    hasUnsavedChanges,
+    inferSamplePath,
+    normalizePath,
+    loadNotes,
+  ]);
+
+  const saveNotes = useCallback(async () => {
+    if (!selectedTarget) {
+      setError("No notes target selected");
+      return;
+    }
+
     if (saveStatus === "saving") {
       return;
     }
@@ -157,7 +467,6 @@ export default function Notes({
     setSaveStatus("saving");
     setError(null);
 
-    // Cancel any ongoing requests
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -169,28 +478,29 @@ export default function Notes({
       const response = await axios.post(
         `${PROD_BACKEND_URL}/save-notes/`,
         {
-          path: selectedItem.path,
-          notes: notes,
+          path: selectedTarget.path,
+          notes,
+          note_scope: selectedTarget.scope,
+          sample_path: selectedTarget.samplePath,
+          sample_name: selectedTarget.sampleName,
+          cryostat_name: selectedTarget.cryostatName,
         },
         {
           signal: controller.signal,
-          timeout: 10000, // 10 second timeout
+          timeout: 10000,
         },
       );
 
-      // Use server-provided last_saved when possible
       const serverLastSaved = response.data?.last_saved || null;
       setHasUnsavedChanges(false);
       setSaveStatus("saved");
       setLastSavedAt(parseBackendTimestamp(serverLastSaved) || new Date());
 
-      // Clear the timeout since we've saved
       if (autoSaveTimeoutRef.current) {
         clearTimeout(autoSaveTimeoutRef.current);
         autoSaveTimeoutRef.current = null;
       }
 
-      // Reset status after a delay
       setTimeout(() => {
         setSaveStatus("idle");
       }, 2000);
@@ -200,7 +510,6 @@ export default function Notes({
         return;
       }
 
-      // console.error("Error saving notes:", err);
       setSaveStatus("error");
       setError(
         axios.isAxiosError(err)
@@ -208,103 +517,22 @@ export default function Notes({
           : "Failed to save notes",
       );
 
-      // Reset status after a delay
       setTimeout(() => {
         setSaveStatus("idle");
       }, 3000);
     }
-  }, [selectedItem, notes, saveStatus]);
+  }, [selectedTarget, notes, saveStatus]);
 
-  // Listen for external append events (from PlotWrapper) and append to notes if dataset matches
+  // Load notes when selected target changes.
   useEffect(() => {
-    const handleNotesAppend = (e: Event) => {
-      try {
-        const ev = e as CustomEvent;
-        const detail = ev.detail as { datasetPath?: string; md_line?: string };
-        if (!detail || !detail.md_line) return;
-        // Only append if current selected item's path matches datasetPath
-        if (selectedItem && detail.datasetPath === selectedItem.path) {
-          setNotes((prev) => prev + "\n" + detail.md_line);
-          setHasUnsavedChanges(true);
-          // Auto-save shortly after appending
-          if (autoSaveTimeoutRef.current)
-            clearTimeout(autoSaveTimeoutRef.current);
-          autoSaveTimeoutRef.current = setTimeout(() => {
-            saveNotes();
-          }, AUTO_SAVE_DELAY);
-        }
-      } catch {
-        // ignore
-      }
-    };
-
-    window.addEventListener("notes:append", handleNotesAppend as EventListener);
-    return () => {
-      window.removeEventListener(
-        "notes:append",
-        handleNotesAppend as EventListener,
+    if (selectedTarget) {
+      loadNotes(
+        selectedTarget.scope,
+        selectedTarget.path,
+        selectedTarget.samplePath,
+        selectedTarget.sampleName,
+        selectedTarget.cryostatName,
       );
-    };
-  }, [saveNotes, selectedItem]);
-
-  // Helper to load notes from the backend for a given path
-  const loadNotes = useCallback(async (path: string) => {
-    setLoading(true);
-    setError(null);
-    setSaveStatus("idle");
-
-    // Cancel any ongoing requests
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
-    try {
-      const response = await axios.post(
-        `${PROD_BACKEND_URL}/load-notes/`,
-        { path },
-        {
-          signal: controller.signal,
-          timeout: 10000, // 10 second timeout
-        },
-      );
-
-      // Response contains notes and optional last_saved/filename
-      setNotes(response.data.notes || "");
-      setHasUnsavedChanges(false);
-      setLastSavedAt(parseBackendTimestamp(response.data?.last_saved) || null);
-
-      if (response.data.error) {
-        setError(response.data.error);
-      }
-    } catch (err) {
-      if (axios.isCancel(err)) {
-        console.log("Load notes request cancelled");
-        return;
-      }
-
-      // console.error("Error loading notes:", err);
-      setError(
-        axios.isAxiosError(err)
-          ? err.response?.data?.detail || err.message
-          : "Failed to load notes",
-      );
-      setNotes("");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // Load notes when a new dataset is selected
-  useEffect(() => {
-    if (
-      selectedItem &&
-      selectedItem.type === "file" &&
-      selectedItem.path.endsWith(".zarr")
-    ) {
-      loadNotes(selectedItem.path);
     } else {
       setNotes("");
       setHasUnsavedChanges(false);
@@ -312,44 +540,26 @@ export default function Notes({
       setLastSavedAt(null);
       setError(null);
     }
-  }, [selectedItem, loadNotes]);
+  }, [selectedTarget, loadNotes]);
 
   // Auto-save effect
   useEffect(() => {
-    if (hasUnsavedChanges && selectedItem?.path.endsWith(".zarr")) {
-      // Clear existing timeout
+    if (hasUnsavedChanges && selectedTarget) {
       if (autoSaveTimeoutRef.current) {
         clearTimeout(autoSaveTimeoutRef.current);
       }
 
-      // Set new timeout for auto-save
       autoSaveTimeoutRef.current = setTimeout(() => {
-        saveNotes(); // Auto-save
+        saveNotes();
       }, AUTO_SAVE_DELAY);
     }
 
-    // Cleanup timeout on unmount
     return () => {
       if (autoSaveTimeoutRef.current) {
         clearTimeout(autoSaveTimeoutRef.current);
       }
     };
-  }, [hasUnsavedChanges, selectedItem, notes, saveNotes]);
-
-  // Auto-select first zarr item when basket items change
-  useEffect(() => {
-    if (zarrItems.length > 0 && !selectedItemId) {
-      handleSelectionChange(zarrItems[0].id);
-    } else if (zarrItems.length === 0) {
-      handleSelectionChange(null);
-    } else if (
-      selectedItemId &&
-      !zarrItems.find((item) => item.id === selectedItemId)
-    ) {
-      // Selected item was removed from basket, select first available
-      handleSelectionChange(zarrItems[0]?.id || null);
-    }
-  }, [zarrItems, selectedItemId, handleSelectionChange]);
+  }, [hasUnsavedChanges, selectedTarget, notes, saveNotes]);
 
   const handleNotesChange = (value: string) => {
     setNotes(value);
@@ -358,14 +568,12 @@ export default function Notes({
   };
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
-    // Save on Ctrl+S or Cmd+S
     if ((event.ctrlKey || event.metaKey) && event.key === "s") {
       event.preventDefault();
-      saveNotes(); // Manual save
+      saveNotes();
     }
   };
 
-  // Format dropped items as markdown
   const formatDroppedItems = (items: DroppedItem[]): string => {
     if (items.length === 0) return "";
 
@@ -387,7 +595,6 @@ export default function Notes({
     return formatted;
   };
 
-  // Handle drag over event
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
@@ -396,58 +603,45 @@ export default function Notes({
     }
   };
 
-  // Handle drag enter event
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(true);
   };
 
-  // Handle drag leave event
   const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
-    // Only set to false if we're leaving the container entirely
     if (!e.currentTarget.contains(e.relatedTarget as Node)) {
       setIsDragOver(false);
     }
   };
 
-  // Handle drop event
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
 
-    if (!canEdit) return;
+    if (!selectedTarget) return;
 
     try {
       const dragData = e.dataTransfer.getData("application/json");
       if (!dragData) return;
 
       const parsedData = JSON.parse(dragData);
-
-      // Handle both single item and array of items
       const items = Array.isArray(parsedData) ? parsedData : [parsedData];
-
-      // Format the items as markdown
       const formattedContent = formatDroppedItems(items);
 
-      // Insert at the end of current notes
-      const newNotes = notes + formattedContent;
-      setNotes(newNotes);
+      setNotes((prev) => prev + formattedContent);
       setHasUnsavedChanges(true);
       setSaveStatus("idle");
     } catch {
-      // console.error("Error processing dropped items:", error);
       setError("Failed to process dropped items");
     }
   };
+
   if (isCollapsed) {
     return null;
   }
 
-  const canEdit =
-    selectedItem &&
-    selectedItem.type === "file" &&
-    selectedItem.path.endsWith(".zarr");
+  const canEdit = Boolean(selectedTarget);
 
   const getSaveIconAndText = () => {
     const formatTimeAgo = (date: Date) => {
@@ -486,6 +680,8 @@ export default function Notes({
     }
   };
 
+  const measurementItemsForSample = selectedSample?.items || [];
+
   return (
     <div
       className="bg-gray-100 h-full flex flex-col"
@@ -501,65 +697,87 @@ export default function Notes({
         className={`p-3 border-b ${themeClasses.accentHeaderBg} ${themeClasses.accentBorderLight}`}
       >
         <div className="flex flex-col space-y-2">
-          {/* Row 1: Dropdown (full width) */}
-          <div>
-            <div className="flex items-center space-x-2">
-              <div className="flex-1 min-w-0">
-                {zarrItems.length > 0 ? (
-                  <div>
-                    {/* Dropdown for selecting zarr items */}
-                    <div className="relative" ref={dropdownRef}>
-                      <button
-                        onClick={() => setShowDropdown(!showDropdown)}
-                        className={`flex items-center justify-between w-full overflow-hidden px-2 py-1.5 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 ${themeClasses.accentFocusRing}`}
-                      >
-                        <span className="truncate">
-                          {selectedItem
-                            ? selectedItem.name
-                            : "Select a dataset"}
-                        </span>
-                        <ChevronDown className="w-4 h-4 ml-2 flex-shrink-0" />
-                      </button>
-
-                      {showDropdown && (
-                        <div className="absolute z-10 left-0 right-0 mt-1 bg-white border border-gray-300 rounded-md shadow-lg box-border max-w-full">
-                          <div className="max-h-60 overflow-y-auto">
-                            {zarrItems.map((item) => (
-                              <button
-                                key={item.id}
-                                onClick={() => {
-                                  handleSelectionChange(item.id);
-                                  setShowDropdown(false);
-                                }}
-                                className={`w-full px-3 py-2 text-sm text-left hover:bg-gray-100 ${
-                                  selectedItemId === item.id
-                                    ? `${themeClasses.accentLightBg} ${themeClasses.accentText}`
-                                    : ""
-                                }`}
-                              >
-                                <div className="truncate">{item.name}</div>
-                                <div className="text-xs text-gray-500 truncate">
-                                  {item.path}
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+          {/* Row 1: Sample + Measurement selectors */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[11px] text-gray-600 mb-1">
+                Sample
+              </label>
+              <select
+                value={selectedSampleKey || ""}
+                aria-label="Select sample notes"
+                onChange={(e) => {
+                  const nextKey = e.target.value || null;
+                  setSelectedSampleKey(nextKey);
+                  setSelectedScope("sample");
+                  handleSelectionChange(null);
+                }}
+                className={`w-full px-2 py-1.5 text-sm bg-white border border-gray-300 rounded-md focus:outline-none focus:ring-2 ${themeClasses.accentFocusRing}`}
+                disabled={sampleGroups.length === 0}
+              >
+                {sampleGroups.length === 0 ? (
+                  <option value="">No samples in basket</option>
                 ) : (
-                  <span className="text-sm text-gray-600">
-                    No datasets in basket
-                  </span>
+                  sampleGroups.map((sample) => (
+                    <option key={sample.key} value={sample.key}>
+                      {sample.sampleName}
+                    </option>
+                  ))
                 )}
-              </div>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[11px] text-gray-600 mb-1">
+                Measurement
+              </label>
+              <select
+                value={
+                  selectedScope === "sample"
+                    ? "__sample__"
+                    : selectedItemId || ""
+                }
+                aria-label="Select measurement notes"
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === "__sample__") {
+                    setSelectedScope("sample");
+                    handleSelectionChange(null);
+                    return;
+                  }
+                  setSelectedScope("measurement");
+                  handleSelectionChange(value || null);
+                }}
+                className={`w-full px-2 py-1.5 text-sm bg-white border border-gray-300 rounded-md focus:outline-none focus:ring-2 ${themeClasses.accentFocusRing}`}
+                disabled={!selectedSample}
+              >
+                {!selectedSample ? (
+                  <option value="">Select sample first</option>
+                ) : (
+                  <>
+                    <option value="__sample__">Pooled sample notes</option>
+                    {measurementItemsForSample.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </>
+                )}
+              </select>
             </div>
           </div>
 
+          {selectedTarget && (
+            <div className="text-[11px] text-gray-500 truncate">
+              {selectedScope === "sample"
+                ? `${selectedSample?.cryostatName}/${selectedSample?.sampleName} -> ${selectedSample?.pooledFilename}`
+                : selectedTarget.path}
+            </div>
+          )}
+
           {/* Row 2: Left Last Saved, Right Autosave indicator */}
           <div className="flex items-center justify-between">
-            {basketItems.length > 0 && (
+            {zarrItems.length > 0 && (
               <div className="text-xs text-gray-600">
                 {lastSavedAt ? (
                   <span>
@@ -571,7 +789,7 @@ export default function Notes({
                     </span>
                   </span>
                 ) : (
-                  <span className="text-gray-500">Last Saved: —</span>
+                  <span className="text-gray-500">Last Saved: -</span>
                 )}
               </div>
             )}
@@ -620,7 +838,7 @@ export default function Notes({
           </div>
         ) : canEdit ? (
           <div
-            className={`h-full bg-white m-2 rounded-lg border shadow-sm transition-all duration-200 relative ${
+            className={`h-full bg-white m-2 rounded-lg border shadow-sm relative ${
               isDragOver
                 ? `border-2 border-dashed ${themeClasses.accentBorder} ${themeClasses.accentLightBg}`
                 : "border-gray-200"
@@ -631,7 +849,7 @@ export default function Notes({
                 className={`absolute inset-0 flex items-center justify-center ${themeClasses.accentOverlay} rounded-lg pointer-events-none z-10`}
               >
                 <div className={`text-center ${themeClasses.accentText}`}>
-                  <FileText
+                  <NotebookPen
                     className={`w-8 h-8 mx-auto mb-2 ${themeClasses.accentIcon}`}
                   />
                   <p className="text-sm font-medium">Drop datasets here</p>
@@ -652,11 +870,7 @@ export default function Notes({
           <div className="h-32 flex flex-col items-center justify-center text-gray-500">
             <NotebookPen size={48} className="mb-2 text-gray-400" />
             <p>No datasets in basket</p>
-            <p className="text-sm mt-1">
-              {zarrItems.length === 0
-                ? "Add datasets to view or edit notes"
-                : "Select a dataset from the dropdown above to view or edit notes"}
-            </p>
+            <p className="text-sm mt-1">Add datasets to view or edit notes</p>
           </div>
         )}
       </div>

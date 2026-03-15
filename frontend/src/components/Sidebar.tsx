@@ -13,7 +13,7 @@ import Notes from "./Notes";
 import Explorer from "./Explorer";
 import Metadata from "./Metadata";
 import BrandingFooter from "./BrandingFooter";
-import { TreeNode } from "./DirTree";
+import { TreeNode } from "./treeUtils";
 import { BasketItem } from "./Basket";
 import { AttrData } from "./interfaces";
 import { useSidebarStore } from "../stores/sidebarStore";
@@ -31,6 +31,7 @@ interface SidebarProps {
   onStartLoadingAttributes: (itemId: string) => void;
   loadingAttributes: Set<string>;
   onOpenNotes: (node: TreeNode) => void;
+  onOpenSampleNotes?: (node: TreeNode) => void;
   notesSelectedItemId: string | null;
   onNotesSelectedItemChange: (itemId: string | null) => void;
   onCycleDataset?: (direction: "prev" | "next") => void; // For cycling through datasets
@@ -58,6 +59,7 @@ const Sidebar = ({
   onUpdateBasketItemAttributes,
   onStartLoadingAttributes,
   onOpenNotes,
+  onOpenSampleNotes,
   notesSelectedItemId,
   onNotesSelectedItemChange,
   onCycleDataset,
@@ -115,9 +117,11 @@ const Sidebar = ({
               {/* Explorer */}
               <button
                 onClick={() => setExplorerCollapsed(!explorerCollapsed)}
-                className={`${sectionButtonBaseClass} ${themeClasses.accentBg
-                  } ${themeClasses.accentHoverBg} ${explorerCollapsed ? "mb-0" : "mb-0"
-                  }`}
+                className={`${sectionButtonBaseClass} ${
+                  themeClasses.accentBg
+                } ${themeClasses.accentHoverBg} ${
+                  explorerCollapsed ? "mb-0" : "mb-0"
+                }`}
                 title={
                   explorerCollapsed ? "Expand Explorer" : "Collapse Explorer"
                 }
@@ -140,6 +144,7 @@ const Sidebar = ({
                   onUpdateBasketItemAttributes={onUpdateBasketItemAttributes}
                   onStartLoadingAttributes={onStartLoadingAttributes}
                   onOpenNotes={handleOpenNotes}
+                  onOpenSampleNotes={onOpenSampleNotes}
                   onCycleDataset={onCycleDataset}
                 />
               </Panel>
@@ -151,9 +156,11 @@ const Sidebar = ({
               />
               <button
                 onClick={() => setMetadataCollapsed(!metadataCollapsed)}
-                className={`${sectionButtonBaseClass} ${themeClasses.accentBg
-                  } ${themeClasses.accentHoverBg} ${metadataCollapsed ? "mb-0" : "mb-0"
-                  }`}
+                className={`${sectionButtonBaseClass} ${
+                  themeClasses.accentBg
+                } ${themeClasses.accentHoverBg} ${
+                  metadataCollapsed ? "mb-0" : "mb-0"
+                }`}
                 title={
                   metadataCollapsed ? "Expand Metadata" : "Collapse Metadata"
                 }
@@ -178,9 +185,11 @@ const Sidebar = ({
               />
               <button
                 onClick={() => setNotesCollapsed(!notesCollapsed)}
-                className={`${sectionButtonBaseClass} ${themeClasses.accentBg
-                  } ${themeClasses.accentHoverBg} ${notesCollapsed ? "mb-0" : "mb-0"
-                  }`}
+                className={`${sectionButtonBaseClass} ${
+                  themeClasses.accentBg
+                } ${themeClasses.accentHoverBg} ${
+                  notesCollapsed ? "mb-0" : "mb-0"
+                }`}
                 title={notesCollapsed ? "Expand Notes" : "Collapse Notes"}
               >
                 <h2 className="relative flex items-center justify-center gap-2">

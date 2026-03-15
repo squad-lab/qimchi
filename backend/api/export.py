@@ -11,7 +11,7 @@ import time
 import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict
 
@@ -21,6 +21,12 @@ from fastapi.responses import FileResponse, JSONResponse
 from plotly import graph_objects as go
 
 from . import live_measurements
+from .notes import (
+    _make_frontmatter,
+    _measurement_notes_paths,
+    _parse_frontmatter,
+    append_sample_rollup,
+)
 
 # Local imports
 from .logger import logger
@@ -740,7 +746,8 @@ async def export_and_send_to_notes(request: Request) -> JSONResponse:
         )
 
     try:
-        ts = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        now = datetime.now(timezone.utc)
+        ts = now.strftime("%Y-%m-%d-%H-%M-%S")
         saved = _save_light_dark_pngs(
             plot_json, fpath, ts=ts, relayout_data=relayout_data
         )
@@ -750,23 +757,37 @@ async def export_and_send_to_notes(request: Request) -> JSONResponse:
 
         # Append markdown image link for the light image to the notes.md
         dataset_path = Path(disk_fpath)
-        dataset_uuid = dataset_path.stem
-        notes_dir = dataset_path.parent / dataset_uuid
+        dataset_uuid, notes_dir, notes_path = _measurement_notes_paths(dataset_path)
         notes_dir.mkdir(parents=True, exist_ok=True)
-        notes_path = notes_dir / f"{dataset_uuid}.md"
 
-        # Ensure notes file exists
+        # Ensure notes file exists with frontmatter
         if not notes_path.exists():
             with open(notes_path, "w", encoding="utf-8") as f:
-                f.write("")
+                f.write(_make_frontmatter(dataset_uuid, now))
 
         # Build image path like <dataset_uuid>/<image_filename>
         light_path = Path(saved.get("png_light"))
         md_path = f"{dataset_uuid}/{light_path.name}"
         md_line = f"![plot]({md_path})\n"
 
-        with open(notes_path, "a", encoding="utf-8") as f:
-            f.write("\n" + md_line)
+        with open(notes_path, "r", encoding="utf-8") as f:
+            existing_text = f.read()
+
+        body, _, _ = _parse_frontmatter(existing_text)
+        body = (body or "").rstrip()
+        if body:
+            body = f"{body}\n\n{md_line.strip()}\n"
+        else:
+            body = md_line
+
+        with open(notes_path, "w", encoding="utf-8") as f:
+            f.write(_make_frontmatter(dataset_uuid, now) + body)
+
+        sample_rollup = append_sample_rollup(
+            dataset_path,
+            body,
+            now,
+        )
 
         return JSONResponse(
             status_code=200,
@@ -775,6 +796,8 @@ async def export_and_send_to_notes(request: Request) -> JSONResponse:
                 "message": "Saved images and appended note link.",
                 "paths": saved,
                 "md_line": md_line,
+                "notes_path": str(notes_path),
+                "sample_notes_path": sample_rollup.get("sample_notes_path"),
             },
         )
 

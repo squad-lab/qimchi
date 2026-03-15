@@ -50,6 +50,7 @@ export interface TransformPlotRequest {
   filters_order: string[];
   filters_opts: Record<string, unknown>;
   slider?: Record<string, SliderConfig>;
+  swap_xy?: boolean;
 }
 
 export interface TransformPlotResponse {
