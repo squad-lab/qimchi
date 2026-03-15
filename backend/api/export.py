@@ -773,8 +773,10 @@ async def export_and_send_to_notes(request: Request) -> JSONResponse:
         with open(notes_path, "r", encoding="utf-8") as f:
             existing_text = f.read()
 
-        body, _, _ = _parse_frontmatter(existing_text)
-        body = (body or "").rstrip()
+        previous_body, _, _ = _parse_frontmatter(existing_text)
+        previous_body = (previous_body or "").rstrip()
+
+        body = previous_body
         if body:
             body = f"{body}\n\n{md_line.strip()}\n"
         else:
@@ -787,6 +789,7 @@ async def export_and_send_to_notes(request: Request) -> JSONResponse:
             dataset_path,
             body,
             now,
+            previous_measurement_notes_body=previous_body,
         )
 
         return JSONResponse(

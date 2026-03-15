@@ -255,10 +255,11 @@ def _find_last_synced_measurement_body(
 
 def _compute_incremental_body(prev_body: str | None, new_body: str) -> str:
     """
-    Compute body to append for pooled notes logfile semantics.
+    Compute incremental body to append from previous -> current measurement note.
 
     If content is unchanged, returns empty string.
-    If content changed, returns the full current body as a new log snapshot.
+    If current starts with previous, returns only the appended suffix.
+    Otherwise, returns full current body as a safe fallback.
 
     """
     current = (new_body or "").rstrip()
@@ -272,6 +273,9 @@ def _compute_incremental_body(prev_body: str | None, new_body: str) -> str:
 
     if current == previous:
         return ""
+
+    if current.startswith(previous):
+        return current[len(previous) :].lstrip("\n")
 
     return current
 
@@ -327,6 +331,7 @@ def append_sample_rollup(
     sample_path: str | None = None,
     sample_name: str | None = None,
     cryostat_name: str | None = None,
+    previous_measurement_notes_body: str | None = None,
 ) -> Dict[str, str]:
     """
     Append a measurement snapshot to the pooled sample notes file.
@@ -359,10 +364,18 @@ def append_sample_rollup(
         sample_text = f.read()
 
     existing_body, _, _ = _parse_frontmatter(sample_text)
-    last_synced_body = _find_last_synced_measurement_body(existing_body, path)
-    incremental_body = _compute_incremental_body(
-        last_synced_body, measurement_notes_body
-    )
+    if previous_measurement_notes_body is not None:
+        incremental_body = _compute_incremental_body(
+            previous_measurement_notes_body,
+            measurement_notes_body,
+        )
+    else:
+        # Fallback for callers that do not provide previous measurement state.
+        last_synced_body = _find_last_synced_measurement_body(existing_body, path)
+        incremental_body = _compute_incremental_body(
+            last_synced_body,
+            measurement_notes_body,
+        )
 
     if not incremental_body:
         return {
@@ -504,6 +517,17 @@ async def save_notes(data: NotesData) -> Dict:
         # Create the directory if it doesn't exist
         notes_dir.mkdir(parents=True, exist_ok=True)
 
+        previous_measurement_body = None
+        if (
+            data.note_scope == "measurement"
+            and notes_path.exists()
+            and notes_path.is_file()
+        ):
+            with open(notes_path, "r", encoding="utf-8") as f:
+                previous_text = f.read()
+            previous_measurement_body, _, _ = _parse_frontmatter(previous_text)
+            previous_measurement_body = (previous_measurement_body or "").rstrip()
+
         # Build frontmatter and write the notes
         now = datetime.now(timezone.utc)
         frontmatter = _make_frontmatter(frontmatter_filename, now)
@@ -525,6 +549,7 @@ async def save_notes(data: NotesData) -> Dict:
                 sample_path=data.sample_path,
                 sample_name=data.sample_name,
                 cryostat_name=data.cryostat_name,
+                previous_measurement_notes_body=previous_measurement_body,
             )
 
         logger.debug(f"save_notes | Successfully saved notes to {notes_path}")
