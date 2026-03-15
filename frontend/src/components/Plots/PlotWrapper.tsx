@@ -211,73 +211,6 @@ const getColorscaleData = (
   return builtInMap[key] || name.charAt(0).toUpperCase() + name.slice(1);
 };
 
-const swapAxesInPlotJson = (plotJson: PlotlyJSON): PlotlyJSON => {
-  // Shallow-clone with shared references
-  const swapped: PlotlyJSON = { ...plotJson };
-
-  if (plotJson.data && plotJson.data.length > 0) {
-    swapped.data = plotJson.data.map((trace) => {
-      const swappedTrace = { ...trace } as Record<string, unknown>;
-      const traceAny = trace as Record<string, unknown>;
-
-      if (trace.type === "heatmap" || trace.type === "heatmapgl") {
-        // For heatmaps, swap x and y coordinates
-        const xObj = traceAny.x as Record<string, unknown> | undefined;
-        const yObj = traceAny.y as Record<string, unknown> | undefined;
-        const zObj = traceAny.z as Record<string, unknown> | undefined;
-
-        if (xObj && yObj) {
-          swappedTrace.x = { ...yObj };
-          swappedTrace.y = { ...xObj };
-        }
-
-        // Use Plotly's transpose property
-        if (zObj) {
-          swappedTrace.transpose = true;
-        }
-      } else {
-        // For line plots and other types, just swap x and y
-        const x = traceAny.x;
-        const y = traceAny.y;
-        if (x !== undefined && y !== undefined) {
-          swappedTrace.x = y;
-          swappedTrace.y = x;
-        }
-      }
-
-      return swappedTrace as Data;
-    });
-  }
-
-  if (plotJson.layout) {
-    swapped.layout = { ...plotJson.layout };
-    const layoutAny = swapped.layout as Record<string, unknown>;
-    // Swap xaxis and yaxis properties
-    if (layoutAny.xaxis && layoutAny.yaxis) {
-      const tempXaxis = { ...(layoutAny.xaxis as object) };
-      layoutAny.xaxis = { ...(layoutAny.yaxis as object) };
-      layoutAny.yaxis = tempXaxis;
-
-      // Remove range properties to force autoscale after swap
-      // This ensures Plotly recalculates the correct axis ranges
-      const xaxisAny = layoutAny.xaxis as Record<string, unknown>;
-      const yaxisAny = layoutAny.yaxis as Record<string, unknown>;
-      if ("range" in xaxisAny) {
-        delete xaxisAny.range;
-      }
-      if ("range" in yaxisAny) {
-        delete yaxisAny.range;
-      }
-      xaxisAny.autorange = true;
-      yaxisAny.autorange = true;
-    }
-    const now = Date.now();
-    (swapped.layout as Record<string, unknown>).datarevision = now;
-  }
-
-  return swapped;
-};
-
 const PlotWrapper: React.FC<Props> = ({
   plotJson,
   plotRef,
@@ -307,6 +240,7 @@ const PlotWrapper: React.FC<Props> = ({
   };
 
   const plotType = detectPlotType(plotJson);
+  const isHeatmapPlot = plotType === "heatmap";
 
   // Extract plot title from plotJson
   const getPlotTitle = (plotData: PlotlyJSON): string => {
@@ -465,6 +399,8 @@ const PlotWrapper: React.FC<Props> = ({
     }
 
     try {
+      showToast("Starting export to notes... This may take a moment.", "info");
+
       const axiosResponse = await axios.post(
         `${PROD_BACKEND_URL}/export-plot-images/send-to-notes`,
         {
@@ -480,21 +416,27 @@ const PlotWrapper: React.FC<Props> = ({
 
       const data = axiosResponse.data;
       if (axiosResponse.status >= 200 && data && data.success) {
-        showToast(data.message || "Saved to notes", "success");
-        // notify notes panel to append the markdown line
-        if (data.md_line) {
-          try {
-            window.dispatchEvent(
-              new CustomEvent("notes:append", {
-                detail: {
-                  datasetPath: plotConfig.fpath,
-                  md_line: data.md_line,
-                },
-              }),
-            );
-          } catch {
-            // ignore dispatch errors
-          }
+        showToast(data.message || "Exported and saved to notes", "success");
+        try {
+          window.dispatchEvent(
+            new CustomEvent("notes:open", {
+              detail: {
+                datasetPath: plotConfig.fpath,
+                openPanel: true,
+              },
+            }),
+          );
+
+          // Force Notes panel to reload content even when the same target is already selected.
+          window.dispatchEvent(
+            new CustomEvent("notes:refresh", {
+              detail: {
+                datasetPath: plotConfig.fpath,
+              },
+            }),
+          );
+        } catch {
+          // ignore dispatch errors
         }
       } else {
         showToast(
@@ -828,9 +770,7 @@ const PlotWrapper: React.FC<Props> = ({
             } else {
               // Source 2 + 3: per-trace zmin/zmax or z-array scan
               (originalPlotJson.data || []).forEach((trace: any) => {
-                if (
-                  (trace.type === "heatmap" || trace.type === "heatmapgl")
-                ) {
+                if (trace.type === "heatmap" || trace.type === "heatmapgl") {
                   // Source 2: backend-provided per-trace zmin/zmax
                   if (
                     typeof trace.zmin === "number" &&
@@ -983,18 +923,10 @@ const PlotWrapper: React.FC<Props> = ({
   // Apply current appearance settings when a new plot loads or when appearance settings change
   // Use useMemo to prevent unnecessary re-calculations
   const customizedPlotJsonMemo = useMemo(() => {
-    let result = applyAppearanceSettings(basePlotJson, appearanceSettings);
-    if (areAxesSwapped) {
-      result = swapAxesInPlotJson(result);
-    }
+    const result = applyAppearanceSettings(basePlotJson, appearanceSettings);
     // console.log(`[PlotWrapper] Calculated new customizedPlotJsonMemo`);
     return result;
-  }, [
-    basePlotJson,
-    appearanceSettings,
-    applyAppearanceSettings,
-    areAxesSwapped,
-  ]);
+  }, [basePlotJson, appearanceSettings, applyAppearanceSettings]);
 
   // Update customized plot JSON only when memo changes (but not during filter operations)
   // Use React 18's concurrent features to batch updates and prevent intermediate renders
@@ -1124,11 +1056,14 @@ const PlotWrapper: React.FC<Props> = ({
       updateRequest: {
         filters: AppliedFilter[];
         sliders?: Record<string, SliderConfig>;
+        swapAxesOverride?: boolean;
       } | null,
     ) => {
       if (!updateRequest) return;
 
-      const { filters, sliders } = updateRequest;
+      const { filters, sliders, swapAxesOverride } = updateRequest;
+      const shouldSwapAxes =
+        plotType === "heatmap" && (swapAxesOverride ?? areAxesSwapped);
 
       // Always use local filter application to avoid plot reload and modal closure
       // This decouples filter application from plot refresh
@@ -1202,6 +1137,7 @@ const PlotWrapper: React.FC<Props> = ({
               filters_order: filtersOrder,
               filters_opts: filtersOpts,
               slider: sliders || sliderConfig,
+              swap_xy: shouldSwapAxes,
             });
             console.log("[PlotWrapper] Slider API call completed successfully");
 
@@ -1278,6 +1214,7 @@ const PlotWrapper: React.FC<Props> = ({
                   filters_order: [],
                   filters_opts: {},
                   slider: sliders,
+                  swap_xy: shouldSwapAxes,
                 });
 
                 // Ensure the returned plot JSON has proper structure
@@ -1325,32 +1262,66 @@ const PlotWrapper: React.FC<Props> = ({
                 setIsApplyingFilters(false);
               }
             } else {
-              // No filters, no sliders - reset to original
-              const resetPlotWithAppearance = applyAppearanceSettings(
-                originalPlotJson,
-                appearanceSettings,
-              );
+              // No filters, no sliders. For swapped heatmaps, re-request backend data;
+              // otherwise reset to the original local payload.
+              if (shouldSwapAxes) {
+                if (!activePlotRef) {
+                  throw new Error(
+                    "Plot reference not available for transform operation",
+                  );
+                }
 
-              // Update all related state in one batch using concurrent features for smoother updates
-              startTransition(() => {
-                flushSync(() => {
-                  setAppliedFilters(filters); // This should be empty array
-                  if (sliders) {
-                    setSliderConfig(sliders);
-                  }
-                  setBasePlotJson(originalPlotJson);
-                  setCustomizedPlotJson(resetPlotWithAppearance);
+                const result = await PlotAPI.transformPlot({
+                  plot_ref: activePlotRef,
+                  filters_order: [],
+                  filters_opts: {},
+                  slider: {},
+                  swap_xy: true,
                 });
-              });
 
-              // Clear loading overlay after a brief delay to ensure smooth transition
-              setTimeout(() => {
-                // if (fallbackTimer) clearTimeout(fallbackTimer);
-                // console.log(
-                //   `[PlotWrapper] Filter application complete - re-enabling concurrent operations`
-                // );
-                setIsApplyingFilters(false);
-              }, 100);
+                if (!result.plot_json.layout) {
+                  result.plot_json.layout = {};
+                }
+
+                const swappedWithAppearance = applyAppearanceSettings(
+                  result.plot_json,
+                  appearanceSettings,
+                );
+
+                startTransition(() => {
+                  flushSync(() => {
+                    setAppliedFilters(filters);
+                    setBasePlotJson(result.plot_json);
+                    setCustomizedPlotJson(swappedWithAppearance);
+                  });
+                });
+
+                setTimeout(() => {
+                  setIsApplyingFilters(false);
+                }, 100);
+              } else {
+                const resetPlotWithAppearance = applyAppearanceSettings(
+                  originalPlotJson,
+                  appearanceSettings,
+                );
+
+                // Update all related state in one batch using concurrent features for smoother updates
+                startTransition(() => {
+                  flushSync(() => {
+                    setAppliedFilters(filters); // This should be empty array
+                    if (sliders) {
+                      setSliderConfig(sliders);
+                    }
+                    setBasePlotJson(originalPlotJson);
+                    setCustomizedPlotJson(resetPlotWithAppearance);
+                  });
+                });
+
+                // Clear loading overlay after a brief delay to ensure smooth transition
+                setTimeout(() => {
+                  setIsApplyingFilters(false);
+                }, 100);
+              }
 
               // Only show "Filters cleared" toast if we actually had filters before
               showToast("Filters cleared", "success");
@@ -1381,6 +1352,7 @@ const PlotWrapper: React.FC<Props> = ({
               filters_order: filtersOrder,
               filters_opts: filtersOpts,
               slider: {},
+              swap_xy: shouldSwapAxes,
             });
             console.log("[PlotWrapper] Filter API call completed successfully");
 
@@ -1457,6 +1429,7 @@ const PlotWrapper: React.FC<Props> = ({
       plotType,
       applyAppearanceSettings,
       activePlotRef,
+      areAxesSwapped,
     ],
   );
 
@@ -1531,6 +1504,7 @@ const PlotWrapper: React.FC<Props> = ({
           // Check if we need to apply filters/sliders
           const hasFiltersOrSliders =
             appliedFilters.length > 0 || Object.keys(sliderConfig).length > 0;
+          const shouldSwapAxes = isHeatmapPlot && areAxesSwapped;
 
           if (hasFiltersOrSliders) {
             console.log(
@@ -1568,6 +1542,7 @@ const PlotWrapper: React.FC<Props> = ({
                   filters_order: filtersOrder,
                   filters_opts: filtersOpts,
                   slider: sliderConfig,
+                  swap_xy: shouldSwapAxes,
                 });
 
                 if (!result.plot_json.layout) {
@@ -1594,6 +1569,7 @@ const PlotWrapper: React.FC<Props> = ({
                   filters_order: filtersOrder,
                   filters_opts: filtersOpts,
                   slider: {},
+                  swap_xy: shouldSwapAxes,
                 });
 
                 const filteredPlotJson = result.plot_json as PlotlyJSON;
@@ -1618,13 +1594,31 @@ const PlotWrapper: React.FC<Props> = ({
               setCustomizedPlotJson(plotWithAppearance);
             }
           } else {
-            // No filters/sliders to apply - show the new plot directly
-            setBasePlotJson(newPlot.plotJson);
-            const plotWithAppearance = applyAppearanceSettings(
-              newPlot.plotJson,
-              appearanceSettings,
-            );
-            setCustomizedPlotJson(plotWithAppearance);
+            // No filters/sliders to apply.
+            // For swapped heatmaps, fetch swapped data from backend.
+            if (shouldSwapAxes && nextPlotRef) {
+              const result = await PlotAPI.transformPlot({
+                plot_ref: nextPlotRef,
+                filters_order: [],
+                filters_opts: {},
+                slider: {},
+                swap_xy: true,
+              });
+              const swappedPlotJson = result.plot_json as PlotlyJSON;
+              setBasePlotJson(swappedPlotJson);
+              const plotWithAppearance = applyAppearanceSettings(
+                swappedPlotJson,
+                appearanceSettings,
+              );
+              setCustomizedPlotJson(plotWithAppearance);
+            } else {
+              setBasePlotJson(newPlot.plotJson);
+              const plotWithAppearance = applyAppearanceSettings(
+                newPlot.plotJson,
+                appearanceSettings,
+              );
+              setCustomizedPlotJson(plotWithAppearance);
+            }
           }
 
           console.log(
@@ -1694,6 +1688,8 @@ const PlotWrapper: React.FC<Props> = ({
       sliderConfig,
       applyAppearanceSettings,
       activePlotRef,
+      isHeatmapPlot,
+      areAxesSwapped,
     ],
   );
 
@@ -1797,12 +1793,20 @@ const PlotWrapper: React.FC<Props> = ({
     showToast("Plot reset to original state", "success");
   };
 
-  const handleSwapAxes = () => {
+  const handleSwapAxes = async () => {
+    if (!isHeatmapPlot || isApplyingFilters) return;
+
     const newSwapped = !areAxesSwapped;
     setAreAxesSwapped(newSwapped);
     if (plotConfig?.id) {
       setPlotAxesSwapped(plotConfig.id, newSwapped);
     }
+
+    await executeFiltersApply({
+      filters: appliedFilters,
+      sliders: sliderConfig,
+      swapAxesOverride: newSwapped,
+    });
   };
 
   const handleAppearanceSettingsChange = useCallback(
@@ -2207,25 +2211,28 @@ const PlotWrapper: React.FC<Props> = ({
                 </button>
               </Tooltip>
 
-              {/* Swap X & Y Axes */}
-              <Tooltip content="Swap X & Y Axes" position="left">
-                <button
-                  onClick={handleSwapAxes}
-                  className={`relative p-1.5 rounded transition-colors duration-150 ${
-                    areAxesSwapped
-                      ? "bg-blue-100 text-blue-600"
-                      : "hover:bg-gray-200"
-                  }`}
-                  title="Swap X & Y Axes (Visual)" // TODOLATER: After filters are moved to frontend
-                >
-                  <ArrowLeftRight
-                    size={16}
-                    className={
-                      areAxesSwapped ? "text-blue-600" : "text-gray-600"
-                    }
-                  />
-                </button>
-              </Tooltip>
+              {/* Swap X & Y Axes (heatmaps only) */}
+              {isHeatmapPlot && (
+                <Tooltip content="Swap X & Y Axes" position="left">
+                  <button
+                    onClick={handleSwapAxes}
+                    className={`relative p-1.5 rounded transition-colors duration-150 ${
+                      areAxesSwapped
+                        ? "bg-blue-100 text-blue-600"
+                        : "hover:bg-gray-200"
+                    }`}
+                    title="Swap X & Y Axes"
+                    disabled={isApplyingFilters}
+                  >
+                    <ArrowLeftRight
+                      size={16}
+                      className={
+                        areAxesSwapped ? "text-blue-600" : "text-gray-600"
+                      }
+                    />
+                  </button>
+                </Tooltip>
+              )}
 
               {/* Maximize */}
               <Tooltip content="Maximize" position="left">

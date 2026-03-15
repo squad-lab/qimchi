@@ -615,8 +615,14 @@ class Smooth(Filter):
                 cval=self.cval,
             )
 
+        axis_label = "z"
+        if self.smooth_axis == 0:
+            axis_label = "x"
+        elif self.smooth_axis == 1:
+            axis_label = "y"
+
         # Update the figure
-        self._hmap_update(z_data, fil="Sm")
+        self._hmap_update(z_data, fil=f"Sm({axis_label})")
 
 
 class SimpleMovingAverage(Filter):
@@ -1231,6 +1237,7 @@ def _generate_plot_json_for_transform(
     slider: dict,
     filters_order: list[str],
     filters_opts: dict,
+    swap_xy: bool,
 ) -> dict:
     """Generate a plot JSON from canonical plot context + transform settings."""
     from .plots import create_line_plots, create_heat_maps, load_dataset
@@ -1238,11 +1245,21 @@ def _generate_plot_json_for_transform(
     dataset = load_dataset(fpath)
     logger.debug(f"Loaded dataset with dims: {list(dataset.dims)}")
 
+    effective_indeps = list(indeps)
+    if plot_type == "HeatMap" and swap_xy and len(effective_indeps) >= 2:
+        effective_indeps[0], effective_indeps[1] = (
+            effective_indeps[1],
+            effective_indeps[0],
+        )
+
+    effective_filters_order = list(filters_order)
+    effective_filters_opts = deepcopy(filters_opts)
+
     if plot_type == "LinePlot":
         plots_data = create_line_plots(
             datasets=[dataset],
             fpaths=[fpath],
-            indeps=indeps,
+            indeps=effective_indeps,
             deps=deps,
             slider=slider,
         )
@@ -1250,7 +1267,7 @@ def _generate_plot_json_for_transform(
         plots_data = create_heat_maps(
             datasets=[dataset],
             fpaths=[fpath],
-            indeps=indeps,
+            indeps=effective_indeps,
             deps=deps,
             slider=slider,
         )
@@ -1264,11 +1281,11 @@ def _generate_plot_json_for_transform(
 
     plot_json = plots_data[0]["plotJson"]
 
-    if filters_order:
+    if effective_filters_order:
         num_axes = 2 if plot_type == "HeatMap" else 1
         plot_json = apply_filters(
-            filters_order=filters_order,
-            filters_opts=filters_opts,
+            filters_order=effective_filters_order,
+            filters_opts=effective_filters_opts,
             fig=plot_json,
             fig_num_axes=num_axes,
         )
@@ -1296,6 +1313,7 @@ async def transform_plot_endpoint(
             slider=request.slider or {},
             filters_order=request.filters_order or [],
             filters_opts=request.filters_opts or {},
+            swap_xy=bool(request.swap_xy),
         )
 
         plot_json = sanitize_for_json(plot_json)
