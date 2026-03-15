@@ -20,7 +20,6 @@ import {
 // Local imports
 import Tooltip from "./Tooltip";
 import { useToast } from "../hooks/useToast";
-import { PlotRequest } from "../services/plotAPI";
 
 export interface PlotField {
   id: string;
@@ -40,10 +39,18 @@ export interface PlotComposerConfig {
   preferredSource?: "memory" | "disk";
 }
 
+export interface ComposerSelectionSnapshot {
+  plotType: PlotType;
+  indeps: string[];
+  deps: string[];
+  hasRequiredAxes: boolean;
+  hasAnySelections: boolean;
+  fieldSources: string[];
+}
+
 interface PlotComposerProps {
-  onCreatePlot?: (config: PlotComposerConfig) => void;
-  // Keep backward compatibility
-  onCreatePlotLegacy?: (request: PlotRequest) => void;
+  onCreatePlot?: (snapshot: ComposerSelectionSnapshot) => void;
+  selectionContextLabel?: string;
 }
 
 export interface PlotComposerHandle {
@@ -51,10 +58,12 @@ export interface PlotComposerHandle {
   createPlotFromComposer: () => void;
   clearComposer: () => void;
   autofillFromField: (field: PlotField) => void;
+  hasComposerSelections: () => boolean;
+  getComposerSelectionNames: () => ComposerSelectionSnapshot;
 }
 
 const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
-  ({ onCreatePlot, onCreatePlotLegacy }: PlotComposerProps, ref) => {
+  ({ onCreatePlot, selectionContextLabel }: PlotComposerProps, ref) => {
     const [xFields, setXFields] = useState<PlotField[]>([]);
     const [yFields, setYFields] = useState<PlotField[]>([]);
     const [zFields, setZFields] = useState<PlotField[]>([]);
@@ -393,78 +402,48 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
       [getDropValidationError, getNextAutofillTarget, showToast],
     );
 
-    // Handle plot creation with new configuration-based approach
-    const handleCreatePlot = useCallback(() => {
-      if (onCreatePlot) {
-        // Extract unique source paths from all fields
+    const getComposerSelectionNames =
+      useCallback((): ComposerSelectionSnapshot => {
         const allFields = [...xFields, ...yFields, ...zFields];
-        const fpaths = Array.from(
+        const fieldSources = Array.from(
           new Set(allFields.map((field) => field.source)),
         );
 
-        // For LinePlot, we typically want X as independent and Y as dependent
-        // For HeatMap, we typically want X,Y as independent and Z as dependent
-        let finalIndeps: string[] = [];
-        let finalDeps: string[] = [];
+        const indeps =
+          plotType === "HeatMap"
+            ? [...xFields, ...yFields].map((field) => field.name)
+            : xFields.map((field) => field.name);
 
-        if (plotType === "LinePlot") {
-          // X can be either independent or dependent, Y should be dependent
-          finalIndeps = xFields.map((field) => field.name);
-          finalDeps = yFields.map((field) => field.name);
-        } else if (plotType === "HeatMap") {
-          // X,Y as independents, Z as dependents
-          finalIndeps = [...xFields, ...yFields].map((field) => field.name);
-          finalDeps = zFields.map((field) => field.name);
-        }
+        const deps =
+          plotType === "HeatMap"
+            ? zFields.map((field) => field.name)
+            : yFields.map((field) => field.name);
 
-        // Create individual plot configurations for each dataset
-        fpaths.forEach((fpath) => {
-          const source: "memory" | "disk" = fpath.startsWith("memory://")
-            ? "memory"
-            : "disk";
-          const config: PlotComposerConfig = {
-            fpath,
-            indeps: finalIndeps,
-            deps: finalDeps,
-            plotType,
-            source,
-            preferredSource: source,
-          };
-
-          // console.log(
-          //   `[PlotComposer] Creating plot with config:`,
-          //   JSON.stringify(config, null, 2)
-          // );
-          onCreatePlot(config);
-        });
-      } else if (onCreatePlotLegacy) {
-        // Backward compatibility with old PlotRequest format
-        const allFields = [...xFields, ...yFields, ...zFields];
-        const fpaths = Array.from(
-          new Set(allFields.map((field) => field.source)),
-        );
-
-        let finalIndeps: string[] = [];
-        let finalDeps: string[] = [];
-
-        if (plotType === "LinePlot") {
-          finalIndeps = xFields.map((field) => field.name);
-          finalDeps = yFields.map((field) => field.name);
-        } else if (plotType === "HeatMap") {
-          finalIndeps = [...xFields, ...yFields].map((field) => field.name);
-          finalDeps = zFields.map((field) => field.name);
-        }
-
-        const request: PlotRequest = {
-          fpaths,
-          indeps: finalIndeps,
-          deps: finalDeps,
+        return {
           plotType,
+          indeps,
+          deps,
+          hasRequiredAxes: xFields.length > 0 && yFields.length > 0,
+          hasAnySelections: allFields.length > 0,
+          fieldSources,
         };
+      }, [plotType, xFields, yFields, zFields]);
 
-        onCreatePlotLegacy(request);
+    // Handle plot creation by delegating eligibility to Viewer.
+    const handleCreatePlot = useCallback(() => {
+      const snapshot = getComposerSelectionNames();
+
+      if (!snapshot.hasRequiredAxes) {
+        showToast(
+          "Select required X and Y fields before plotting.",
+          "warning",
+          3000,
+        );
+        return;
       }
-    }, [onCreatePlot, onCreatePlotLegacy, plotType, xFields, yFields, zFields]);
+
+      onCreatePlot?.(snapshot);
+    }, [getComposerSelectionNames, onCreatePlot, showToast]);
 
     useImperativeHandle(
       ref,
@@ -473,8 +452,19 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
         createPlotFromComposer: () => handleCreatePlot(),
         clearComposer: () => clearAllFields(),
         autofillFromField: (field: PlotField) => handleAutofillField(field),
+        hasComposerSelections: () =>
+          xFields.length > 0 || yFields.length > 0 || zFields.length > 0,
+        getComposerSelectionNames,
       }),
-      [handleCreatePlot, clearAllFields, handleAutofillField],
+      [
+        clearAllFields,
+        getComposerSelectionNames,
+        handleAutofillField,
+        handleCreatePlot,
+        xFields.length,
+        yFields.length,
+        zFields.length,
+      ],
     );
 
     const canCreatePlot = xFields.length > 0 && yFields.length > 0;
@@ -752,11 +742,18 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
           onClick={() => setIsExpanded(!isExpanded)}
         >
           <div className="flex items-center justify-between">
-            {/* <div> */}
-            <h3 className="font-semibold text-gray-900 flex items-center">
-              <ListMusic size={18} className="mr-1.5 align-middle mb-0.5" />
-              Composer
-            </h3>
+            <div className="flex items-center">
+              <h3 className="font-semibold text-gray-900 flex items-center">
+                <ListMusic size={18} className="mr-1.5 align-middle mb-0.5" />
+                Composer
+              </h3>
+
+              {selectionContextLabel && (
+                <span className="ml-2 text-xs text-slate-600 bg-slate-100 px-2 py-1 rounded">
+                  {selectionContextLabel}
+                </span>
+              )}
+            </div>
 
             <div className="flex items-center">
               {/* Help tooltip */}
@@ -772,8 +769,8 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
                         Z (HeatMap only).
                       </div>
                       <div className="text-sm text-white">
-                        Shortcuts: H HeatMap, L LinePlot, P
-                        Plot, Alt+Shift+C Clear Composer.
+                        Shortcuts: H HeatMap, L LinePlot, P Plot, Alt+Shift+C
+                        Clear Composer.
                       </div>
                     </div>
                   }

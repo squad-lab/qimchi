@@ -22,6 +22,10 @@ import {
 // Local imports
 import Tooltip from "./Tooltip";
 import { useToast } from "../hooks/useToast";
+import {
+  SharedFieldResult,
+  isFieldShared,
+} from "../utils/datasetFieldSelectors";
 
 interface AttrData {
   measurement_id?: string;
@@ -56,12 +60,16 @@ export interface BasketFieldSelection {
 
 interface BasketProps {
   items: BasketItem[];
+  selectedDatasetIds: Set<string>;
+  onToggleDatasetSelection: (datasetId: string, multiSelect: boolean) => void;
   onRemoveItem: (id: string) => void;
   onClearAll: () => void;
   onDownload?: (items: BasketItem[]) => void;
   onDropItem?: (item: BasketItem) => void;
   externalLoadingAttributes?: Set<string>; // External loading state for items added via Plus/double-click
   highlightedFields?: Set<string>; // Fields to highlight (from PlotComposer)
+  sharedFields: SharedFieldResult;
+  enforceSharedGating: boolean;
   onAutofillComposerField?: (field: BasketFieldSelection) => void;
   onOpenNotesItem?: (item: BasketItem) => void;
 }
@@ -74,6 +82,7 @@ const FieldItem = ({
   type,
   selectedItems,
   onToggleSelect,
+  isDisabled = false,
   isHighlighted = false,
   onAutofillComposerField,
 }: {
@@ -83,6 +92,7 @@ const FieldItem = ({
   type: "independent" | "dependent";
   selectedItems?: Set<string>;
   onToggleSelect?: (itemId: string, ctrlPressed: boolean) => void;
+  isDisabled?: boolean;
   isHighlighted?: boolean;
   onAutofillComposerField?: (field: BasketFieldSelection) => void;
 }) => {
@@ -90,6 +100,11 @@ const FieldItem = ({
   const isSelected = selectedItems?.has(itemId) || false;
 
   const handleDragStart = (e: React.DragEvent) => {
+    if (isDisabled) {
+      e.preventDefault();
+      return;
+    }
+
     const ctrlPressed = e.ctrlKey || e.metaKey;
 
     // If ctrl is pressed and item is not selected, add it to selection
@@ -128,12 +143,20 @@ const FieldItem = ({
   };
 
   const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isDisabled) {
+      return;
+    }
     const ctrlPressed = e.ctrlKey || e.metaKey;
     onToggleSelect?.(itemId, ctrlPressed);
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.preventDefault();
+    e.stopPropagation();
+    if (isDisabled) {
+      return;
+    }
     onAutofillComposerField?.({
       id: itemId,
       source: basketItemPath,
@@ -178,9 +201,10 @@ const FieldItem = ({
         transition-all duration-200 min-w-[70px] max-w-[90px]
         ${config.bgColor} ${config.hoverColor}
         ${isSelected ? `ring-2 ${config.ringColor}` : ""}
+        ${isDisabled ? "opacity-45 cursor-not-allowed hover:bg-gray-200" : ""}
         ${isHighlighted ? "ring-2 ring-yellow-400 shadow-lg" : ""}
       `}
-      draggable
+      draggable={!isDisabled}
       onDragStart={handleDragStart}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
@@ -206,12 +230,16 @@ const FieldItem = ({
 
 const Basket = ({
   items,
+  selectedDatasetIds,
+  onToggleDatasetSelection,
   onRemoveItem,
   onClearAll,
   onDownload,
   onDropItem,
   externalLoadingAttributes = new Set(),
   highlightedFields = new Set(),
+  sharedFields,
+  enforceSharedGating,
   onAutofillComposerField,
   onOpenNotesItem,
 }: BasketProps) => {
@@ -289,6 +317,17 @@ const Basket = ({
 
       return newSet;
     });
+  };
+
+  const isSharedChipEnabled = (
+    fieldName: string,
+    type: "independent" | "dependent",
+  ) => {
+    if (!enforceSharedGating || selectedDatasetIds.size <= 1) {
+      return true;
+    }
+
+    return isFieldShared(fieldName, type, sharedFields);
   };
 
   // Get attribute tooltip content for display
@@ -463,6 +502,12 @@ const Basket = ({
                       Double-click any field chip to autofill Composer (X, then
                       Y, then Z in HeatMap).
                     </div>
+                    {selectedDatasetIds.size > 1 && enforceSharedGating && (
+                      <div className="text-white text-sm">
+                        Gray chips are not shared across selected datasets and
+                        cannot be added to Composer.
+                      </div>
+                    )}
                     <div className="text-white text-sm">
                       Shortcuts: Alt+Shift+B Clear Basket, Shift+E Toggle Side
                       Panel.
@@ -545,9 +590,21 @@ const Basket = ({
             ) : (
               <div className="p-2 flex gap-2 min-w-fit">
                 {items.map((item) => (
+                  // Dataset-card selection is the source of truth for plotting scope.
                   <div
                     key={item.id}
-                    className="flex flex-col bg-gray-50 hover:bg-gray-100 rounded p-2 transition-all duration-200 border border-gray-200 flex-shrink-0 w-[250px]"
+                    data-basket-item-card="true"
+                    onClick={(e) =>
+                      onToggleDatasetSelection(
+                        item.id,
+                        Boolean(e.ctrlKey || e.metaKey),
+                      )
+                    }
+                    className={`flex flex-col rounded p-2 transition-all duration-200 border flex-shrink-0 w-[250px] cursor-pointer ${
+                      selectedDatasetIds.has(item.id)
+                        ? "bg-slate-100 border-slate-400 ring-1 ring-slate-400"
+                        : "bg-gray-50 hover:bg-gray-100 border-gray-200"
+                    }`}
                   >
                     {/* Compact header with item info */}
                     <div className="flex flex-col space-y-1 mb-2">
@@ -599,13 +656,14 @@ const Basket = ({
                           {/* Copy buttons */}
                           <Tooltip content="Copy filename" position="top">
                             <button
-                              onClick={async () =>
+                              onClick={async (e) => {
+                                e.stopPropagation();
                                 await copyToClipboard(
                                   item.name,
                                   item.id,
                                   "filename",
-                                )
-                              }
+                                );
+                              }}
                               className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                               title="Copy filename"
                             >
@@ -620,7 +678,8 @@ const Basket = ({
                           {/* Download button */}
                           <Tooltip content="Download" position="top">
                             <button
-                              onClick={async () => {
+                              onClick={async (e) => {
+                                e.stopPropagation();
                                 try {
                                   const response = await axios.post(
                                     `${PROD_BACKEND_URL}/download-multiple/`,
@@ -659,7 +718,10 @@ const Basket = ({
                           {item.path.endsWith(".zarr") && onOpenNotesItem && (
                             <Tooltip content="Open notes" position="top">
                               <button
-                                onClick={() => onOpenNotesItem(item)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onOpenNotesItem(item);
+                                }}
                                 className="p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
                                 title="Open notes"
                               >
@@ -673,7 +735,10 @@ const Basket = ({
                           {/* Remove button */}
                           <Tooltip content="Remove" position="top">
                             <button
-                              onClick={() => onRemoveItem(item.id)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onRemoveItem(item.id);
+                              }}
                               className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-100 rounded transition-colors"
                               title="Remove"
                             >
@@ -707,6 +772,10 @@ const Basket = ({
                             item.attributes.independents.length > 0 ? (
                             item.attributes.independents.map((indep) => {
                               const fieldId = `${item.name}-${indep}`;
+                              const isEnabled = isSharedChipEnabled(
+                                indep,
+                                "independent",
+                              );
                               return (
                                 <FieldItem
                                   key={indep}
@@ -716,6 +785,7 @@ const Basket = ({
                                   type="independent"
                                   selectedItems={selectedItems}
                                   onToggleSelect={handleToggleSelect}
+                                  isDisabled={!isEnabled}
                                   isHighlighted={highlightedFields.has(fieldId)}
                                   onAutofillComposerField={
                                     onAutofillComposerField
@@ -745,6 +815,10 @@ const Basket = ({
                             item.attributes.dependents.length > 0 ? (
                             item.attributes.dependents.map((dep) => {
                               const fieldId = `${item.name}-${dep}`;
+                              const isEnabled = isSharedChipEnabled(
+                                dep,
+                                "dependent",
+                              );
                               return (
                                 <FieldItem
                                   key={dep}
@@ -754,6 +828,7 @@ const Basket = ({
                                   type="dependent"
                                   selectedItems={selectedItems}
                                   onToggleSelect={handleToggleSelect}
+                                  isDisabled={!isEnabled}
                                   isHighlighted={highlightedFields.has(fieldId)}
                                   onAutofillComposerField={
                                     onAutofillComposerField

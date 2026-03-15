@@ -9,7 +9,7 @@ import Basket, { BasketFieldSelection, BasketItem } from "./Basket";
 import { TreeNode } from "./treeUtils";
 import { AttrData } from "./interfaces";
 import PlotComposer, {
-  PlotComposerConfig,
+  ComposerSelectionSnapshot,
   PlotComposerHandle,
   PlotField,
 } from "./PlotComposer";
@@ -24,6 +24,12 @@ import {
   useGlobalShortcutsInit,
   useShortcut,
 } from "../hooks/useGlobalShortcuts";
+import {
+  computeSharedFields,
+  getEligibleDatasetsForComposer,
+  getSelectedDatasets,
+  isComposerCompatibleWithDataset,
+} from "../utils/datasetFieldSelectors";
 
 interface ViewerProps {
   defaultWidth?: number; // In percentage (0-100)
@@ -69,6 +75,9 @@ const Viewer = ({
   >({});
   // Global squarify toggle affecting all plots
   const [isSquareModeGlobal, setIsSquareModeGlobal] = useState<boolean>(false);
+  const [selectedDatasetIds, setSelectedDatasetIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [viewerHeight, setViewerHeight] = useState<string>(
     "calc(100vh - 200px)",
   );
@@ -79,6 +88,7 @@ const Viewer = ({
   const composerActionRef = useRef<PlotComposerHandle | null>(null);
   const previousBasketItems = useRef<BasketItem[]>([]);
   const processedAutoPlotItems = useRef<Set<string>>(new Set());
+  const previousSelectionKeyRef = useRef<string>("");
 
   // Monitor basket changes for dataset cycling
   useEffect(() => {
@@ -332,6 +342,28 @@ const Viewer = ({
     });
   }, [basketItems]);
 
+  // Keep selected dataset IDs valid as basket contents change.
+  useEffect(() => {
+    setSelectedDatasetIds((prev) => {
+      const existingIds = new Set(basketItems.map((item) => item.id));
+      const next = new Set(
+        Array.from(prev).filter((id) => existingIds.has(id)),
+      );
+
+      if (next.size === 0 && basketItems.length === 1) {
+        next.add(basketItems[0].id);
+      }
+
+      return next;
+    });
+  }, [basketItems]);
+
+  const selectedDatasets = getSelectedDatasets(basketItems, selectedDatasetIds);
+  const sharedFields = computeSharedFields(selectedDatasets);
+  const enforceSharedGating =
+    selectedDatasetIds.size > 1 &&
+    sharedFields.knownDatasetCount === selectedDatasetIds.size;
+
   // Also update on window resize
   useEffect(() => {
     const handleResize = () => updateViewerHeight();
@@ -382,11 +414,55 @@ const Viewer = ({
         • Shortcuts: H HeatMap, L LinePlot, P Plot, Alt+Shift+C Clear Composer.
       </div>
       <div>
+        • Select Basket dataset cards (Ctrl/Cmd+Click for multi-select) to set
+        plot scope.
+      </div>
+      <div>
+        • Gray Basket chips are not shared across selected datasets and are
+        disabled.
+      </div>
+      <div>
         • Shortcuts: Alt+Shift+B Clear Basket, Alt+Shift+V Clear Viewer, Shift+E
         Toggle Side Panel, Shift+M Toggle Metadata, Shift+N Toggle Notes.
       </div>
     </div>
   );
+
+  const getSelectionContextLabel = () => {
+    if (selectedDatasetIds.size === 0) {
+      return "No dataset selected";
+    }
+
+    if (selectedDatasetIds.size === 1) {
+      return `Selected: ${selectedDatasets[0]?.name ?? "1 dataset"}`;
+    }
+
+    return `Selected: ${selectedDatasetIds.size} datasets`;
+  };
+
+  const handleToggleDatasetSelection = (
+    datasetId: string,
+    multiSelect: boolean,
+  ) => {
+    setSelectedDatasetIds((prev) => {
+      const next = new Set(prev);
+
+      if (multiSelect) {
+        if (next.has(datasetId)) {
+          next.delete(datasetId);
+        } else {
+          next.add(datasetId);
+        }
+        return next;
+      }
+
+      if (next.size === 1 && next.has(datasetId)) {
+        return next;
+      }
+
+      return new Set([datasetId]);
+    });
+  };
 
   const handleAutofillComposerField = (field: BasketFieldSelection) => {
     const normalizedField: PlotField = {
@@ -398,13 +474,102 @@ const Viewer = ({
     composerActionRef.current?.autofillFromField(normalizedField);
   };
 
-  const handleCreatePlot = (config: PlotComposerConfig) => {
-    console.log(
-      `[Viewer] handleCreatePlot received config:`,
-      JSON.stringify(config, null, 2),
-    );
-    addPlot({ ...config });
+  const handleCreatePlot = (snapshot: ComposerSelectionSnapshot) => {
+    if (!snapshot.hasRequiredAxes) {
+      showToast("Select required X and Y fields before plotting.", "warning");
+      return;
+    }
+
+    if (selectedDatasetIds.size === 0) {
+      showToast("Select at least one dataset in Basket before plotting.", "warning");
+      return;
+    }
+
+    const currentlySelected = getSelectedDatasets(basketItems, selectedDatasetIds);
+    if (currentlySelected.length === 0) {
+      showToast("No selected datasets are available for plotting.", "error");
+      return;
+    }
+
+    const eligibility = getEligibleDatasetsForComposer(currentlySelected, {
+      indeps: snapshot.indeps,
+      deps: snapshot.deps,
+    });
+
+    if (eligibility.eligible.length === 0) {
+      showToast(
+        "No selected datasets can be plotted with the current composer settings.",
+        "error",
+      );
+      return;
+    }
+
+    eligibility.eligible.forEach((dataset) => {
+      const source: "memory" | "disk" = dataset.path.startsWith("memory://")
+        ? "memory"
+        : "disk";
+
+      addPlot({
+        fpath: dataset.path,
+        indeps: snapshot.indeps,
+        deps: snapshot.deps,
+        plotType: snapshot.plotType,
+        source,
+        preferredSource: source,
+      });
+    });
+
+    if (eligibility.ineligible.length > 0 || eligibility.unknown.length > 0) {
+      showToast(
+        "Some selected datasets do not share the required indeps/deps and were skipped.",
+        "warning",
+      );
+    }
   };
+
+  useEffect(() => {
+    if (selectedDatasetIds.size !== 1) {
+      previousSelectionKeyRef.current = Array.from(selectedDatasetIds)
+        .sort()
+        .join("|");
+      return;
+    }
+
+    const selectionKey = Array.from(selectedDatasetIds).sort().join("|");
+    if (selectionKey === previousSelectionKeyRef.current) {
+      return;
+    }
+    previousSelectionKeyRef.current = selectionKey;
+
+    const composer = composerActionRef.current;
+    if (!composer || !composer.hasComposerSelections()) {
+      return;
+    }
+
+    const snapshot = composer.getComposerSelectionNames();
+    if (!snapshot.hasRequiredAxes) {
+      return;
+    }
+
+    const selectedDataset = selectedDatasets[0];
+    if (!selectedDataset) {
+      return;
+    }
+
+    const compatibility = isComposerCompatibleWithDataset(
+      { indeps: snapshot.indeps, deps: snapshot.deps },
+      selectedDataset.attributes,
+    );
+
+    if (compatibility === false) {
+      showToast(
+        "Selected dataset does not match current composer fields.",
+        "warning",
+        3000,
+      );
+      composer.clearComposer();
+    }
+  }, [selectedDatasetIds, selectedDatasets, showToast]);
 
   const handleDownload = async (items: BasketItem[]) => {
     try {
@@ -490,11 +655,15 @@ const Viewer = ({
           <div ref={basketRef} className="flex-shrink-0">
             <Basket
               items={basketItems}
+              selectedDatasetIds={selectedDatasetIds}
+              onToggleDatasetSelection={handleToggleDatasetSelection}
               onRemoveItem={onRemoveBasketItem}
               onClearAll={onClearBasket}
               onDownload={handleDownload}
               onDropItem={handleDropItem}
               externalLoadingAttributes={loadingAttributes}
+              sharedFields={sharedFields}
+              enforceSharedGating={enforceSharedGating}
               onAutofillComposerField={handleAutofillComposerField}
               onOpenNotesItem={onOpenNotesItem}
             />
@@ -508,6 +677,7 @@ const Viewer = ({
             <PlotComposer
               ref={composerActionRef}
               onCreatePlot={handleCreatePlot}
+              selectionContextLabel={getSelectionContextLabel()}
             />
           </div>
 
