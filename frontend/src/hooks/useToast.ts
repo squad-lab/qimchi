@@ -5,10 +5,18 @@ export interface LogItem {
   message: string;
   type: "success" | "error" | "warning" | "info";
   timestamp: string;
+  source?: string;
+  metadata?: any;
 }
 
 export interface ToastContextType {
-  showToast: (message: string, type?: "success" | "error" | "warning" | "info", duration?: number) => void;
+  showToast: (
+    message: string,
+    type?: "success" | "error" | "warning" | "info",
+    duration?: number,
+    source?: string,
+    metadata?: any,
+  ) => void;
   openLogModal: () => void;
 }
 

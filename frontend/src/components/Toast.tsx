@@ -30,6 +30,8 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
       message: string,
       type: "success" | "error" | "warning" | "info" = "info",
       duration: number = 3000,
+      source?: string,
+      metadata?: any,
     ) => {
       const id =
         Date.now().toString() + Math.random().toString(36).substr(2, 9);
@@ -37,7 +39,14 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
 
       setToasts((prev) => [...prev, newToast]);
       setLogs((prev) => [
-        { id, message, type, timestamp: new Date().toISOString() },
+        {
+          id,
+          message,
+          type,
+          timestamp: new Date().toISOString(),
+          source,
+          metadata,
+        },
         ...prev,
       ]);
 

@@ -14,6 +14,7 @@ import JsonView from "@uiw/react-json-view";
 import { BasketItem } from "./Basket";
 import { useSidebarStore } from "../stores/sidebarStore";
 import Tooltip from "./Tooltip";
+import { useToast } from "../hooks/useToast";
 
 // Type definitions for metadata
 interface Metadata {
@@ -150,6 +151,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
   // Use Zustand store for search state
   const { componentStates, updateMetadataState } = useSidebarStore();
   const { searchInput, searchQuery } = componentStates.metadata;
+  const { showToast } = useToast();
 
   // State for metadata - now stores metadata for each basket item
   const [metadataMap, setMetadataMap] = useState<Map<string, Metadata>>(
@@ -347,17 +349,10 @@ const Metadata = ({ basketItems }: MetadataProps) => {
 
               return { success: true, itemId: item.id };
             } catch (error) {
-              // console.error(
-              //   "Error fetching metadata for item:",
-              //   item.id,
-              //   error
-              // );
-
-              // Update error state for failed response
-              setMetadataErrors(
-                (prev) =>
-                  new Map([...prev, [item.id, "Failed to load metadata"]]),
-              );
+              showToast("Failed to load metadata", "error", 3000, "Metadata", {
+                path: item.path,
+                error: error instanceof Error ? error.message : String(error),
+              });
 
               return { success: false, itemId: item.id, error };
             } finally {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   X,
   History,
@@ -7,8 +7,12 @@ import {
   AlertCircle,
   AlertTriangle,
   Info,
+  Search,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { Rnd } from "react-rnd";
+import JsonView from "@uiw/react-json-view";
 import { LogItem } from "../hooks/useToast";
 
 interface NotificationLogModalProps {
@@ -49,6 +53,89 @@ const formatDate = (isoString: string) => {
   }
 };
 
+const NotificationLogEntry: React.FC<{
+  log: LogItem;
+  getIcon: (type: string) => React.ReactNode;
+  getLogStyles: (type: string) => string;
+}> = ({ log, getIcon, getLogStyles }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const hasMetadata =
+    log.metadata &&
+    (typeof log.metadata === "object"
+      ? Object.keys(log.metadata).length > 0
+      : String(log.metadata).length > 0);
+
+  return (
+    <div
+      className={`p-3 rounded-lg border shadow-sm flex flex-col gap-2 transition-all ${getLogStyles(log.type)} ${hasMetadata ? "cursor-pointer hover:shadow-md" : ""}`}
+      onClick={() => hasMetadata && setIsExpanded(!isExpanded)}
+    >
+      <div className="flex items-start gap-3">
+        <div className="flex-shrink-0">{getIcon(log.type)}</div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-sm font-medium break-words leading-tight">
+              {log.message}
+            </p>
+            {hasMetadata && (
+              <div className="text-slate-400 mt-0.5">
+                {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </div>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5 opacity-70">
+            {log.source && (
+              <span className="text-[10px] px-1.5 py-0.5 bg-black bg-opacity-10 rounded font-bold uppercase tracking-tight">
+                {log.source}
+              </span>
+            )}
+            <span className="text-[10px] uppercase tracking-wider font-semibold">
+              {log.type}
+            </span>
+            <span className="w-1 h-1 rounded-full bg-current opacity-40"></span>
+            <span className="text-xs">{formatTime(log.timestamp)}</span>
+            <span className="text-[10px] ml-auto">
+              {formatDate(log.timestamp)}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {isExpanded && hasMetadata && (
+        <div
+          className="mt-2 p-2 bg-white bg-opacity-50 rounded border border-black border-opacity-5 overflow-hidden text-xs"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p className="text-[10px] font-bold uppercase text-slate-500 mb-1">
+            Technical Details
+          </p>
+          {typeof log.metadata === "object" ? (
+            <JsonView
+              value={log.metadata}
+              displayDataTypes={false}
+              displayObjectSize={false}
+              enableClipboard={true}
+              collapsed={1}
+              style={
+                {
+                  fontSize: "11px",
+                  backgroundColor: "transparent",
+                  "--w-rjv-background-color": "transparent",
+                  "--w-rjv-line-color": "rgba(0,0,0,0.05)",
+                } as any
+              }
+            />
+          ) : (
+            <pre className="whitespace-pre-wrap font-mono text-[11px]">
+              {String(log.metadata)}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
   isOpen,
   onClose,
@@ -58,6 +145,33 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
   const [zIndexLocal, setZIndexLocal] = useState<number | undefined>(undefined);
   const zRef = useRef<number | undefined>(undefined);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  // Search state
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Debounce search input
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setSearchQuery(searchInput);
+    }, 300);
+    return () => clearTimeout(timeoutId);
+  }, [searchInput]);
+
+  // Filter logs based on search query
+  const filteredLogs = useMemo(() => {
+    if (!searchQuery.trim()) return logs;
+    const lowerQuery = searchQuery.toLowerCase();
+    return logs.filter((log) => {
+      const msgMatch = log.message.toLowerCase().includes(lowerQuery);
+      const typeMatch = log.type.toLowerCase().includes(lowerQuery);
+      const sourceMatch = log.source?.toLowerCase().includes(lowerQuery);
+      const metaMatch =
+        log.metadata &&
+        JSON.stringify(log.metadata).toLowerCase().includes(lowerQuery);
+      return msgMatch || typeMatch || sourceMatch || metaMatch;
+    });
+  }, [logs, searchQuery]);
 
   useEffect(() => {
     if (isOpen) {
@@ -153,38 +267,61 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
             </div>
           </div>
 
+          {/* Search Bar - Similar to Metadata.tsx */}
+          <div className="bg-slate-100 p-2 px-3 border-b border-slate-200">
+            <div className="relative">
+              <Search
+                size={14}
+                className="absolute left-2.5 top-1/2 transform -translate-y-1/2 text-slate-400"
+              />
+              <input
+                type="text"
+                placeholder="Search notifications..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                className="w-full pl-8 pr-8 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-slate-700"
+              />
+              {searchInput && (
+                <button
+                  onClick={() => {
+                    setSearchInput("");
+                    setSearchQuery("");
+                  }}
+                  className="absolute right-2 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                  title="Clear search"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            {searchQuery && (
+              <div className="mt-1.5 px-0.5 flex justify-between items-center text-[11px] text-slate-500 italic">
+                <span>
+                  Found {filteredLogs.length} match
+                  {filteredLogs.length !== 1 ? "es" : ""}
+                </span>
+                {searchInput !== searchQuery && <span>Searching...</span>}
+              </div>
+            )}
+          </div>
+
           {/* Body */}
           <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-slate-50">
-            {logs.length === 0 ? (
+            {filteredLogs.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-slate-400">
                 <History size={32} className="mb-2 opacity-30" />
-                <p className="text-sm">No notifications yet</p>
+                <p className="text-sm">
+                  {searchInput ? "No matches found" : "No notifications yet"}
+                </p>
               </div>
             ) : (
-              logs.map((log) => (
-                <div
+              filteredLogs.map((log) => (
+                <NotificationLogEntry
                   key={log.id}
-                  className={`p-3 rounded-lg border shadow-sm flex items-start gap-3 ${getLogStyles(log.type)}`}
-                >
-                  <div className="flex-shrink-0">{getIcon(log.type)}</div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium break-words leading-tight">
-                      {log.message}
-                    </p>
-                    <div className="flex items-center gap-2 mt-1.5 opacity-70">
-                      <span className="text-[10px] uppercase tracking-wider font-semibold">
-                        {log.type}
-                      </span>
-                      <span className="w-1 h-1 rounded-full bg-current opacity-40"></span>
-                      <span className="text-xs">
-                        {formatTime(log.timestamp)}
-                      </span>
-                      <span className="text-[10px] ml-auto">
-                        {formatDate(log.timestamp)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
+                  log={log}
+                  getIcon={getIcon}
+                  getLogStyles={getLogStyles}
+                />
               ))
             )}
           </div>

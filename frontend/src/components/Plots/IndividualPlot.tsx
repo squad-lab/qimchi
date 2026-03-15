@@ -210,7 +210,12 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
           const errorMsg = response.message || "No plots created";
           setError(errorMsg);
           if (!options.silent) {
-            showToast(`Failed to create plot: ${errorMsg}`, "error");
+            showToast(`Failed to create plot: ${errorMsg}`, "error", 5000, "Plotter", {
+              dataset: plotConfig.fpath,
+              type: plotConfig.plotType,
+              vars: { indeps: plotConfig.indeps, deps: plotConfig.deps },
+              backend_error: errorMsg
+            });
           }
         }
       } catch (err) {

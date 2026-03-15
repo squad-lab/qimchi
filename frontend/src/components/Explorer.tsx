@@ -88,7 +88,10 @@ const Explorer = ({
         // Update the basket item with the loaded attributes (this also removes from loading state)
         onUpdateBasketItemAttributes(node.id, response.data);
       } catch {
-        showToast("Failed to load file attributes", "error");
+        showToast("Failed to load file attributes", "error", 3000, "Explorer", {
+          path: node.path,
+          error: "API Request Failed",
+        });
         // console.error("Error loading attributes for item:", error);
         // Remove from loading state even if there's an error
         onUpdateBasketItemAttributes(node.id, {});
@@ -121,7 +124,10 @@ const Explorer = ({
       console.log("Download initiated successfully");
     } catch (error) {
       console.error("Error downloading dataset:", error);
-      showToast("Failed to download dataset", "error");
+      showToast("Failed to download dataset", "error", 3000, "Explorer", {
+        path: node.path,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   };
 
