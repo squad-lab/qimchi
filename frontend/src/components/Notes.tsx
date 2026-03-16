@@ -70,6 +70,7 @@ export default function Notes({
   );
   const [selectedScope, setSelectedScope] = useState<NoteScope>("measurement");
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isSwitchingSelection, setIsSwitchingSelection] = useState(false);
 
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -454,14 +455,14 @@ export default function Notes({
     loadNotes,
   ]);
 
-  const saveNotes = useCallback(async () => {
+  const saveNotes = useCallback(async (): Promise<boolean> => {
     if (!selectedTarget) {
       setError("No notes target selected");
-      return;
+      return false;
     }
 
-    if (saveStatus === "saving") {
-      return;
+    if (saveStatus === "saving" || isSwitchingSelection) {
+      return false;
     }
 
     setSaveStatus("saving");
@@ -504,10 +505,11 @@ export default function Notes({
       setTimeout(() => {
         setSaveStatus("idle");
       }, 2000);
+      return true;
     } catch (err) {
       if (axios.isCancel(err)) {
         console.log("Save notes request cancelled");
-        return;
+        return false;
       }
 
       setSaveStatus("error");
@@ -520,8 +522,34 @@ export default function Notes({
       setTimeout(() => {
         setSaveStatus("idle");
       }, 3000);
+      return false;
     }
-  }, [selectedTarget, notes, saveStatus]);
+  }, [selectedTarget, notes, saveStatus, isSwitchingSelection]);
+
+  const switchTargetAfterSave = useCallback(
+    async (applySelection: () => void) => {
+      if (isSwitchingSelection) {
+        return;
+      }
+
+      if (!hasUnsavedChanges) {
+        applySelection();
+        return;
+      }
+
+      setIsSwitchingSelection(true);
+      try {
+        const ok = await saveNotes();
+        if (!ok) {
+          return;
+        }
+        applySelection();
+      } finally {
+        setIsSwitchingSelection(false);
+      }
+    },
+    [hasUnsavedChanges, isSwitchingSelection, saveNotes],
+  );
 
   // Load notes when selected target changes.
   useEffect(() => {
@@ -708,12 +736,14 @@ export default function Notes({
                 aria-label="Select sample notes"
                 onChange={(e) => {
                   const nextKey = e.target.value || null;
-                  setSelectedSampleKey(nextKey);
-                  setSelectedScope("sample");
-                  handleSelectionChange(null);
+                  void switchTargetAfterSave(() => {
+                    setSelectedSampleKey(nextKey);
+                    setSelectedScope("sample");
+                    handleSelectionChange(null);
+                  });
                 }}
                 className={`w-full px-2 py-1.5 text-sm bg-white border border-gray-300 rounded-md focus:outline-none focus:ring-2 ${themeClasses.accentFocusRing}`}
-                disabled={sampleGroups.length === 0}
+                disabled={sampleGroups.length === 0 || isSwitchingSelection}
               >
                 {sampleGroups.length === 0 ? (
                   <option value="">No samples in basket</option>
@@ -740,16 +770,18 @@ export default function Notes({
                 aria-label="Select measurement notes"
                 onChange={(e) => {
                   const value = e.target.value;
-                  if (value === "__sample__") {
-                    setSelectedScope("sample");
-                    handleSelectionChange(null);
-                    return;
-                  }
-                  setSelectedScope("measurement");
-                  handleSelectionChange(value || null);
+                  void switchTargetAfterSave(() => {
+                    if (value === "__sample__") {
+                      setSelectedScope("sample");
+                      handleSelectionChange(null);
+                      return;
+                    }
+                    setSelectedScope("measurement");
+                    handleSelectionChange(value || null);
+                  });
                 }}
                 className={`w-full px-2 py-1.5 text-sm bg-white border border-gray-300 rounded-md focus:outline-none focus:ring-2 ${themeClasses.accentFocusRing}`}
-                disabled={!selectedSample}
+                disabled={!selectedSample || isSwitchingSelection}
               >
                 {!selectedSample ? (
                   <option value="">Select sample first</option>
@@ -808,6 +840,11 @@ export default function Notes({
                       );
                     })()}
                   </div>
+                  {isSwitchingSelection && (
+                    <span className="text-[10px] text-gray-500">
+                      saving before switch...
+                    </span>
+                  )}
                 </div>
               )}
             </div>
