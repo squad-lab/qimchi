@@ -1,5 +1,17 @@
 ## Qimchi Changelog
 
+### v0.4.x - ???
+
+- [Feature] Notes: Added rolling-log like note-pooling across Samples, UI/UX improvements (New icon, Open Notes from Basket, "Send to notes" export flow), and faster+safer saving flow
+- [Feature] Notification Log: debounced fuzzy search, expandable JSON-tree details, optional `source`/`metadata` fields, and richer search across messages/types/sources
+- [Feature] Basket & Composer Upgrade: dataset-card single + Ctrl/Cmd multi-select flow; shared indep/dep eligibility checks; disabled non-shared fields during multi-select; routed plot creation with per-dataset warnings and selection guidance UI
+- [Feature] Global shortcuts: unified and simplified shortcuts (e.g. `P` for plotting, `H`/`L` to switch HeatMap/LinePlot in Composer)
+- [Fix] Filters: Savgol's plot title now includes axis information (z/x/y)
+- [Fix] Axis swapping and filtering: axis-swap behavior refined so filters apply to the current X/Y; removed axis swap on LinePlots; minor export status UX ("Starting export...")
+- [Fix] Fixed multi-worker logging rollover concurrency bug by replacing RotatingFileHandler with ConcurrentRotatingFileHandler and update requirements (add `concurrent-log-handler==0.9.29` & `portalocker==3.2.0`)
+- [Misc] Added helper utilities and hooks (`treeUtils`, `useGlobalShortcuts`, `datasetFieldSelectors`); backend API updates for export/filters/notes/models; front-end plot API and toast improvements
+
+
 ### v0.4.0 - 2026-03-15
 
 - [Feature] Combined filter + data slicing application into a single endpoint; switched plot update payloads to `plot_ref`
