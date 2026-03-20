@@ -1,6 +1,6 @@
 ## Qimchi Changelog
 
-### v0.4.x - ???
+### v0.4.1 - 2026-03-21
 
 - [Feature] Notes: Added rolling-log like note-pooling across Samples, UI/UX improvements (New icon, Open Notes from Basket, "Send to notes" export flow), and faster+safer saving flow
 - [Feature] Notification Log: debounced fuzzy search, expandable JSON-tree details, optional `source`/`metadata` fields, and richer search across messages/types/sources
@@ -9,6 +9,7 @@
 - [Fix] Filters: Savgol's plot title now includes axis information (z/x/y)
 - [Fix] Axis swapping and filtering: axis-swap behavior refined so filters apply to the current X/Y; removed axis swap on LinePlots; minor export status UX ("Starting export...")
 - [Fix] Fixed multi-worker logging rollover concurrency bug by replacing RotatingFileHandler with ConcurrentRotatingFileHandler and update requirements (add `concurrent-log-handler==0.9.29` & `portalocker==3.2.0`)
+- [Fix] Fixed qimchi.bat to reinstall backend deps if updated (checks `pyproject.toml` and `requirements.txt`)
 - [Misc] Added helper utilities and hooks (`treeUtils`, `useGlobalShortcuts`, `datasetFieldSelectors`); backend API updates for export/filters/notes/models; front-end plot API and toast improvements
 
 

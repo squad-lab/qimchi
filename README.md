@@ -1,4 +1,4 @@
-# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.4.0
+# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.4.1
 
 Plotly based data visualization tool for `xarray` data. Optimized to work with the [`qcutils`](https://gitlab.com/squad-lab/qcutils) package. Qimchi expects the data to be `zarr` formatted `xarray` files. Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html#zarr).
 

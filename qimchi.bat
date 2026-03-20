@@ -208,7 +208,7 @@ if exist "%INSTALL_MARKER%" (
                 goto :branch_check_ok
             )
         )
-        
+
         :: If we get here, branch was not found
         echo.
         echo ============================================
@@ -260,11 +260,11 @@ if exist "%INSTALL_MARKER%" (
     if "!CURRENT_BRANCH!"=="" (
         echo Warning: Could not detect current branch
     )
-    
+
     :branch_check_ok
-    
+
     echo Checking for updates...
-    :: Capture git pull output to check for frontend changes
+    :: Capture git pull output to check for frontend and backend dependency changes
     git pull origin > "%TEMP%\qimchi_git_pull.txt" 2>&1
     if errorlevel 1 (
         echo Warning: Could not update repository. Using existing version.
@@ -272,8 +272,9 @@ if exist "%INSTALL_MARKER%" (
         :: Check if pull output indicates changes
         findstr /C:"Already up to date" "%TEMP%\qimchi_git_pull.txt" >nul
         if errorlevel 1 (
-            echo Repository updated. Checking for frontend changes...
-            :: Check if frontend directory was affected - can be a bit more discerning, e.g., checking only src/
+            echo Repository updated. Checking what changed...
+
+            :: Rebuild frontend only if frontend files changed
             findstr /C:"frontend/" "%TEMP%\qimchi_git_pull.txt" >nul
             if not errorlevel 1 (
                 echo Frontend changes detected. Rebuilding frontend...
@@ -288,6 +289,58 @@ if exist "%INSTALL_MARKER%" (
                 cd /d "%QIMCHI_DIR%\qimchi"
             ) else (
                 echo No frontend changes detected. Using existing build.
+            )
+
+            :: Reinstall backend dependencies if requirements.txt or pyproject.toml changed
+            set "REQ_CHANGED=0"
+            set "PYPROJECT_CHANGED=0"
+
+            findstr /C:"backend/requirements.txt" "%TEMP%\qimchi_git_pull.txt" >nul
+            if not errorlevel 1 set "REQ_CHANGED=1"
+
+            findstr /C:"backend/pyproject.toml" "%TEMP%\qimchi_git_pull.txt" >nul
+            if not errorlevel 1 set "PYPROJECT_CHANGED=1"
+
+            if "!REQ_CHANGED!"=="1" (
+                echo backend/requirements.txt changed.
+            )
+            if "!PYPROJECT_CHANGED!"=="1" (
+                echo backend/pyproject.toml changed.
+            )
+
+            if "!REQ_CHANGED!!PYPROJECT_CHANGED!"=="00" (
+                echo No backend dependency file changes detected.
+            ) else (
+                echo Reinstalling backend dependencies...
+                cd /d "%QIMCHI_DIR%\qimchi\backend"
+
+                if "!PYPROJECT_CHANGED!"=="1" (
+                    if exist "%QIMCHI_DIR%\qimchi\backend\pyproject.toml" (
+                        uv pip install --python "%QIMCHI_DIR%\.venv\Scripts\python.exe" .
+                        if errorlevel 1 (
+                            echo Warning: Failed to install backend package from pyproject.toml.
+                        ) else (
+                            echo Backend package installed successfully from pyproject.toml.
+                        )
+                    ) else (
+                        echo Warning: backend/pyproject.toml not found. Skipping pyproject install.
+                    )
+                )
+
+                if "!REQ_CHANGED!"=="1" (
+                    if exist "%QIMCHI_DIR%\qimchi\backend\requirements.txt" (
+                        uv pip install --python "%QIMCHI_DIR%\.venv\Scripts\python.exe" -r "%QIMCHI_DIR%\qimchi\backend\requirements.txt"
+                        if errorlevel 1 (
+                            echo Warning: Failed to install backend requirements.
+                        ) else (
+                            echo Backend requirements installed successfully.
+                        )
+                    ) else (
+                        echo Warning: backend/requirements.txt not found. Skipping requirements install.
+                    )
+                )
+
+                cd /d "%QIMCHI_DIR%\qimchi"
             )
         ) else (
             echo Repository already up to date.
