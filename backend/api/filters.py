@@ -1034,6 +1034,76 @@ class PolyFit(Filter):
         raise NotImplementedError("Polynomial Fitting not supported for 2D plots.")
 
 
+class BackgroundCorrection(Filter):
+    def __init__(self, figure: dict, num_axes: int, options: dict = None) -> None:
+        """
+        Background Correction Filter.
+
+        Args:
+            figure (dict): Plotly Figure object to apply filters to.
+            num_axes (int): Number of axes in the figure.
+            options (dict, optional): Options for the filter. Default is None.
+
+        """
+        super().__init__(figure, num_axes, options)
+        self.mode = _safe_init(options, "mode", "constant")
+        self.points = _safe_init(options, "points", [])
+
+    def apply_1d(self):
+        """
+        Applies the background correction filter to a 1D plot.
+
+        """
+        if not self.points:
+            logger.warning("Background Correction: No points provided.")
+            return
+
+        if self.mode == "constant":
+            # Use the y-value of the first point as a baseline
+            baseline = self.points[0]["y"]
+            logger.debug(
+                f"Applying constant background correction with value: {baseline}"
+            )
+            self.new_fig.data[0].y = self.y_axis - baseline
+            self._update_title("BG(C)")
+
+        elif self.mode == "linear":
+            if len(self.points) < 2:
+                logger.warning("Background Correction: Linear mode requires 2 points.")
+                return
+
+            p1, p2 = self.points[0], self.points[1]
+            x1, y1 = p1["x"], p1["y"]
+            x2, y2 = p2["x"], p2["y"]
+
+            if x2 == x1:
+                logger.warning(
+                    "Background Correction: Linear mode points have same x value."
+                )
+                m = 0
+            else:
+                m = (y2 - y1) / (x2 - x1)
+            c = y1 - m * x1
+
+            logger.debug(f"Applying linear background correction: y = {m}x + {c}")
+            baseline = m * self.x_axis + c
+            self.new_fig.data[0].y = self.y_axis - baseline
+            self._update_title("BG(L)")
+
+        else:
+            logger.error(f"Unknown background correction mode: {self.mode}")
+            return
+
+        self.new_fig.update_layout(yaxis=dict(title=dict(text=f"Corr {self.y_label}")))
+
+    def apply_2d(self):
+        """
+        Not supported for 2D plots.
+
+        """
+        raise NotImplementedError("Background Correction not supported for 2D plots.")
+
+
 class RotateHeatMap(Filter):
     def __init__(self, figure: dict, num_axes: int, options: dict = None) -> None:
         """
@@ -1215,6 +1285,13 @@ def apply_filters(
             case "polyfit":
                 logger.debug("apply_filters | Applying `Polynomial Fitting` filter...")
                 filt_obj = PolyFit(fig_tmp, fig_num_axes, opts)
+                filt_fig = filt_obj.apply()
+
+            case "bg_corr":
+                logger.debug(
+                    "apply_filters | Applying `Background Correction` filter..."
+                )
+                filt_obj = BackgroundCorrection(fig_tmp, fig_num_axes, opts)
                 filt_fig = filt_obj.apply()
 
             case _:

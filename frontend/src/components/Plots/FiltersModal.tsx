@@ -17,6 +17,7 @@ import {
   Info,
   MoveHorizontal,
   AlertTriangle,
+  Crosshair,
 } from "lucide-react";
 import { Rnd } from "react-rnd";
 
@@ -42,7 +43,7 @@ interface FiltersModalProps {
   onClose: () => void;
   onApplyFilters: (
     filters: AppliedFilter[],
-    sliders?: Record<string, SliderConfig>
+    sliders?: Record<string, SliderConfig>,
   ) => void;
   plotType?: string;
   plotTitle?: string;
@@ -53,7 +54,15 @@ interface FiltersModalProps {
 
 // Filter categories and their available filters
 const FILTER_CATEGORIES = {
-  "1d": ["diff", "savgol", "sma", "normalize", "log_scale", "polyfit"],
+  "1d": [
+    "diff",
+    "savgol",
+    "sma",
+    "normalize",
+    "log_scale",
+    "polyfit",
+    "bg_corr",
+  ],
   "2d": [
     "flip",
     "diff_x",
@@ -143,6 +152,11 @@ const FILTER_DEFINITIONS = {
     icon: FlipHorizontal,
     description: "Invert the color scale by multiplying Z-axis data by -1",
   },
+  bg_corr: {
+    name: "Background Correction",
+    icon: Crosshair,
+    description: "Subtract a constant offset or linear baseline from the data",
+  },
 };
 
 // Default filter options
@@ -196,6 +210,11 @@ const DEFAULT_FILTER_OPTIONS = {
   rotate: {
     enabled: false,
     angle: 0,
+  },
+  bg_corr: {
+    enabled: false,
+    mode: "constant",
+    points: [],
   },
 };
 
@@ -289,7 +308,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
     // Skip if we're in the middle of applying local filter changes
     if (isApplyingLocalFilters.current) {
       console.log(
-        "FiltersModal: Skipping currentFilters sync - applying local filters"
+        "FiltersModal: Skipping currentFilters sync - applying local filters",
       );
       return;
     }
@@ -355,7 +374,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   const updateFilterSetting = (
     filterKey: string,
     setting: string,
-    value: unknown
+    value: unknown,
   ) => {
     setLocalFilterSettings((prev) => {
       const newSettings = { ...prev };
@@ -384,8 +403,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
           typeof filter === "boolean"
             ? filter
             : filter && typeof filter === "object" && "enabled" in filter
-            ? Boolean((filter as Record<string, unknown>).enabled)
-            : false;
+              ? Boolean((filter as Record<string, unknown>).enabled)
+              : false;
 
         if (isEnabled) {
           // Use debounced application with the updated settings
@@ -549,8 +568,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
       typeof filter === "boolean"
         ? filter
         : filter && typeof filter === "object" && "enabled" in filter
-        ? Boolean((filter as Record<string, unknown>).enabled)
-        : false;
+          ? Boolean((filter as Record<string, unknown>).enabled)
+          : false;
 
     return enabled;
   };
@@ -573,10 +592,10 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
           typeof filterConfig === "boolean"
             ? filterConfig
             : filterConfig &&
-              typeof filterConfig === "object" &&
-              "enabled" in filterConfig
-            ? Boolean((filterConfig as Record<string, unknown>).enabled)
-            : false;
+                typeof filterConfig === "object" &&
+                "enabled" in filterConfig
+              ? Boolean((filterConfig as Record<string, unknown>).enabled)
+              : false;
 
         if (filterEnabled) {
           if (typeof filterConfig === "boolean" && filterConfig) {
@@ -693,10 +712,10 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
         typeof filterConfig === "boolean"
           ? filterConfig
           : filterConfig &&
-            typeof filterConfig === "object" &&
-            "enabled" in filterConfig
-          ? Boolean((filterConfig as Record<string, unknown>).enabled)
-          : false;
+              typeof filterConfig === "object" &&
+              "enabled" in filterConfig
+            ? Boolean((filterConfig as Record<string, unknown>).enabled)
+            : false;
 
       if (filterEnabled) {
         if (typeof filterConfig === "boolean" && filterConfig) {
@@ -711,8 +730,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
         ) {
           const options = Object.fromEntries(
             Object.entries(filterConfig as Record<string, unknown>).filter(
-              ([key]) => key !== "enabled"
-            )
+              ([key]) => key !== "enabled",
+            ),
           ) as Record<
             string,
             string | number | boolean | Record<string, unknown>
@@ -820,7 +839,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
         console.error("Error importing filters:", error);
         showToast(
           "Error parsing filter file. Please check the file format.",
-          "error"
+          "error",
         );
       }
     };
@@ -859,7 +878,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
 
     const files = Array.from(e.dataTransfer.files);
     const jsonFile = files.find(
-      (file) => file.type === "application/json" || file.name.endsWith(".json")
+      (file) => file.type === "application/json" || file.name.endsWith(".json"),
     );
 
     if (jsonFile) {
@@ -1124,7 +1143,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                     <input
                                       type="range"
                                       title={`${key} slider value: ${slider.value.toFixed(
-                                        6
+                                        6,
                                       )}`}
                                       min={available.min}
                                       max={available.max}
@@ -1133,7 +1152,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                       onChange={(e) =>
                                         updateSliderValue(
                                           key,
-                                          parseFloat(e.target.value)
+                                          parseFloat(e.target.value),
                                         )
                                       }
                                       className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1240,7 +1259,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               <span className="text-xs text-gray-500">
                                 {String(
                                   (filterConfig as Record<string, unknown>)
-                                    .window
+                                    .window,
                                 )}
                               </span>
                             </label>
@@ -1257,7 +1276,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                 updateFilterSetting(
                                   activeTab,
                                   "window",
-                                  parseInt(e.target.value)
+                                  parseInt(e.target.value),
                                 )
                               }
                               className="w-full"
@@ -1271,7 +1290,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               <span className="text-xs text-gray-500">
                                 {String(
                                   (filterConfig as Record<string, unknown>)
-                                    .polyorder
+                                    .polyorder,
                                 )}
                               </span>
                             </label>
@@ -1287,7 +1306,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                 updateFilterSetting(
                                   activeTab,
                                   "polyorder",
-                                  parseInt(e.target.value)
+                                  parseInt(e.target.value),
                                 )
                               }
                               className="w-full"
@@ -1309,7 +1328,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                   updateFilterSetting(
                                     activeTab,
                                     "axis",
-                                    parseInt(e.target.value)
+                                    parseInt(e.target.value),
                                   )
                                 }
                                 className="w-full p-2 border border-gray-300 rounded"
@@ -1328,7 +1347,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               <span className="text-xs text-gray-500">
                                 {String(
                                   (filterConfig as Record<string, unknown>)
-                                    .deriv
+                                    .deriv,
                                 )}
                               </span>
                             </label>
@@ -1344,7 +1363,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                 updateFilterSetting(
                                   activeTab,
                                   "deriv",
-                                  parseInt(e.target.value)
+                                  parseInt(e.target.value),
                                 )
                               }
                               className="w-full"
@@ -1358,7 +1377,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               <span className="text-xs text-gray-500">
                                 {String(
                                   (filterConfig as Record<string, unknown>)
-                                    .delta
+                                    .delta,
                                 )}
                               </span>
                             </label>
@@ -1375,7 +1394,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                 updateFilterSetting(
                                   activeTab,
                                   "delta",
-                                  parseFloat(e.target.value)
+                                  parseFloat(e.target.value),
                                 )
                               }
                               className="w-full"
@@ -1396,7 +1415,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                 updateFilterSetting(
                                   activeTab,
                                   "mode",
-                                  e.target.value
+                                  e.target.value,
                                 )
                               }
                               className="w-full p-2 border border-gray-300 rounded"
@@ -1415,7 +1434,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               Constant Value (cval)
                               <span className="text-xs text-gray-500">
                                 {String(
-                                  (filterConfig as Record<string, unknown>).cval
+                                  (filterConfig as Record<string, unknown>)
+                                    .cval,
                                 )}
                               </span>
                             </label>
@@ -1432,7 +1452,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                 updateFilterSetting(
                                   activeTab,
                                   "cval",
-                                  parseFloat(e.target.value)
+                                  parseFloat(e.target.value),
                                 )
                               }
                               className="w-full"
@@ -1449,7 +1469,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             Window Size
                             <span className="text-xs text-gray-500">
                               {String(
-                                (filterConfig as Record<string, unknown>).window
+                                (filterConfig as Record<string, unknown>)
+                                  .window,
                               )}
                             </span>
                           </label>
@@ -1465,7 +1486,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               updateFilterSetting(
                                 activeTab,
                                 "window",
-                                parseInt(e.target.value)
+                                parseInt(e.target.value),
                               )
                             }
                             className="w-full"
@@ -1511,7 +1532,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               updateFilterSetting(
                                 activeTab,
                                 "axis",
-                                e.target.value
+                                e.target.value,
                               )
                             }
                             className="w-full p-2 border border-gray-300 rounded"
@@ -1533,7 +1554,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               <span className="text-xs text-gray-500">
                                 {String(
                                   (filterConfig as Record<string, unknown>)
-                                    .gamma
+                                    .gamma,
                                 )}
                               </span>
                             </label>
@@ -1550,7 +1571,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                 updateFilterSetting(
                                   activeTab,
                                   "gamma",
-                                  parseFloat(e.target.value)
+                                  parseFloat(e.target.value),
                                 )
                               }
                               className="w-full"
@@ -1563,7 +1584,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               Gain
                               <span className="text-xs text-gray-500">
                                 {String(
-                                  (filterConfig as Record<string, unknown>).gain
+                                  (filterConfig as Record<string, unknown>)
+                                    .gain,
                                 )}
                               </span>
                             </label>
@@ -1580,7 +1602,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                 updateFilterSetting(
                                   activeTab,
                                   "gain",
-                                  parseFloat(e.target.value)
+                                  parseFloat(e.target.value),
                                 )
                               }
                               className="w-full"
@@ -1598,7 +1620,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               Gain
                               <span className="text-xs text-gray-500">
                                 {String(
-                                  (filterConfig as Record<string, unknown>).gain
+                                  (filterConfig as Record<string, unknown>)
+                                    .gain,
                                 )}
                               </span>
                             </label>
@@ -1615,7 +1638,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                 updateFilterSetting(
                                   activeTab,
                                   "gain",
-                                  parseFloat(e.target.value)
+                                  parseFloat(e.target.value),
                                 )
                               }
                               className="w-full"
@@ -1634,7 +1657,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                 updateFilterSetting(
                                   activeTab,
                                   "inv",
-                                  e.target.checked
+                                  e.target.checked,
                                 )
                               }
                               className="mr-2"
@@ -1655,7 +1678,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               <span className="text-xs text-gray-500">
                                 {String(
                                   (filterConfig as Record<string, unknown>)
-                                    .cutoff
+                                    .cutoff,
                                 )}
                               </span>
                             </label>
@@ -1672,7 +1695,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                 updateFilterSetting(
                                   activeTab,
                                   "cutoff",
-                                  parseFloat(e.target.value)
+                                  parseFloat(e.target.value),
                                 )
                               }
                               className="w-full"
@@ -1685,7 +1708,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               Gain
                               <span className="text-xs text-gray-500">
                                 {String(
-                                  (filterConfig as Record<string, unknown>).gain
+                                  (filterConfig as Record<string, unknown>)
+                                    .gain,
                                 )}
                               </span>
                             </label>
@@ -1702,7 +1726,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                 updateFilterSetting(
                                   activeTab,
                                   "gain",
-                                  parseFloat(e.target.value)
+                                  parseFloat(e.target.value),
                                 )
                               }
                               className="w-full"
@@ -1720,7 +1744,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             Polynomial Degree
                             <span className="text-xs text-gray-500">
                               {String(
-                                (filterConfig as Record<string, unknown>).deg
+                                (filterConfig as Record<string, unknown>).deg,
                               )}
                             </span>
                           </label>
@@ -1736,7 +1760,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               updateFilterSetting(
                                 activeTab,
                                 "deg",
-                                parseInt(e.target.value)
+                                parseInt(e.target.value),
                               )
                             }
                             className="w-full"
@@ -1752,7 +1776,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             Angle
                             <span className="text-xs text-gray-500">
                               {String(
-                                (filterConfig as Record<string, unknown>).angle
+                                (filterConfig as Record<string, unknown>).angle,
                               )}
                               °
                             </span>
@@ -1773,6 +1797,56 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               ticks={15}
                               className="rounded-lg"
                             />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Background Correction options */}
+                      {activeTab === "bg_corr" && (
+                        <div className="space-y-4">
+                          <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 italic text-sm text-blue-800 flex items-start gap-2">
+                            <Info size={16} className="mt-0.5 flex-shrink-0" />
+                            <span>
+                              Use the target button on the plot sidebar for
+                              interactive selection.
+                            </span>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Correction Mode
+                            </label>
+                            <div className="text-sm font-mono bg-gray-100 px-2 py-1 rounded inline-block uppercase text-blue-600 font-bold">
+                              {(filterConfig as any).mode || "constant"}
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Selected Points
+                            </label>
+                            <div className="space-y-1 max-h-40 overflow-y-auto border border-gray-100 rounded-lg p-2 bg-gray-50">
+                              {((filterConfig as any).points || []).length ===
+                              0 ? (
+                                <span className="text-sm text-gray-400 italic">
+                                  No points selected
+                                </span>
+                              ) : (
+                                ((filterConfig as any).points || []).map(
+                                  (p: any, i: number) => (
+                                    <div
+                                      key={i}
+                                      className="text-xs font-mono bg-white border border-gray-200 p-2 rounded flex justify-between items-center shadow-sm"
+                                    >
+                                      <span className="font-bold text-gray-500">
+                                        P{i + 1}:
+                                      </span>
+                                      <span className="text-blue-700">
+                                        ({p.x.toFixed(4)}, {p.y.toFixed(4)})
+                                      </span>
+                                    </div>
+                                  ),
+                                )
+                              )}
+                            </div>
                           </div>
                         </div>
                       )}

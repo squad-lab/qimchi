@@ -19,6 +19,7 @@ import {
   ImageDown,
   ImagePlus,
   ArrowLeftRight,
+  Crosshair,
 } from "lucide-react";
 import { Data, Layout, Config } from "plotly.js";
 import type { AxisType, Dash } from "plotly.js";
@@ -454,6 +455,14 @@ const PlotWrapper: React.FC<Props> = ({
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [appliedFilters, setAppliedFilters] = useState<AppliedFilter[]>([]);
   const [isApplyingFilters, setIsApplyingFilters] = useState(false);
+
+  // Background Correction ("BG Corr") state
+  const [isBGCorrActive, setIsBGCorrActive] = useState(false);
+  const [bgCorrPoints, setBgCorrPoints] = useState<{ x: number; y: number }[]>(
+    [],
+  );
+  const [plotKey, setPlotKey] = useState(0);
+  const plotContainerRef = useRef<HTMLDivElement>(null);
 
   // Hover states for modal buttons to show paint overlay when Shift is held
   const [hoverAppearanceBtn, setHoverAppearanceBtn] = useState(false);
@@ -1752,45 +1761,80 @@ const PlotWrapper: React.FC<Props> = ({
 
   // Reset handler to clear all filters and appearance modifications
   const handleReset = async () => {
-    setAreAxesSwapped(false);
+    try {
+      setIsApplyingFilters(true);
+      setAreAxesSwapped(false);
 
-    // Always use local reset to avoid plot reload and maintain consistency with filter approach
-    const defaultSettings = getInitialSettings(plotType);
-    setAppearanceSettings(defaultSettings);
+      // Reset state locally
+      const defaultSettings = getInitialSettings(plotType);
+      setAppearanceSettings(defaultSettings);
+      setAppliedFilters([]);
+      setSliderConfig({});
+      lastAppliedSliders.current = {};
 
-    // Clear all filters and sliders
-    setAppliedFilters([]);
-    setSliderConfig({});
-    lastAppliedSliders.current = {}; // Clear the tracking ref too
+      // Increment plot key to force Plotly to reset internal state (relayout, etc.)
+      setPlotKey((prev) => prev + 1);
 
-    // Reset to original plot JSON (not the current potentially filtered plotJson)
-    setBasePlotJson(originalPlotJson);
+      // Call backend to get a truly fresh plot
+      if (plotConfig?.fpath) {
+        const request = {
+          fpaths: [plotConfig.fpath],
+          indeps: plotConfig.indeps,
+          deps: plotConfig.deps,
+          plotType: plotConfig.plotType,
+          filters_order: [],
+          filters_opts: {},
+          slider: {},
+        };
 
-    // Apply default appearance to original plot
-    const resetPlotJson = applyAppearanceSettings(
-      originalPlotJson,
-      defaultSettings,
-    );
-    setCustomizedPlotJson(resetPlotJson);
+        const response = await PlotAPI.createPlots(request);
 
-    // Update backend configuration to clear filters and sliders
-    if (handleUpdateConfig) {
-      handleUpdateConfig({
-        filters_order: [],
-        filters_opts: {},
-        slider: {},
-      });
+        if (response.success && response.plots.length > 0) {
+          const newPlot = response.plots[0];
+          setActivePlotRef(newPlot.plot_ref || activePlotRef);
+          setOriginalPlotJson(newPlot.plotJson);
+          setBasePlotJson(newPlot.plotJson);
+
+          const resetPlotJson = applyAppearanceSettings(
+            newPlot.plotJson,
+            defaultSettings,
+          );
+          setCustomizedPlotJson(resetPlotJson);
+          showToast("Plot successfully reset to original state", "success");
+        } else {
+          // Fallback to local reset if API fails
+          setBasePlotJson(originalPlotJson);
+          const resetPlotJson = applyAppearanceSettings(
+            originalPlotJson,
+            defaultSettings,
+          );
+          setCustomizedPlotJson(resetPlotJson);
+          showToast("Reset locally (backend refresh failed)", "warning");
+        }
+      }
+
+      // Update backend configuration to clear filters and sliders
+      if (handleUpdateConfig) {
+        handleUpdateConfig({
+          filters_order: [],
+          filters_opts: {},
+          slider: {},
+        });
+      }
+
+      // Save to store if available
+      if (plotConfig?.id) {
+        setPlotAppearance(plotConfig.id, defaultSettings);
+        setPlotFilters(plotConfig.id, []);
+        setPlotSliders(plotConfig.id, {});
+        setPlotAxesSwapped(plotConfig.id, false);
+      }
+    } catch (error) {
+      console.error("[PlotWrapper] Error during reset:", error);
+      showToast("Failed to fully reset plot", "error");
+    } finally {
+      setIsApplyingFilters(false);
     }
-
-    // Save to store if available (for persistence)
-    if (plotConfig?.id) {
-      setPlotAppearance(plotConfig.id, defaultSettings);
-      setPlotFilters(plotConfig.id, []);
-      setPlotSliders(plotConfig.id, {});
-      setPlotAxesSwapped(plotConfig.id, false);
-    }
-
-    showToast("Plot reset to original state", "success");
   };
 
   const handleSwapAxes = async () => {
@@ -1806,6 +1850,126 @@ const PlotWrapper: React.FC<Props> = ({
       filters: appliedFilters,
       sliders: sliderConfig,
       swapAxesOverride: newSwapped,
+    });
+  };
+
+  const handleBGCorrToggle = () => {
+    if (isBGCorrActive) {
+      setIsBGCorrActive(false);
+      setBgCorrPoints([]);
+    } else {
+      // Auto expand the plot for easier selection of points
+      if (!isMaximized) {
+        setIsMaximized(true);
+      }
+
+      setIsBGCorrActive(true);
+      setBgCorrPoints([]);
+
+      // Focus the plot container so user can immediately interact
+      setTimeout(() => {
+        plotContainerRef.current?.focus();
+      }, 50);
+
+      showToast(
+        "BG Corr active: Click points on the plot. 1 = Offset, 2 = Linear.",
+        "info",
+      );
+    }
+  };
+
+  const applyBGCorrNow = useCallback(
+    async (points: { x: number; y: number }[]) => {
+      if (points.length === 0) return;
+
+      const mode = points.length === 1 ? "constant" : "linear";
+      const newFilter: AppliedFilter = {
+        name: "bg_corr",
+        options: {
+          mode,
+          points,
+        },
+      };
+
+      // Remove any existing bg_corr filter
+      const otherFilters = appliedFilters.filter((f) => f.name !== "bg_corr");
+      const nextFilters = [...otherFilters, newFilter];
+
+      setAppliedFilters(nextFilters);
+      await executeFiltersApply({
+        filters: nextFilters,
+        sliders: sliderConfig,
+      });
+
+      // Reset interaction state
+      setIsBGCorrActive(false);
+      setBgCorrPoints([]);
+    },
+    [appliedFilters, executeFiltersApply, sliderConfig],
+  );
+
+  // Visual feedback for BG Corr points
+  const plotWithBGMarkers = useMemo(() => {
+    if (bgCorrPoints.length === 0) return customizedPlotJson;
+
+    const markerTrace: any = {
+      x: bgCorrPoints.map((p) => p.x),
+      y: bgCorrPoints.map((p) => p.y),
+      type: "scatter",
+      mode: "markers",
+      marker: {
+        color: "red",
+        size: 10,
+        symbol: "cross",
+      },
+      name: "BG Corr Points",
+      showlegend: false,
+    };
+
+    const traces = [...(customizedPlotJson.data || []), markerTrace];
+
+    // If 2 points, add a line between them
+    if (bgCorrPoints.length === 2) {
+      const lineTrace: any = {
+        x: bgCorrPoints.map((p) => p.x),
+        y: bgCorrPoints.map((p) => p.y),
+        type: "scatter",
+        mode: "lines",
+        line: {
+          color: "red",
+          dash: "dash",
+          width: 2,
+        },
+        name: "BG Corr Line",
+        showlegend: false,
+      };
+      traces.push(lineTrace);
+    }
+
+    return {
+      ...customizedPlotJson,
+      data: traces,
+    };
+  }, [customizedPlotJson, bgCorrPoints]);
+
+  const handlePlotClick = (event: Plotly.PlotMouseEvent) => {
+    if (!isBGCorrActive) return;
+
+    const point = event.points[0];
+    const x = typeof point.x === "number" ? point.x : Number(point.x);
+    const y = typeof point.y === "number" ? point.y : Number(point.y);
+
+    if (isNaN(x) || isNaN(y)) {
+      showToast("Invalid point data", "error");
+      return;
+    }
+
+    // Cycle selection: 1st click -> Pt1, 2nd click -> Pt2, 3rd click -> Pt1 (reset)
+    setBgCorrPoints((prev) => {
+      if (prev.length >= 2) {
+        return [{ x, y }];
+      }
+      return [...prev, { x, y }];
     });
   };
 
@@ -1958,9 +2122,53 @@ const PlotWrapper: React.FC<Props> = ({
               </div>
 
               <PlotComponent
-                plotJson={customizedPlotJson}
+                key={plotKey}
+                plotJson={
+                  isBGCorrActive ? plotWithBGMarkers : customizedPlotJson
+                }
                 onRelayout={handleRelayout}
+                onClick={isBGCorrActive ? handlePlotClick : undefined}
               />
+
+              {/* BG Corr Controls Overlay (Maximized) */}
+              {isBGCorrActive && (
+                <div className="absolute top-16 left-1/2 transform -translate-x-1/2 z-30 flex items-center gap-3 bg-white/95 backdrop-blur-md border border-blue-200 px-4 py-2.5 rounded-full shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300">
+                  <div className="flex items-center gap-2 mr-2">
+                    <div className="flex h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                    <span className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                      {bgCorrPoints.length === 0
+                        ? "Select points on plot"
+                        : `${bgCorrPoints.length} point${
+                            bgCorrPoints.length > 1 ? "s" : ""
+                          } selected`}
+                    </span>
+                  </div>
+
+                  <div className="h-4 w-px bg-gray-200" />
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => applyBGCorrNow(bgCorrPoints)}
+                      disabled={bgCorrPoints.length === 0}
+                      className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-1.5 rounded-full transition-all shadow-sm hover:shadow-md active:scale-95"
+                    >
+                      Apply {bgCorrPoints.length < 2 ? "Offset" : "Linear"}
+                    </button>
+                    <button
+                      onClick={() => setBgCorrPoints([])}
+                      className="hover:bg-gray-100 text-gray-600 text-xs font-medium px-3 py-1.5 rounded-full transition-colors"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      onClick={() => setIsBGCorrActive(false)}
+                      className="hover:bg-red-50 text-red-600 text-xs font-medium px-3 py-1.5 rounded-full transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Dataset update error overlay */}
               {datasetUpdateError && (
@@ -1992,7 +2200,8 @@ const PlotWrapper: React.FC<Props> = ({
   return (
     <>
       <div
-        className="relative w-full h-full bg-white rounded-lg shadow-md border border-gray-200 overflow-hidden"
+        ref={plotContainerRef}
+        className="relative w-full h-full bg-white rounded-lg shadow-md border border-gray-200 overflow-hidden outline-none focus:ring-2 focus:ring-blue-400/50"
         onMouseEnter={() => setIsHoveredOrFocused(true)}
         onMouseLeave={() => setIsHoveredOrFocused(false)}
         onFocus={() => setIsHoveredOrFocused(true)}
@@ -2018,9 +2227,40 @@ const PlotWrapper: React.FC<Props> = ({
             </div>
 
             <PlotComponent
-              plotJson={customizedPlotJson}
+              key={plotKey}
+              plotJson={isBGCorrActive ? plotWithBGMarkers : customizedPlotJson}
               onRelayout={handleRelayout}
+              onClick={isBGCorrActive ? handlePlotClick : undefined}
             />
+
+            {/* BG Corr Controls Overlay */}
+            {isBGCorrActive && (
+              <div className="absolute top-12 left-1/2 transform -translate-x-1/2 z-30 flex items-center gap-2 bg-white/95 backdrop-blur-md border border-blue-200 px-3 py-2 rounded-full shadow-xl animate-in fade-in slide-in-from-top-2 duration-300">
+                <span className="text-[10px] font-bold text-blue-600 px-1 uppercase tracking-wider">
+                  {bgCorrPoints.length === 0
+                    ? "Pick Points"
+                    : `${bgCorrPoints.length} Pt${
+                        bgCorrPoints.length > 1 ? "s" : ""
+                      }`}
+                </span>
+
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => applyBGCorrNow(bgCorrPoints)}
+                    disabled={bgCorrPoints.length === 0}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-[10px] font-bold px-2.5 py-1 rounded-full transition-all active:scale-95"
+                  >
+                    Apply
+                  </button>
+                  <button
+                    onClick={() => setIsBGCorrActive(false)}
+                    className="hover:bg-red-50 text-red-600 text-[10px] font-bold px-2 py-1 rounded-full transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Dataset update error overlay */}
             {datasetUpdateError && (
@@ -2230,6 +2470,35 @@ const PlotWrapper: React.FC<Props> = ({
                         areAxesSwapped ? "text-blue-600" : "text-gray-600"
                       }
                     />
+                  </button>
+                </Tooltip>
+              )}
+
+              {/* Background Correction (LinePlots only) */}
+              {!isHeatmapPlot && (
+                <Tooltip content="Background Correction" position="left">
+                  <button
+                    onClick={handleBGCorrToggle}
+                    className={`relative p-1.5 rounded transition-colors duration-150 ${
+                      isBGCorrActive
+                        ? "bg-blue-100 text-blue-600 border border-blue-600"
+                        : "hover:bg-gray-200"
+                    }`}
+                    title="BG Correction (interactive)"
+                    disabled={isApplyingFilters}
+                  >
+                    <Crosshair
+                      size={16}
+                      className={
+                        isBGCorrActive ? "text-blue-600" : "text-gray-600"
+                      }
+                    />
+                    {isBGCorrActive && (
+                      <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                      </span>
+                    )}
                   </button>
                 </Tooltip>
               )}

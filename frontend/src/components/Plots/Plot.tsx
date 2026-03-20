@@ -34,10 +34,11 @@ type Props = {
   plotJson: PlotlyJSON;
   customization?: CustomizationProps;
   onRelayout?: (relayoutData: Record<string, unknown>) => void;
+  onClick?: (event: Plotly.PlotMouseEvent) => void;
 };
 
 const PlotComponent: React.FC<Props> = React.memo(
-  ({ plotJson, onRelayout }) => {
+  ({ plotJson, onRelayout, onClick }) => {
     // Defer plot JSON updates to reduce flickering during rapid appearance changes
     const deferredPlotJson = useDeferredValue(plotJson);
 
@@ -55,6 +56,12 @@ const PlotComponent: React.FC<Props> = React.memo(
     >(null);
     // Synchronous ref update – safe to do during render.
     onRelayoutRef.current = onRelayout;
+
+    const onClickRef = useRef(onClick);
+    onClickRef.current = onClick;
+    const clickListenerRef = useRef<
+      ((event: Plotly.PlotMouseEvent) => void) | null
+    >(null);
 
     // Create a structural hash to detect when plot needs full recreation vs just data update
     const plotStructureHash = useMemo(() => {
@@ -225,6 +232,18 @@ const PlotComponent: React.FC<Props> = React.memo(
           }
         }
 
+        // Attach the plotly_click listener
+        if (!clickListenerRef.current) {
+          const plotEl = plotRef.current as any;
+          if (typeof plotEl.on === "function") {
+            const handler = (event: Plotly.PlotMouseEvent) => {
+              onClickRef.current?.(event);
+            };
+            clickListenerRef.current = handler;
+            plotEl.on("plotly_click", handler);
+          }
+        }
+
         return true;
       } catch (error) {
         console.error("[Plot] Error updating plot:", error);
@@ -258,6 +277,14 @@ const PlotComponent: React.FC<Props> = React.memo(
         ) {
           plotEl.off("plotly_relayout", relayoutListenerRef.current);
           relayoutListenerRef.current = null;
+        }
+        if (
+          plotEl &&
+          clickListenerRef.current &&
+          typeof plotEl.off === "function"
+        ) {
+          plotEl.off("plotly_click", clickListenerRef.current);
+          clickListenerRef.current = null;
         }
       };
     }, []);
