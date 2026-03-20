@@ -1098,10 +1098,97 @@ class BackgroundCorrection(Filter):
 
     def apply_2d(self):
         """
-        Not supported for 2D plots.
+        Applies the background correction filter to a 2D plot (heatmap).
+        Modes:
+        - constant: subtract a scalar (from first point's Z)
+        - row_mean: subtract the mean of a selected row
+        - col_mean: subtract the mean of a selected column
+        - plane: subtract a plane defined by 3 points
 
         """
-        raise NotImplementedError("Background Correction not supported for 2D plots.")
+        if not self.points:
+            logger.warning("Background Correction 2D: No points provided.")
+            return
+
+        z_data = self.z_axis.copy()
+
+        if self.mode == "constant":
+            baseline = self.points[0].get("z", 0)
+            logger.debug(f"Applying 2D constant BG subtraction: {baseline}")
+            z_data = z_data - baseline
+            self._update_title("BG(C)")
+
+        elif self.mode == "row_mean":
+            # Assume points[0] has 'y' or 'row' index
+            # In Plotly heatmaps, y usually maps to row index
+            row_idx = self.points[0].get("row_idx")
+            if row_idx is None:
+                # Fallback: try to find index from y-value
+                y_val = self.points[0].get("y")
+                row_idx = np.abs(self.y_axis - y_val).argmin()
+
+            logger.debug(f"Applying 2D row mean BG subtraction for row: {row_idx}")
+            row_mean = np.nanmean(z_data[row_idx, :])
+            z_data = z_data - row_mean
+            self._update_title("BG(RM)")
+
+        elif self.mode == "col_mean":
+            # Assume points[0] has 'x' or 'col' index
+            col_idx = self.points[0].get("col_idx")
+            if col_idx is None:
+                x_val = self.points[0].get("x")
+                col_idx = np.abs(self.x_axis - x_val).argmin()
+
+            logger.debug(
+                f"Applying 2D column mean BG subtraction for column: {col_idx}"
+            )
+            col_mean = np.nanmean(z_data[:, col_idx])
+            z_data = z_data - col_mean
+            self._update_title("BG(CM)")
+
+        elif self.mode == "plane":
+            if len(self.points) < 3:
+                logger.warning(
+                    "Background Correction 2D: Plane mode requires 3 points."
+                )
+                return
+
+            # Extract points
+            p1, p2, p3 = self.points[:3]
+            x_pts = np.array([p1["x"], p2["x"], p3["x"]])
+            y_pts = np.array([p1["y"], p2["y"], p3["y"]])
+            z_pts = np.array([p1["z"], p2["z"], p3["z"]])
+
+            # Solve for plane z = Ax + By + C
+            # Matrix M = [x y 1]
+            M = np.column_stack((x_pts, y_pts, np.ones(3)))
+            try:
+                A, B, C = np.linalg.solve(M, z_pts)
+                logger.debug(f"Applying 2D plane BG subtraction: z = {A}x + {B}y + {C}")
+
+                # Create meshgrid for entire heatmap
+                X, Y = np.meshgrid(self.x_axis, self.y_axis)
+                plane = A * X + B * Y + C
+                z_data = z_data - plane
+                self._update_title("BG(P)")
+            except np.linalg.LinAlgError:
+                logger.error(
+                    "Background Correction 2D: Points are collinear, cannot fit plane."
+                )
+                return
+
+        else:
+            logger.error(f"Unknown 2D background correction mode: {self.mode}")
+            return
+
+        # Update the figure data
+        self.new_fig.data[0].z = z_data
+        # Reset coloraxis auto-range
+        if "coloraxis" in self.new_fig.layout:
+            self.new_fig.layout.coloraxis.cauto = True
+        self.new_fig.update_layout(
+            coloraxis=dict(colorbar=dict(title=dict(text=f"Corr {self.z_label}")))
+        )
 
 
 class RotateHeatMap(Filter):

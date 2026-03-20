@@ -458,9 +458,19 @@ const PlotWrapper: React.FC<Props> = ({
 
   // Background Correction ("BG Corr") state
   const [isBGCorrActive, setIsBGCorrActive] = useState(false);
-  const [bgCorrPoints, setBgCorrPoints] = useState<{ x: number; y: number }[]>(
-    [],
-  );
+  const [bgCorrPoints, setBgCorrPoints] = useState<
+    {
+      x: number;
+      y: number;
+      z?: number;
+      row_idx?: number;
+      col_idx?: number;
+    }[]
+  >([]);
+  const [is3DMode, setIs3DMode] = useState(false);
+  const [bgCorrMode, setBgCorrMode] = useState<
+    "constant" | "linear" | "row_mean" | "col_mean" | "plane"
+  >("constant");
   const [plotKey, setPlotKey] = useState(0);
   const plotContainerRef = useRef<HTMLDivElement>(null);
 
@@ -1865,33 +1875,111 @@ const PlotWrapper: React.FC<Props> = ({
 
       setIsBGCorrActive(true);
       setBgCorrPoints([]);
+      setBgCorrMode("constant");
 
       // Focus the plot container so user can immediately interact
       setTimeout(() => {
         plotContainerRef.current?.focus();
       }, 50);
 
-      showToast(
-        "BG Corr active: Click points on the plot. 1 = Offset, 2 = Linear.",
-        "info",
-      );
+      const msg = isHeatmapPlot
+        ? "Heatmap BG Corr active. Pick mode and click plot. Plane mode is WIP."
+        : "BG Corr active: Click points on the plot. 1 = Offset, 2 = Linear.";
+      showToast(msg, "info");
     }
   };
 
   const applyBGCorrNow = useCallback(
-    async (points: { x: number; y: number }[]) => {
+    async (points: any[]) => {
       if (points.length === 0) return;
 
-      const mode = points.length === 1 ? "constant" : "linear";
+      let mode = bgCorrMode;
+      let pointsForApply = points;
+      // Force linear for LinePlot if 2 points
+      if (!isHeatmapPlot) {
+        mode = points.length === 1 ? "constant" : "linear";
+      } else if (mode === "row_mean" || mode === "col_mean") {
+        const trace = customizedPlotJson?.data?.[0] as
+          | { z?: unknown }
+          | undefined;
+        const zDataRaw = trace?.z;
+        const selectedPoint = points[0] || {};
+
+        const toNumericArray = (row: unknown): number[] => {
+          if (!Array.isArray(row)) return [];
+          return row
+            .map((v) => (typeof v === "number" ? v : Number(v)))
+            .filter((v) => Number.isFinite(v));
+        };
+
+        const zRows: number[][] = Array.isArray(zDataRaw)
+          ? zDataRaw
+              .map((row: unknown) => toNumericArray(row))
+              .filter((row: number[]) => row.length > 0)
+          : [];
+
+        if (zRows.length === 0) {
+          showToast("Unable to compute heatmap baseline", "error");
+          return;
+        }
+
+        const clamp = (idx: number, maxIdx: number) =>
+          Math.max(0, Math.min(idx, maxIdx));
+
+        let baseline = 0;
+        if (mode === "row_mean") {
+          const rowIdxGuess =
+            typeof selectedPoint.row_idx === "number"
+              ? selectedPoint.row_idx
+              : Math.round(Number(selectedPoint.y) || 0);
+          const rowIdx = clamp(rowIdxGuess, zRows.length - 1);
+          const row = zRows[rowIdx] || [];
+
+          if (row.length === 0) {
+            showToast("Selected row has no data", "error");
+            return;
+          }
+
+          baseline = row.reduce((acc, val) => acc + val, 0) / row.length;
+        } else {
+          const maxColIdx = Math.max(0, zRows[0].length - 1);
+          const colIdxGuess =
+            typeof selectedPoint.col_idx === "number"
+              ? selectedPoint.col_idx
+              : Math.round(Number(selectedPoint.x) || 0);
+          const colIdx = clamp(colIdxGuess, maxColIdx);
+
+          const colValues = zRows
+            .map((row) => row[colIdx])
+            .filter((val) => Number.isFinite(val));
+
+          if (colValues.length === 0) {
+            showToast("Selected column has no data", "error");
+            return;
+          }
+
+          baseline =
+            colValues.reduce((acc, val) => acc + val, 0) / colValues.length;
+        }
+
+        // Apply as constant correction using the computed baseline to preserve heatmap shape.
+        mode = "constant";
+        pointsForApply = [
+          {
+            ...selectedPoint,
+            z: baseline,
+          },
+        ];
+      }
+
       const newFilter: AppliedFilter = {
         name: "bg_corr",
         options: {
           mode,
-          points,
+          points: pointsForApply,
         },
       };
 
-      // Remove any existing bg_corr filter
       const otherFilters = appliedFilters.filter((f) => f.name !== "bg_corr");
       const nextFilters = [...otherFilters, newFilter];
 
@@ -1901,35 +1989,152 @@ const PlotWrapper: React.FC<Props> = ({
         sliders: sliderConfig,
       });
 
-      // Reset interaction state
       setIsBGCorrActive(false);
       setBgCorrPoints([]);
     },
-    [appliedFilters, executeFiltersApply, sliderConfig],
+    [
+      appliedFilters,
+      executeFiltersApply,
+      sliderConfig,
+      bgCorrMode,
+      isHeatmapPlot,
+      customizedPlotJson,
+      showToast,
+    ],
   );
 
   // Visual feedback for BG Corr points
   const plotWithBGMarkers = useMemo(() => {
-    if (bgCorrPoints.length === 0) return customizedPlotJson;
+    let basePlot = customizedPlotJson;
+
+    // If 3D Mode is active for heatmap BG Corr, transform base plot to surface
+    if (isBGCorrActive && isHeatmapPlot && is3DMode) {
+      basePlot = {
+        ...basePlot,
+        data: basePlot.data.map((trace: any) => {
+          if (trace.type === "heatmap" || trace.type === "heatmapgl") {
+            return {
+              ...trace,
+              type: "surface",
+              scene: "scene1",
+            };
+          }
+          return trace;
+        }),
+        layout: {
+          ...basePlot.layout,
+          uirevision: "bg-corr", // Keep camera constant across point selection
+          scene: (basePlot.layout as any).scene || {
+            aspectmode: "cube",
+            dragmode: "turntable",
+            camera: {
+              eye: { x: 1.5, y: 1.5, z: 1.5 },
+            },
+          },
+        },
+      };
+    } else if (isBGCorrActive) {
+      // Still set uirevision for 2D mode to preserve zoom
+      basePlot = {
+        ...basePlot,
+        layout: {
+          ...basePlot.layout,
+          uirevision: "bg-corr",
+        },
+      };
+    }
+
+    if (bgCorrPoints.length === 0) return basePlot;
 
     const markerTrace: any = {
       x: bgCorrPoints.map((p) => p.x),
       y: bgCorrPoints.map((p) => p.y),
-      type: "scatter",
+      z: bgCorrPoints.map((p) => p.z || 0),
+      type: isHeatmapPlot && is3DMode ? "scatter3d" : "scatter",
       mode: "markers",
       marker: {
-        color: "red",
-        size: 10,
-        symbol: "cross",
+        color: bgCorrPoints.map((_, i) =>
+          i === bgCorrPoints.length - 1 ? "red" : "#888",
+        ),
+        size: isHeatmapPlot && is3DMode ? 10 : 10,
+        symbol: isHeatmapPlot && is3DMode ? "circle" : "cross",
+        line: { color: "white", width: 2 },
       },
+      text: bgCorrPoints.map(
+        (p, i) =>
+          `Pt ${i + 1}: (${p.x.toFixed(2)}, ${p.y.toFixed(2)}${
+            p.z !== undefined ? `, Z: ${p.z.toFixed(2)}` : ""
+          })`,
+      ),
+      hoverinfo: "text",
       name: "BG Corr Points",
       showlegend: false,
     };
 
-    const traces = [...(customizedPlotJson.data || []), markerTrace];
+    if (isHeatmapPlot && is3DMode) {
+      markerTrace.scene = "scene1";
+      // Don't skip hover if we have text labels
+      markerTrace.hoverinfo = "text";
 
-    // If 2 points, add a line between them
-    if (bgCorrPoints.length === 2) {
+      // Calculate a relative offset to lift markers slightly above the surface
+      const zDataArr = (basePlot.data[0] as any)?.z;
+      if (Array.isArray(zDataArr)) {
+        const flatZ = zDataArr.flat().filter((v: any) => typeof v === "number");
+        if (flatZ.length > 0) {
+          const zMin = Math.min(...flatZ);
+          const zMax = Math.max(...flatZ);
+          const zRange = zMax - zMin;
+          const offset = zRange * 0.02 || 0.1;
+          markerTrace.z = markerTrace.z.map((val: number) => val + offset);
+        }
+      }
+    }
+
+    const traces = [...(basePlot.data || []), markerTrace];
+
+    // Heatmap mode indicators: row/col dotted lines
+    if (isHeatmapPlot && !is3DMode && bgCorrPoints.length === 1) {
+      const p = bgCorrPoints[0];
+      if (bgCorrMode === "row_mean" || bgCorrMode === "col_mean") {
+        const dat = originalPlotJson.data?.[0] as any;
+        const xData = dat?.x || [];
+        const yData = dat?.y || [];
+        const zData = dat?.z || [];
+
+        // Correctly calculate data bounds. If x/y axes missing, use indices
+        const xMin = xData.length > 0 ? Math.min(...xData) : 0;
+        const xMax =
+          xData.length > 0
+            ? Math.max(...xData)
+            : zData[0]?.length
+              ? zData[0].length - 1
+              : 10;
+        const yMin = yData.length > 0 ? Math.min(...yData) : 0;
+        const yMax =
+          yData.length > 0
+            ? Math.max(...yData)
+            : zData.length
+              ? zData.length - 1
+              : 10;
+
+        const xRange = (basePlot.layout?.xaxis as any)?.range || [xMin, xMax];
+        const yRange = (basePlot.layout?.yaxis as any)?.range || [yMin, yMax];
+
+        const lineTrace: any = {
+          x: bgCorrMode === "row_mean" ? xRange : [p.x, p.x],
+          y: bgCorrMode === "col_mean" ? yRange : [p.y, p.y],
+          type: "scatter",
+          mode: "lines",
+          line: { color: "white", width: 3, dash: "dot" },
+          hoverinfo: "skip",
+          showlegend: false,
+        };
+        traces.push(lineTrace);
+      }
+    }
+
+    // LinePlot linear mode: line between 2 points
+    if (!isHeatmapPlot && bgCorrPoints.length === 2) {
       const lineTrace: any = {
         x: bgCorrPoints.map((p) => p.x),
         y: bgCorrPoints.map((p) => p.y),
@@ -1947,30 +2152,68 @@ const PlotWrapper: React.FC<Props> = ({
     }
 
     return {
-      ...customizedPlotJson,
+      ...basePlot,
       data: traces,
     };
-  }, [customizedPlotJson, bgCorrPoints]);
+  }, [
+    customizedPlotJson,
+    bgCorrPoints,
+    isBGCorrActive,
+    isHeatmapPlot,
+    is3DMode,
+    bgCorrMode,
+  ]);
 
   const handlePlotClick = (event: Plotly.PlotMouseEvent) => {
     if (!isBGCorrActive) return;
 
     const point = event.points[0];
+
+    // Ignore clicks on existing BG markers
+    if (
+      point.data.name === "BG Corr Points" ||
+      point.data.name === "BG Corr Line"
+    ) {
+      return;
+    }
+
     const x = typeof point.x === "number" ? point.x : Number(point.x);
     const y = typeof point.y === "number" ? point.y : Number(point.y);
+    const z = (point as any).z;
+    const rowIdx = (point as any).row;
+    const colIdx = (point as any).col;
 
     if (isNaN(x) || isNaN(y)) {
       showToast("Invalid point data", "error");
       return;
     }
 
-    // Cycle selection: 1st click -> Pt1, 2nd click -> Pt2, 3rd click -> Pt1 (reset)
-    setBgCorrPoints((prev) => {
-      if (prev.length >= 2) {
-        return [{ x, y }];
+    const newPoint = {
+      x,
+      y,
+      z: typeof z === "number" ? z : undefined,
+      row_idx: typeof rowIdx === "number" ? rowIdx : undefined,
+      col_idx: typeof colIdx === "number" ? colIdx : undefined,
+    };
+
+    if (isHeatmapPlot) {
+      if (bgCorrMode === "plane") {
+        // Plane needs 3 points, cycle through 3
+        setBgCorrPoints((prev) => {
+          if (prev.length >= 3) return [newPoint];
+          return [...prev, newPoint];
+        });
+      } else {
+        // Other heatmap modes (constant, row_mean, col_mean) only need 1 point
+        setBgCorrPoints([newPoint]);
       }
-      return [...prev, { x, y }];
-    });
+    } else {
+      // LinePlot: Cycle selection: 1st click -> Pt1, 2nd click -> Pt2, 3rd click -> Pt1 (reset)
+      setBgCorrPoints((prev) => {
+        if (prev.length >= 2) return [newPoint];
+        return [...prev, newPoint];
+      });
+    }
   };
 
   const handleAppearanceSettingsChange = useCallback(
@@ -2132,37 +2375,103 @@ const PlotWrapper: React.FC<Props> = ({
 
               {/* BG Corr Controls Overlay (Maximized) */}
               {isBGCorrActive && (
-                <div className="absolute top-16 left-1/2 transform -translate-x-1/2 z-30 flex items-center gap-3 bg-white/95 backdrop-blur-md border border-blue-200 px-4 py-2.5 rounded-full shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300">
-                  <div className="flex items-center gap-2 mr-2">
-                    <div className="flex h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-                    <span className="text-sm font-medium text-gray-700 whitespace-nowrap">
-                      {bgCorrPoints.length === 0
-                        ? "Select points on plot"
-                        : `${bgCorrPoints.length} point${
-                            bgCorrPoints.length > 1 ? "s" : ""
-                          } selected`}
+                <div className="absolute top-16 left-1/2 transform -translate-x-1/2 z-30 flex flex-col items-center gap-3 bg-white/95 backdrop-blur-md border border-blue-200 px-6 py-4 rounded-[2rem] shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300 min-w-[400px]">
+                  <div className="flex items-center justify-between w-full mb-1">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-2.5 w-2.5 rounded-full bg-blue-500 animate-pulse" />
+                      <span className="text-sm font-bold text-gray-800 uppercase tracking-tight">
+                        Background Correction (WIP)
+                      </span>
+                    </div>
+                    <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
+                      {bgCorrPoints.length}{" "}
+                      {bgCorrPoints.length === 1 ? "point" : "points"}
                     </span>
                   </div>
 
-                  <div className="h-4 w-px bg-gray-200" />
+                  <div className="flex items-center gap-2 w-full">
+                    {isHeatmapPlot ? (
+                      <div className="flex items-center gap-1.5 p-1 bg-gray-100/80 rounded-full w-full">
+                        {[
+                          { id: "constant", label: "Offset", disabled: false },
+                          {
+                            id: "row_mean",
+                            label: "Row Mean",
+                            disabled: false,
+                          },
+                          {
+                            id: "col_mean",
+                            label: "Col Mean",
+                            disabled: false,
+                          },
+                          { id: "plane", label: "Plane", disabled: true },
+                        ].map((m) => (
+                          <button
+                            key={m.id}
+                            onClick={() => {
+                              if (m.disabled) return;
+                              setBgCorrMode(m.id as any);
+                              setBgCorrPoints([]);
+                              if (m.id === "plane") setIs3DMode(true);
+                              else setIs3DMode(false);
+                            }}
+                            disabled={m.disabled}
+                            title={m.disabled ? "WIP" : m.label}
+                            className={`flex-1 text-[10px] font-bold py-1.5 px-3 rounded-full transition-all ${
+                              bgCorrMode === m.id
+                                ? "bg-white text-blue-700 shadow-sm border border-blue-100"
+                                : m.disabled
+                                  ? "text-gray-400 cursor-not-allowed"
+                                  : "text-gray-500 hover:text-gray-700"
+                            }`}
+                          >
+                            <span className="inline-flex items-center gap-1 justify-center w-full">
+                              {m.label}
+                              {m.disabled && (
+                                <span className="text-[9px]">WIP</span>
+                              )}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-gray-500 px-2 italic">
+                        Click 1 point for Offset, 2 points for Linear baseline
+                      </div>
+                    )}
+                  </div>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-3 w-full mt-1">
                     <button
                       onClick={() => applyBGCorrNow(bgCorrPoints)}
-                      disabled={bgCorrPoints.length === 0}
-                      className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-1.5 rounded-full transition-all shadow-sm hover:shadow-md active:scale-95"
+                      disabled={
+                        bgCorrPoints.length === 0 ||
+                        (isHeatmapPlot &&
+                          bgCorrMode === "plane" &&
+                          bgCorrPoints.length < 3)
+                      }
+                      className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold py-2 rounded-full transition-all shadow-md active:scale-[0.98]"
                     >
-                      Apply {bgCorrPoints.length < 2 ? "Offset" : "Linear"}
+                      Apply{" "}
+                      {isHeatmapPlot
+                        ? bgCorrMode.replace("_", " ")
+                        : bgCorrPoints.length < 2
+                          ? "constant"
+                          : "linear"}
                     </button>
                     <button
                       onClick={() => setBgCorrPoints([])}
-                      className="hover:bg-gray-100 text-gray-600 text-xs font-medium px-3 py-1.5 rounded-full transition-colors"
+                      className="px-4 py-2 hover:bg-gray-100 text-gray-600 text-xs font-bold rounded-full transition-colors"
                     >
                       Clear
                     </button>
                     <button
-                      onClick={() => setIsBGCorrActive(false)}
-                      className="hover:bg-red-50 text-red-600 text-xs font-medium px-3 py-1.5 rounded-full transition-colors"
+                      onClick={() => {
+                        setIsBGCorrActive(false);
+                        setIs3DMode(false);
+                        setBgCorrPoints([]);
+                      }}
+                      className="px-4 py-2 hover:bg-red-50 text-red-600 text-xs font-bold rounded-full transition-colors"
                     >
                       Cancel
                     </button>
@@ -2474,8 +2783,8 @@ const PlotWrapper: React.FC<Props> = ({
                 </Tooltip>
               )}
 
-              {/* Background Correction (LinePlots only) */}
-              {!isHeatmapPlot && (
+              {/* Background Correction (LinePlots and Heatmaps) */}
+              {true /* Always show if in sidebar for relevant types */ && (
                 <Tooltip content="Background Correction" position="left">
                   <button
                     onClick={handleBGCorrToggle}

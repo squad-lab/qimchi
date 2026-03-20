@@ -73,6 +73,7 @@ const FILTER_CATEGORIES = {
     "log_corr",
     "sig_corr",
     "rescale_intensity",
+    "bg_corr",
     "log_scale",
     "rotate",
   ],
@@ -155,7 +156,8 @@ const FILTER_DEFINITIONS = {
   bg_corr: {
     name: "Background Correction",
     icon: Crosshair,
-    description: "Subtract a constant offset or linear baseline from the data",
+    description:
+      "Subtract a constant offset, linear baseline, or plane (heatmaps) from the data",
   },
 };
 
@@ -1836,12 +1838,22 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                       key={i}
                                       className="text-xs font-mono bg-white border border-gray-200 p-2 rounded flex justify-between items-center shadow-sm"
                                     >
-                                      <span className="font-bold text-gray-500">
-                                        P{i + 1}:
-                                      </span>
-                                      <span className="text-blue-700">
-                                        ({p.x.toFixed(4)}, {p.y.toFixed(4)})
-                                      </span>
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-bold text-gray-500">
+                                          P{i + 1}:
+                                        </span>
+                                        <span className="text-blue-700">
+                                          ({p.x.toFixed(2)}, {p.y.toFixed(2)}
+                                          {p.z !== undefined &&
+                                            `, Z:${p.z.toFixed(2)}`}
+                                          )
+                                        </span>
+                                      </div>
+                                      {p.row_idx !== undefined && (
+                                        <span className="text-[10px] text-gray-400">
+                                          [{p.row_idx},{p.col_idx}]
+                                        </span>
+                                      )}
                                     </div>
                                   ),
                                 )
