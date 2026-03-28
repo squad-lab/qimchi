@@ -510,7 +510,8 @@ const Basket = ({
                     )}
                     <div className="text-white text-sm">
                       Shortcuts: Alt+Shift+B Clear Basket, Shift+E Toggle Side
-                      Panel.
+                      Panel, Shift+N Toggle Notes, Shift+R Refresh Dir, Esc
+                      Close modals/modes.
                     </div>
                   </div>
                 }

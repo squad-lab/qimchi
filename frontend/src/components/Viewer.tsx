@@ -1,6 +1,6 @@
 import axios from "axios";
 import { PROD_BACKEND_URL } from "../config";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Panel } from "react-resizable-panels";
 import { ChartScatter, Lightbulb } from "lucide-react";
 
@@ -78,6 +78,7 @@ const Viewer = ({
   const [selectedDatasetIds, setSelectedDatasetIds] = useState<Set<string>>(
     new Set(),
   );
+  const [selectedPlotId, setSelectedPlotId] = useState<string | null>(null);
   const [viewerHeight, setViewerHeight] = useState<string>(
     "calc(100vh - 200px)",
   );
@@ -358,6 +359,48 @@ const Viewer = ({
     });
   }, [basketItems]);
 
+  // Keep selected plot valid as plot list changes.
+  useEffect(() => {
+    if (plotConfigs.length === 0) {
+      setSelectedPlotId(null);
+      return;
+    }
+
+    setSelectedPlotId((prev) => {
+      if (prev && plotConfigs.some((p) => p.id === prev)) {
+        return prev;
+      }
+      return plotConfigs[0].id;
+    });
+  }, [plotConfigs]);
+
+  const dispatchSelectedPlotShortcut = useCallback(
+    (
+      action:
+        | "enter-linecut"
+        | "open-filters"
+        | "open-appearance"
+        | "toggle-maximize"
+        | "toggle-bgcorr"
+        | "swap-axes"
+        | "reset-plot"
+        | "send-to-notes"
+        | "export-images",
+    ) => {
+      if (!selectedPlotId) return;
+      try {
+        window.dispatchEvent(
+          new CustomEvent("plot-shortcut-action", {
+            detail: { id: selectedPlotId, action },
+          }),
+        );
+      } catch {
+        // ignore dispatch failures
+      }
+    },
+    [selectedPlotId],
+  );
+
   const selectedDatasets = getSelectedDatasets(basketItems, selectedDatasetIds);
   const sharedFields = computeSharedFields(selectedDatasets);
   const enforceSharedGating =
@@ -393,6 +436,62 @@ const Viewer = ({
   useShortcut("clear-basket", () => onClearBasket());
   useShortcut("clear-viewer", () => clearPlots());
 
+  useShortcut("select-plot-1", () =>
+    setSelectedPlotId(plotConfigs[0]?.id ?? null),
+  );
+  useShortcut("select-plot-2", () =>
+    setSelectedPlotId(plotConfigs[1]?.id ?? null),
+  );
+  useShortcut("select-plot-3", () =>
+    setSelectedPlotId(plotConfigs[2]?.id ?? null),
+  );
+  useShortcut("select-plot-4", () =>
+    setSelectedPlotId(plotConfigs[3]?.id ?? null),
+  );
+  useShortcut("select-plot-5", () =>
+    setSelectedPlotId(plotConfigs[4]?.id ?? null),
+  );
+  useShortcut("select-plot-6", () =>
+    setSelectedPlotId(plotConfigs[5]?.id ?? null),
+  );
+  useShortcut("select-plot-7", () =>
+    setSelectedPlotId(plotConfigs[6]?.id ?? null),
+  );
+  useShortcut("select-plot-8", () =>
+    setSelectedPlotId(plotConfigs[7]?.id ?? null),
+  );
+  useShortcut("select-plot-9", () =>
+    setSelectedPlotId(plotConfigs[8]?.id ?? null),
+  );
+
+  useShortcut("selected-enter-linecut", () =>
+    dispatchSelectedPlotShortcut("enter-linecut"),
+  );
+  useShortcut("selected-open-filters", () =>
+    dispatchSelectedPlotShortcut("open-filters"),
+  );
+  useShortcut("selected-open-appearance", () =>
+    dispatchSelectedPlotShortcut("open-appearance"),
+  );
+  useShortcut("selected-toggle-maximize", () =>
+    dispatchSelectedPlotShortcut("toggle-maximize"),
+  );
+  useShortcut("selected-toggle-bgcorr", () =>
+    dispatchSelectedPlotShortcut("toggle-bgcorr"),
+  );
+  useShortcut("selected-swap-axes", () =>
+    dispatchSelectedPlotShortcut("swap-axes"),
+  );
+  useShortcut("selected-reset-plot", () =>
+    dispatchSelectedPlotShortcut("reset-plot"),
+  );
+  useShortcut("selected-send-to-notes", () =>
+    dispatchSelectedPlotShortcut("send-to-notes"),
+  );
+  useShortcut("selected-export-images", () =>
+    dispatchSelectedPlotShortcut("export-images"),
+  );
+
   const VIEWER_TIPS = (
     <div className="space-y-1 text-sm">
       <div>• Click Appearance / Filters to edit a plot.</div>
@@ -414,6 +513,11 @@ const Viewer = ({
         • Shortcuts: H HeatMap, L LinePlot, P Plot, Alt+Shift+C Clear Composer.
       </div>
       <div>
+        • Selected plot shortcuts: 1-9 Select, Shift+X LineCut, F Filters, A
+        Appearance, M Maximize, B BG Corr, S Swap Axes, R Reset, N Send to
+        Notes, E Export Images.
+      </div>
+      <div>
         • Select Basket dataset cards (Ctrl/Cmd+Click for multi-select) to set
         plot scope.
       </div>
@@ -423,7 +527,8 @@ const Viewer = ({
       </div>
       <div>
         • Shortcuts: Alt+Shift+B Clear Basket, Alt+Shift+V Clear Viewer, Shift+E
-        Toggle Side Panel, Shift+M Toggle Metadata, Shift+N Toggle Notes.
+        Toggle Side Panel, Shift+M Toggle Metadata, Shift+N Toggle Notes,
+        Shift+R Refresh Dir, Esc Close modals/modes.
       </div>
     </div>
   );
@@ -830,6 +935,8 @@ const Viewer = ({
                     onAddPlot={addPlot}
                     widthPercent={plotWidthPercent}
                     perPlotWidthMap={perPlotWidthMap}
+                    selectedPlotId={selectedPlotId}
+                    onSelectPlot={setSelectedPlotId}
                   />
                 </div>
               ) : (

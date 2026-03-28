@@ -772,6 +772,11 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
                         Shortcuts: H HeatMap, L LinePlot, P Plot, Alt+Shift+C
                         Clear Composer.
                       </div>
+                      <div className="text-sm text-white">
+                        Selected plot: 1-9 Select, F Filters, A Appearance, M
+                        Maximize, B BG Corr, S Swap Axes, Shift+X LineCut, R
+                        Reset, N Send to Notes, E Export Images.
+                      </div>
                     </div>
                   }
                   position="bottom"

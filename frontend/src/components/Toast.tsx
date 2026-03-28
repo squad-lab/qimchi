@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { X, AlertCircle, CheckCircle, Info, AlertTriangle } from "lucide-react";
 import { ToastContext, LogItem } from "../hooks/useToast";
 import NotificationLogModal from "./NotificationLogModal";
+import { useShortcut } from "../hooks/useGlobalShortcuts";
 
 interface ToastProps {
   message: string;
@@ -65,6 +66,10 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
   const openLogModal = useCallback(() => {
     setIsLogModalOpen(true);
   }, []);
+
+  useShortcut("escape", () => {
+    setIsLogModalOpen(false);
+  });
 
   const contextValue = useMemo(
     () => ({ showToast, openLogModal }),

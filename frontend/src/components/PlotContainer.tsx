@@ -14,6 +14,8 @@ interface PlotContainerProps {
   // Optional per-plot overrides keyed by plot id
   perPlotWidthMap?: Record<string, number>;
   onAddPlot?: (config: Omit<PlotConfiguration, "id">) => void;
+  selectedPlotId?: string | null;
+  onSelectPlot?: (id: string) => void;
 }
 
 const PlotContainer: React.FC<PlotContainerProps> = ({
@@ -23,6 +25,8 @@ const PlotContainer: React.FC<PlotContainerProps> = ({
   onAddPlot,
   widthPercent,
   perPlotWidthMap,
+  selectedPlotId,
+  onSelectPlot,
 }) => {
   const setShiftHeld = usePainterStore((s) => s.setShiftHeld);
 
@@ -78,7 +82,12 @@ const PlotContainer: React.FC<PlotContainerProps> = ({
           return (
             <div
               key={config.id}
-              className="flex-grow"
+              className={`flex-grow rounded-lg transition-shadow ${
+                selectedPlotId === config.id
+                  ? "ring-2 ring-blue-500 shadow-md"
+                  : "ring-1 ring-transparent"
+              }`}
+              onClick={() => onSelectPlot?.(config.id)}
               style={{
                 flexBasis: effective,
                 maxWidth: effective,
