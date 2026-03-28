@@ -1851,19 +1851,17 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                       {/* Background Correction options */}
                       {activeTab.startsWith("bg_corr_") && (
                         <div className="space-y-4">
-                          <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 flex flex-col items-start gap-3">
-                            <button
-                              onClick={() =>
-                                onRequestBGCorr?.(
-                                  activeTab.replace("bg_corr_", ""),
-                                )
-                              }
-                              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-1.5 px-3 rounded shadow-sm transition-colors flex items-center gap-2"
-                            >
-                              <Crosshair size={14} />
-                              Pick Points on Plot
-                            </button>
-                          </div>
+                          <button
+                            onClick={() =>
+                              onRequestBGCorr?.(
+                                activeTab.replace("bg_corr_", ""),
+                              )
+                            }
+                            className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-2.5 py-2 rounded-md border border-blue-600 shadow-sm transition-colors inline-flex items-center justify-center gap-2"
+                          >
+                            <Crosshair size={14} />
+                            Pick Points on Plot
+                          </button>
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">
                               Correction Mode
