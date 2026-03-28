@@ -20,7 +20,10 @@ import {
   ImagePlus,
   ArrowLeftRight,
   Crosshair,
+  Scissors,
+  Split,
 } from "lucide-react";
+
 import { Data, Layout, Config } from "plotly.js";
 import type { AxisType, Dash } from "plotly.js";
 
@@ -61,6 +64,7 @@ type Props = {
   onUpdateConfig?: (config: Partial<PlotConfiguration>) => void;
   onFiltersModalOpenChange?: (isOpen: boolean) => void;
   availableSliders?: Record<string, SliderConfig>; // Sliders from backend
+  onAddPlot?: (config: Omit<PlotConfiguration, "id">) => void;
 };
 
 // Default appearance settings based on backend
@@ -221,6 +225,7 @@ const PlotWrapper: React.FC<Props> = ({
   onUpdateConfig,
   onFiltersModalOpenChange,
   availableSliders = {},
+  onAddPlot,
 }) => {
   const { showToast } = useToast();
 
@@ -478,7 +483,54 @@ const PlotWrapper: React.FC<Props> = ({
   const [hoverAppearanceBtn, setHoverAppearanceBtn] = useState(false);
   const [hoverFiltersBtn, setHoverFiltersBtn] = useState(false);
 
+  // LineCut state
+  const [isLineCutActive, setIsLineCutActive] = useState(false);
+  const [lineCutAxis, setLineCutAxis] = useState<"x" | "y" | null>(null);
+  const [lineCutPreviewJson, setLineCutPreviewJson] =
+    useState<PlotlyJSON | null>(null);
+  const [hoverData, setHoverData] = useState<{
+    x: number;
+    y: number;
+    xIndex: number;
+    yIndex: number;
+  } | null>(null);
+
   const shiftHeld = usePainterStore((s) => s.shiftHeld);
+
+  // Keyboard listeners for LineCut (X/Y keys)
+  useEffect(() => {
+    if (!isLineCutActive || (!isHoveredOrFocused && !isMaximized)) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        (e.target as HTMLElement).isContentEditable
+      ) {
+        return;
+      }
+      const key = e.key.toLowerCase();
+      if (key === "x") setLineCutAxis("x");
+      else if (key === "y") setLineCutAxis("y");
+      else if (key === "escape") {
+        setIsLineCutActive(false);
+        setLineCutAxis(null);
+        setLineCutPreviewJson(null);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      if (key === "x" || key === "y") setLineCutAxis(null);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, [isLineCutActive, isHoveredOrFocused, isMaximized]);
 
   // Ref to track isApplyingFilters for effects that shouldn't re-run when this flag changes
   const isApplyingFiltersRef = useRef<boolean>(isApplyingFilters);
@@ -531,6 +583,233 @@ const PlotWrapper: React.FC<Props> = ({
     setPlotSliders,
     setPlotAxesSwapped,
   } = usePlotStore();
+
+  const debugHoverRef = useRef<HTMLSpanElement>(null);
+
+  // Handle Heatmap Hover for LineCut Preview
+  const handlePlotHover = useCallback(
+    (event: any) => {
+      if (debugHoverRef.current) {
+        if (!event?.points?.[0]) {
+          debugHoverRef.current.innerText = "No point";
+        } else {
+          const p = event.points[0];
+          debugHoverRef.current.innerText = `Raw Pt [X: ${p.x}, Y: ${p.y}]`;
+        }
+      }
+
+      if (!isLineCutActive || !event.points || !event.points[0]) {
+        return;
+      }
+
+      const point = event.points[0];
+
+      let xIndex = 0;
+      let yIndex = 0;
+
+      if (Array.isArray(point.pointIndex) && point.pointIndex.length >= 2) {
+        yIndex = point.pointIndex[0];
+        xIndex = point.pointIndex[1];
+      } else if (
+        Array.isArray(point.pointNumber) &&
+        point.pointNumber.length >= 2
+      ) {
+        yIndex = point.pointNumber[0];
+        xIndex = point.pointNumber[1];
+      } else {
+        // Fallback for flat arrays or scatter
+        xIndex =
+          typeof point.pointIndex === "number"
+            ? point.pointIndex
+            : point.pointNumber || 0;
+        yIndex =
+          typeof point.pointIndex === "number"
+            ? point.pointIndex
+            : point.pointNumber || 0;
+      }
+
+      setHoverData({
+        x: typeof point.x === "number" ? point.x : Number(point.x || 0),
+        y: typeof point.y === "number" ? point.y : Number(point.y || 0),
+        xIndex,
+        yIndex,
+      });
+
+      if (!lineCutAxis) return;
+
+      try {
+        const trace = customizedPlotJson.data[0] as any;
+        if (!trace || !trace.z) {
+          if (debugHoverRef.current)
+            debugHoverRef.current.innerText += " [Err: No trace.z fallback]";
+          return;
+        }
+
+        const z = trace.z;
+        const xArr = trace.x || customizedPlotJson.layout?.xaxis?.tickvals;
+        const yArr = trace.y || customizedPlotJson.layout?.yaxis?.tickvals;
+
+        let previewX: number[] = [];
+        let previewY: number[] = [];
+        let title = "";
+
+        const getTitleText = (axis: any) => {
+          if (!axis?.title) return "";
+          if (typeof axis.title === "string") return axis.title;
+          return axis.title.text || "";
+        };
+
+        const getZTitle = () => {
+          const coloraxis = (customizedPlotJson.layout as any)?.coloraxis;
+          if (coloraxis?.colorbar?.title?.text)
+            return coloraxis.colorbar.title.text;
+          return "Intensity";
+        };
+
+        if (lineCutAxis === "x") {
+          // Flatten mapping safe fallback for various Array/TypedArray types
+          previewY = Array.from(z)
+            .map((row: any) =>
+              row && typeof row[xIndex] === "number" ? row[xIndex] : undefined,
+            )
+            .filter((v) => v !== undefined) as number[];
+          previewX =
+            yArr && typeof yArr[Symbol.iterator] === "function"
+              ? Array.from(yArr)
+              : previewY.map((_: any, i: number) => i);
+          title = `Slice at X = ${typeof point.x === "number" ? point.x.toFixed(4) : String(point.x)}`;
+        } else {
+          // Ensure z[yIndex] handles TypedArray perfectly
+          previewY =
+            z[yIndex] && typeof z[yIndex][Symbol.iterator] === "function"
+              ? Array.from(z[yIndex])
+              : [];
+          previewX =
+            xArr && typeof xArr[Symbol.iterator] === "function"
+              ? Array.from(xArr)
+              : previewY.map((_: any, i: number) => i);
+          title = `Slice at Y = ${typeof point.y === "number" ? point.y.toFixed(4) : String(point.y)}`;
+        }
+
+        const previewJson: PlotlyJSON = {
+          data: [
+            {
+              x: previewX,
+              y: previewY,
+              type: "scatter",
+              mode: "lines",
+              line: { color: "#3b82f6", width: 2 },
+              name: "LineCut Preview",
+            },
+          ],
+          layout: {
+            title: { text: title, font: { size: 10 } },
+            margin: { t: 30, r: 10, b: 30, l: 40 },
+            xaxis: {
+              title: {
+                text:
+                  lineCutAxis === "x"
+                    ? getTitleText(customizedPlotJson.layout?.yaxis)
+                    : getTitleText(customizedPlotJson.layout?.xaxis),
+                font: { size: 10 },
+              },
+              tickfont: { size: 9 },
+            },
+            yaxis: {
+              title: {
+                text: getZTitle(),
+                font: { size: 10 },
+              },
+              tickfont: { size: 9 },
+            },
+            paper_bgcolor: "rgba(0,0,0,0)",
+            plot_bgcolor: "rgba(0,0,0,0)",
+          },
+          config: { responsive: true, displayModeBar: false },
+        };
+
+        setLineCutPreviewJson(previewJson);
+      } catch (err: any) {
+        if (debugHoverRef.current)
+          debugHoverRef.current.innerText += ` [PreviewError: ${err?.message || "Gen Fail"}]`;
+        console.error("LineCut preview generation error:", err);
+      }
+    },
+    [isLineCutActive, lineCutAxis, customizedPlotJson],
+  );
+
+  const handleLineCutClick = useCallback(async () => {
+    if (!isLineCutActive) return;
+    if (!lineCutAxis) {
+      showToast("LineCut Axis not detected. Hold X or Y and retry.", "warning");
+      return;
+    }
+    if (!hoverData) {
+      showToast(
+        "Hover coordinates not locked. Hover over points and retry.",
+        "warning",
+      );
+      return;
+    }
+    if (!onAddPlot) {
+      showToast("System error: onAddPlot missing.", "error");
+      return;
+    }
+
+    try {
+      showToast("Creating persistent LinePlot...", "info");
+
+      const xVar = plotConfig?.indeps?.[0];
+      const yVar = plotConfig?.indeps?.[1];
+
+      if (!xVar || !yVar) {
+        showToast(
+          `Failed: Missing variables. indeps: ${JSON.stringify(plotConfig?.indeps)}`,
+          "error",
+        );
+        throw new Error("Cannot determine independent variables for cut");
+      }
+
+      const cutVar = lineCutAxis === "x" ? xVar : yVar;
+      const remainVar = lineCutAxis === "x" ? yVar : xVar;
+      const cutVal = lineCutAxis === "x" ? hoverData.x : hoverData.y;
+
+      onAddPlot({
+        fpath: plotConfig.fpath,
+        indeps: [remainVar],
+        deps: plotConfig.deps,
+        plotType: "LinePlot",
+        source: plotConfig.source,
+        preferredSource: plotConfig.preferredSource,
+        slider: {
+          ...sliderConfig,
+          [cutVar]: {
+            min: cutVal,
+            max: cutVal,
+            step: 0,
+            value: cutVal,
+          },
+        },
+        filters_order: [],
+        filters_opts: {},
+      });
+
+      showToast(
+        `LinePlot created at ${cutVar}=${cutVal.toFixed(4)}`,
+        "success",
+      );
+    } catch (err: any) {
+      showToast(`Failed to create linecut: ${err.message}`, "error");
+    }
+  }, [
+    isLineCutActive,
+    lineCutAxis,
+    hoverData,
+    onAddPlot,
+    plotConfig,
+    sliderConfig,
+    showToast,
+  ]);
 
   // Load persisted state when component mounts or plot config changes
   useEffect(() => {
@@ -1894,93 +2173,22 @@ const PlotWrapper: React.FC<Props> = ({
       if (points.length === 0) return;
 
       let mode = bgCorrMode;
-      let pointsForApply = points;
-      // Force linear for LinePlot if 2 points
+      // Force constant/linear for LinePlot; for heatmap row_mean/col_mean the
+      // backend handles baseline computation — just pass mode + points through.
       if (!isHeatmapPlot) {
         mode = points.length === 1 ? "constant" : "linear";
-      } else if (mode === "row_mean" || mode === "col_mean") {
-        const trace = customizedPlotJson?.data?.[0] as
-          | { z?: unknown }
-          | undefined;
-        const zDataRaw = trace?.z;
-        const selectedPoint = points[0] || {};
-
-        const toNumericArray = (row: unknown): number[] => {
-          if (!Array.isArray(row)) return [];
-          return row
-            .map((v) => (typeof v === "number" ? v : Number(v)))
-            .filter((v) => Number.isFinite(v));
-        };
-
-        const zRows: number[][] = Array.isArray(zDataRaw)
-          ? zDataRaw
-              .map((row: unknown) => toNumericArray(row))
-              .filter((row: number[]) => row.length > 0)
-          : [];
-
-        if (zRows.length === 0) {
-          showToast("Unable to compute heatmap baseline", "error");
-          return;
-        }
-
-        const clamp = (idx: number, maxIdx: number) =>
-          Math.max(0, Math.min(idx, maxIdx));
-
-        let baseline = 0;
-        if (mode === "row_mean") {
-          const rowIdxGuess =
-            typeof selectedPoint.row_idx === "number"
-              ? selectedPoint.row_idx
-              : Math.round(Number(selectedPoint.y) || 0);
-          const rowIdx = clamp(rowIdxGuess, zRows.length - 1);
-          const row = zRows[rowIdx] || [];
-
-          if (row.length === 0) {
-            showToast("Selected row has no data", "error");
-            return;
-          }
-
-          baseline = row.reduce((acc, val) => acc + val, 0) / row.length;
-        } else {
-          const maxColIdx = Math.max(0, zRows[0].length - 1);
-          const colIdxGuess =
-            typeof selectedPoint.col_idx === "number"
-              ? selectedPoint.col_idx
-              : Math.round(Number(selectedPoint.x) || 0);
-          const colIdx = clamp(colIdxGuess, maxColIdx);
-
-          const colValues = zRows
-            .map((row) => row[colIdx])
-            .filter((val) => Number.isFinite(val));
-
-          if (colValues.length === 0) {
-            showToast("Selected column has no data", "error");
-            return;
-          }
-
-          baseline =
-            colValues.reduce((acc, val) => acc + val, 0) / colValues.length;
-        }
-
-        // Apply as constant correction using the computed baseline to preserve heatmap shape.
-        mode = "constant";
-        pointsForApply = [
-          {
-            ...selectedPoint,
-            z: baseline,
-          },
-        ];
       }
 
+      const filterName = `bg_corr_${mode}`;
+
       const newFilter: AppliedFilter = {
-        name: "bg_corr",
+        name: filterName,
         options: {
-          mode,
-          points: pointsForApply,
+          points,
         },
       };
 
-      const otherFilters = appliedFilters.filter((f) => f.name !== "bg_corr");
+      const otherFilters = appliedFilters.filter((f) => f.name !== filterName);
       const nextFilters = [...otherFilters, newFilter];
 
       setAppliedFilters(nextFilters);
@@ -1989,7 +2197,8 @@ const PlotWrapper: React.FC<Props> = ({
         sliders: sliderConfig,
       });
 
-      setIsBGCorrActive(false);
+      // Keep overlay active but clear markers to avoid squishing/autoscale issues.
+      // setIsBGCorrActive(false);
       setBgCorrPoints([]);
     },
     [
@@ -1998,8 +2207,6 @@ const PlotWrapper: React.FC<Props> = ({
       sliderConfig,
       bgCorrMode,
       isHeatmapPlot,
-      customizedPlotJson,
-      showToast,
     ],
   );
 
@@ -2096,40 +2303,41 @@ const PlotWrapper: React.FC<Props> = ({
     if (isHeatmapPlot && !is3DMode && bgCorrPoints.length === 1) {
       const p = bgCorrPoints[0];
       if (bgCorrMode === "row_mean" || bgCorrMode === "col_mean") {
-        const dat = originalPlotJson.data?.[0] as any;
-        const xData = dat?.x || [];
-        const yData = dat?.y || [];
-        const zData = dat?.z || [];
+        // Use a Plotly layout SHAPE instead of a scatter trace so that the
+        // line does not affect autoscaling or require axis range locking.
+        const lineShape: any =
+          bgCorrMode === "row_mean"
+            ? {
+                type: "line",
+                xref: "paper",
+                yref: "y",
+                x0: 0,
+                x1: 1,
+                y0: p.y,
+                y1: p.y,
+                line: { color: "white", width: 3, dash: "dot" },
+                editable: false,
+              }
+            : {
+                type: "line",
+                xref: "x",
+                yref: "paper",
+                x0: p.x,
+                x1: p.x,
+                y0: 0,
+                y1: 1,
+                line: { color: "white", width: 3, dash: "dot" },
+                editable: false,
+              };
 
-        // Correctly calculate data bounds. If x/y axes missing, use indices
-        const xMin = xData.length > 0 ? Math.min(...xData) : 0;
-        const xMax =
-          xData.length > 0
-            ? Math.max(...xData)
-            : zData[0]?.length
-              ? zData[0].length - 1
-              : 10;
-        const yMin = yData.length > 0 ? Math.min(...yData) : 0;
-        const yMax =
-          yData.length > 0
-            ? Math.max(...yData)
-            : zData.length
-              ? zData.length - 1
-              : 10;
-
-        const xRange = (basePlot.layout?.xaxis as any)?.range || [xMin, xMax];
-        const yRange = (basePlot.layout?.yaxis as any)?.range || [yMin, yMax];
-
-        const lineTrace: any = {
-          x: bgCorrMode === "row_mean" ? xRange : [p.x, p.x],
-          y: bgCorrMode === "col_mean" ? yRange : [p.y, p.y],
-          type: "scatter",
-          mode: "lines",
-          line: { color: "white", width: 3, dash: "dot" },
-          hoverinfo: "skip",
-          showlegend: false,
+        return {
+          ...basePlot,
+          data: traces,
+          layout: {
+            ...basePlot.layout,
+            shapes: [...((basePlot.layout as any)?.shapes ?? []), lineShape],
+          },
         };
-        traces.push(lineTrace);
       }
     }
 
@@ -2180,8 +2388,15 @@ const PlotWrapper: React.FC<Props> = ({
     const x = typeof point.x === "number" ? point.x : Number(point.x);
     const y = typeof point.y === "number" ? point.y : Number(point.y);
     const z = (point as any).z;
-    const rowIdx = (point as any).row;
-    const colIdx = (point as any).col;
+    // Plotly heatmap click events expose indices via pointIndex = [row, col].
+    // The .row / .col properties do not exist on 2-D heatmap points.
+    const rawPointIdx = (point as any).pointIndex;
+    const rowIdx = Array.isArray(rawPointIdx)
+      ? rawPointIdx[0]
+      : (point as any).row;
+    const colIdx = Array.isArray(rawPointIdx)
+      ? rawPointIdx[1]
+      : (point as any).col;
 
     if (isNaN(x) || isNaN(y)) {
       showToast("Invalid point data", "error");
@@ -2335,6 +2550,85 @@ const PlotWrapper: React.FC<Props> = ({
             </div>
 
             <div className="flex items-center gap-1">
+              {/* Swap X & Y Axes (heatmaps only) */}
+              {isHeatmapPlot && (
+                <Tooltip content="Swap X & Y Axes" position="bottom">
+                  <button
+                    onClick={handleSwapAxes}
+                    className={`relative p-1.5 rounded transition-colors duration-150 ${
+                      areAxesSwapped
+                        ? "bg-blue-100 text-blue-600"
+                        : "hover:bg-gray-200"
+                    }`}
+                    title="Swap X & Y Axes"
+                    disabled={isApplyingFilters}
+                  >
+                    <ArrowLeftRight
+                      size={16}
+                      className={
+                        areAxesSwapped ? "text-blue-600" : "text-gray-600"
+                      }
+                    />
+                  </button>
+                </Tooltip>
+              )}
+
+              {/* LineCut (Heatmaps only) */}
+              {isHeatmapPlot && (
+                <Tooltip content="LineCut" position="bottom">
+                  <button
+                    onClick={() => {
+                      const next = !isLineCutActive;
+                      setIsLineCutActive(next);
+                      if (next) {
+                        setLineCutPreviewJson(null);
+                        showToast(
+                          "LineCut active. Hover + X / Y keys.",
+                          "info",
+                        );
+                      }
+                    }}
+                    className={`relative p-1.5 rounded transition-colors duration-150 ${
+                      isLineCutActive
+                        ? "bg-blue-100 text-blue-600 border border-blue-600"
+                        : "hover:bg-gray-200"
+                    }`}
+                    title="Generate line slices (X/Y keys)"
+                    disabled={isApplyingFilters}
+                  >
+                    <Split
+                      size={16}
+                      className={
+                        isLineCutActive ? "text-blue-600" : "text-gray-600"
+                      }
+                    />
+                  </button>
+                </Tooltip>
+              )}
+
+              {/* Background Correction */}
+              <Tooltip content="Background Correction" position="bottom">
+                <button
+                  onClick={handleBGCorrToggle}
+                  className={`relative p-1.5 rounded transition-colors duration-150 ${
+                    isBGCorrActive
+                      ? "bg-blue-100 text-blue-600 border border-blue-600"
+                      : "hover:bg-gray-200"
+                  }`}
+                  title="BG Correction (interactive)"
+                  disabled={isApplyingFilters}
+                >
+                  <Crosshair
+                    size={16}
+                    className={
+                      isBGCorrActive ? "text-blue-600" : "text-gray-600"
+                    }
+                  />
+                </button>
+              </Tooltip>
+
+              <div className="w-px h-6 bg-gray-200 mx-1" />
+
               <button
                 onClick={handleMaximize}
                 className="p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
@@ -2347,153 +2641,256 @@ const PlotWrapper: React.FC<Props> = ({
 
           {/* Plot content */}
           <div className="plot-content" style={{ height: "calc(100% - 52px)" }}>
-            <div
-              className={`p-4 h-full relative ${
-                isSquareMode ? "square-mode" : ""
-              }`}
-            >
+            <div className="flex h-full w-full relative">
               <div
-                className="absolute top-3 left-3 z-20 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-2.5 py-1 shadow-sm"
-                aria-label={`Status: ${statusLabel[displayStatus]}`}
+                className={`p-4 h-full relative ${
+                  isSquareMode ? "square-mode" : ""
+                }`}
+                style={{
+                  width: isLineCutActive ? "50%" : "100%",
+                  transition: "width 0.3s ease-in-out",
+                }}
               >
-                <span
-                  className={`block h-3.5 w-3.5 rounded-full border border-black/10 ${statusClass[displayStatus]}`}
-                ></span>
-                <span className="text-xs font-medium text-gray-700">
-                  {statusLabel[displayStatus]}
-                </span>
-              </div>
+                <div
+                  className="absolute top-3 left-3 z-20 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-2.5 py-1 shadow-sm"
+                  aria-label={`Status: ${statusLabel[displayStatus]}`}
+                >
+                  <span
+                    className={`block h-3.5 w-3.5 rounded-full border border-black/10 ${statusClass[displayStatus]}`}
+                  ></span>
+                  <span className="text-xs font-medium text-gray-700">
+                    {statusLabel[displayStatus]}
+                  </span>
+                </div>
 
-              <PlotComponent
-                key={plotKey}
-                plotJson={
-                  isBGCorrActive ? plotWithBGMarkers : customizedPlotJson
-                }
-                onRelayout={handleRelayout}
-                onClick={isBGCorrActive ? handlePlotClick : undefined}
-              />
+                <PlotComponent
+                  key={plotKey}
+                  plotJson={
+                    isBGCorrActive ? plotWithBGMarkers : customizedPlotJson
+                  }
+                  onRelayout={handleRelayout}
+                  onHover={handlePlotHover}
+                  onClick={
+                    isLineCutActive
+                      ? handleLineCutClick
+                      : isBGCorrActive
+                        ? handlePlotClick
+                        : undefined
+                  }
+                />
 
-              {/* BG Corr Controls Overlay (Maximized) */}
-              {isBGCorrActive && (
-                <div className="absolute top-16 left-1/2 transform -translate-x-1/2 z-30 flex flex-col items-center gap-3 bg-white/95 backdrop-blur-md border border-blue-200 px-6 py-4 rounded-[2rem] shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300 min-w-[400px]">
-                  <div className="flex items-center justify-between w-full mb-1">
-                    <div className="flex items-center gap-2">
-                      <div className="flex h-2.5 w-2.5 rounded-full bg-blue-500 animate-pulse" />
-                      <span className="text-sm font-bold text-gray-800 uppercase tracking-tight">
-                        Background Correction (WIP)
+                {/* BG Corr Controls Overlay (Maximized) */}
+
+                {isBGCorrActive && (
+                  <div className="absolute top-16 left-1/2 transform -translate-x-1/2 z-30 flex flex-col items-center gap-3 bg-white/95 backdrop-blur-md border border-blue-200 px-6 py-4 rounded-[2rem] shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300 min-w-[400px]">
+                    <div className="flex items-center justify-between w-full mb-1">
+                      <div className="flex items-center gap-2">
+                        <div className="flex h-2.5 w-2.5 rounded-full bg-blue-500 animate-pulse" />
+                        <span className="text-sm font-bold text-gray-800 uppercase tracking-tight">
+                          Background Correction
+                        </span>
+                      </div>
+                      <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
+                        {bgCorrPoints.length}{" "}
+                        {bgCorrPoints.length === 1 ? "point" : "points"}
                       </span>
                     </div>
-                    <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
-                      {bgCorrPoints.length}{" "}
-                      {bgCorrPoints.length === 1 ? "point" : "points"}
-                    </span>
+
+                    <div className="flex items-center gap-2 w-full">
+                      {isHeatmapPlot ? (
+                        <div className="flex items-center gap-1.5 p-1 bg-gray-100/80 rounded-full w-full">
+                          {[
+                            {
+                              id: "constant",
+                              label: "Offset",
+                              disabled: false,
+                            },
+                            {
+                              id: "row_mean",
+                              label: "Row",
+                              disabled: false,
+                            },
+                            {
+                              id: "col_mean",
+                              label: "Col",
+                              disabled: false,
+                            },
+                            { id: "plane", label: "Plane", disabled: false },
+                          ].map((m) => (
+                            <button
+                              key={m.id}
+                              onClick={() => {
+                                if (m.disabled) return;
+                                setBgCorrMode(m.id as any);
+                                setBgCorrPoints([]);
+                                setIs3DMode(false);
+                              }}
+                              disabled={m.disabled}
+                              title={m.disabled ? "WIP" : m.label}
+                              className={`flex-1 text-[10px] font-bold py-1.5 px-3 rounded-full transition-all ${
+                                bgCorrMode === m.id
+                                  ? "bg-white text-blue-700 shadow-sm border border-blue-100"
+                                  : m.disabled
+                                    ? "text-gray-400 cursor-not-allowed"
+                                    : "text-gray-500 hover:text-gray-700"
+                              }`}
+                            >
+                              <span className="inline-flex items-center gap-1 justify-center w-full">
+                                {m.label}
+                                {m.disabled && (
+                                  <span className="text-[9px]">WIP</span>
+                                )}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-gray-500 px-2 italic">
+                          Click 1 point for Offset, 2 points for Linear baseline
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-3 w-full mt-1">
+                      <button
+                        onClick={() => applyBGCorrNow(bgCorrPoints)}
+                        disabled={
+                          bgCorrPoints.length === 0 ||
+                          (isHeatmapPlot &&
+                            bgCorrMode === "plane" &&
+                            bgCorrPoints.length < 3)
+                        }
+                        className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold py-2 rounded-full transition-all shadow-md active:scale-[0.98]"
+                      >
+                        Apply{" "}
+                        {isHeatmapPlot
+                          ? bgCorrMode.replace("_", " ")
+                          : bgCorrPoints.length < 2
+                            ? "constant"
+                            : "linear"}
+                      </button>
+                      <button
+                        onClick={() => setBgCorrPoints([])}
+                        className="px-4 py-2 hover:bg-gray-100 text-gray-600 text-xs font-bold rounded-full transition-colors"
+                      >
+                        Clear
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsBGCorrActive(false);
+                          setIs3DMode(false);
+                          setBgCorrPoints([]);
+                        }}
+                        className="px-4 py-2 hover:bg-red-50 text-red-600 text-xs font-bold rounded-full transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Dataset update error overlay */}
+                {datasetUpdateError && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-90 rounded">
+                    <div className="max-w-md p-6 text-center">
+                      <div className="text-red-600 font-semibold text-lg mb-2">
+                        Dataset Update Failed
+                      </div>
+                      <div className="text-gray-700 text-sm mb-4">
+                        {datasetUpdateError}
+                      </div>
+                      <button
+                        onClick={() => setDatasetUpdateError(null)}
+                        className="px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* LineCut Side Panel (Maximized) */}
+              {isLineCutActive && (
+                <div
+                  className="h-full bg-white border-l border-gray-200 flex flex-col z-30 transition-all duration-300 animate-in slide-in-from-right"
+                  style={{ width: "50%" }}
+                >
+                  <div className="flex items-center justify-between p-3 border-b border-gray-100 bg-gray-50/50">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1 px-2 bg-blue-100 text-blue-700 rounded-md text-[10px] font-black uppercase tracking-tighter">
+                        LineCut Preview
+                      </div>
+                      {lineCutAxis && (
+                        <span className="text-[10px] font-bold text-gray-500 uppercase">
+                          Mode:{" "}
+                          {lineCutAxis === "x" ? "Vertical" : "Horizontal"}
+                        </span>
+                      )}
+                      <span className="text-[10px] font-bold text-gray-500 uppercase ml-2 border-l border-gray-200 pl-2">
+                        State:{" "}
+                        {hoverData &&
+                        typeof hoverData.x === "number" &&
+                        typeof hoverData.y === "number"
+                          ? `[${hoverData.x.toFixed(4)}, ${hoverData.y.toFixed(4)}]`
+                          : "None"}
+                      </span>
+                      <span
+                        ref={debugHoverRef}
+                        className="text-[10px] font-bold text-red-500 ml-2 border-l border-gray-200 pl-2"
+                      >
+                        Wait...
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setIsLineCutActive(false);
+                        setLineCutPreviewJson(null);
+                      }}
+                      className="p-1 hover:bg-red-50 text-red-500 rounded transition-colors"
+                    >
+                      <X size={14} />
+                    </button>
                   </div>
 
-                  <div className="flex items-center gap-2 w-full">
-                    {isHeatmapPlot ? (
-                      <div className="flex items-center gap-1.5 p-1 bg-gray-100/80 rounded-full w-full">
-                        {[
-                          { id: "constant", label: "Offset", disabled: false },
-                          {
-                            id: "row_mean",
-                            label: "Row Mean",
-                            disabled: false,
-                          },
-                          {
-                            id: "col_mean",
-                            label: "Col Mean",
-                            disabled: false,
-                          },
-                          { id: "plane", label: "Plane", disabled: true },
-                        ].map((m) => (
-                          <button
-                            key={m.id}
-                            onClick={() => {
-                              if (m.disabled) return;
-                              setBgCorrMode(m.id as any);
-                              setBgCorrPoints([]);
-                              if (m.id === "plane") setIs3DMode(true);
-                              else setIs3DMode(false);
-                            }}
-                            disabled={m.disabled}
-                            title={m.disabled ? "WIP" : m.label}
-                            className={`flex-1 text-[10px] font-bold py-1.5 px-3 rounded-full transition-all ${
-                              bgCorrMode === m.id
-                                ? "bg-white text-blue-700 shadow-sm border border-blue-100"
-                                : m.disabled
-                                  ? "text-gray-400 cursor-not-allowed"
-                                  : "text-gray-500 hover:text-gray-700"
-                            }`}
-                          >
-                            <span className="inline-flex items-center gap-1 justify-center w-full">
-                              {m.label}
-                              {m.disabled && (
-                                <span className="text-[9px]">WIP</span>
-                              )}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
+                  <div className="flex-1 p-2 relative">
+                    {lineCutPreviewJson ? (
+                      <PlotComponent plotJson={lineCutPreviewJson} />
                     ) : (
-                      <div className="text-xs text-gray-500 px-2 italic">
-                        Click 1 point for Offset, 2 points for Linear baseline
+                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 space-y-3">
+                        <div className="p-4 bg-blue-50 rounded-full animate-pulse">
+                          <Scissors size={24} className="text-blue-400" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-gray-600">
+                            Ready for LineCut
+                          </p>
+                          <p className="text-[10px] text-gray-400 mt-1 max-w-[150px]">
+                            Hold{" "}
+                            <kbd className="font-sans border px-1 rounded bg-white shadow-sm">
+                              X
+                            </kbd>{" "}
+                            for Vertical or{" "}
+                            <kbd className="font-sans border px-1 rounded bg-white shadow-sm">
+                              Y
+                            </kbd>{" "}
+                            for Horizontal slice.
+                          </p>
+                        </div>
                       </div>
                     )}
                   </div>
 
-                  <div className="flex items-center gap-3 w-full mt-1">
-                    <button
-                      onClick={() => applyBGCorrNow(bgCorrPoints)}
-                      disabled={
-                        bgCorrPoints.length === 0 ||
-                        (isHeatmapPlot &&
-                          bgCorrMode === "plane" &&
-                          bgCorrPoints.length < 3)
-                      }
-                      className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold py-2 rounded-full transition-all shadow-md active:scale-[0.98]"
-                    >
-                      Apply{" "}
-                      {isHeatmapPlot
-                        ? bgCorrMode.replace("_", " ")
-                        : bgCorrPoints.length < 2
-                          ? "constant"
-                          : "linear"}
-                    </button>
-                    <button
-                      onClick={() => setBgCorrPoints([])}
-                      className="px-4 py-2 hover:bg-gray-100 text-gray-600 text-xs font-bold rounded-full transition-colors"
-                    >
-                      Clear
-                    </button>
-                    <button
-                      onClick={() => {
-                        setIsBGCorrActive(false);
-                        setIs3DMode(false);
-                        setBgCorrPoints([]);
-                      }}
-                      className="px-4 py-2 hover:bg-red-50 text-red-600 text-xs font-bold rounded-full transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Dataset update error overlay */}
-              {datasetUpdateError && (
-                <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-90 rounded">
-                  <div className="max-w-md p-6 text-center">
-                    <div className="text-red-600 font-semibold text-lg mb-2">
-                      Dataset Update Failed
-                    </div>
-                    <div className="text-gray-700 text-sm mb-4">
-                      {datasetUpdateError}
+                  <div className="p-3 border-t border-gray-100 bg-white">
+                    <div className="text-[12px] text-gray-400 font-medium mb-2 flex items-center gap-1">
+                      <div className="w-1 h-1 rounded-full bg-blue-400"></div>
+                      Click Heatmap to create persistent LinePlot
                     </div>
                     <button
-                      onClick={() => setDatasetUpdateError(null)}
-                      className="px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
+                      onClick={() => setIsLineCutActive(false)}
+                      className="w-full py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-[10px] font-bold rounded-lg transition-colors active:scale-[0.98]"
                     >
-                      Dismiss
+                      Exit LineCut Mode
                     </button>
                   </div>
                 </div>
@@ -2539,10 +2936,18 @@ const PlotWrapper: React.FC<Props> = ({
               key={plotKey}
               plotJson={isBGCorrActive ? plotWithBGMarkers : customizedPlotJson}
               onRelayout={handleRelayout}
-              onClick={isBGCorrActive ? handlePlotClick : undefined}
+              onHover={handlePlotHover}
+              onClick={
+                isLineCutActive && isMaximized
+                  ? handleLineCutClick
+                  : isBGCorrActive
+                    ? handlePlotClick
+                    : undefined
+              }
             />
 
             {/* BG Corr Controls Overlay */}
+
             {isBGCorrActive && (
               <div className="absolute top-12 left-1/2 transform -translate-x-1/2 z-30 flex items-center gap-2 bg-white/95 backdrop-blur-md border border-blue-200 px-3 py-2 rounded-full shadow-xl animate-in fade-in slide-in-from-top-2 duration-300">
                 <span className="text-[10px] font-bold text-blue-600 px-1 uppercase tracking-wider">
@@ -2783,26 +3188,50 @@ const PlotWrapper: React.FC<Props> = ({
                 </Tooltip>
               )}
 
-              {/* Background Correction (LinePlots and Heatmaps) */}
-              {true /* Always show if in sidebar for relevant types */ && (
-                <Tooltip content="Background Correction" position="left">
+              {/* LineCut (Heatmaps only) */}
+              {isHeatmapPlot && (
+                <Tooltip content="LineCut" position="left">
                   <button
-                    onClick={handleBGCorrToggle}
+                    onClick={() => {
+                      const next = !isLineCutActive;
+                      setIsLineCutActive(next);
+                      if (next) {
+                        setLineCutPreviewJson(null);
+                        // Auto-expand if needed or just notify user
+                        if (!isMaximized) {
+                          setIsMaximized(true);
+                        }
+                        showToast(
+                          "LineCut active. Hover + X / Y keys.",
+                          "info",
+                        );
+                        // Trigger a potential resize event to parent if we want 100% width
+                        try {
+                          window.dispatchEvent(
+                            new CustomEvent("plot-size-preset", {
+                              detail: { id: plotConfig?.id, percent: 100 },
+                            }),
+                          );
+                        } catch {
+                          // ignore resize dispatch errors
+                        }
+                      }
+                    }}
                     className={`relative p-1.5 rounded transition-colors duration-150 ${
-                      isBGCorrActive
+                      isLineCutActive
                         ? "bg-blue-100 text-blue-600 border border-blue-600"
                         : "hover:bg-gray-200"
                     }`}
-                    title="BG Correction (interactive)"
+                    title="Generate line slices (X/Y keys)"
                     disabled={isApplyingFilters}
                   >
-                    <Crosshair
+                    <Split
                       size={16}
                       className={
-                        isBGCorrActive ? "text-blue-600" : "text-gray-600"
+                        isLineCutActive ? "text-blue-600" : "text-gray-600"
                       }
                     />
-                    {isBGCorrActive && (
+                    {isLineCutActive && (
                       <span className="absolute -top-1 -right-1 flex h-2 w-2">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
@@ -2811,6 +3240,33 @@ const PlotWrapper: React.FC<Props> = ({
                   </button>
                 </Tooltip>
               )}
+
+              {/* Background Correction (LinePlots and Heatmaps) */}
+              <Tooltip content="Background Correction" position="left">
+                <button
+                  onClick={handleBGCorrToggle}
+                  className={`relative p-1.5 rounded transition-colors duration-150 ${
+                    isBGCorrActive
+                      ? "bg-blue-100 text-blue-600 border border-blue-600"
+                      : "hover:bg-gray-200"
+                  }`}
+                  title="BG Correction (interactive)"
+                  disabled={isApplyingFilters}
+                >
+                  <Crosshair
+                    size={16}
+                    className={
+                      isBGCorrActive ? "text-blue-600" : "text-gray-600"
+                    }
+                  />
+                  {isBGCorrActive && (
+                    <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                    </span>
+                  )}
+                </button>
+              </Tooltip>
 
               {/* Maximize */}
               <Tooltip content="Maximize" position="left">
@@ -2848,6 +3304,24 @@ const PlotWrapper: React.FC<Props> = ({
         currentFilters={appliedFilters}
         currentSliders={sliderConfig}
         availableSliders={availableSliders}
+        onRequestBGCorr={(mode) => {
+          handleFiltersModalClose();
+          setIsBGCorrActive(true);
+          setBgCorrPoints([]);
+          setBgCorrMode(mode as any);
+          setIs3DMode(false);
+          // Focus the plot container so user can immediately interact
+          setTimeout(() => {
+            plotContainerRef.current?.focus();
+          }, 50);
+
+          if (!isMaximized) setIsMaximized(true);
+
+          const msg = isHeatmapPlot
+            ? `Heatmap BG Corr active (${mode}). Click plot to select points.`
+            : `BG Corr active (${mode}): Click points on the plot.`;
+          showToast(msg, "info");
+        }}
       />
     </>
   );

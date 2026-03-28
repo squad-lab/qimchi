@@ -50,6 +50,7 @@ interface FiltersModalProps {
   currentFilters: AppliedFilter[];
   currentSliders?: Record<string, SliderConfig>;
   availableSliders?: Record<string, SliderConfig>;
+  onRequestBGCorr?: (mode: string) => void;
 }
 
 // Filter categories and their available filters
@@ -61,7 +62,8 @@ const FILTER_CATEGORIES = {
     "normalize",
     "log_scale",
     "polyfit",
-    "bg_corr",
+    "bg_corr_constant",
+    "bg_corr_linear",
   ],
   "2d": [
     "flip",
@@ -73,7 +75,10 @@ const FILTER_CATEGORIES = {
     "log_corr",
     "sig_corr",
     "rescale_intensity",
-    "bg_corr",
+    "bg_corr_constant",
+    "bg_corr_row_mean",
+    "bg_corr_col_mean",
+    "bg_corr_plane",
     "log_scale",
     "rotate",
   ],
@@ -153,11 +158,30 @@ const FILTER_DEFINITIONS = {
     icon: FlipHorizontal,
     description: "Invert the color scale by multiplying Z-axis data by -1",
   },
-  bg_corr: {
-    name: "Background Correction",
+  bg_corr_constant: {
+    name: "BG Correction (Constant)",
     icon: Crosshair,
-    description:
-      "Subtract a constant offset, linear baseline, or plane (heatmaps) from the data",
+    description: "Subtract a constant offset baseline",
+  },
+  bg_corr_linear: {
+    name: "BG Correction (Linear)",
+    icon: Crosshair,
+    description: "Subtract a linear baseline",
+  },
+  bg_corr_row_mean: {
+    name: "BG Correction (Row Mean)",
+    icon: Crosshair,
+    description: "Subtract the mean of a selected row",
+  },
+  bg_corr_col_mean: {
+    name: "BG Correction (Col Mean)",
+    icon: Crosshair,
+    description: "Subtract the mean of a selected column",
+  },
+  bg_corr_plane: {
+    name: "BG Correction (Plane)",
+    icon: Crosshair,
+    description: "Subtract a plane defined by 3 points",
   },
 };
 
@@ -213,9 +237,29 @@ const DEFAULT_FILTER_OPTIONS = {
     enabled: false,
     angle: 0,
   },
-  bg_corr: {
+  bg_corr_constant: {
     enabled: false,
     mode: "constant",
+    points: [],
+  },
+  bg_corr_linear: {
+    enabled: false,
+    mode: "linear",
+    points: [],
+  },
+  bg_corr_row_mean: {
+    enabled: false,
+    mode: "row_mean",
+    points: [],
+  },
+  bg_corr_col_mean: {
+    enabled: false,
+    mode: "col_mean",
+    points: [],
+  },
+  bg_corr_plane: {
+    enabled: false,
+    mode: "plane",
     points: [],
   },
 };
@@ -238,6 +282,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   currentFilters,
   currentSliders = {},
   availableSliders = {},
+  onRequestBGCorr,
 }) => {
   const [localFilterSettings, setLocalFilterSettings] =
     useState<FilterSettings>({});
@@ -1804,21 +1849,27 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                       )}
 
                       {/* Background Correction options */}
-                      {activeTab === "bg_corr" && (
+                      {activeTab.startsWith("bg_corr_") && (
                         <div className="space-y-4">
-                          <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 italic text-sm text-blue-800 flex items-start gap-2">
-                            <Info size={16} className="mt-0.5 flex-shrink-0" />
-                            <span>
-                              Use the target button on the plot sidebar for
-                              interactive selection.
-                            </span>
+                          <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 flex flex-col items-start gap-3">
+                            <button
+                              onClick={() =>
+                                onRequestBGCorr?.(
+                                  activeTab.replace("bg_corr_", ""),
+                                )
+                              }
+                              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-1.5 px-3 rounded shadow-sm transition-colors flex items-center gap-2"
+                            >
+                              <Crosshair size={14} />
+                              Pick Points on Plot
+                            </button>
                           </div>
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">
                               Correction Mode
                             </label>
                             <div className="text-sm font-mono bg-gray-100 px-2 py-1 rounded inline-block uppercase text-blue-600 font-bold">
-                              {(filterConfig as any).mode || "constant"}
+                              {activeTab.replace("bg_corr_", "")}
                             </div>
                           </div>
                           <div>

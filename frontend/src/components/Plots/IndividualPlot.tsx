@@ -36,6 +36,7 @@ const inferSourceFromPath = (path: string): "memory" | "disk" => {
 interface IndividualPlotProps {
   config: PlotConfiguration;
   onRemove: (id: string) => void;
+  onAddPlot?: (config: Omit<PlotConfiguration, "id">) => void;
 }
 
 type PlotLiveStatus = "live" | "paused" | "error" | "completed";
@@ -43,6 +44,7 @@ type PlotLiveStatus = "live" | "paused" | "error" | "completed";
 const IndividualPlot: React.FC<IndividualPlotProps> = ({
   config,
   onRemove,
+  onAddPlot,
 }) => {
   const [plotJson, setPlotJson] = useState<PlotlyJSON | null>(null);
   const [plotRef, setPlotRef] = useState<string | undefined>(undefined);
@@ -210,12 +212,18 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
           const errorMsg = response.message || "No plots created";
           setError(errorMsg);
           if (!options.silent) {
-            showToast(`Failed to create plot: ${errorMsg}`, "error", 5000, "Plotter", {
-              dataset: plotConfig.fpath,
-              type: plotConfig.plotType,
-              vars: { indeps: plotConfig.indeps, deps: plotConfig.deps },
-              backend_error: errorMsg
-            });
+            showToast(
+              `Failed to create plot: ${errorMsg}`,
+              "error",
+              5000,
+              "Plotter",
+              {
+                dataset: plotConfig.fpath,
+                type: plotConfig.plotType,
+                vars: { indeps: plotConfig.indeps, deps: plotConfig.deps },
+                backend_error: errorMsg,
+              },
+            );
           }
         }
       } catch (err) {
@@ -487,6 +495,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         onUpdateConfig={handleConfigUpdate}
         onFiltersModalOpenChange={setIsFiltersModalOpen}
         availableSliders={availableSliders}
+        onAddPlot={onAddPlot}
       />
     </div>
   );

@@ -1094,7 +1094,10 @@ class BackgroundCorrection(Filter):
             logger.error(f"Unknown background correction mode: {self.mode}")
             return
 
-        self.new_fig.update_layout(yaxis=dict(title=dict(text=f"Corr {self.y_label}")))
+        new_label = (
+            f"Filt. {self.y_label}" if "Filt." not in self.y_label else self.y_label
+        )
+        self.new_fig.update_layout(yaxis=dict(title=dict(text=new_label)))
 
     def apply_2d(self):
         """
@@ -1116,7 +1119,7 @@ class BackgroundCorrection(Filter):
             baseline = self.points[0].get("z", 0)
             logger.debug(f"Applying 2D constant BG subtraction: {baseline}")
             z_data = z_data - baseline
-            self._update_title("BG(C)")
+            fil_name = "BG(C)"
 
         elif self.mode == "row_mean":
             # Assume points[0] has 'y' or 'row' index
@@ -1126,11 +1129,10 @@ class BackgroundCorrection(Filter):
                 # Fallback: try to find index from y-value
                 y_val = self.points[0].get("y")
                 row_idx = np.abs(self.y_axis - y_val).argmin()
-
             logger.debug(f"Applying 2D row mean BG subtraction for row: {row_idx}")
             row_mean = np.nanmean(z_data[row_idx, :])
             z_data = z_data - row_mean
-            self._update_title("BG(RM)")
+            fil_name = "BG(RM)"
 
         elif self.mode == "col_mean":
             # Assume points[0] has 'x' or 'col' index
@@ -1138,13 +1140,12 @@ class BackgroundCorrection(Filter):
             if col_idx is None:
                 x_val = self.points[0].get("x")
                 col_idx = np.abs(self.x_axis - x_val).argmin()
-
             logger.debug(
                 f"Applying 2D column mean BG subtraction for column: {col_idx}"
             )
             col_mean = np.nanmean(z_data[:, col_idx])
             z_data = z_data - col_mean
-            self._update_title("BG(CM)")
+            fil_name = "BG(CM)"
 
         elif self.mode == "plane":
             if len(self.points) < 3:
@@ -1170,25 +1171,17 @@ class BackgroundCorrection(Filter):
                 X, Y = np.meshgrid(self.x_axis, self.y_axis)
                 plane = A * X + B * Y + C
                 z_data = z_data - plane
-                self._update_title("BG(P)")
+                fil_name = "BG(P)"
             except np.linalg.LinAlgError:
                 logger.error(
                     "Background Correction 2D: Points are collinear, cannot fit plane."
                 )
                 return
-
         else:
             logger.error(f"Unknown 2D background correction mode: {self.mode}")
             return
 
-        # Update the figure data
-        self.new_fig.data[0].z = z_data
-        # Reset coloraxis auto-range
-        if "coloraxis" in self.new_fig.layout:
-            self.new_fig.layout.coloraxis.cauto = True
-        self.new_fig.update_layout(
-            coloraxis=dict(colorbar=dict(title=dict(text=f"Corr {self.z_label}")))
-        )
+        self._hmap_update(z_data, fil_name)
 
 
 class RotateHeatMap(Filter):
@@ -1374,10 +1367,17 @@ def apply_filters(
                 filt_obj = PolyFit(fig_tmp, fig_num_axes, opts)
                 filt_fig = filt_obj.apply()
 
-            case "bg_corr":
+            case (
+                "bg_corr_constant"
+                | "bg_corr_linear"
+                | "bg_corr_row_mean"
+                | "bg_corr_col_mean"
+                | "bg_corr_plane"
+            ):
                 logger.debug(
-                    "apply_filters | Applying `Background Correction` filter..."
+                    f"apply_filters | Applying `Background Correction` filter ({fil})..."
                 )
+                opts["mode"] = fil.replace("bg_corr_", "")
                 filt_obj = BackgroundCorrection(fig_tmp, fig_num_axes, opts)
                 filt_fig = filt_obj.apply()
 

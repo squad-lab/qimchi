@@ -13,12 +13,14 @@ interface PlotContainerProps {
   widthPercent?: number;
   // Optional per-plot overrides keyed by plot id
   perPlotWidthMap?: Record<string, number>;
+  onAddPlot?: (config: Omit<PlotConfiguration, "id">) => void;
 }
 
 const PlotContainer: React.FC<PlotContainerProps> = ({
   plotConfigs,
   className = "",
   onRemovePlot,
+  onAddPlot,
   widthPercent,
   perPlotWidthMap,
 }) => {
@@ -83,7 +85,11 @@ const PlotContainer: React.FC<PlotContainerProps> = ({
                 boxSizing: "border-box",
               }}
             >
-              <IndividualPlot config={config} onRemove={onRemovePlot} />
+              <IndividualPlot
+                config={config}
+                onRemove={onRemovePlot}
+                onAddPlot={onAddPlot}
+              />
             </div>
           );
         })}

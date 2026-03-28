@@ -481,11 +481,17 @@ const Viewer = ({
     }
 
     if (selectedDatasetIds.size === 0) {
-      showToast("Select at least one dataset in Basket before plotting.", "warning");
+      showToast(
+        "Select at least one dataset in Basket before plotting.",
+        "warning",
+      );
       return;
     }
 
-    const currentlySelected = getSelectedDatasets(basketItems, selectedDatasetIds);
+    const currentlySelected = getSelectedDatasets(
+      basketItems,
+      selectedDatasetIds,
+    );
     if (currentlySelected.length === 0) {
       showToast("No selected datasets are available for plotting.", "error");
       return;
@@ -821,6 +827,7 @@ const Viewer = ({
                   <PlotContainer
                     plotConfigs={plotConfigs}
                     onRemovePlot={removePlot}
+                    onAddPlot={addPlot}
                     widthPercent={plotWidthPercent}
                     perPlotWidthMap={perPlotWidthMap}
                   />

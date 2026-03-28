@@ -35,10 +35,11 @@ type Props = {
   customization?: CustomizationProps;
   onRelayout?: (relayoutData: Record<string, unknown>) => void;
   onClick?: (event: Plotly.PlotMouseEvent) => void;
+  onHover?: (event: Plotly.PlotMouseEvent) => void;
 };
 
 const PlotComponent: React.FC<Props> = React.memo(
-  ({ plotJson, onRelayout, onClick }) => {
+  ({ plotJson, onRelayout, onClick, onHover }) => {
     // Defer plot JSON updates to reduce flickering during rapid appearance changes
     const deferredPlotJson = useDeferredValue(plotJson);
 
@@ -60,6 +61,12 @@ const PlotComponent: React.FC<Props> = React.memo(
     const onClickRef = useRef(onClick);
     onClickRef.current = onClick;
     const clickListenerRef = useRef<
+      ((event: Plotly.PlotMouseEvent) => void) | null
+    >(null);
+
+    const onHoverRef = useRef(onHover);
+    onHoverRef.current = onHover;
+    const hoverListenerRef = useRef<
       ((event: Plotly.PlotMouseEvent) => void) | null
     >(null);
 
@@ -244,6 +251,18 @@ const PlotComponent: React.FC<Props> = React.memo(
           }
         }
 
+        // Attach the plotly_hover listener
+        if (!hoverListenerRef.current) {
+          const plotEl = plotRef.current as any;
+          if (typeof plotEl.on === "function") {
+            const handler = (event: Plotly.PlotMouseEvent) => {
+              onHoverRef.current?.(event);
+            };
+            hoverListenerRef.current = handler;
+            plotEl.on("plotly_hover", handler);
+          }
+        }
+
         return true;
       } catch (error) {
         console.error("[Plot] Error updating plot:", error);
@@ -285,6 +304,14 @@ const PlotComponent: React.FC<Props> = React.memo(
         ) {
           plotEl.off("plotly_click", clickListenerRef.current);
           clickListenerRef.current = null;
+        }
+        if (
+          plotEl &&
+          hoverListenerRef.current &&
+          typeof plotEl.off === "function"
+        ) {
+          plotEl.off("plotly_hover", hoverListenerRef.current);
+          hoverListenerRef.current = null;
         }
       };
     }, []);
@@ -438,7 +465,16 @@ const plotPropsAreEqual = (prevProps: Props, nextProps: Props): boolean => {
     return false;
   }
 
-  // Don't compare onRelayout callback - it's a function that may be recreated
+  // Check callback references so PlotComponent updates its refs when mode changes (LineCut, BGCorr)
+  if (
+    prevProps.onHover !== nextProps.onHover ||
+    prevProps.onClick !== nextProps.onClick
+  ) {
+    return false;
+  }
+
+  // Don't compare onRelayout callback - it's a function that may be recreated continuously
+  // causing unwanted heavy re-renders.
   return true;
 };
 
