@@ -26,17 +26,16 @@ command_exists() {
 }
 
 install_fd() {
-    if command_exists fd || command_exists fdfind; then
+    if command_exists fd; then
         echo "fd is already installed."
         return
     fi
-    echo "fd-find not found. Installing..."
+    echo "fd not found. Installing..."
     if command_exists brew; then
         brew install fd
     elif command_exists apt-get; then
         sudo apt-get update
         sudo apt-get install -y fd-find
-        ln -sf "$(command -v fdfind)" "$HOME/.local/bin/fd" || true
     elif command_exists pacman; then
         sudo pacman -S --noconfirm fd
     else
@@ -98,7 +97,7 @@ install_uv() {
 }
 
 # ----------------------------------------
-# Step 1: Install dependencies
+# Install dependencies
 # ----------------------------------------
 echo "============================================"
 echo "Step 1: Installing dependencies"
@@ -109,115 +108,148 @@ install_node
 install_fd
 
 # ----------------------------------------
-# Helper: Pick branch from remote
-# ----------------------------------------
-pick_branch() {
-    local repo_url=$1
-    local default_branch=$2
-    local repo_tmp_dir=$3
-    local name=$4
-
-    mkdir -p "$repo_tmp_dir"
-    cd "$repo_tmp_dir"
-
-    # Fetch branch list
-    if [ ! -d "$repo_tmp_dir/.git" ]; then
-        git init >/dev/null 2>&1
-        git remote add origin "$repo_url"
-    fi
-    git fetch --all --tags >/dev/null 2>&1
-
-    mapfile -t branches < <(git ls-remote --heads origin | awk '{print $2}' | sed 's|refs/heads/||')
-    echo ""
-    echo "Available $name branches:"
-    local i=1
-    for b in "${branches[@]}"; do
-        echo "  [$i] $b"
-        ((i++))
-    done
-
-    read -p "Pick a number for $name branch (default: $default_branch): " choice
-    if [[ -z "$choice" ]]; then
-        echo "$default_branch"
-        rm -rf "$repo_tmp_dir"
-        return
-    fi
-
-    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#branches[@]}" ]; then
-        echo "Invalid choice, using default branch $default_branch"
-        rm -rf "$repo_tmp_dir"
-        echo "$default_branch"
-        return
-    fi
-    local selected_branch="${branches[$((choice-1))]}"
-    rm -rf "$repo_tmp_dir"
-    echo "$selected_branch"
-}
-
-# ----------------------------------------
-# Step 2: Choose branches interactively
-# ----------------------------------------
-QIMCHI_BRANCH=$(pick_branch "$QIMCHI_REPO" "$DEFAULT_QIMCHI_BRANCH" "$QIMCHI_DIR/qimchi-tmp" "QIMCHI")
-QCUTILS_BRANCH=$(pick_branch "$QCUTILS_REPO" "$DEFAULT_QCUTILS_BRANCH" "$QIMCHI_DIR/qcutils-tmp" "QCUtils")
-
-# ----------------------------------------
-# Step 3: Clone or update QIMCHI
+# Clone or update QIMCHI
 # ----------------------------------------
 echo "============================================"
-echo "Step 3: Setting up QIMCHI (branch: $QIMCHI_BRANCH)"
+echo "Step 2: Setting up QIMCHI"
 echo "============================================"
-cd "$QIMCHI_DIR"
-if [ ! -d "$QIMCHI_DIR/qimchi" ]; then
-    git clone --branch "$QIMCHI_BRANCH" "$QIMCHI_REPO" qimchi
+
+QIMCHI_TARGET="$QIMCHI_DIR/qimchi"
+
+if [ ! -d "$QIMCHI_TARGET/.git" ]; then
+    echo "QIMCHI repository not found. Cloning..."
+    git clone "$QIMCHI_REPO" "$QIMCHI_TARGET"
+fi
+
+cd "$QIMCHI_TARGET" || exit 1
+
+# Fetch all remote branches
+echo "Fetching all remote branches..."
+git fetch origin --prune
+
+# List remote branches
+remote_branches=($(git ls-remote --heads origin | awk '{print $2}' | sed 's|refs/heads/||'))
+default_branch="$DEFAULT_QIMCHI_BRANCH"
+
+# Move default branch to front if exists
+for i in "${!remote_branches[@]}"; do
+    if [ "${remote_branches[$i]}" = "$default_branch" ]; then
+        remote_branches=("$default_branch" "${remote_branches[@]:0:$i}" "${remote_branches[@]:$((i+1))}")
+        break
+    fi
+done
+
+# Print menu
+echo "Available QIMCHI branches:"
+for i in "${!remote_branches[@]}"; do
+    printf "%d) %s\n" $((i+1)) "${remote_branches[$i]}"
+done
+
+# Prompt user
+read -p "Pick a number for QIMCHI branch (default: 1): " branch_choice < /dev/tty
+branch_choice=${branch_choice:-1}
+QIMCHI_BRANCH="${remote_branches[$((branch_choice-1))]}"
+
+# Ensure remote branch exists locally
+if git show-ref --verify --quiet "refs/remotes/origin/$QIMCHI_BRANCH"; then
+    if git show-ref --verify --quiet "refs/heads/$QIMCHI_BRANCH"; then
+        git checkout "$QIMCHI_BRANCH"
+    else
+        git checkout -b "$QIMCHI_BRANCH" "origin/$QIMCHI_BRANCH"
+    fi
+    git reset --hard "origin/$QIMCHI_BRANCH"
 else
-    cd "$QIMCHI_DIR/qimchi"
-    git fetch origin
-    git checkout "$QIMCHI_BRANCH"
-    git reset --hard origin/"$QIMCHI_BRANCH"
+    echo "Available remote branches:"
+    echo "Error: remote branch origin/$QIMCHI_BRANCH not found!"
+    exit 1
 fi
 
 # ----------------------------------------
-# Step 4: Clone or update QCUtils
+# Clone or update QCUtils
 # ----------------------------------------
 echo "============================================"
-echo "Step 4: Setting up QCUtils (branch: $QCUTILS_BRANCH)"
+echo "Step 2.5: Setting up QCUtils"
 echo "============================================"
-cd "$QIMCHI_DIR"
-if [ ! -d "$QCUTILS_DIR" ]; then
-    git clone --branch "$QCUTILS_BRANCH" "$QCUTILS_REPO" qcutils
-else
-    cd "$QCUTILS_DIR"
-    git fetch origin
+
+QCUTILS_TARGET="$QCUTILS_DIR"
+if [ ! -d "$QCUTILS_TARGET/.git" ]; then
+    git clone "$QCUTILS_REPO" "$QCUTILS_TARGET"
+fi
+
+cd "$QCUTILS_TARGET" || exit 1
+echo "Fetching all remote branches..."
+git fetch --all --prune
+
+remote_branches=()
+for branch in $(git ls-remote --heads origin | awk '{print $2}' | sed 's|refs/heads/||'); do
+    remote_branches+=("$branch")
+done
+
+# Ensure default branch first
+default_branch="$DEFAULT_QCUTILS_BRANCH"
+found_default=0
+for i in "${!remote_branches[@]}"; do
+    if [ "${remote_branches[$i]}" = "$default_branch" ]; then
+        found_default=1
+        remote_branches=("$default_branch" "${remote_branches[@]:0:$i}" "${remote_branches[@]:$((i+1))}")
+        break
+    fi
+done
+if [ $found_default -eq 0 ]; then
+    default_branch="${remote_branches[0]}"
+fi
+
+# Print menu
+echo "Available QCUtils branches:"
+for i in "${!remote_branches[@]}"; do
+    printf "%d) %s\n" $((i+1)) "${remote_branches[$i]}"
+done
+
+# Prompt user
+read -p "Pick a number for QCUtils branch (default: 1): " branch_choice < /dev/tty
+branch_choice=${branch_choice:-1}
+QCUTILS_BRANCH="${remote_branches[$((branch_choice-1))]}"
+
+echo "Checking out branch $QCUTILS_BRANCH ..."
+if git show-ref --verify --quiet "refs/heads/$QCUTILS_BRANCH"; then
     git checkout "$QCUTILS_BRANCH"
-    git reset --hard origin/"$QCUTILS_BRANCH"
+    git reset --hard "origin/$QCUTILS_BRANCH"
+else
+    git checkout -B "$QCUTILS_BRANCH" "origin/$QCUTILS_BRANCH"
 fi
 
 # ----------------------------------------
-# Step 5: Setup Python venv and install backend
+# Setup Python venv and install backend
 # ----------------------------------------
 echo "============================================"
-echo "Step 5: Setting up backend"
+echo "Step 3: Setting up backend"
 echo "============================================"
 cd "$QIMCHI_DIR/qimchi"
-uv venv --python 3.13 --seed --clear
+
+# Create venv in $VENV_DIR
+uv venv --python 3.13 --seed --clear "$VENV_DIR"
+
+# Activate it
 source "$VENV_DIR/bin/activate"
 
 cd "$QIMCHI_DIR/qimchi/backend"
 uv pip install .
+
+# Install QCUtils inside backend venv
 uv pip install "$QCUTILS_DIR"
 
 # ----------------------------------------
-# Step 6: Setup frontend
+# Setup frontend
 # ----------------------------------------
 echo "============================================"
-echo "Step 6: Setting up frontend"
+echo "Step 4: Setting up frontend"
 echo "============================================"
 cd "$QIMCHI_DIR/qimchi/frontend"
 npm install
 npm run build
 
 # ----------------------------------------
-# Step 7: Create CLI wrapper
+# Create CLI wrapper
 # ----------------------------------------
 cat > "$CLI_PATH" << EOF
 #!/usr/bin/env bash
@@ -231,17 +263,22 @@ uvicorn main:app --host 127.0.0.1 --port \$PORT --workers 8 --ws-max-size 200000
 EOF
 
 chmod +x "$CLI_PATH"
+echo "CLI created at $CLI_PATH"
+
+# Add to PATH in shell rc files
+for shell_rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+    if [ -f "$shell_rc" ] && ! grep -q "$BIN_DIR" "$shell_rc"; then
+        echo "export PATH=\"$BIN_DIR:\$PATH\"" >> "$shell_rc"
+    fi
+done
 
 # ----------------------------------------
-# Step 8: Remind user to update PATH
+# Final message
 # ----------------------------------------
-echo ""
 echo "============================================"
-echo "Installation complete"
-echo ""
+echo "Installation complete!"
 echo "Restart your shell or run:"
-echo "export PATH=\"$BIN_DIR:\$PATH\""
-echo ""
+echo "  export PATH=\"$BIN_DIR:\$PATH\""
 echo "Then run: qimchi"
 echo "Server will be available at: http://127.0.0.1:$PORT"
 echo "============================================"
