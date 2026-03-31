@@ -38,10 +38,25 @@ Download the latest `qimchi.exe` from the [Releases page](https://gitlab.com/squ
 
 Simply double-click `qimchi.exe` and follow the prompts. The web interface will be available at http://localhost:8001.
 
-### Linux/macOS: Docker Installation
+### Linux/macOS
 
 > [!tip]
 > Recommended for Linux and macOS users.
+
+Run the following command in your terminal:
+
+```bash
+bash -c "$(curl -fsSL https://gitlab.com/squad-lab/qimchi/-/raw/main/qimchi-install.sh)"
+```
+
+After installation, either restart your shell, or run:
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Then simply start qimchi with `qimchi`. The web interface will be available at http://localhost:8001.
+
+### Docker Installation
 
 Docker provides a containerized environment that isolates Qimchi from your local system, ensuring a smooth setup with all required dependencies, and avoiding potential conflicts with other software.
 
