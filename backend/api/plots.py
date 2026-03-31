@@ -16,15 +16,12 @@ from .figures import Line, HeatMap, DEFAULT_THEME
 from .filters import apply_filters
 from .models import PlotRequest, PlotResponse
 from .logger import logger
-from .live_utils import resolve_live_dataset
+from .data_loader import MEMORY_PROTOCOL, load_dataset_sync, resolve_to_disk_path
 from .json_utils import sanitize_for_json
-from . import live_client
 
 
 # FastAPI router for plot endpoints
 router = APIRouter()
-
-MEMORY_PROTOCOL = "memory://"
 
 # Runtime plot context registry used by unified transform endpoint.
 _PLOT_CONTEXTS: Dict[str, Dict] = {}
@@ -47,6 +44,41 @@ def get_plot_context(plot_ref: str) -> Dict | None:
     return _PLOT_CONTEXTS.get(plot_ref)
 
 
+def _resolve_context_fpath(
+    request_fpath: str, dataset: xr.Dataset, is_live: bool
+) -> str:
+    """
+    Resolve the canonical dataset reference for plot context/transform.
+
+    Important for sqlite/qcodes references like `<db>#run_id=<n>`:
+    we must preserve the fragment so transform/filter stays on the same run.
+
+    Args:
+        request_fpath (str): The original dataset reference from the plot request
+        dataset (xr.Dataset): The loaded dataset, which may have attributes indicating source paths
+        is_live (bool): Whether this dataset is from a live measurement (memory://)
+
+    Returns:
+        str: The resolved dataset reference to use in plot context and transforms
+
+    """
+    if is_live:
+        return request_fpath
+
+    source_ref = str(dataset.attrs.get("path") or request_fpath)
+    actual_path = str(dataset.attrs.get("actual_path") or "")
+
+    # Ended live datasets may arrive as memory:// with a disk fallback.
+    if source_ref.startswith(MEMORY_PROTOCOL) and actual_path:
+        return actual_path
+
+    # Keep explicit reference fragments (e.g. sqlite#run_id=...) intact.
+    if "#" in source_ref:
+        return source_ref
+
+    return source_ref or actual_path or request_fpath
+
+
 def _validate_paths(fpaths: List[str]) -> bool:
     """
     Helper function to validate that all paths exist and are accessible.
@@ -62,11 +94,15 @@ def _validate_paths(fpaths: List[str]) -> bool:
         if fpath.startswith(MEMORY_PROTOCOL):
             # Memory-backed paths are validated at load time.
             continue
-        path = Path(fpath)
-        if not path.exists() or not path.is_dir():
+        try:
+            # Supports reference-style paths like sqlite#run_id=...
+            disk_path = resolve_to_disk_path(fpath)
+        except Exception:
             return False
-        # Check if it's a valid zarr dataset
-        if not (path.name.endswith(".zarr") or (path / ".zarray").exists()):
+        path = Path(disk_path)
+        if not path.exists():
+            return False
+        if not (path.is_dir() or path.is_file()):
             return False
 
     return True
@@ -90,105 +126,19 @@ def _validate_plot_type(plot_type: str) -> bool:
 
 def load_dataset(fpath: str) -> xr.Dataset:
     """
-    Loads a zarr dataset from the given path.
+    Load dataset via centralized data_loader module.
 
     Args:
-        fpath (str): The file path to the zarr dataset.
+        fpath (str): Dataset reference path.
 
     Returns:
         xr.Dataset: The loaded dataset.
 
     """
-    if fpath.startswith(MEMORY_PROTOCOL):
-        measurement_id = fpath[len(MEMORY_PROTOCOL) :]
-
-        # Get WebSocket URL and disk path from database
-        info = resolve_live_dataset(measurement_id)
-        ws_url = info.get("ws_url")
-        disk_path = info.get("disk_path")
-        live_status = info.get("live_status")
-        ended_at = info.get("ended_at")
-
-        # Try WebSocket first for in-memory access
-        if ws_url:
-            try:
-                dataset = live_client.open_live_dataset_sync(
-                    measurement_id, ws_url=ws_url
-                )
-                dataset.attrs["path"] = fpath
-                dataset.attrs.setdefault("measurement_id", measurement_id)
-                dataset.attrs["loaded_from"] = "memory"
-                dataset.attrs["measurement_live_status"] = live_status
-                dataset.attrs["measurement_ended_at"] = ended_at
-                logger.info(
-                    f"Loaded live dataset '{measurement_id}' via WebSocket from memory"
-                )
-                return dataset
-            except Exception as e:
-                logger.info(
-                    f"WebSocket unavailable for '{measurement_id}': {e}, loading from disk..."
-                )
-        else:
-            logger.info(
-                f"No WebSocket URL for '{measurement_id}', loading from disk..."
-            )
-
-        # Fallback to disk path
-        if not disk_path:
-            # Try live_measurements as secondary fallback
-            from . import live_measurements
-
-            measurement_info = live_measurements.get_measurement_info(measurement_id)
-            if measurement_info and measurement_info.fpath:
-                disk_path = measurement_info.fpath
-                logger.info(f"Found disk path from live_measurements: {disk_path}")
-
-        if not disk_path:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Live dataset {measurement_id} has no disk path available",
-            )
-
-        # Load from disk
-        try:
-            logger.info(f"Loading dataset from disk: {disk_path}")
-            dataset = xr.open_zarr(disk_path)
-            dataset.attrs["path"] = fpath  # Keep memory:// path for consistency
-            dataset.attrs["actual_path"] = disk_path  # Store actual disk path
-            dataset.attrs["loaded_from"] = "disk"
-            dataset.attrs.setdefault("measurement_id", measurement_id)
-            dataset.attrs["measurement_live_status"] = live_status
-            dataset.attrs["measurement_ended_at"] = ended_at
-            if live_status is True:
-                logger.info(
-                    f"❕Loaded dataset '{measurement_id}' from disk fallback while measurement is still live"
-                )
-            elif live_status is False:
-                logger.info(
-                    f"❕Loaded dataset '{measurement_id}' from disk (measurement ended)"
-                )
-            else:
-                logger.info(
-                    f"❕Loaded dataset '{measurement_id}' from disk (live status unknown)"
-                )
-            return dataset
-        except Exception as e:
-            logger.error(
-                f"Failed to load dataset '{measurement_id}' from disk at {disk_path}: {e}"
-            )
-            raise HTTPException(
-                status_code=400,
-                detail=f"Failed to load dataset {measurement_id} from disk: {e}",
-            )
-
     try:
-        dataset = xr.open_zarr(fpath)
-        dataset.attrs["path"] = fpath
-        return dataset
-
+        return load_dataset_sync(fpath)
     except Exception as e:
         logger.error(f"Failed to load dataset from {fpath}: {e}")
-
         raise HTTPException(status_code=400, detail=f"Failed to load dataset: {e}")
 
 
@@ -397,9 +347,7 @@ def create_line_plots(
                 else:
                     is_live = False
 
-                context_fpath = (
-                    fpath if is_live else str(dataset.attrs.get("actual_path") or fpath)
-                )
+                context_fpath = _resolve_context_fpath(fpath, dataset, is_live)
                 dataset_name = Path(context_fpath).stem
 
                 context = {
@@ -526,9 +474,7 @@ def create_heat_maps(
                 else:
                     is_live = False
 
-                context_fpath = (
-                    fpath if is_live else str(dataset.attrs.get("actual_path") or fpath)
-                )
+                context_fpath = _resolve_context_fpath(fpath, dataset, is_live)
                 dataset_name = Path(context_fpath).stem
 
                 context = {

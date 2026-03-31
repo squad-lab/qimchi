@@ -74,3 +74,4 @@ xarray==2025.8.0
 zarr==3.1.1
 concurrent-log-handler==0.9.29
 portalocker==3.2.0
+polars==1.39.3

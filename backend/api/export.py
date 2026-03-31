@@ -20,7 +20,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse
 from plotly import graph_objects as go
 
-from . import live_measurements
+from .data_loader import resolve_to_disk_path
 from .notes import (
     _make_frontmatter,
     _measurement_notes_paths,
@@ -30,9 +30,6 @@ from .notes import (
 
 # Local imports
 from .logger import logger
-
-MEMORY_PROTOCOL = "memory://"
-
 
 router = APIRouter()
 
@@ -328,24 +325,10 @@ def _resolve_fpath_to_disk(fpath: str) -> str:
         ValueError: If memory:// path cannot be resolved to disk
 
     """
-    if fpath.startswith(MEMORY_PROTOCOL):
-        # Extract measurement ID from memory://
-        measurement_id = fpath[len(MEMORY_PROTOCOL) :]
-
-        # Query DB for disk path
-        info = live_measurements.get_measurement_info(measurement_id)
-        if not info or not info.fpath:
-            raise ValueError(
-                f"Cannot resolve memory path '{measurement_id}' to disk. "
-                f"Measurement not found in database or has no disk path."
-            )
-
-        disk_path = info.fpath
-        logger.info(f"Resolved memory://{measurement_id} to disk path: {disk_path}")
-        return disk_path
-
-    # Regular disk path, return as-is
-    return fpath
+    try:
+        return resolve_to_disk_path(fpath)
+    except Exception as exc:
+        raise ValueError(str(exc)) from exc
 
 
 # NOTE: Worker function must be module-level (picklable) for ProcessPoolExecutor on Windows

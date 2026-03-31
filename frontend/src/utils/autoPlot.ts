@@ -1,5 +1,6 @@
 import { BasketItem } from "../components/Basket";
 import type { PlotConfiguration, AppliedFilter } from "../components/interfaces";
+import { isDatasetPath, isMemoryPath } from "./datasetPaths";
 
 interface AutoPlotResult {
   success: boolean;
@@ -25,11 +26,10 @@ export function generateAutoPlotConfigs(
   sourceLineplotFilters?: AppliedFilter[]
 ): AutoPlotResult {
   try {
-    // Only process .zarr files (disk) or memory:// paths (live) with attributes
-    const isZarrFile = item.path.endsWith(".zarr");
-    const isMemoryPath = item.path.startsWith("memory://");
-    
-    if ((!isZarrFile && !isMemoryPath) || !item.attributes) {
+    // Only process supported dataset files (disk) or memory:// paths (live) with attributes
+    const isDatasetFile = isDatasetPath(item.path);
+
+    if (!isDatasetFile || !item.attributes) {
       return {
         success: false,
         message: "Item is not a valid measurement dataset",
@@ -52,7 +52,7 @@ export function generateAutoPlotConfigs(
     const plotConfigs: Omit<PlotConfiguration, "id">[] = [];
     
     // Determine source based on path type
-    const source = fpath.startsWith("memory://") ? "memory" : "disk";
+    const source = isMemoryPath(fpath) ? "memory" : "disk";
     const preferredSource = source;
 
     // Attempt to create HeatMap config if we have at least 2 indeps and 1 dep

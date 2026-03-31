@@ -9,7 +9,10 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 # Import the live_db module from qcutils
-from qcutils import live_db
+try:
+    from qcutils import live_db
+except Exception:  # pragma: no cover - depends on local environment
+    live_db = None
 
 
 logger = logging.getLogger(__name__)

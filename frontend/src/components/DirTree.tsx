@@ -39,6 +39,10 @@ import {
   FolderClosedIcon,
   FolderOpenIcon,
   DatabaseIcon,
+  FileArchive,
+  FileText,
+  HardDrive,
+  Table,
   SearchXIcon,
   Lightbulb,
   X,
@@ -59,8 +63,14 @@ import Tooltip from "./Tooltip";
 import { BasketItem } from "./Basket";
 import type { AttrData } from "./interfaces";
 import { useShortcut } from "../hooks/useGlobalShortcuts";
-
-
+import {
+  detectDatasetKind,
+  hasDatasetTag,
+  isSqliteContainerPath,
+  isDatasetNode,
+  isDatasetPath,
+  isZarrPath,
+} from "../utils/datasetPaths";
 
 // Global cache to persist data across component mounts/unmounts
 const globalDirTreeCache = new Map<
@@ -378,7 +388,6 @@ const DirTree = ({
                   autoAddedMeasurements.current.delete(id);
                 });
               }
-
               return result;
             });
           }
@@ -470,10 +479,8 @@ const DirTree = ({
     // Helper function to check if a node should be included based on filter
     const shouldIncludeNode = (node: TreeNode): boolean => {
       if (filterBy === "all") return true;
-      if (filterBy === "zarr") {
-        return (
-          node.name.endsWith(".zarr") || (node.tags?.includes("zarr") ?? false)
-        );
+      if (filterBy === "dataset" || filterBy === "zarr") {
+        return isDatasetPath(node.path) || hasDatasetTag(node.tags);
       }
       if (filterBy === "folder") {
         return node.type === "folder";
@@ -624,7 +631,6 @@ const DirTree = ({
       propMemoizationFeature, // For better memoization of props
     ],
   });
-
   // Force tree refresh when switching to/from chrono mode
   useEffect(() => {
     console.log("Sort mode changed to:", sortBy);
@@ -641,6 +647,7 @@ const DirTree = ({
 
     return () => clearTimeout(timeoutId);
   }, [sortBy, tree, updateDirTreeState]);
+
   // Auto-expand tree when new data is loaded
   useEffect(() => {
     if (rootNodes.length > 0) {
@@ -648,11 +655,6 @@ const DirTree = ({
       const timeoutId = setTimeout(() => {
         // Don't expand in chrono mode since we only have leaf nodes
         if (sortBy !== "chrono") {
-          // console.log(
-          //   "Auto-expanding tree with",
-          //   rootNodes.length,
-          //   "root nodes",
-          // );
           // Force a collapse/expand cycle to ensure tree shows items
           tree.collapseAll();
           setTimeout(() => {
@@ -668,6 +670,10 @@ const DirTree = ({
       return () => clearTimeout(timeoutId);
     }
   }, [rootNodes, tree, sortBy, updateDirTreeState]);
+  const updateExpandedNodeState = useCallback(
+    (_nodeId: string, _nextExpanded: boolean) => {},
+    [],
+  );
 
   const handleSort = (newSortBy: typeof sortBy) => {
     if (sortBy === newSortBy) {
@@ -711,10 +717,10 @@ const DirTree = ({
           // For files, add them directly
           validItemsToDrag.push(item);
         } else if (item.type === "folder") {
-          // For folders, add all direct children that are dataset files (.zarr)
+          // For folders, add all direct children that are dataset files.
           const folderChildren = item.children || [];
-          const datasetChildren = folderChildren.filter(
-            (child) => child.type === "file" && child.path.endsWith(".zarr"),
+          const datasetChildren = folderChildren.filter((child) =>
+            isDatasetNode(child),
           );
           validItemsToDrag.push(...datasetChildren);
         }
@@ -760,7 +766,22 @@ const DirTree = ({
     console.log("Double clicked node:", node.id);
 
     if (node.type === "folder") {
+      const isQcodesDateFolder =
+        node.tags?.includes("qcodes-date") === true ||
+        node.path.includes("#date=");
+      if (isQcodesDateFolder) {
+        // Virtual date folders inside sqlite/qcodes trees are only for visual grouping.
+        // They should not mutate the explorer path.
+        return;
+      }
       // For folders, navigate to that path
+      onPathChange?.(node.path);
+      return;
+    }
+
+    const isSqliteRootNode = isSqliteContainerPath(node.path);
+    if (isSqliteRootNode) {
+      // Open sqlite contents as a virtual folder view.
       onPathChange?.(node.path);
       return;
     }
@@ -884,61 +905,62 @@ const DirTree = ({
   // Check if cycling through datasets is enabled
   const isCyclingEnabled = (): boolean => {
     // Only enable if there's exactly one dataset in basket and onCycleDataset is provided
-    const zarrItems = basketItems.filter(
-      (item) => item.type === "file" && item.path.endsWith(".zarr"),
+    const datasetItems = basketItems.filter(
+      (item) => item.type === "file" && isDatasetPath(item.path),
     );
-    return zarrItems.length === 1 && !!onCycleDataset;
+    return datasetItems.length === 1 && !!onCycleDataset;
   };
 
   // Get the current dataset index in the processed data
   const getCurrentDatasetIndex = (): number => {
     if (!isCyclingEnabled()) return -1;
 
-    const zarrItem = basketItems.find(
-      (item) => item.type === "file" && item.path.endsWith(".zarr"),
+    const datasetItem = basketItems.find(
+      (item) => item.type === "file" && isDatasetPath(item.path),
     );
-    if (!zarrItem) return -1;
+    if (!datasetItem) return -1;
 
-    const zarrNodes = Array.from(processedData.allNodes.values()).filter(
-      (node) => node.type === "file" && node.path.endsWith(".zarr"),
+    const datasetNodes = Array.from(processedData.allNodes.values()).filter(
+      (node) => node.type === "file" && isDatasetPath(node.path),
     );
 
-    return zarrNodes.findIndex((node) => node.path === zarrItem.path);
+    return datasetNodes.findIndex((node) => node.path === datasetItem.path);
   };
 
   // Get total number of datasets
   const getTotalDatasets = (): number => {
-    const zarrNodes = Array.from(processedData.allNodes.values()).filter(
-      (node) => node.type === "file" && node.path.endsWith(".zarr"),
+    const datasetNodes = Array.from(processedData.allNodes.values()).filter(
+      (node) => node.type === "file" && isDatasetPath(node.path),
     );
-    return zarrNodes.length;
+    return datasetNodes.length;
   };
 
   // Handle cycling through datasets
   const handleCycleDataset = (direction: "prev" | "next") => {
     if (!isCyclingEnabled() || !onCycleDataset) return;
 
-    const zarrNodes = Array.from(processedData.allNodes.values()).filter(
-      (node) => node.type === "file" && node.path.endsWith(".zarr"),
+    const datasetNodes = Array.from(processedData.allNodes.values()).filter(
+      (node) => node.type === "file" && isDatasetPath(node.path),
     );
 
-    if (zarrNodes.length === 0) return;
+    if (datasetNodes.length === 0) return;
 
     const currentIndex = getCurrentDatasetIndex();
     if (currentIndex === -1) return;
 
     let nextIndex: number;
     if (direction === "next") {
-      nextIndex = (currentIndex + 1) % zarrNodes.length;
+      nextIndex = (currentIndex + 1) % datasetNodes.length;
     } else {
-      nextIndex = currentIndex === 0 ? zarrNodes.length - 1 : currentIndex - 1;
+      nextIndex =
+        currentIndex === 0 ? datasetNodes.length - 1 : currentIndex - 1;
     }
 
-    const nextNode = zarrNodes[nextIndex];
+    const nextNode = datasetNodes[nextIndex];
     if (nextNode) {
       // Remove current dataset from basket
       const currentItem = basketItems.find(
-        (item) => item.type === "file" && item.path.endsWith(".zarr"),
+        (item) => item.type === "file" && isDatasetPath(item.path),
       );
       if (currentItem) {
         onRemoveBasketItem?.(currentItem.id);
@@ -1328,7 +1350,7 @@ const DirTree = ({
           <div className="p-1 bg-gray-50 rounded-md">
             <div className="flex items-center space-x-2">
               <div className="flex space-x-1 w-full justify-center items-center">
-                {(["all", "folder", "zarr"] as const).map((filter) => (
+                {(["all", "folder", "dataset"] as const).map((filter) => (
                   <button
                     type="button"
                     key={filter}
@@ -1339,7 +1361,11 @@ const DirTree = ({
                         : "bg-white text-gray-600 hover:bg-gray-100"
                     }`}
                   >
-                    {filter === "all" ? "All" : filter.toUpperCase()}
+                    {filter === "all"
+                      ? "All"
+                      : filter === "dataset"
+                        ? "DATASET"
+                        : filter.toUpperCase()}
                   </button>
                 ))}
               </div>
@@ -1364,6 +1390,8 @@ const DirTree = ({
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           onDoubleClick={onDoubleClick}
+          onOpenSqliteNode={(node) => onPathChange?.(node.path)}
+          onToggleFolderExpand={updateExpandedNodeState}
           searchTerm={searchTerm}
           basketItems={basketItems}
           path={path}
@@ -1388,6 +1416,8 @@ interface VirtualizedTreeViewProps {
   onDragStart: (e: React.DragEvent, node: TreeNode) => void;
   onDragEnd: () => void;
   onDoubleClick: (e: React.MouseEvent, node: TreeNode) => void;
+  onOpenSqliteNode: (node: TreeNode) => void;
+  onToggleFolderExpand: (nodeId: string, expanded: boolean) => void;
   searchTerm?: string;
   basketItems?: BasketItem[];
   path?: string;
@@ -1412,6 +1442,8 @@ const VirtualizedTreeView = forwardRef<
       onDragStart,
       onDragEnd,
       onDoubleClick,
+      onOpenSqliteNode,
+      onToggleFolderExpand,
       searchTerm,
       basketItems,
       path,
@@ -1488,6 +1520,8 @@ const VirtualizedTreeView = forwardRef<
                     onDragStart={onDragStart}
                     onDragEnd={onDragEnd}
                     onDoubleClick={onDoubleClick}
+                    onOpenSqliteNode={onOpenSqliteNode}
+                    onToggleFolderExpand={onToggleFolderExpand}
                     searchTerm={searchTerm}
                     basketItems={basketItems}
                   />
@@ -1529,6 +1563,8 @@ interface TreeItemComponentProps {
   onDragEnd: () => void;
   // Double click should add to basket
   onDoubleClick: (e: React.MouseEvent, node: TreeNode) => void;
+  onOpenSqliteNode: (node: TreeNode) => void;
+  onToggleFolderExpand: (nodeId: string, expanded: boolean) => void;
   searchTerm?: string;
   basketItems?: BasketItem[]; // Items already in the basket
   // liveStatusMap removed
@@ -1546,6 +1582,8 @@ const TreeItemComponent = ({
   onDragStart,
   onDragEnd,
   onDoubleClick,
+  onOpenSqliteNode,
+  onToggleFolderExpand,
   searchTerm = "",
   basketItems = [],
 }: TreeItemComponentProps) => {
@@ -1558,10 +1596,14 @@ const TreeItemComponent = ({
   const isFocused = item.isFocused();
   const isSelected = item.isSelected();
   const isFolder = item.isFolder();
+  const isSqliteContainerNode =
+    isSqliteContainerPath(nodeData.path) && !nodeData.path.includes("#");
+  const isDatasetLeafNode = isDatasetNode(nodeData) && !isSqliteContainerNode;
+  const datasetKind = detectDatasetKind(nodeData.path, nodeData.tags);
   const isSampleFolder =
     isFolder &&
     (nodeData.children || []).some(
-      (child) => child.type === "file" && child.path.endsWith(".zarr"),
+      (child) => child.type === "file" && isZarrPath(child.path),
     );
 
   // Check if this item is in the basket
@@ -1593,9 +1635,27 @@ const TreeItemComponent = ({
     );
   };
 
+  const renderDatasetIcon = () => {
+    switch (datasetKind) {
+      case "zarr":
+        return <FileArchive size={16} className="text-violet-600" />;
+      case "netcdf":
+        return <FileText size={16} className="text-sky-600" />;
+      case "hdf5":
+        return <HardDrive size={16} className="text-indigo-600" />;
+      case "qcodes":
+        return <DatabaseIcon size={16} className="text-teal-600" />;
+      case "sqlite":
+        return <DatabaseIcon size={16} className="text-emerald-600" />;
+      case "csv":
+        return <Table size={16} className="text-orange-600" />;
+      default:
+        return <DatabaseIcon size={16} className="text-green-500" />;
+    }
+  };
+
   return (
     <div
-      {...item.getProps()}
       className={`w-full flex items-center group hover:bg-gray-50 transition-colors border-l-2 ${
         isInBasket
           ? "border-l-green-500 bg-green-50"
@@ -1623,21 +1683,33 @@ const TreeItemComponent = ({
         />
 
         {/* Expand/Collapse Icon */}
-        {isFolder && (
+        {(isFolder || isSqliteContainerNode) && (
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              if (isExpanded) {
-                item.collapse();
-              } else {
-                item.expand();
+              if (isFolder) {
+                if (isExpanded) {
+                  item.collapse();
+                  onToggleFolderExpand(nodeData.id, false);
+                } else {
+                  item.expand();
+                  onToggleFolderExpand(nodeData.id, true);
+                }
+                return;
               }
+              onOpenSqliteNode(nodeData);
             }}
             className="mr-1 flex-shrink-0 p-1 hover:bg-gray-200 rounded transition-colors"
-            aria-label={isExpanded ? "Collapse folder" : "Expand folder"}
+            aria-label={
+              isFolder
+                ? isExpanded
+                  ? "Collapse folder"
+                  : "Expand folder"
+                : "Open sqlite runs"
+            }
           >
-            {isExpanded ? (
+            {isFolder && isExpanded ? (
               <ChevronDown size={14} className="text-gray-500" />
             ) : (
               <ChevronRight size={14} className="text-gray-500" />
@@ -1654,7 +1726,7 @@ const TreeItemComponent = ({
               <FolderClosedIcon size={16} className="text-blue-900" />
             )
           ) : (
-            <DatabaseIcon size={16} className="text-green-500" />
+            renderDatasetIcon()
           )}
           {/* Live indicator for zarr datasets (prefer liveStatusMap updates from WS) */}
           {/* live indicator removed */}
@@ -1662,15 +1734,22 @@ const TreeItemComponent = ({
 
         {/* Name with Tooltip - display with search highlighting */}
         <div className="flex-1 min-w-0">
-          <span
-            className={`text-sm truncate block ${
-              nodeData.name.endsWith(".zarr")
-                ? "text-purple-700 font-medium"
-                : "text-gray-800"
-            }`}
-          >
-            {highlightSearchTerm(nodeData.name, searchTerm)}
-          </span>
+          <div className="flex items-center gap-2 min-w-0">
+            <span
+              className={`text-sm truncate block ${
+                isDatasetPath(nodeData.path)
+                  ? "text-purple-700 font-medium"
+                  : "text-gray-800"
+              }`}
+            >
+              {highlightSearchTerm(nodeData.name, searchTerm)}
+            </span>
+            {isSqliteContainerNode && (
+              <span className="text-[10px] uppercase tracking-wide text-teal-700 bg-teal-100 border border-teal-200 rounded px-1 py-0.5 flex-shrink-0">
+                RUNS
+              </span>
+            )}
+          </div>
           {/* </Tooltip> */}
         </div>
       </div>
@@ -1717,8 +1796,8 @@ const TreeItemComponent = ({
             </button>
           </Tooltip>
 
-          {/* Download Button - only for zarr files */}
-          {nodeData.path.endsWith(".zarr") && (
+          {/* Download Button - for dataset files */}
+          {isDatasetPath(nodeData.path) && (
             <Tooltip content="Download dataset" position="top">
               <button
                 type="button"
@@ -1734,8 +1813,8 @@ const TreeItemComponent = ({
             </Tooltip>
           )}
 
-          {/* Open Notes Button - only for zarr files */}
-          {nodeData.path.endsWith(".zarr") && (
+          {/* Open Notes Button - any dataset leaf except sqlite container nodes */}
+          {isDatasetLeafNode && (
             <Tooltip content="Open notes" position="top">
               <button
                 type="button"
@@ -1751,31 +1830,47 @@ const TreeItemComponent = ({
             </Tooltip>
           )}
 
-          {/* Add/Remove Basket Button - only for files */}
-          <Tooltip
-            content={isInBasket ? "Remove from basket" : "Add to basket"}
-            position="top"
-          >
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (isInBasket) {
-                  onRemoveBasketItem?.(nodeData.id);
-                } else {
-                  onAddToBasket?.(nodeData);
-                }
-              }}
-              className={`p-1 rounded transition-colors flex-shrink-0 ${
-                isInBasket
-                  ? "text-red-500 hover:text-red-700 hover:bg-red-50"
-                  : "text-gray-400 hover:text-blue-600 hover:bg-blue-100"
-              }`}
-              aria-label={isInBasket ? "Remove from basket" : "Add to basket"}
+          {isSqliteContainerNode ? (
+            <Tooltip content="Open runs" position="top">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenSqliteNode(nodeData);
+                }}
+                className="p-1 rounded transition-colors flex-shrink-0 text-gray-400 hover:text-blue-600 hover:bg-blue-100"
+                aria-label="Open runs"
+              >
+                <FolderOpenIcon size={14} />
+              </button>
+            </Tooltip>
+          ) : (
+            /* Add/Remove Basket Button - only for non-container files */
+            <Tooltip
+              content={isInBasket ? "Remove from basket" : "Add to basket"}
+              position="top"
             >
-              {isInBasket ? <Minus size={14} /> : <Plus size={14} />}
-            </button>
-          </Tooltip>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (isInBasket) {
+                    onRemoveBasketItem?.(nodeData.id);
+                  } else {
+                    onAddToBasket?.(nodeData);
+                  }
+                }}
+                className={`p-1 rounded transition-colors flex-shrink-0 ${
+                  isInBasket
+                    ? "text-red-500 hover:text-red-700 hover:bg-red-50"
+                    : "text-gray-400 hover:text-blue-600 hover:bg-blue-100"
+                }`}
+                aria-label={isInBasket ? "Remove from basket" : "Add to basket"}
+              >
+                {isInBasket ? <Minus size={14} /> : <Plus size={14} />}
+              </button>
+            </Tooltip>
+          )}
         </div>
       )}
 

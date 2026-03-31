@@ -30,6 +30,7 @@ import {
   getSelectedDatasets,
   isComposerCompatibleWithDataset,
 } from "../utils/datasetFieldSelectors";
+import { isDatasetPath, isMemoryPath, isZarrPath } from "../utils/datasetPaths";
 
 interface ViewerProps {
   defaultWidth?: number; // In percentage (0-100)
@@ -93,11 +94,11 @@ const Viewer = ({
 
   // Monitor basket changes for dataset cycling
   useEffect(() => {
-    const zarrItems = basketItems.filter(
-      (item) => item.type === "file" && item.path.endsWith(".zarr"),
+    const datasetItems = basketItems.filter(
+      (item) => item.type === "file" && isDatasetPath(item.path),
     );
-    const prevZarrItems = previousBasketItems.current.filter(
-      (item) => item.type === "file" && item.path.endsWith(".zarr"),
+    const prevDatasetItems = previousBasketItems.current.filter(
+      (item) => item.type === "file" && isDatasetPath(item.path),
     );
 
     const buildMemoryPath = (item: BasketItem): string | null => {
@@ -112,21 +113,21 @@ const Viewer = ({
 
     let nextPreviousItems: BasketItem[] = basketItems;
 
-    // Check if we have exactly one zarr item and it's different from before
+    // Check if we have exactly one dataset item and it's different from before
     if (
-      zarrItems.length === 1 &&
-      prevZarrItems.length === 1 &&
-      zarrItems[0].path !== prevZarrItems[0].path &&
+      datasetItems.length === 1 &&
+      prevDatasetItems.length === 1 &&
+      datasetItems[0].path !== prevDatasetItems[0].path &&
       plotConfigs.length > 0
     ) {
       // This indicates a dataset cycle - update all plot data sources
-      const prevItem = prevZarrItems[0];
-      const newItem = zarrItems[0];
+      const prevItem = prevDatasetItems[0];
+      const newItem = datasetItems[0];
 
       let preferredPath = newItem.path;
 
-      const newIsMemory = preferredPath.startsWith("memory://");
-      const prevIsMemory = prevItem.path.startsWith("memory://");
+      const newIsMemory = isMemoryPath(preferredPath);
+      const prevIsMemory = isMemoryPath(prevItem.path);
       const sameDataset = prevItem.name === newItem.name;
       const isLiveDataset = newItem.tags?.includes("live");
       const isDiskFallback = newItem.tags?.includes("disk-fallback");
@@ -135,7 +136,11 @@ const Viewer = ({
         if (sameDataset && prevIsMemory) {
           // Preserve the memory path we were already using for the same dataset
           preferredPath = prevItem.path;
-        } else if (isLiveDataset && !isDiskFallback) {
+        } else if (
+          isZarrPath(newItem.path) &&
+          isLiveDataset &&
+          !isDiskFallback
+        ) {
           // Prefer the memory URI when the basket item represents a live dataset with an in-memory store
           const memoryPath = buildMemoryPath(newItem);
           if (memoryPath) {
@@ -145,8 +150,7 @@ const Viewer = ({
       }
 
       const preferMemory =
-        preferredPath.startsWith("memory://") ||
-        prevItem.path.startsWith("memory://");
+        isMemoryPath(preferredPath) || isMemoryPath(prevItem.path);
 
       updatePlotDataSource(preferredPath, { preferMemory });
       console.log(
@@ -182,7 +186,10 @@ const Viewer = ({
         const itemBaseName = item.name?.endsWith(".zarr")
           ? item.name.slice(0, -5)
           : item.name;
-        const itemMemoryPath = itemBaseName ? `memory://${itemBaseName}` : null;
+        const itemMemoryPath =
+          isZarrPath(item.path) && itemBaseName
+            ? `memory://${itemBaseName}`
+            : null;
 
         const hasExistingPlots = plotConfigs.some((config) => {
           return (
@@ -616,7 +623,7 @@ const Viewer = ({
     }
 
     eligibility.eligible.forEach((dataset) => {
-      const source: "memory" | "disk" = dataset.path.startsWith("memory://")
+      const sourceByPath: "memory" | "disk" = isMemoryPath(dataset.path)
         ? "memory"
         : "disk";
 
@@ -625,8 +632,8 @@ const Viewer = ({
         indeps: snapshot.indeps,
         deps: snapshot.deps,
         plotType: snapshot.plotType,
-        source,
-        preferredSource: source,
+        source: sourceByPath,
+        preferredSource: sourceByPath,
       });
     });
 
@@ -686,19 +693,19 @@ const Viewer = ({
     try {
       // console.log("Downloading items:", items);
 
-      // Filter only .zarr files
-      const zarrItems = items.filter(
-        (item) => item.type === "file" && item.path.endsWith(".zarr"),
+      // Filter only dataset files
+      const datasetItems = items.filter(
+        (item) => item.type === "file" && isDatasetPath(item.path),
       );
 
-      if (zarrItems.length === 0) {
-        showToast("No .zarr files to download", "warning");
-        console.warn("No .zarr files to download");
+      if (datasetItems.length === 0) {
+        showToast("No dataset files to download", "warning");
+        console.warn("No dataset files to download");
         return;
       }
 
       // Prepare paths for the API
-      const paths = zarrItems.map((item) => ({ path: item.path }));
+      const paths = datasetItems.map((item) => ({ path: item.path }));
 
       // Call the backend download-selected endpoint
       const response = await axios.post(
@@ -713,7 +720,7 @@ const Viewer = ({
       link.href = url;
       link.setAttribute(
         "download",
-        `selected_datasets_${zarrItems.length}_files.zip`,
+        `selected_datasets_${datasetItems.length}_files.zip`,
       );
       document.body.appendChild(link);
       link.click();

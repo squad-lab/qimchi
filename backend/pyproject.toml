@@ -36,6 +36,7 @@ dependencies = [
     "zarr==2.18.4",
     "concurrent-log-handler==0.9.29",
     "portalocker==3.2.0",
+    "polars==1.39.3",
 ]
 
 [project.urls]

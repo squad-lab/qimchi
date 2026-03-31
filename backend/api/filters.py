@@ -1404,9 +1404,10 @@ def _generate_plot_json_for_transform(
     swap_xy: bool,
 ) -> dict:
     """Generate a plot JSON from canonical plot context + transform settings."""
-    from .plots import create_line_plots, create_heat_maps, load_dataset
+    from .plots import create_line_plots, create_heat_maps
+    from .data_loader import load_dataset_sync
 
-    dataset = load_dataset(fpath)
+    dataset = load_dataset_sync(fpath)
     logger.debug(f"Loaded dataset with dims: {list(dataset.dims)}")
 
     effective_indeps = list(indeps)

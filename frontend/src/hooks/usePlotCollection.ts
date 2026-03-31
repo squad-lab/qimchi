@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 
 // Local imports
 import type { PlotConfiguration } from "../components/interfaces";
+import { isMemoryPath, isZarrPath } from "../utils/datasetPaths";
 
 export interface UsePlotCollectionReturn {
   plotConfigs: PlotConfiguration[];
@@ -18,11 +19,11 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
   const [plotConfigs, setPlotConfigs] = useState<PlotConfiguration[]>([]);
 
   const inferSourceFromPath = useCallback((path: string): "memory" | "disk" => {
-    return path.startsWith("memory://") ? "memory" : "disk";
+    return isMemoryPath(path) ? "memory" : "disk";
   }, []);
 
   const toMemoryPath = useCallback((path: string): string | null => {
-    if (path.startsWith("memory://")) {
+    if (isMemoryPath(path)) {
       return path;
     }
 
@@ -33,7 +34,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
     }
 
     const lastSegment = segments[segments.length - 1];
-    if (!lastSegment.endsWith(".zarr")) {
+    if (!isZarrPath(lastSegment)) {
       return null;
     }
 
@@ -55,7 +56,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
       const prefersMemory =
         config.preferredSource === "memory" ||
         config.source === "memory" ||
-        config.fpath.startsWith("memory://");
+        isMemoryPath(config.fpath);
 
       // console.log(
       //   `[usePlotCollection] prefersMemory=${prefersMemory}, fpath=${config.fpath}`
@@ -111,7 +112,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
           const preferMemoryImplicit =
             plot.preferredSource === "memory" ||
             plot.source === "memory" ||
-            plot.fpath.startsWith("memory://");
+            isMemoryPath(plot.fpath);
 
           const shouldPreferMemory = preferMemoryExplicit || preferMemoryImplicit;
           const memoryCandidate = toMemoryPath(newFpath);
@@ -125,7 +126,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
             source: inferSourceFromPath(preferredPath),
             preferredSource:
               plot.preferredSource ??
-              (preferredPath.startsWith("memory://")
+              (isMemoryPath(preferredPath)
                 ? "memory"
                 : inferSourceFromPath(preferredPath)),
           };

@@ -1,5 +1,6 @@
 import axios from "axios";
-import { Folder } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, Folder } from "lucide-react";
 
 // Local imports
 import { AttrData } from "./interfaces";
@@ -38,18 +39,70 @@ const Explorer = ({
   const { componentStates, updateExplorerState } = useSidebarStore();
   const { path, submittedPath } = componentStates.explorer;
   const { showToast } = useToast();
+  const historyRef = useRef<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number>(-1);
+
+  const canGoBack = historyIndex > 0;
+  const canGoForward =
+    historyIndex >= 0 && historyIndex < historyRef.current.length - 1;
+
+  const pushHistory = (rawPath: string) => {
+    const nextPath = rawPath.trim();
+    if (!nextPath) return;
+
+    const currentPath =
+      historyIndex >= 0 ? historyRef.current[historyIndex] : undefined;
+    if (currentPath === nextPath) return;
+
+    const truncated =
+      historyIndex >= 0
+        ? historyRef.current.slice(0, historyIndex + 1)
+        : historyRef.current.slice();
+
+    const merged =
+      truncated.length > 0 && truncated[truncated.length - 1] === nextPath
+        ? truncated
+        : [...truncated, nextPath];
+
+    historyRef.current = merged;
+    setHistoryIndex(merged.length - 1);
+  };
+
+  useEffect(() => {
+    const initial = submittedPath.trim();
+    if (!initial || historyRef.current.length > 0) return;
+    historyRef.current = [initial];
+    setHistoryIndex(0);
+  }, [submittedPath]);
 
   const handleSubmit = () => {
-    if (path.trim()) {
-      console.log("Loading directory for path:", path);
-      updateExplorerState({ submittedPath: path.trim() });
+    const nextPath = path.trim();
+    if (nextPath) {
+      console.log("Loading directory for path:", nextPath);
+      updateExplorerState({ path: nextPath, submittedPath: nextPath });
+      pushHistory(nextPath);
     }
   };
 
   const handlePathChange = (newPath: string) => {
+    const nextPath = newPath.trim();
     updateExplorerState({
-      path: newPath,
-      submittedPath: newPath,
+      path: nextPath,
+      submittedPath: nextPath,
+    });
+    pushHistory(nextPath);
+  };
+
+  const navigateHistory = (direction: "back" | "forward") => {
+    const delta = direction === "back" ? -1 : 1;
+    const nextIndex = historyIndex + delta;
+    const nextPath = historyRef.current[nextIndex];
+    if (!nextPath) return;
+
+    setHistoryIndex(nextIndex);
+    updateExplorerState({
+      path: nextPath,
+      submittedPath: nextPath,
     });
   };
 
@@ -135,9 +188,34 @@ const Explorer = ({
     <div className="flex flex-col h-full p-2">
       {/* Path input section */}
       <div className="flex mb-4 w-full">
+        {/* Path history navigation - no persistence */}
+        <Tooltip content="Back" className="flex">
+          <button
+            type="button"
+            onClick={() => navigateHistory("back")}
+            disabled={!canGoBack}
+            className="border border-gray-300 border-r-0 px-2 py-2 rounded-l shadow-sm bg-white text-gray-700 disabled:text-gray-300 disabled:bg-gray-100 hover:bg-gray-50 disabled:hover:bg-gray-100 transition-colors"
+            title="Back"
+            aria-label="Go back"
+          >
+            <ChevronLeft size={18} />
+          </button>
+        </Tooltip>
+        <Tooltip content="Forward" className="flex">
+          <button
+            type="button"
+            onClick={() => navigateHistory("forward")}
+            disabled={!canGoForward}
+            className="border border-gray-300 border-r-0 px-2 py-2 shadow-sm bg-white text-gray-700 disabled:text-gray-300 disabled:bg-gray-100 hover:bg-gray-50 disabled:hover:bg-gray-100 transition-colors"
+            title="Forward"
+            aria-label="Go forward"
+          >
+            <ChevronRight size={18} />
+          </button>
+        </Tooltip>
         <input
           type="text"
-          className="flex-1 min-w-0 border border-gray-300 px-3 py-2 rounded-l shadow-sm focus:outline-none focus:ring focus:ring-blue-300 focus:border-blue-300 text-sm"
+          className="flex-1 min-w-0 border border-gray-300 px-3 py-2 shadow-sm focus:outline-none focus:ring focus:ring-blue-300 focus:border-blue-300 text-sm"
           placeholder="Enter folder path"
           value={path}
           onChange={(e) => updateExplorerState({ path: e.target.value })}
@@ -159,6 +237,7 @@ const Explorer = ({
       <div className="flex-1 overflow-y-auto">
         {submittedPath && submittedPath.trim() ? (
           <DirTree
+            key={submittedPath}
             path={submittedPath}
             onSelectNode={handleSelectNode}
             basketItems={basketItems}

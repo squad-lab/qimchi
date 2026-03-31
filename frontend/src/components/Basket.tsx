@@ -6,6 +6,10 @@ import {
   Download,
   Trash2,
   Database,
+  FileArchive,
+  FileText,
+  HardDrive,
+  Table,
   Copy,
   Check,
   Info,
@@ -26,6 +30,11 @@ import {
   SharedFieldResult,
   isFieldShared,
 } from "../utils/datasetFieldSelectors";
+import {
+  detectDatasetKind,
+  isDatasetPath,
+  isSqliteContainerPath,
+} from "../utils/datasetPaths";
 
 interface AttrData {
   measurement_id?: string;
@@ -377,6 +386,52 @@ const Basket = ({
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
   };
 
+  const renderBasketDatasetIcon = (item: BasketItem) => {
+    const datasetKind = detectDatasetKind(item.path, item.tags);
+    switch (datasetKind) {
+      case "zarr":
+        return (
+          <FileArchive size={15} className="text-violet-600 flex-shrink-0" />
+        );
+      case "netcdf":
+        return <FileText size={15} className="text-sky-600 flex-shrink-0" />;
+      case "hdf5":
+        return (
+          <HardDrive size={15} className="text-indigo-600 flex-shrink-0" />
+        );
+      case "qcodes":
+        return <Database size={15} className="text-teal-600 flex-shrink-0" />;
+      case "sqlite":
+        return (
+          <Database size={15} className="text-emerald-600 flex-shrink-0" />
+        );
+      case "csv":
+        return <Table size={15} className="text-orange-600 flex-shrink-0" />;
+      default:
+        return <Database size={15} className="text-green-500 flex-shrink-0" />;
+    }
+  };
+
+  const getDatasetTypeLabel = (item: BasketItem): string => {
+    const datasetKind = detectDatasetKind(item.path, item.tags);
+    switch (datasetKind) {
+      case "zarr":
+        return "Type: Zarr";
+      case "netcdf":
+        return "Type: NetCDF";
+      case "hdf5":
+        return "Type: HDF5";
+      case "qcodes":
+        return "Type: QCoDeS";
+      case "sqlite":
+        return "Type: SQLite";
+      case "csv":
+        return "Type: CSV/TXT/DAT";
+      default:
+        return "Type: Unknown";
+    }
+  };
+
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -632,10 +687,15 @@ const Basket = ({
 
                           {/* Database icon and name */}
                           <div className="mr-1">
-                            <Database
-                              size={15}
-                              className="text-green-500 flex-shrink-0"
-                            />
+                            <Tooltip
+                              content={getDatasetTypeLabel(item)}
+                              position="top"
+                              className="flex items-center"
+                            >
+                              <span className="inline-flex items-center justify-center leading-none">
+                                {renderBasketDatasetIcon(item)}
+                              </span>
+                            </Tooltip>
                           </div>
 
                           {/* live indicator removed */}
@@ -715,21 +775,23 @@ const Basket = ({
                             </button>
                           </Tooltip>
 
-                          {/* Open notes button */}
-                          {item.path.endsWith(".zarr") && onOpenNotesItem && (
-                            <Tooltip content="Open notes" position="top">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onOpenNotesItem(item);
-                                }}
-                                className="p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
-                                title="Open notes"
-                              >
-                                <NotebookPen size={14} />
-                              </button>
-                            </Tooltip>
-                          )}
+                          {/* Open notes button - any dataset except sqlite container nodes */}
+                          {isDatasetPath(item.path) &&
+                            !isSqliteContainerPath(item.path) &&
+                            onOpenNotesItem && (
+                              <Tooltip content="Open notes" position="top">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onOpenNotesItem(item);
+                                  }}
+                                  className="p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                                  title="Open notes"
+                                >
+                                  <NotebookPen size={14} />
+                                </button>
+                              </Tooltip>
+                            )}
 
                           {/* live toggle removed */}
 

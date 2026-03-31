@@ -2255,13 +2255,52 @@ const PlotWrapper: React.FC<Props> = ({
                 `[PlotWrapper] Error applying filters/sliders to new dataset:`,
                 filterError,
               );
-              // Fallback to showing unfiltered plot
-              setBasePlotJson(newPlot.plotJson);
-              const plotWithAppearance = applyAppearanceSettings(
-                newPlot.plotJson,
-                appearanceSettings,
-              );
-              setCustomizedPlotJson(plotWithAppearance);
+              // TODOLATER: Check if needed
+              // Test Fallback: request a filtered/sliced plot directly from /plot/
+              // so dataset cycling does not silently drop filters for refs
+              // like sqlite#run_id=... when transform context is transient.
+              try {
+                const fallbackPlotResponse = await PlotAPI.createPlots({
+                  fpaths: [newFpath],
+                  indeps: plotConfig.indeps,
+                  deps: plotConfig.deps,
+                  plotType: plotConfig.plotType,
+                  filters_order: filtersOrder,
+                  filters_opts: filtersOpts,
+                  slider: isSliderChange ? sliderConfig : {},
+                });
+
+                if (
+                  fallbackPlotResponse.success &&
+                  fallbackPlotResponse.plots.length > 0
+                ) {
+                  const fallbackPlot = fallbackPlotResponse.plots[0];
+                  const fallbackPlotJson = fallbackPlot.plotJson as PlotlyJSON;
+                  setBasePlotJson(fallbackPlotJson);
+                  const fallbackWithAppearance = applyAppearanceSettings(
+                    fallbackPlotJson,
+                    appearanceSettings,
+                  );
+                  setCustomizedPlotJson(fallbackWithAppearance);
+                } else {
+                  throw new Error(
+                    fallbackPlotResponse.message ||
+                      "Fallback plot request returned no plots",
+                  );
+                }
+              } catch (fallbackError) {
+                console.error(
+                  `[PlotWrapper] Fallback filtered plot request failed:`,
+                  fallbackError,
+                );
+                // Last-resort fallback to unfiltered plot
+                setBasePlotJson(newPlot.plotJson);
+                const plotWithAppearance = applyAppearanceSettings(
+                  newPlot.plotJson,
+                  appearanceSettings,
+                );
+                setCustomizedPlotJson(plotWithAppearance);
+              }
             }
           } else {
             // No filters/sliders to apply.

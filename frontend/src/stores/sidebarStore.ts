@@ -29,7 +29,7 @@ interface ComponentStates {
     searchTerm: string;
     sortBy: "name" | "timestamp" | "size" | "chrono";
     sortDirection: "asc" | "desc";
-    filterBy: "all" | "folder" | "zarr";
+    filterBy: "all" | "folder" | "dataset" | "zarr";
     showFilters: boolean;
     isExpanded: boolean;
     lastPath: string; // Track the last loaded path
@@ -154,7 +154,7 @@ export const useSidebarStore = create<SidebarState>()(
     }),
     {
       name: "sidebar-store",
-      version: 3, // Incremented to reset corrupted state
+      version: 7, // Reset persisted sidebar/dirTree state to clear stale expansion behavior
     }
   )
 );
