@@ -1,4 +1,5 @@
 import os
+import atexit
 import logging
 import plotly.io as pio
 from plotly import graph_objects as go
@@ -39,6 +40,50 @@ _enable_kaleido_warmup = os.environ.get("ENABLE_KALEIDO_WARMUP", "false").lower(
     "yes",
 )
 
+# Workaround for Kaleido v1 performance regression with the v0 API:
+# explicitly manage the Kaleido sync server lifecycle.
+_enable_kaleido_sync_server = os.environ.get(
+    "ENABLE_KALEIDO_SYNC_SERVER", "true"
+).lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+
+def _start_kaleido_sync_server(context: str) -> bool:
+    if not _enable_kaleido_sync_server:
+        logging.info("Kaleido sync server disabled for %s", context)
+        return False
+    try:
+        import kaleido
+
+        kaleido.start_sync_server()
+        logging.info("Kaleido sync server started for %s", context)
+        return True
+    except Exception:
+        logging.exception("Failed to start Kaleido sync server for %s", context)
+        return False
+
+
+def _stop_kaleido_sync_server(context: str) -> None:
+    if not _enable_kaleido_sync_server:
+        return
+    try:
+        import kaleido
+
+        kaleido.stop_sync_server()
+        logging.info("Kaleido sync server stopped for %s", context)
+    except Exception:
+        logging.exception("Failed to stop Kaleido sync server for %s", context)
+
+
+def _init_export_worker() -> None:
+    """ProcessPool worker initializer for export image generation."""
+    started = _start_kaleido_sync_server("export-worker")
+    if started:
+        atexit.register(_stop_kaleido_sync_server, "export-worker")
+
 
 # Monitoring endpoints
 router = APIRouter()
@@ -60,13 +105,18 @@ async def lifespan(app: FastAPI):
     then shut down the pool on application shutdown.
     """
     try:
+        app.state.kaleido_sync_started = _start_kaleido_sync_server("api-process")
+
         # Pre-spawn worker processes; keep conservative worker count
         # Respect EXPORT_MAX_WORKERS env var if provided, else conservative default
         if _export_max_workers_env and _export_max_workers_env.isdigit():
             max_workers = max(1, int(_export_max_workers_env))
         else:
             max_workers = min(4, (os.cpu_count() or 1))
-        app.state.export_pool = ProcessPoolExecutor(max_workers=max_workers)
+        app.state.export_pool = ProcessPoolExecutor(
+            max_workers=max_workers,
+            initializer=_init_export_worker,
+        )
 
         # Optionally warm up kaleido on startup to reduce first-request latency.
         # Controlled by the ENABLE_KALEIDO_WARMUP environment variable; default
@@ -93,6 +143,9 @@ async def lifespan(app: FastAPI):
                 logging.info("Export ProcessPoolExecutor shut down")
         except Exception:
             logging.exception("Error shutting down export pool")
+        finally:
+            if getattr(app.state, "kaleido_sync_started", False):
+                _stop_kaleido_sync_server("api-process")
 
 
 app = FastAPI(lifespan=lifespan)

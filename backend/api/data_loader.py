@@ -304,7 +304,6 @@ def _load_xarray_dataset(path: Path, fmt: str) -> xr.Dataset:
     """
     try:
         if fmt == "zarr":
-            # NOTE: Current datasets are zarr v2 stores.
             return xr.load_dataset(str(path), engine="zarr")
 
         if fmt == "netcdf":
@@ -382,8 +381,17 @@ def _detect_filesystem_format(path: Path) -> str:
 
     """
 
-    if path.is_dir() and (path.name.endswith(".zarr") or (path / ".zarray").exists()):
-        return "zarr"
+    if path.is_dir():
+        zarr_markers = {
+            "zarr.json",  # zarr v3 marker
+            ".zgroup",  # zarr v2 group marker
+            ".zarray",  # zarr v2 array marker
+            ".zmetadata",  # consolidated v2 metadata
+        }
+        if path.name.endswith(".zarr") or any(
+            (path / marker).exists() for marker in zarr_markers
+        ):
+            return "zarr"
 
     suffix = path.suffix.lower()
     if suffix == ".nc":

@@ -24,6 +24,44 @@ def test_load_data_sync_zarr(tmp_path, monkeypatch):
     loaded.obj.close()
 
 
+def test_load_data_sync_zarr_v3_marker_dir(tmp_path, monkeypatch):
+    zarr_path = tmp_path / "demo_v3_store"
+    zarr_path.mkdir(parents=True)
+    (zarr_path / "zarr.json").write_text("{}")
+
+    ds = xr.Dataset(
+        data_vars={"signal": (("x",), [1.0, 2.0, 3.0])},
+        coords={"x": [0, 1, 2]},
+    )
+    monkeypatch.setattr(data_loader, "_load_xarray_dataset", lambda *_args: ds)
+
+    loaded = data_loader.load_data_sync(str(zarr_path))
+    assert loaded.kind == "dataset"
+    assert loaded.format == "zarr"
+    assert loaded.loaded_from == "disk"
+    assert loaded.obj.attrs["path"] == str(zarr_path)
+    loaded.obj.close()
+
+
+def test_load_data_sync_zarr_v2_group_marker_dir(tmp_path, monkeypatch):
+    zarr_path = tmp_path / "demo_v2_store"
+    zarr_path.mkdir(parents=True)
+    (zarr_path / ".zgroup").write_text("{}")
+
+    ds = xr.Dataset(
+        data_vars={"signal": (("x",), [1.0, 2.0, 3.0])},
+        coords={"x": [0, 1, 2]},
+    )
+    monkeypatch.setattr(data_loader, "_load_xarray_dataset", lambda *_args: ds)
+
+    loaded = data_loader.load_data_sync(str(zarr_path))
+    assert loaded.kind == "dataset"
+    assert loaded.format == "zarr"
+    assert loaded.loaded_from == "disk"
+    assert loaded.obj.attrs["path"] == str(zarr_path)
+    loaded.obj.close()
+
+
 def test_load_data_sync_netcdf_file(tmp_path, monkeypatch):
     nc_path = tmp_path / "demo.nc"
     nc_path.write_text("placeholder")
