@@ -318,9 +318,11 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   const [isDragging, setIsDragging] = useState(false);
 
   // Debounce ref to prevent excessive API calls
-  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Separate debounce ref for sliders (shorter delay for better responsiveness)
-  const sliderDebounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const sliderDebounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   const { showToast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);

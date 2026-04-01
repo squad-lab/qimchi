@@ -238,7 +238,7 @@ const PlotWrapper: React.FC<Props> = ({
 
     const firstTrace = plotData.data[0];
     // Check for heatmap types
-    if (firstTrace.type === "heatmap" || firstTrace.type === "heatmapgl") {
+    if (firstTrace.type === "heatmap") {
       return "heatmap";
     }
 
@@ -840,7 +840,7 @@ const PlotWrapper: React.FC<Props> = ({
         };
         const hoveredTrace = pointObj.data ?? pointObj.fullData;
         const fallbackHeatmapTrace = (customizedPlotJson.data || []).find(
-          (t) => t.type === "heatmap" || t.type === "heatmapgl",
+          (t) => t.type === "heatmap",
         ) as unknown as Record<string, unknown> | undefined;
         const activeTrace = hoveredTrace ?? fallbackHeatmapTrace;
 
@@ -1274,10 +1274,7 @@ const PlotWrapper: React.FC<Props> = ({
           const updatedTrace = { ...trace };
 
           // Apply heatmap settings
-          if (
-            (trace.type === "heatmap" || trace.type === "heatmapgl") &&
-            settings.hmap
-          ) {
+          if (trace.type === "heatmap" && settings.hmap) {
             // If trace is not using a shared coloraxis, set per-trace fallback
             updatedTrace.colorscale = getColorscaleData(
               settings.hmap.colorscale,
@@ -1393,7 +1390,7 @@ const PlotWrapper: React.FC<Props> = ({
         // When using heatmaps built by the backend, traces use a shared coloraxis.
         // Update layout.coloraxis so the colorscale actually changes.
         const hasHeatmap = (updatedPlotJson.data || []).some(
-          (t: Data) => t.type === "heatmap" || t.type === "heatmapgl",
+          (t: Data) => t.type === "heatmap",
         );
         if (hasHeatmap && settings.hmap) {
           type LayoutWithColorAxis = {
@@ -1440,7 +1437,7 @@ const PlotWrapper: React.FC<Props> = ({
             } else {
               // Source 2 + 3: per-trace zmin/zmax or z-array scan
               (originalPlotJson.data || []).forEach((trace: any) => {
-                if (trace.type === "heatmap" || trace.type === "heatmapgl") {
+                if (trace.type === "heatmap") {
                   // Source 2: backend-provided per-trace zmin/zmax
                   if (
                     typeof trace.zmin === "number" &&
@@ -1626,7 +1623,9 @@ const PlotWrapper: React.FC<Props> = ({
   }, [plotConfig?.id]);
 
   // Throttled onUpdateConfig to prevent excessive backend calls
-  const throttledUpdateConfig = useRef<NodeJS.Timeout | null>(null);
+  const throttledUpdateConfig = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   const handleUpdateConfig = useCallback(
     (config: Partial<PlotConfiguration>) => {
@@ -1737,7 +1736,7 @@ const PlotWrapper: React.FC<Props> = ({
 
       // Always use local filter application to avoid plot reload and modal closure
       // This decouples filter application from plot refresh
-      // let fallbackTimer: NodeJS.Timeout | null = null;
+      // let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
       try {
         setIsApplyingFilters(true);
@@ -2761,7 +2760,7 @@ const PlotWrapper: React.FC<Props> = ({
       basePlot = {
         ...basePlot,
         data: basePlot.data.map((trace: any) => {
-          if (trace.type === "heatmap" || trace.type === "heatmapgl") {
+          if (trace.type === "heatmap") {
             return {
               ...trace,
               type: "surface",

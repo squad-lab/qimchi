@@ -337,7 +337,7 @@ const PlotComponent: React.FC<Props> = React.memo(
       };
 
       // Debounced update function
-      let timeoutId: NodeJS.Timeout;
+      let timeoutId: ReturnType<typeof setTimeout>;
       const debouncedUpdate = () => {
         clearTimeout(timeoutId);
         timeoutId = setTimeout(updateDimensions, 150);

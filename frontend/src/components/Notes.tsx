@@ -72,7 +72,7 @@ export default function Notes({
   const [isDragOver, setIsDragOver] = useState(false);
   const [isSwitchingSelection, setIsSwitchingSelection] = useState(false);
 
-  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const notesContainerRef = useRef<HTMLDivElement | null>(null);
 

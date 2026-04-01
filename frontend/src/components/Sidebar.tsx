@@ -107,7 +107,7 @@ const Sidebar = ({
         defaultSize={defaultWidth}
         collapsible
         // TODOLATER: Remove if the skip is annoying.
-        minSize={sidebarCollapsed ? 0 : 16}
+        minSize={sidebarCollapsed ? 0 : 18}
         className={`${sidebarCollapsed ? "max-w-[0px]" : ""}`}
         style={{ display: sidebarCollapsed ? "none" : "block" }}
       >

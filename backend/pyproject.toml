@@ -15,29 +15,65 @@ classifiers = [
 ]
 requires-python = ">=3.13"
 dependencies = [
-    "fastapi[standard]>=0.115.12",
-    "gunicorn>=23.0.0",
-    "kaleido>=1.0.0",
-    "numpy>=2.2.4",
-    "pip>=25.2",
-    "plotly>=6.0.1",
-    "pydantic>=2.11.3",
+    "fastapi[standard]>=0.135.0",
+    "gunicorn>=25.3.0",
+    "kaleido>=1.2.0",
+    "numpy>=2.4.0",
+    "pip>=26.0.0",
+    "plotly>=6.6.0",
+    "pydantic>=2.12.0",
+    "python-dotenv>=1.2.0",
+    "qcodes>=0.54.2",
+    "rich>=14.3.0",
+    "scikit-image>=0.26.0",
+    "setuptools>=82.0.0",
+    "scipy>=1.17.0",
+    "watchdog>=6.0.0",
+    "websockets>=16.0.0",
+    "uvicorn>=0.42.0",
+    "concurrent-log-handler>=0.9.29",
+    "portalocker>=3.2.0",
+    "xarray>=2026.2.0",
+    "zarr>=3.1.0,<4",
+    # "qcutils",  # Handled via .bat installer - can be pinned to GitLab source
+]
+
+[project.optional-dependencies]
+dev = [
+    "wheel>=0.46.0",
+    "ruff>=0.12.10",
     "pytest>=9.0.1",
     "pytest-asyncio>=1.0.0",
-    "python-dotenv>=1.1.1",
-    "rich>=14.1.0",
-    "ruff>=0.12.10",
-    "scikit-image>=0.25.2",
-    "setuptools>=80.9.0",
-    "watchdog>=6.0.0",
-    "websockets>=15.0.1",
-    "wheel>=0.45.1",
-    "xarray>=2025.3.1",
-    "zarr==2.18.4",
-    "concurrent-log-handler==0.9.29",
-    "portalocker==3.2.0",
-    "polars==1.39.3",
 ]
+test = [
+    "pytest>=9.0.1",
+    "pytest-asyncio>=1.0.0",
+]
+datasets = [
+    "netcdf4>=1.7.4",
+    "h5netcdf>=1.8.1",
+    "h5py>=3.16.0",
+    "numcodecs>=0.16.5",
+    "polars>=1.39.3",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.10",
+    "pytest>=9.0.1",
+    "pytest-asyncio>=1.0.0",
+]
+test = [
+    "pytest>=9.0.1",
+    "pytest-asyncio>=1.0.0",
+]
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+qcutils = { workspace = true }
+
 
 [project.urls]
 homepage = "https://gitlab.com/squad-lab/qimchi"

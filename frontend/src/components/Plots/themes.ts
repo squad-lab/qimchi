@@ -84,10 +84,12 @@ export const applyThemeToLayout = (
         color: theme.colors.text,
         family: theme.font.family,
       },
-      titlefont: {
-        size: theme.font.size,
-        color: theme.colors.text,
-        family: theme.font.family,
+      title: {
+        font: {
+          size: theme.font.size,
+          color: theme.colors.text,
+          family: theme.font.family,
+        },
       },
     },
     yaxis: {
@@ -99,10 +101,12 @@ export const applyThemeToLayout = (
         color: theme.colors.text,
         family: theme.font.family,
       },
-      titlefont: {
-        size: theme.font.size,
-        color: theme.colors.text,
-        family: theme.font.family,
+      title: {
+        font: {
+          size: theme.font.size,
+          color: theme.colors.text,
+          family: theme.font.family,
+        },
       },
     },
   };
