@@ -35,7 +35,7 @@ dependencies = [
     "portalocker>=3.2.0",
     "xarray>=2026.2.0",
     "zarr>=3.1.6,<4",
-    # "qcutils",  # Handled via .bat installer - can be pinned to GitLab source
+    # "qcutils",  # Handled via .bat installer
 ]
 
 [project.optional-dependencies]

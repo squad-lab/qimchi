@@ -22,13 +22,10 @@ import sqlite3
 import numpy as np
 import xarray as xr
 
-try:
-    from qcutils import live_db
-except Exception:  # pragma: no cover - depends on local environment
-    live_db = None
 
 # Local imports
 from . import live_client
+from .shared import live_db
 from .logger import logger
 
 MEMORY_PROTOCOL = "memory://"

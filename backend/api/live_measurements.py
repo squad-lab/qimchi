@@ -8,12 +8,8 @@ from typing import List, Optional
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-# Import the live_db module from qcutils
-try:
-    from qcutils import live_db
-except Exception:  # pragma: no cover - depends on local environment
-    live_db = None
-
+# Local imports
+from .shared import live_db
 
 logger = logging.getLogger(__name__)
 
