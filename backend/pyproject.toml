@@ -23,7 +23,7 @@ dependencies = [
     "plotly>=6.6.0",
     "pydantic>=2.12.0",
     "python-dotenv>=1.2.0",
-    "qcodes>=0.54.2",
+    "qcodes>=0.56.0",
     "rich>=14.3.0",
     "scikit-image>=0.26.0",
     "setuptools>=82.0.0",
@@ -34,20 +34,20 @@ dependencies = [
     "concurrent-log-handler>=0.9.29",
     "portalocker>=3.2.0",
     "xarray>=2026.2.0",
-    "zarr>=3.1.0,<4",
+    "zarr>=3.1.6,<4",
     # "qcutils",  # Handled via .bat installer - can be pinned to GitLab source
 ]
 
 [project.optional-dependencies]
 dev = [
     "wheel>=0.46.0",
-    "ruff>=0.12.10",
+    "ruff>=0.15.0",
     "pytest>=9.0.1",
-    "pytest-asyncio>=1.0.0",
+    "pytest-asyncio>=1.3.0",
 ]
 test = [
     "pytest>=9.0.1",
-    "pytest-asyncio>=1.0.0",
+    "pytest-asyncio>=1.3.0",
 ]
 datasets = [
     "netcdf4>=1.7.4",
@@ -59,21 +59,24 @@ datasets = [
 
 [dependency-groups]
 dev = [
-    "ruff>=0.12.10",
+    "ruff>=0.15.0",
     "pytest>=9.0.1",
-    "pytest-asyncio>=1.0.0",
+    "pytest-asyncio>=1.3.0",
 ]
 test = [
     "pytest>=9.0.1",
-    "pytest-asyncio>=1.0.0",
+    "pytest-asyncio>=1.3.0",
+]
+datasets = [
+    "netcdf4>=1.7.4",
+    "h5netcdf>=1.8.1",
+    "h5py>=3.16.0",
+    "numcodecs>=0.16.5",
+    "polars>=1.39.3",
 ]
 
 [tool.uv]
 package = true
-
-[tool.uv.sources]
-qcutils = { workspace = true }
-
 
 [project.urls]
 homepage = "https://gitlab.com/squad-lab/qimchi"
