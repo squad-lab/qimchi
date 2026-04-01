@@ -979,209 +979,289 @@ const PlotWrapper: React.FC<Props> = ({
     ],
   );
 
-  const handleLineCutClick = useCallback(async () => {
-    if (!isLineCutActive) return;
-    const activeAxis = lineCutAxis ?? lastLineCutAxisRef.current;
-    const activeHoverData = hoverData ?? lastHoverDataRef.current;
+  const handleLineCutClick = useCallback(
+    async (event?: Plotly.PlotMouseEvent) => {
+      if (!isLineCutActive) return;
+      const activeAxis = lineCutAxis ?? lastLineCutAxisRef.current;
+      const clickedPoint = event?.points?.[0];
 
-    if (!activeAxis) {
-      showToast("LineCut Axis not detected. Hold X or Y and retry.", "warning");
-      return;
-    }
-    if (!activeHoverData) {
-      showToast(
-        "Hover coordinates not locked. Hover over points and retry.",
-        "warning",
-      );
-      return;
-    }
-    if (!onAddPlot) {
-      showToast("System error: onAddPlot missing.", "error");
-      return;
-    }
+      let clickSelection: {
+        x: number;
+        y: number;
+        xIndex: number;
+        yIndex: number;
+      } | null = null;
 
-    try {
-      showToast("Creating persistent LinePlot...", "info");
+      if (clickedPoint) {
+        const pointX =
+          typeof clickedPoint.x === "number"
+            ? clickedPoint.x
+            : Number(clickedPoint.x);
+        const pointY =
+          typeof clickedPoint.y === "number"
+            ? clickedPoint.y
+            : Number(clickedPoint.y);
 
-      const xVar = plotConfig?.indeps?.[0];
-      const yVar = plotConfig?.indeps?.[1];
+        if (Number.isFinite(pointX) && Number.isFinite(pointY)) {
+          let fallbackXIndex = 0;
+          let fallbackYIndex = 0;
 
-      if (!xVar || !yVar) {
-        showToast(
-          `Failed: Missing variables. indeps: ${JSON.stringify(plotConfig?.indeps)}`,
-          "error",
-        );
-        throw new Error("Cannot determine independent variables for cut");
-      }
-
-      const normalizeAxisLabel = (label: string): string =>
-        label
-          .toLowerCase()
-          .replace(/\([^)]*\)/g, "")
-          .replace(/\s+/g, "")
-          .trim();
-
-      const getAxisTitleText = (axis: unknown): string => {
-        if (!axis || typeof axis !== "object") return "";
-        const axisObj = axis as { title?: string | { text?: string } };
-        if (typeof axisObj.title === "string") return axisObj.title;
-        if (axisObj.title && typeof axisObj.title === "object") {
-          return axisObj.title.text || "";
-        }
-        return "";
-      };
-
-      const xAxisTitle = getAxisTitleText(customizedPlotJson.layout?.xaxis);
-      const yAxisTitle = getAxisTitleText(customizedPlotJson.layout?.yaxis);
-
-      const nxTitle = normalizeAxisLabel(xAxisTitle);
-      const nyTitle = normalizeAxisLabel(yAxisTitle);
-      const nxVar = normalizeAxisLabel(xVar);
-      const nyVar = normalizeAxisLabel(yVar);
-
-      const xMatchesXVar =
-        nxTitle && (nxTitle.includes(nxVar) || nxVar.includes(nxTitle));
-      const xMatchesYVar =
-        nxTitle && (nxTitle.includes(nyVar) || nyVar.includes(nxTitle));
-      const yMatchesXVar =
-        nyTitle && (nyTitle.includes(nxVar) || nxVar.includes(nyTitle));
-      const yMatchesYVar =
-        nyTitle && (nyTitle.includes(nyVar) || nyVar.includes(nyTitle));
-
-      const displayXVar =
-        xMatchesXVar && !xMatchesYVar
-          ? xVar
-          : xMatchesYVar && !xMatchesXVar
-            ? yVar
-            : areAxesSwapped
-              ? xVar
-              : yVar;
-
-      const displayYVar =
-        yMatchesYVar && !yMatchesXVar
-          ? yVar
-          : yMatchesXVar && !yMatchesYVar
-            ? xVar
-            : areAxesSwapped
-              ? yVar
-              : xVar;
-
-      const cutVar = activeAxis === "x" ? displayXVar : displayYVar;
-      const remainVar = activeAxis === "x" ? displayYVar : displayXVar;
-      const cutVal = activeAxis === "x" ? activeHoverData.x : activeHoverData.y;
-
-      // Keep slider editable in the created LinePlot by preserving range/step.
-      const sourceCutSlider =
-        availableSliders[cutVar] ||
-        (sliderConfig[cutVar] && sliderConfig[cutVar].step > 0
-          ? sliderConfig[cutVar]
-          : undefined);
-
-      const domainForCutVar =
-        activeAxis === "x"
-          ? lastLineCutAxisDomainsRef.current.x
-          : lastLineCutAxisDomainsRef.current.y;
-
-      const domainFallbackSlider: SliderConfig | undefined = (() => {
-        if (!domainForCutVar || domainForCutVar.length < 2) {
-          return undefined;
-        }
-
-        let min = Infinity;
-        let max = -Infinity;
-        for (const v of domainForCutVar) {
-          if (Number.isFinite(v)) {
-            if (v < min) min = v;
-            if (v > max) max = v;
+          if (
+            Array.isArray(clickedPoint.pointIndex) &&
+            clickedPoint.pointIndex.length >= 2
+          ) {
+            fallbackYIndex = Number(clickedPoint.pointIndex[0]) || 0;
+            fallbackXIndex = Number(clickedPoint.pointIndex[1]) || 0;
+          } else if (
+            Array.isArray(clickedPoint.pointNumber) &&
+            clickedPoint.pointNumber.length >= 2
+          ) {
+            fallbackYIndex = Number(clickedPoint.pointNumber[0]) || 0;
+            fallbackXIndex = Number(clickedPoint.pointNumber[1]) || 0;
           }
-        }
 
-        if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
-          return undefined;
-        }
+          const pointObj = clickedPoint as unknown as {
+            data?: Record<string, unknown>;
+            fullData?: Record<string, unknown>;
+          };
+          const clickedTrace = pointObj.data ?? pointObj.fullData;
 
-        let bestStep = Infinity;
-        for (let i = 1; i < domainForCutVar.length; i++) {
-          const d = Math.abs(domainForCutVar[i] - domainForCutVar[i - 1]);
-          if (d > 0 && d < bestStep) bestStep = d;
-        }
+          const xArr = toNumericArray(
+            (clickedTrace && clickedTrace["x"]) ||
+              customizedPlotJson.layout?.xaxis?.tickvals,
+          );
+          const yArr = toNumericArray(
+            (clickedTrace && clickedTrace["y"]) ||
+              customizedPlotJson.layout?.yaxis?.tickvals,
+          );
 
-        const step =
-          Number.isFinite(bestStep) && bestStep > 0
-            ? bestStep
-            : Math.abs(max - min) / Math.max(domainForCutVar.length - 1, 1);
-
-        return {
-          min,
-          max,
-          step: step > 0 ? step : 0.001,
-          value: Math.min(max, Math.max(min, cutVal)),
-        };
-      })();
-
-      const normalizedCutSlider: SliderConfig = sourceCutSlider
-        ? {
-            min: sourceCutSlider.min,
-            max: sourceCutSlider.max,
-            step: sourceCutSlider.step > 0 ? sourceCutSlider.step : 1,
-            value: Math.min(
-              sourceCutSlider.max,
-              Math.max(sourceCutSlider.min, cutVal),
-            ),
+          if (xArr.length || yArr.length) {
+            lastLineCutAxisDomainsRef.current = { x: xArr, y: yArr };
           }
-        : domainFallbackSlider || {
-            // Final fallback if domain metadata is missing.
-            min: cutVal - 1,
-            max: cutVal + 1,
-            step: 0.001,
-            value: cutVal,
+
+          clickSelection = {
+            x: pointX,
+            y: pointY,
+            xIndex: getClosestIndex(xArr, pointX, fallbackXIndex),
+            yIndex: getClosestIndex(yArr, pointY, fallbackYIndex),
           };
 
-      // Keep non-cut sliders but never lock the variable that should remain on x-axis.
-      const nextSliders: Record<string, SliderConfig> = { ...sliderConfig };
-      delete nextSliders[remainVar];
-      nextSliders[cutVar] = normalizedCutSlider;
+          setHoverData(clickSelection);
+          lastHoverDataRef.current = clickSelection;
+        }
+      }
 
-      const filtersOrder = appliedFilters.map((f) => f.name);
-      const filtersOpts = appliedFilters.reduce(
-        (acc, filter) => {
-          acc[filter.name] = filter.options ?? {};
-          return acc;
-        },
-        {} as Record<string, unknown>,
-      );
+      const activeHoverData =
+        clickSelection ?? hoverData ?? lastHoverDataRef.current;
 
-      onAddPlot({
-        fpath: plotConfig.fpath,
-        indeps: [remainVar],
-        deps: plotConfig.deps,
-        plotType: "LinePlot",
-        source: plotConfig.source,
-        preferredSource: plotConfig.preferredSource,
-        slider: nextSliders,
-        filters_order: filtersOrder,
-        filters_opts: filtersOpts,
-      });
+      if (!activeAxis) {
+        showToast(
+          "LineCut Axis not detected. Hold X or Y and retry.",
+          "warning",
+        );
+        return;
+      }
+      if (!activeHoverData) {
+        showToast(
+          "Hover coordinates not locked. Hover over points and retry.",
+          "warning",
+        );
+        return;
+      }
+      if (!onAddPlot) {
+        showToast("System error: onAddPlot missing.", "error");
+        return;
+      }
 
-      showToast(
-        `LinePlot created at ${cutVar}=${cutVal.toFixed(4)}`,
-        "success",
-      );
-    } catch (err: any) {
-      showToast(`Failed to create linecut: ${err.message}`, "error");
-    }
-  }, [
-    isLineCutActive,
-    lineCutAxis,
-    hoverData,
-    areAxesSwapped,
-    appliedFilters,
-    availableSliders,
-    onAddPlot,
-    plotConfig,
-    sliderConfig,
-    showToast,
-  ]);
+      try {
+        showToast("Creating persistent LinePlot...", "info");
+
+        const xVar = plotConfig?.indeps?.[0];
+        const yVar = plotConfig?.indeps?.[1];
+
+        if (!xVar || !yVar) {
+          showToast(
+            `Failed: Missing variables. indeps: ${JSON.stringify(plotConfig?.indeps)}`,
+            "error",
+          );
+          throw new Error("Cannot determine independent variables for cut");
+        }
+
+        const normalizeAxisLabel = (label: string): string =>
+          label
+            .toLowerCase()
+            .replace(/\([^)]*\)/g, "")
+            .replace(/\s+/g, "")
+            .trim();
+
+        const getAxisTitleText = (axis: unknown): string => {
+          if (!axis || typeof axis !== "object") return "";
+          const axisObj = axis as { title?: string | { text?: string } };
+          if (typeof axisObj.title === "string") return axisObj.title;
+          if (axisObj.title && typeof axisObj.title === "object") {
+            return axisObj.title.text || "";
+          }
+          return "";
+        };
+
+        const xAxisTitle = getAxisTitleText(customizedPlotJson.layout?.xaxis);
+        const yAxisTitle = getAxisTitleText(customizedPlotJson.layout?.yaxis);
+
+        const nxTitle = normalizeAxisLabel(xAxisTitle);
+        const nyTitle = normalizeAxisLabel(yAxisTitle);
+        const nxVar = normalizeAxisLabel(xVar);
+        const nyVar = normalizeAxisLabel(yVar);
+
+        const xMatchesXVar =
+          nxTitle && (nxTitle.includes(nxVar) || nxVar.includes(nxTitle));
+        const xMatchesYVar =
+          nxTitle && (nxTitle.includes(nyVar) || nyVar.includes(nxTitle));
+        const yMatchesXVar =
+          nyTitle && (nyTitle.includes(nxVar) || nxVar.includes(nyTitle));
+        const yMatchesYVar =
+          nyTitle && (nyTitle.includes(nyVar) || nyVar.includes(nyTitle));
+
+        const displayXVar =
+          xMatchesXVar && !xMatchesYVar
+            ? xVar
+            : xMatchesYVar && !xMatchesXVar
+              ? yVar
+              : areAxesSwapped
+                ? xVar
+                : yVar;
+
+        const displayYVar =
+          yMatchesYVar && !yMatchesXVar
+            ? yVar
+            : yMatchesXVar && !yMatchesYVar
+              ? xVar
+              : areAxesSwapped
+                ? yVar
+                : xVar;
+
+        const cutVar = activeAxis === "x" ? displayXVar : displayYVar;
+        const remainVar = activeAxis === "x" ? displayYVar : displayXVar;
+        const cutVal =
+          activeAxis === "x" ? activeHoverData.x : activeHoverData.y;
+
+        // Keep slider editable in the created LinePlot by preserving range/step.
+        const sourceCutSlider =
+          availableSliders[cutVar] ||
+          (sliderConfig[cutVar] && sliderConfig[cutVar].step > 0
+            ? sliderConfig[cutVar]
+            : undefined);
+
+        const domainForCutVar =
+          activeAxis === "x"
+            ? lastLineCutAxisDomainsRef.current.x
+            : lastLineCutAxisDomainsRef.current.y;
+
+        const domainFallbackSlider: SliderConfig | undefined = (() => {
+          if (!domainForCutVar || domainForCutVar.length < 2) {
+            return undefined;
+          }
+
+          let min = Infinity;
+          let max = -Infinity;
+          for (const v of domainForCutVar) {
+            if (Number.isFinite(v)) {
+              if (v < min) min = v;
+              if (v > max) max = v;
+            }
+          }
+
+          if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
+            return undefined;
+          }
+
+          let bestStep = Infinity;
+          for (let i = 1; i < domainForCutVar.length; i++) {
+            const d = Math.abs(domainForCutVar[i] - domainForCutVar[i - 1]);
+            if (d > 0 && d < bestStep) bestStep = d;
+          }
+
+          const step =
+            Number.isFinite(bestStep) && bestStep > 0
+              ? bestStep
+              : Math.abs(max - min) / Math.max(domainForCutVar.length - 1, 1);
+
+          return {
+            min,
+            max,
+            step: step > 0 ? step : 0.001,
+            value: Math.min(max, Math.max(min, cutVal)),
+          };
+        })();
+
+        const normalizedCutSlider: SliderConfig = sourceCutSlider
+          ? {
+              min: sourceCutSlider.min,
+              max: sourceCutSlider.max,
+              step: sourceCutSlider.step > 0 ? sourceCutSlider.step : 1,
+              value: Math.min(
+                sourceCutSlider.max,
+                Math.max(sourceCutSlider.min, cutVal),
+              ),
+            }
+          : domainFallbackSlider || {
+              // Final fallback if domain metadata is missing.
+              min: cutVal - 1,
+              max: cutVal + 1,
+              step: 0.001,
+              value: cutVal,
+            };
+
+        // Keep non-cut sliders but never lock the variable that should remain on x-axis.
+        const nextSliders: Record<string, SliderConfig> = { ...sliderConfig };
+        delete nextSliders[remainVar];
+        nextSliders[cutVar] = normalizedCutSlider;
+
+        const filtersOrder = appliedFilters.map((f) => f.name);
+        const filtersOpts = appliedFilters.reduce(
+          (acc, filter) => {
+            acc[filter.name] = filter.options ?? {};
+            return acc;
+          },
+          {} as Record<string, unknown>,
+        );
+
+        onAddPlot({
+          fpath: plotConfig.fpath,
+          indeps: [remainVar],
+          deps: plotConfig.deps,
+          plotType: "LinePlot",
+          source: plotConfig.source,
+          preferredSource: plotConfig.preferredSource,
+          slider: nextSliders,
+          filters_order: filtersOrder,
+          filters_opts: filtersOpts,
+        });
+
+        showToast(
+          `LinePlot created at ${cutVar}=${cutVal.toFixed(4)}`,
+          "success",
+        );
+      } catch (err: any) {
+        showToast(`Failed to create linecut: ${err.message}`, "error");
+      }
+    },
+    [
+      isLineCutActive,
+      lineCutAxis,
+      hoverData,
+      areAxesSwapped,
+      appliedFilters,
+      availableSliders,
+      customizedPlotJson.layout?.xaxis?.tickvals,
+      customizedPlotJson.layout?.yaxis?.tickvals,
+      getClosestIndex,
+      onAddPlot,
+      plotConfig,
+      sliderConfig,
+      showToast,
+      toNumericArray,
+    ],
+  );
 
   // Load persisted state when component mounts or plot config changes
   useEffect(() => {
@@ -2930,7 +3010,8 @@ const PlotWrapper: React.FC<Props> = ({
               x1: hoverData.x,
               y0: 0,
               y1: 1,
-              line: { color: "#ffffff", width: 8 },
+              editable: false,
+              line: { color: "#ffffff", width: 2.5 },
             },
             {
               type: "line",
@@ -2940,7 +3021,8 @@ const PlotWrapper: React.FC<Props> = ({
               x1: hoverData.x,
               y0: 0,
               y1: 1,
-              line: { color: "#ef4444", width: 4 },
+              editable: false,
+              line: { color: "#ef4444", width: 1.5 },
             },
           ]
         : [
@@ -2952,7 +3034,8 @@ const PlotWrapper: React.FC<Props> = ({
               x1: 1,
               y0: hoverData.y,
               y1: hoverData.y,
-              line: { color: "#ffffff", width: 8 },
+              editable: false,
+              line: { color: "#ffffff", width: 2.5 },
             },
             {
               type: "line",
@@ -2962,7 +3045,8 @@ const PlotWrapper: React.FC<Props> = ({
               x1: 1,
               y0: hoverData.y,
               y1: hoverData.y,
-              line: { color: "#ef4444", width: 4 },
+              editable: false,
+              line: { color: "#ef4444", width: 1.5 },
             },
           ];
 
@@ -2974,6 +3058,11 @@ const PlotWrapper: React.FC<Props> = ({
           ...(((basePlot.layout as any)?.shapes as any[]) ?? []),
           ...normalizedGuideShapes,
         ],
+      },
+      // Prevent Plotly's shape-edit cursor/handles from stealing LineCut clicks.
+      config: {
+        ...(basePlot.config || {}),
+        editable: false,
       },
     };
   }, [
