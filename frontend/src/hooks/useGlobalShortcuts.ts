@@ -56,6 +56,7 @@ export type ShortcutAction =
   | "selected-reset-plot"
   | "selected-send-to-notes"
   | "selected-export-images"
+  | "selected-remove-plot"
   | "escape";
 
 interface ShortcutConfig {
@@ -109,6 +110,7 @@ export const KEYBOARD_SHORTCUTS: Record<
   ],
   c: { action: "clear-composer", alt: true, shift: true }, // Alt+Shift+C
   v: { action: "clear-viewer", alt: true, shift: true },   // Alt+Shift+V
+  "delete": { action: "selected-remove-plot" },
 };
 
 export const useGlobalShortcutsInit = () => {

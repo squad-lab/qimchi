@@ -498,6 +498,14 @@ const Viewer = ({
   useShortcut("selected-export-images", () =>
     dispatchSelectedPlotShortcut("export-images"),
   );
+  useShortcut("selected-remove-plot", () => {
+    if (selectedPlotId) {
+      removePlot(selectedPlotId);
+      return;
+    }
+
+    showToast("No plot selected to remove.", "warning");
+  });
 
   const VIEWER_TIPS = (
     <div className="space-y-1 text-sm">
@@ -537,6 +545,7 @@ const Viewer = ({
         Toggle Side Panel, Shift+M Toggle Metadata, Shift+N Toggle Notes,
         Shift+R Refresh Dir, Esc Close modals/modes.
       </div>
+      <div>• Del: Remove selected plot or selected basket items.</div>
     </div>
   );
 
