@@ -10,10 +10,9 @@ REM    - Interactive branch selection during initial installation
 REM 4. Create and activate Python virtual environment using uv
 REM 5. Install Node.js via winget if not present
 REM 6. Install fd-find for better performance (optional)
-REM 7. Clone and install QCUtils with interactive branch selection
-REM 8. Install Python backend dependencies using pip
-REM 9. Install and build React frontend using npm
-REM 10. Start the FastAPI server with static file serving
+REM 7. Install Python backend dependencies using uv and pyproject.toml
+REM 8. Install and build React frontend using npm
+REM 9. Start the FastAPI server with static file serving
 REM
 REM Usage: Double-click this file or run from command prompt
 REM The web interface will be available at http://localhost:8001
@@ -27,8 +26,14 @@ REM ============================================================================
 REM Configuration Parameters - Edit these as needed
 REM ============================================================================
 set DEFAULT_QIMCHI_BRANCH=main
-set DEFAULT_QCUTILS_BRANCH=main
 REM ============================================================================
+
+:: Parse command-line args
+set "FORCE_REINSTALL=0"
+if /I "%~1"=="--force-reinstall" set "FORCE_REINSTALL=1"
+if /I "%~1"=="/force" set "FORCE_REINSTALL=1"
+if /I "%~1"=="/f" set "FORCE_REINSTALL=1"
+if /I "%~1"=="-f" set "FORCE_REINSTALL=1"
 
 REM Skip over function definitions
 goto :main
@@ -57,6 +62,21 @@ set "PATH=%LOCALAPPDATA%\Microsoft\WindowsApps;%PATH%"
 set "PATH=%ProgramFiles%\Git\cmd;%PATH%"
 set "PATH=%ProgramFiles%\nodejs;%PATH%"
 echo PATH refreshed successfully
+goto :eof
+
+:remove_qcutils
+echo Checking for qcutils directory at %QIMCHI_DIR%...
+if exist "%QIMCHI_DIR%\qcutils" (
+    echo Found qcutils at %QIMCHI_DIR%\qcutils. Removing...
+    rmdir /s /q "%QIMCHI_DIR%\qcutils"
+    if exist "%QIMCHI_DIR%\qcutils" (
+        echo WARNING: Failed to remove %QIMCHI_DIR%\qcutils. Please remove it manually.
+    ) else (
+        echo qcutils removed successfully.
+    )
+) else (
+    echo No qcutils directory found in %QIMCHI_DIR%.
+)
 goto :eof
 REM ============================================================================
 
@@ -161,7 +181,23 @@ set QIMCHI_DIR=%USERPROFILE%\.qimchi
 set INSTALL_MARKER=%QIMCHI_DIR%\.qimchi_installed
 echo Setting up QIMCHI in: %QIMCHI_DIR%
 
-:: Check if QIMCHI_DIR exists first, if not, force reinstall
+:: Force reinstall handling (via CLI flag)
+if "%FORCE_REINSTALL%"=="1" (
+    echo Force reinstall requested. Removing existing installation...
+    if exist "%QIMCHI_DIR%" (
+        echo Removing %QIMCHI_DIR%...
+        rmdir /s /q "%QIMCHI_DIR%"
+        if exist "%QIMCHI_DIR%" (
+            echo ERROR: Failed to remove old installation directory
+            echo Please manually delete: %QIMCHI_DIR%
+            pause
+            exit /b 1
+        )
+    )
+    goto :restart_install
+)
+
+:: Check if QIMCHI_DIR exists first, if not, start fresh installation
 if not exist "%QIMCHI_DIR%" (
     echo QIMCHI directory not found. Starting fresh installation...
     goto :restart_install
@@ -186,13 +222,10 @@ if exist "%INSTALL_MARKER%" (
         del "%INSTALL_MARKER%" 2>nul
         goto :restart_install
     )
-    if not exist "%QIMCHI_DIR%\qcutils" (
-        echo QCUtils not found. Re-running setup...
-        del "%INSTALL_MARKER%" 2>nul
-        goto :restart_install
-    )
     
     echo Installation verified. Checking branch status...
+    :: Ensure qcutils is removed if present (no longer required by qimchi)
+    call :remove_qcutils
     cd /d "%QIMCHI_DIR%\qimchi"
     
     :: Check if current branch exists on remote
@@ -291,55 +324,26 @@ if exist "%INSTALL_MARKER%" (
                 echo No frontend changes detected. Using existing build.
             )
 
-            :: Reinstall backend dependencies if requirements.txt or pyproject.toml changed
-            set "REQ_CHANGED=0"
+            :: Reinstall backend dependencies if pyproject.toml changed
             set "PYPROJECT_CHANGED=0"
-
-            findstr /C:"backend/requirements.txt" "%TEMP%\qimchi_git_pull.txt" >nul
-            if not errorlevel 1 set "REQ_CHANGED=1"
-
             findstr /C:"backend/pyproject.toml" "%TEMP%\qimchi_git_pull.txt" >nul
             if not errorlevel 1 set "PYPROJECT_CHANGED=1"
 
-            if "!REQ_CHANGED!"=="1" (
-                echo backend/requirements.txt changed.
-            )
-            if "!PYPROJECT_CHANGED!"=="1" (
-                echo backend/pyproject.toml changed.
-            )
-
-            if "!REQ_CHANGED!!PYPROJECT_CHANGED!"=="00" (
+            if "!PYPROJECT_CHANGED!"=="0" (
                 echo No backend dependency file changes detected.
             ) else (
                 echo Reinstalling backend dependencies...
                 cd /d "%QIMCHI_DIR%\qimchi\backend"
-
-                if "!PYPROJECT_CHANGED!"=="1" (
-                    if exist "%QIMCHI_DIR%\qimchi\backend\pyproject.toml" (
-                        uv pip install --python "%QIMCHI_DIR%\.venv\Scripts\python.exe" .
-                        if errorlevel 1 (
-                            echo Warning: Failed to install backend package from pyproject.toml.
-                        ) else (
-                            echo Backend package installed successfully from pyproject.toml.
-                        )
+                if exist "%QIMCHI_DIR%\qimchi\backend\pyproject.toml" (
+                    uv pip install --python "%QIMCHI_DIR%\.venv\Scripts\python.exe" .
+                    if errorlevel 1 (
+                        echo Warning: Failed to install backend package from pyproject.toml.
                     ) else (
-                        echo Warning: backend/pyproject.toml not found. Skipping pyproject install.
+                        echo Backend package installed successfully from pyproject.toml.
                     )
+                ) else (
+                    echo Warning: backend/pyproject.toml not found. Skipping pyproject install.
                 )
-
-                if "!REQ_CHANGED!"=="1" (
-                    if exist "%QIMCHI_DIR%\qimchi\backend\requirements.txt" (
-                        uv pip install --python "%QIMCHI_DIR%\.venv\Scripts\python.exe" -r "%QIMCHI_DIR%\qimchi\backend\requirements.txt"
-                        if errorlevel 1 (
-                            echo Warning: Failed to install backend requirements.
-                        ) else (
-                            echo Backend requirements installed successfully.
-                        )
-                    ) else (
-                        echo Warning: backend/requirements.txt not found. Skipping requirements install.
-                    )
-                )
-
                 cd /d "%QIMCHI_DIR%\qimchi"
             )
         ) else (
@@ -481,83 +485,11 @@ if errorlevel 1 (
 echo Installing plotly chrome support...
 echo y | python -c "import plotly; plotly.io.kaleido.scope.chromium.config.set_executable('chrome')" 2>nul || echo Plotly chrome setup completed
 
+
 echo.
-echo ============================================
-echo             Setting up QCUtils
-echo ============================================
-
-:: Check if qcutils already exists, if not clone it
-if not exist "%QIMCHI_DIR%\qcutils" (
-    echo.
-    echo ============================================
-    echo     Selecting QCUtils Branch to Install
-    echo ============================================
-    
-    :: Fetch available branches from GitLab
-    echo Fetching available branches from qcutils repository...
-    cd /d "%QIMCHI_DIR%"
-    git ls-remote --heads https://gitlab.com/squad-lab/qcutils.git > "%TEMP%\qcutils_branches.txt"
-    if errorlevel 1 (
-        echo ERROR: Failed to fetch branches from qcutils repository
-        echo Please check your internet connection and try again
-        pause
-        exit /b 1
-    )
-    
-    :: Parse and display branches
-    echo.
-    echo Available branches:
-    echo.
-    set /a QCUTILS_BRANCH_COUNT=0
-    for /f "tokens=2" %%a in ('type "%TEMP%\qcutils_branches.txt"') do (
-        set "QCUTILS_BRANCH_FULL=%%a"
-        :: Extract branch name after refs/heads/
-        for /f "tokens=3 delims=/" %%b in ("!QCUTILS_BRANCH_FULL!") do (
-            set /a QCUTILS_BRANCH_COUNT+=1
-            set "QCUTILS_BRANCH_!QCUTILS_BRANCH_COUNT!=%%b"
-            echo !QCUTILS_BRANCH_COUNT!. %%b
-        )
-    )
-    
-    echo.
-    set /p QCUTILS_BRANCH_CHOICE="Select branch number (default: %DEFAULT_QCUTILS_BRANCH%): "
-    
-    :: Set default or validate choice
-    if "!QCUTILS_BRANCH_CHOICE!"=="" (
-        set "SELECTED_QCUTILS_BRANCH=%DEFAULT_QCUTILS_BRANCH%"
-    ) else (
-        call set "SELECTED_QCUTILS_BRANCH=%%QCUTILS_BRANCH_!QCUTILS_BRANCH_CHOICE!%%"
-        if "!SELECTED_QCUTILS_BRANCH!"=="" (
-            echo Invalid selection. Using default: %DEFAULT_QCUTILS_BRANCH%
-            set "SELECTED_QCUTILS_BRANCH=%DEFAULT_QCUTILS_BRANCH%"
-        )
-    )
-    
-    echo.
-    echo Cloning QCUtils repository from branch: !SELECTED_QCUTILS_BRANCH!
-    cd /d "%QIMCHI_DIR%"
-    git clone --branch !SELECTED_QCUTILS_BRANCH! --single-branch https://gitlab.com/squad-lab/qcutils.git
-    if errorlevel 1 (
-        echo ERROR: Failed to clone qcutils repository
-        echo Please check your internet connection and try again
-        pause
-        exit /b 1
-    )
-    echo QCUtils repository cloned successfully
-) else (
-    echo QCUtils repository already exists
-)
-
-:: Install qcutils using pip into the backend virtual environment
-echo Installing QCUtils into backend virtual environment...
-cd /d "%QIMCHI_DIR%\qimchi\backend"
-uv pip install "%QIMCHI_DIR%\qcutils"
-if errorlevel 1 (
-    echo ERROR: Failed to install qcutils
-    pause
-    exit /b 1
-)
-echo QCUtils installed successfully
+echo             QCUtils cleanup
+echo QCUtils is no longer required; ensuring qcutils is removed.
+call :remove_qcutils
 
 echo.
 echo ============================================
@@ -601,7 +533,7 @@ if errorlevel 1 (
 :: Create installation completion marker
 echo Creating installation completion marker...
 echo Installation completed on %DATE% %TIME% > "%INSTALL_MARKER%"
-echo Git, Python, Node.js, qcutils, backend and frontend setup complete >> "%INSTALL_MARKER%"
+echo Git, Python, Node.js, backend and frontend setup complete >> "%INSTALL_MARKER%"
 
 :start_server
 echo.
