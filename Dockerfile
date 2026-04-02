@@ -6,7 +6,6 @@ COPY frontend/package*.json ./
 COPY frontend/tsconfig*.json ./
 COPY frontend/vite.config.ts ./
 COPY frontend/postcss.config.js ./
-COPY frontend/tailwind.config.js ./
 COPY frontend/index.html ./
 COPY frontend/public/ ./public/
 COPY frontend/src/ ./src/
@@ -26,11 +25,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor \
     && rm -rf /var/lib/apt/lists/*
 
-COPY backend/pyproject.toml backend/requirements.txt /app/
+COPY backend/pyproject.toml /app/
 
 RUN python -m pip install --no-cache-dir -U pip setuptools wheel \
     && pip install --no-cache-dir uv \
-    && (uv sync --no-dev || (if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi)) \
+    && (uv sync --no-dev || pip install --no-cache-dir .) \
     && echo "y" | uv run plotly_get_chrome
 
 COPY backend/api/ /app/api/

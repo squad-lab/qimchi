@@ -1,8 +1,20 @@
-# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.4.1
+# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.5.0
 
-Plotly based data visualization tool for `xarray` data. Optimized to work with the [`qcutils`](https://gitlab.com/squad-lab/qcutils) package. Qimchi expects the data to be `zarr` formatted `xarray` files. Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html#zarr).
+Plotly based data visualization tool for `xarray` data. Optimized to work with the optional [`qcutils`](https://gitlab.com/squad-lab/qcutils) package (the installer no longer installs `qcutils` by default). Qimchi supports any dataset format convertible to `xarray` (see [Supported Dataset Types](#supported-dataset-types) below). Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html).
 
 This repository contains a unified FastAPI application that serves a React-based frontend for the Qimchi plotter.
+
+## v0.5.0 Highlights
+
+- Unified backend dataset loader: supports `xarray` DataTrees, NetCDF/HDF5, QCoDeS DBs, flat CSV/TXT, and SQLite-backed containers via a single loader.
+- Zarr v3 support while retaining backwards compatibility with v2.
+- Custom dataset support and loader templates: see [docs/custom_datasets.md](docs/custom_datasets.md).
+- LineCuts: interactive horizontal/vertical slicing with live preview and improved backend plot creation.
+- Background correction: added support for LinePlots (constant + linear) and HeatMaps (constant, row/col mean, plane).
+- Keyboard shortcuts overhaul and many UX improvements (quick keys for Filters, Appearance, Maximized view, Notes, Export, and more).
+- Explorer and Viewer improvements: path history, dataset cycling across types, and more robust filter handling.
+- Misc: removed `qcutils` as a core dependency (installer no longer installs it), installer updated with a qcutils cleanup function, and upgrades to frontend/backend toolchains (Vite 8, Plotly, xarray, zarr, etc.).
+
 
 <!-- Full API documentation and more can be found [here](https://qimchi.squad-lab.org) -->
 
@@ -18,11 +30,12 @@ This repository contains a unified FastAPI application that serves a React-based
       - [Windows](#windows-1)
       - [Linux/macOS](#linuxmacos)
 - [Environment Variables](#environment-variables)
+- [Supported Dataset Types](#supported-dataset-types)
 - [Measurements](#measurements)
 
 ## Installation
 
-Qimchi supports multiple installation methods, including Windows executable, Docker, and expert manual installation. Choose the method that best suits your use case.
+Qimchi supports multiple installation methods, including executable scripts, Docker, and expert manual installation. Choose the method that best suits your use case.
 
 ### Windows
 
@@ -32,11 +45,13 @@ Qimchi supports multiple installation methods, including Windows executable, Doc
 Download the latest `qimchi.exe` from the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases) and run it. The executable will:
 - Automatically install all required dependencies (Git, Python, Node.js, fd-find)
 - Set up the application in `%USERPROFILE%\.qimchi`
-- Clone and configure both Qimchi and QCUtils
+- Clone and configure Qimchi (QCUtils is optional and not installed by the Windows installer)
 - Build the frontend and start the server
 - Open the web interface in your browser
 
 Simply double-click `qimchi.exe` and follow the prompts. The web interface will be available at http://localhost:8001.
+
+Note: The Windows installer no longer clones or installs `qcutils`.
 
 ### Linux/macOS
 
@@ -53,6 +68,8 @@ After installation, either restart your shell, or run:
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+Note: The Linux/macOS installer (`qimchi-install.sh`) no longer clones or installs `qcutils`.
 
 Then simply start qimchi with `qimchi`. The web interface will be available at http://localhost:8001.
 
@@ -260,22 +277,14 @@ For manual installation with full control over the setup process, follow these s
    echo y | python -c "import plotly; plotly.io.kaleido.scope.chromium.config.set_executable('chrome')"
    ```
 
-6. **Clone and install QCUtils:**
-   ```powershell
-   cd ..\..
-   git clone https://gitlab.com/squad-lab/qcutils.git
-   cd qimchi\backend
-   uv pip install ..\..\qcutils
-   ```
-
-7. **Build the frontend:**
+6. **Build the frontend:**
    ```powershell
    cd ..\frontend
    npm install
    npm run build
    ```
 
-8. **Start the server:**
+7. **Start the server:**
    ```powershell
    cd ..\backend
    $env:PYTHONPATH="$PWD"
@@ -353,22 +362,14 @@ For manual installation with full control over the setup process, follow these s
    echo "y" | python -c "import plotly; plotly.io.kaleido.scope.chromium.config.set_executable('chrome')"
    ```
 
-6. **Clone and install QCUtils:**
-   ```bash
-   cd ../..
-   git clone https://gitlab.com/squad-lab/qcutils.git
-   cd qimchi/backend
-   uv pip install ../../qcutils
-   ```
-
-7. **Build the frontend:**
+6. **Build the frontend:**
    ```bash
    cd ../frontend
    npm install
    npm run build
    ```
 
-8. **Start the server:**
+7. **Start the server:**
    ```bash
    cd ../backend
    export PYTHONPATH="$PWD"
@@ -413,5 +414,16 @@ QIMCHI_MAX_DEPTH=6
 SERVE_STATIC_FILES=true
 ```
 
+## Supported Dataset Types
+Qimchi's backend supports loading datasets in any format that can be converted to an `xarray` DataArray or Dataset. This includes:
+- Zarr (v2 and v3)
+- NetCDF
+- HDF5
+- QCoDeS databases (via `load_by_id()`)
+- Flat files (CSV, TXT, DAT) - requires `polars` dependency
+- `xarray` DataTrees (hierarchical datasets)
+- SQLite-backed containers with `xarray`-compatible structure
+- Custom formats convertible to `xarray` via user-defined loaders (see [Custom Dataset Support](https://qimchi.squad-lab.org/docs/custom_datasets.md))
+
 ## Measurements
-Measurement examples while using `qcutils` can be found in its own repository. Refer to [its repository](https://gitlab.com/squad-lab/qcutils) for more details.
+Measurement examples referencing `qcutils` can be found in its own repository. Refer to [its repository](https://gitlab.com/squad-lab/qcutils) for more details. If you need `qcutils`, the project must be installed manually; it is no longer installed automatically by the Qimchi installer.
