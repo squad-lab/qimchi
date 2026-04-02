@@ -16,11 +16,21 @@ DEFAULT_QIMCHI_BRANCH="main"
 DEFAULT_QCUTILS_BRANCH="main"
 PORT=8001
 
+## Command-line flags
+FORCE_REINSTALL=0
+if [ "$1" = "--force-reinstall" ] || [ "$1" = "-f" ]; then
+    FORCE_REINSTALL=1
+fi
+
+if [ "$FORCE_REINSTALL" -eq 1 ]; then
+    echo "Force reinstall requested. Removing $QIMCHI_DIR..."
+    rm -rf "$QIMCHI_DIR"
+fi
+
 mkdir -p "$QIMCHI_DIR" "$BIN_DIR"
 
-# ----------------------------------------
-# Helper functions
-# ----------------------------------------
+
+# Helper: check command existence
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
@@ -83,6 +93,7 @@ install_node() {
     fi
 }
 
+
 install_uv() {
     if command_exists uv; then
         echo "uv is already installed."
@@ -93,6 +104,20 @@ install_uv() {
     if ! command_exists uv; then
         echo "uv installation failed. Please install manually."
         exit 1
+    fi
+}
+
+remove_qcutils() {
+    if [ -d "$QCUTILS_DIR" ]; then
+        echo "qcutils found at $QCUTILS_DIR. Removing..."
+        rm -rf "$QCUTILS_DIR"
+        if [ -d "$QCUTILS_DIR" ]; then
+            echo "WARNING: Failed to remove $QCUTILS_DIR. Please remove it manually."
+        else
+            echo "qcutils removed successfully."
+        fi
+    else
+        echo "No qcutils directory found at $QCUTILS_DIR."
     fi
 }
 
@@ -150,7 +175,7 @@ read -p "Pick a number for QIMCHI branch (default: 1): " branch_choice < /dev/tt
 branch_choice=${branch_choice:-1}
 QIMCHI_BRANCH="${remote_branches[$((branch_choice-1))]}"
 
-# Ensure remote branch exists locally
+# Ensure remote branch exists locally and check it out
 if git show-ref --verify --quiet "refs/remotes/origin/$QIMCHI_BRANCH"; then
     if git show-ref --verify --quiet "refs/heads/$QIMCHI_BRANCH"; then
         git checkout "$QIMCHI_BRANCH"
@@ -159,65 +184,12 @@ if git show-ref --verify --quiet "refs/remotes/origin/$QIMCHI_BRANCH"; then
     fi
     git reset --hard "origin/$QIMCHI_BRANCH"
 else
-    echo "Available remote branches:"
     echo "Error: remote branch origin/$QIMCHI_BRANCH not found!"
     exit 1
 fi
 
-# ----------------------------------------
-# Clone or update QCUtils
-# ----------------------------------------
-echo "============================================"
-echo "Step 2.5: Setting up QCUtils"
-echo "============================================"
-
-QCUTILS_TARGET="$QCUTILS_DIR"
-if [ ! -d "$QCUTILS_TARGET/.git" ]; then
-    git clone "$QCUTILS_REPO" "$QCUTILS_TARGET"
-fi
-
-cd "$QCUTILS_TARGET" || exit 1
-echo "Fetching all remote branches..."
-git fetch --all --prune
-
-remote_branches=()
-for branch in $(git ls-remote --heads origin | awk '{print $2}' | sed 's|refs/heads/||'); do
-    remote_branches+=("$branch")
-done
-
-# Ensure default branch first
-default_branch="$DEFAULT_QCUTILS_BRANCH"
-found_default=0
-for i in "${!remote_branches[@]}"; do
-    if [ "${remote_branches[$i]}" = "$default_branch" ]; then
-        found_default=1
-        remote_branches=("$default_branch" "${remote_branches[@]:0:$i}" "${remote_branches[@]:$((i+1))}")
-        break
-    fi
-done
-if [ $found_default -eq 0 ]; then
-    default_branch="${remote_branches[0]}"
-fi
-
-# Print menu
-echo "Available QCUtils branches:"
-for i in "${!remote_branches[@]}"; do
-    printf "%d) %s\n" $((i+1)) "${remote_branches[$i]}"
-done
-
-# Prompt user
-read -p "Pick a number for QCUtils branch (default: 1): " branch_choice < /dev/tty
-branch_choice=${branch_choice:-1}
-QCUTILS_BRANCH="${remote_branches[$((branch_choice-1))]}"
-
-echo "Checking out branch $QCUTILS_BRANCH ..."
-if git show-ref --verify --quiet "refs/heads/$QCUTILS_BRANCH"; then
-    git checkout "$QCUTILS_BRANCH"
-    git reset --hard "origin/$QCUTILS_BRANCH"
-else
-    git checkout -B "$QCUTILS_BRANCH" "origin/$QCUTILS_BRANCH"
-fi
-
+# Ensure qcutils folder is removed
+remove_qcutils
 # ----------------------------------------
 # Setup Python venv and install backend
 # ----------------------------------------
@@ -235,8 +207,7 @@ source "$VENV_DIR/bin/activate"
 cd "$QIMCHI_DIR/qimchi/backend"
 uv pip install .
 
-# Install QCUtils inside backend venv
-uv pip install "$QCUTILS_DIR"
+# Note: QCUtils is optional and is not installed by this script.
 
 # ----------------------------------------
 # Setup frontend
