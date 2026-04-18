@@ -14,7 +14,6 @@ import {
   Grid,
   ChartLine,
   ListMusic,
-  Lightbulb,
 } from "lucide-react";
 
 // Local imports
@@ -756,40 +755,6 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
             </div>
 
             <div className="flex items-center">
-              {/* Help tooltip */}
-              <div className="mr-2">
-                <Tooltip
-                  content={
-                    <div className="text-left space-y-2">
-                      <div className="text-sm text-white">
-                        Drag indeps and deps from basket items to create plots.
-                      </div>
-                      <div className="text-sm text-white">
-                        Double-click a basket field to autofill X, then Y, then
-                        Z (HeatMap only).
-                      </div>
-                      <div className="text-sm text-white">
-                        Shortcuts: H HeatMap, L LinePlot, P Plot, Alt+Shift+C
-                        Clear Composer.
-                      </div>
-                      <div className="text-sm text-white">
-                        Selected plot: 1-9 Select, F Filters, A Appearance, M
-                        Maximize, B BG Corr, S Swap Axes, Shift+X LineCut, R
-                        Reset, N Send to Notes, E Export Images.
-                      </div>
-                    </div>
-                  }
-                  position="bottom"
-                >
-                  <button
-                    className="p-1 text-gray-600 hover:text-yellow-600 hover:bg-yellow-200 rounded"
-                    title="Composer help"
-                  >
-                    <Lightbulb size={16} />
-                  </button>
-                </Tooltip>
-              </div>
-
               {/* Clear All button */}
               {(xFields.length > 0 ||
                 yFields.length > 0 ||

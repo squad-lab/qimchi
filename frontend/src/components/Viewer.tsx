@@ -2,7 +2,7 @@ import axios from "axios";
 import { PROD_BACKEND_URL } from "../config";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Panel } from "react-resizable-panels";
-import { ChartScatter, Lightbulb } from "lucide-react";
+import { ChartScatter } from "lucide-react";
 
 // Local imports
 import Basket, { BasketFieldSelection, BasketItem } from "./Basket";
@@ -507,48 +507,6 @@ const Viewer = ({
     showToast("No plot selected to remove.", "warning");
   });
 
-  const VIEWER_TIPS = (
-    <div className="space-y-1 text-sm">
-      <div>• Click Appearance / Filters to edit a plot.</div>
-      <div>
-        • Hold Shift while hovering those buttons to switch to Paint mode.
-      </div>
-      <div>
-        • In Paint mode, Shift+Click other plots to apply copied settings.
-      </div>
-      <div>• Incompatible plot types will show an error toast.</div>
-      <div>
-        • Use the size preset buttons (33 / 50 / 66 / 100) to set plot widths
-        for all plots; 50% forces side-by-side.
-      </div>
-      <div>
-        • Use the Squarify button to force a 1:1 aspect ratio for all plots.
-      </div>
-      <div>
-        • Shortcuts: H HeatMap, L LinePlot, P Plot, Alt+Shift+C Clear Composer.
-      </div>
-      <div>
-        • Selected plot shortcuts: 1-9 Select, Shift+X LineCut, F Filters, A
-        Appearance, M Maximize, B BG Corr, S Swap Axes, R Reset, N Send to
-        Notes, E Export Images.
-      </div>
-      <div>
-        • Select Basket dataset cards (Ctrl/Cmd+Click for multi-select) to set
-        plot scope.
-      </div>
-      <div>
-        • Gray Basket chips are not shared across selected datasets and are
-        disabled.
-      </div>
-      <div>
-        • Shortcuts: Alt+Shift+B Clear Basket, Alt+Shift+V Clear Viewer, Shift+E
-        Toggle Side Panel, Shift+M Toggle Metadata, Shift+N Toggle Notes,
-        Shift+R Refresh Dir, Esc Close modals/modes.
-      </div>
-      <div>• Del: Remove selected plot or selected basket items.</div>
-    </div>
-  );
-
   const getSelectionContextLabel = () => {
     if (selectedDatasetIds.size === 0) {
       return "No dataset selected";
@@ -822,15 +780,6 @@ const Viewer = ({
                 Viewer<span className="ml-[1.5px]">({plotConfigs.length})</span>
               </h3>
               <div className="flex items-center space-x-2">
-                {/* Tips */}
-                <Tooltip
-                  content={VIEWER_TIPS}
-                  position="left"
-                  className="p-1 text-gray-600 hover:text-yellow-600 hover:bg-yellow-200 rounded disabled:opacity-50 transition-colors"
-                >
-                  <Lightbulb size={16} />
-                </Tooltip>
-
                 {/* Squarify toggle - applies to all plots */}
                 <Tooltip
                   content={

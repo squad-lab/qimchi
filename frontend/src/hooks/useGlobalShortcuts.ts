@@ -57,6 +57,7 @@ export type ShortcutAction =
   | "selected-send-to-notes"
   | "selected-export-images"
   | "selected-remove-plot"
+  | "toggle-help"
   | "escape";
 
 interface ShortcutConfig {
@@ -73,7 +74,6 @@ export const KEYBOARD_SHORTCUTS: Record<
   escape: { action: "escape" },
   esc: { action: "escape" },
   p: { action: "plot" },
-  h: { action: "heatmap" },
   l: { action: "lineplot" },
   f: { action: "selected-open-filters" },
   a: { action: "selected-open-appearance" },
@@ -110,6 +110,10 @@ export const KEYBOARD_SHORTCUTS: Record<
   ],
   c: { action: "clear-composer", alt: true, shift: true }, // Alt+Shift+C
   v: { action: "clear-viewer", alt: true, shift: true },   // Alt+Shift+V
+  h: [
+    { action: "heatmap" },
+    { action: "toggle-help", shift: true },                 // Shift+H
+  ],
   "delete": { action: "selected-remove-plot" },
 };
 

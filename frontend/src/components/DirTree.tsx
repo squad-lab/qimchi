@@ -96,6 +96,7 @@ interface DirTreeProps {
   onCycleDataset?: (direction: "prev" | "next") => void; // For cycling through datasets
   onStartLoadingAttributes?: (itemId: string) => void;
   onUpdateBasketItemAttributes?: (itemId: string, attributes: AttrData) => void;
+  onOpenHelp?: () => void; // For opening the Help modal
 }
 
 /**
@@ -125,6 +126,7 @@ const DirTree = ({
   onCycleDataset,
   onStartLoadingAttributes,
   onUpdateBasketItemAttributes,
+  onOpenHelp,
 }: DirTreeProps) => {
   const { showToast } = useToast();
 
@@ -1028,28 +1030,6 @@ const DirTree = ({
     );
   }
 
-  const TIPS = (
-    <div className="p-0 flex flex-wrap">
-      <div className="space-y-1 text-sm">
-        <div>• Double-click folders to navigate</div>
-        <div>• Ctrl/Shift + Click for multi-selection</div>
-        <div>• Drag datasets to basket or use + button</div>
-        <div>• Drag datasets to Notes to add paths to note</div>
-        <div>• Drag folders to add all its contents to basket</div>
-        <div>• Use ↑/↓ buttons to cycle through datasets</div>
-        <div>• Toggle button to view live measurements (auto-refreshes)</div>
-        <div>• Shift + R to refresh directory</div>
-        <div>
-          • Global: H HeatMap, L LinePlot, P Plot, Alt+Shift+C Clear Composer
-        </div>
-        <div>
-          • Global: Alt+Shift+B Clear Basket, Alt+Shift+V Clear Viewer, Shift+E
-          Toggle Side Panel, Shift+M Toggle Metadata, Shift+N Toggle Notes
-        </div>
-      </div>
-    </div>
-  );
-
   return (
     <div className="flex flex-col h-full w-full">
       {/* Fixed Toolbar Section */}
@@ -1159,13 +1139,16 @@ const DirTree = ({
                 </button>
               </Tooltip>
 
-              {/* Tips */}
-              <Tooltip
-                content={TIPS}
-                position="right"
-                className="px-2 py-1 text-gray-600 hover:text-yellow-600 hover:bg-yellow-200 rounded disabled:opacity-50 transition-colors"
-              >
-                <Lightbulb size={16} />
+              {/* Help Modal Button */}
+              <Tooltip content="Help & Tips (Shift+H)" position="right">
+                <button
+                  type="button"
+                  onClick={() => onOpenHelp?.()}
+                  className="px-2 py-1 flex items-center justify-center text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-md shadow-sm transition-all duration-200 group active:scale-95"
+                  title="Help & Tips"
+                >
+                  <Lightbulb size={16} className="group-hover:fill-amber-200 transition-colors" />
+                </button>
               </Tooltip>
 
               {/* Refresh Button */}

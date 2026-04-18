@@ -12,6 +12,8 @@ import { TreeNode } from "./components/treeUtils";
 import { BasketItem } from "./components/Basket";
 import { AttrData } from "./components/interfaces";
 import { useSidebarStore } from "./stores/sidebarStore";
+import HelpModal from "./components/HelpModal";
+import { useShortcut } from "./hooks/useGlobalShortcuts";
 
 const App: React.FC = () => {
   const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
@@ -22,6 +24,7 @@ const App: React.FC = () => {
   const [notesSelectedItemId, setNotesSelectedItemId] = useState<string | null>(
     null,
   );
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
   const { setSidebarCollapsed, setNotesCollapsed } = useSidebarStore();
 
   const datasetKeys = useMemo(
@@ -208,6 +211,8 @@ const App: React.FC = () => {
     console.log(`Cycling dataset: ${direction}`);
   };
 
+  useShortcut("toggle-help", () => setIsHelpOpen((prev) => !prev));
+
   return (
     <ToastProvider>
       <ErrorBoundary>
@@ -227,6 +232,7 @@ const App: React.FC = () => {
                 notesSelectedItemId={notesSelectedItemId}
                 onNotesSelectedItemChange={handleNotesSelectedItemChange}
                 onCycleDataset={handleCycleDataset}
+                onOpenHelp={() => setIsHelpOpen(true)}
               />
             </ErrorBoundary>
           }
@@ -248,6 +254,7 @@ const App: React.FC = () => {
           }
         />
       </ErrorBoundary>
+      <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
     </ToastProvider>
   );
 };

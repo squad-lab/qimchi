@@ -4,7 +4,6 @@ import {
   FolderTree,
   NotebookPen,
   BadgeInfo,
-  Lightbulb,
 } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 
@@ -17,7 +16,6 @@ import { TreeNode } from "./treeUtils";
 import { BasketItem } from "./Basket";
 import { AttrData } from "./interfaces";
 import { useSidebarStore } from "../stores/sidebarStore";
-import Tooltip from "./Tooltip";
 import { themeClasses } from "../theme";
 
 // Type definitions for props
@@ -35,17 +33,8 @@ interface SidebarProps {
   notesSelectedItemId: string | null;
   onNotesSelectedItemChange: (itemId: string | null) => void;
   onCycleDataset?: (direction: "prev" | "next") => void; // For cycling through datasets
+  onOpenHelp?: () => void; // For opening the Help modal
 }
-
-const NOTES_TIPS = (
-  <div className="w-80 space-y-1 text-sm text-left">
-    <ul className="list-disc list-inside">
-      <li>Drag & drop dataset paths</li>
-      <li>Send plot images to Notes</li>
-      <li>Frontmatter saved in .md</li>
-    </ul>
-  </div>
-);
 
 const sectionButtonBaseClass =
   "text-lg font-semibold p-2 transition-colors w-full text-center";
@@ -63,6 +52,7 @@ const Sidebar = ({
   notesSelectedItemId,
   onNotesSelectedItemChange,
   onCycleDataset,
+  onOpenHelp,
 }: SidebarProps) => {
   // Use Zustand store for panel states
   const {
@@ -146,6 +136,7 @@ const Sidebar = ({
                   onOpenNotes={handleOpenNotes}
                   onOpenSampleNotes={onOpenSampleNotes}
                   onCycleDataset={onCycleDataset}
+                  onOpenHelp={onOpenHelp}
                 />
               </Panel>
 
@@ -192,17 +183,7 @@ const Sidebar = ({
                 }`}
                 title={notesCollapsed ? "Expand Notes" : "Collapse Notes"}
               >
-                <h2 className="relative flex items-center justify-center gap-2">
-                  {/* Lightbulb tips for Notes */}
-                  <div className="absolute left-2 top-1/2 transform -translate-y-1/2 z-10">
-                    <Tooltip
-                      content={NOTES_TIPS}
-                      position="right"
-                      className="p-2 text-gray-600 hover:text-yellow-600 hover:bg-yellow-200 rounded disabled:opacity-50 transition-colors"
-                    >
-                      <Lightbulb size={16} />
-                    </Tooltip>
-                  </div>
+                <h2 className="flex items-center justify-center gap-2">
                   <NotebookPen size={20} /> Notes
                 </h2>
               </button>

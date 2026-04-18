@@ -22,6 +22,7 @@ interface ExplorerProps {
   onOpenNotes: (node: TreeNode) => void;
   onOpenSampleNotes?: (node: TreeNode) => void;
   onCycleDataset?: (direction: "prev" | "next") => void; // For cycling through datasets
+  onOpenHelp?: () => void; // For opening Help modal
 }
 
 const Explorer = ({
@@ -34,6 +35,7 @@ const Explorer = ({
   onOpenNotes,
   onOpenSampleNotes,
   onCycleDataset,
+  onOpenHelp,
 }: ExplorerProps) => {
   // Use Zustand store for path and submittedPath
   const { componentStates, updateExplorerState } = useSidebarStore();
@@ -250,6 +252,7 @@ const Explorer = ({
             onCycleDataset={onCycleDataset}
             onStartLoadingAttributes={onStartLoadingAttributes}
             onUpdateBasketItemAttributes={onUpdateBasketItemAttributes}
+            onOpenHelp={onOpenHelp}
           />
         ) : (
           <div className="h-32 flex flex-col items-center justify-center text-gray-500">

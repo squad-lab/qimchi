@@ -1040,7 +1040,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                         onClick={() => setActiveTab(key)}
                         className={`w-full px-3 py-2.5 text-sm font-medium transition-colors flex items-center gap-2 border-b border-gray-200 ${
                           activeTab === key
-                            ? "text-blue-600 bg-blue-50 border-l-4 border-l-blue-600 shadow-sm"
+                            ? "text-blue-600 bg-blue-50 border-l-4 border-l-blue-600 shadow-inner"
                             : "text-purple-700 hover:text-purple-800 hover:bg-purple-50 bg-gradient-to-r from-purple-50 to-indigo-50 border-l-2 border-l-purple-300"
                         }`}
                         aria-controls={`tab-panel-${key}`}
@@ -1075,7 +1075,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                       onClick={() => setActiveTab(key)}
                       className={`w-full px-3 py-2.5 text-sm font-medium transition-colors flex items-center gap-2 border-b border-gray-200 ${
                         activeTab === key
-                          ? "text-blue-600 bg-white border-l-3 border-l-blue-600"
+                          ? "text-blue-600 bg-white border-l-3 border-l-blue-600 shadow-inner"
                           : "text-gray-600 hover:text-gray-800 hover:bg-gray-100"
                       }`}
                       aria-controls={`tab-panel-${key}`}

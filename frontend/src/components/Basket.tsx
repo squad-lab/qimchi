@@ -19,7 +19,6 @@ import {
   Variable,
   SquareFunction,
   ShoppingBasket,
-  Lightbulb,
   NotebookPen,
 } from "lucide-react";
 
@@ -537,50 +536,6 @@ const Basket = ({
             </span>
           </h3>
           <div className="flex items-center">
-            {/* Help tooltip */}
-            <div className="mr-2">
-              <Tooltip
-                content={
-                  <div className="text-left space-y-2">
-                    <div className="font-semibold text-blue-200">
-                      Field Types
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Variable size={15} className="text-blue-300" />
-                      <span className="text-white">Independents</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <SquareFunction size={15} className="text-red-300" />
-                      <span className="text-white">Dependents</span>
-                    </div>
-                    <div className="text-white text-sm">
-                      Double-click any field chip to autofill Composer (X, then
-                      Y, then Z in HeatMap).
-                    </div>
-                    {selectedDatasetIds.size > 1 && enforceSharedGating && (
-                      <div className="text-white text-sm">
-                        Gray chips are not shared across selected datasets and
-                        cannot be added to Composer.
-                      </div>
-                    )}
-                    <div className="text-white text-sm">
-                      Shortcuts: Alt+Shift+B Clear Basket, Shift+E Toggle Side
-                      Panel, Shift+N Toggle Notes, Shift+R Refresh Dir, Esc
-                      Close modals/modes.
-                    </div>
-                  </div>
-                }
-                position="bottom"
-              >
-                <button
-                  className="p-1 text-gray-600 hover:text-yellow-600 hover:bg-yellow-200 rounded"
-                  title="Field types help"
-                >
-                  <Lightbulb size={16} />
-                </button>
-              </Tooltip>
-            </div>
-
             {items.length > 0 && (
               <>
                 {onDownload && (
