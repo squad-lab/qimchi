@@ -98,7 +98,7 @@ const Sidebar = ({
         collapsible
         // TODOLATER: Remove if the skip is annoying.
         minSize={sidebarCollapsed ? 0 : 18}
-        className={`${sidebarCollapsed ? "max-w-[0px]" : ""}`}
+        className={`${sidebarCollapsed ? "max-w-0" : ""}`}
         style={{ display: sidebarCollapsed ? "none" : "block" }}
       >
         <div className="flex flex-col h-screen">

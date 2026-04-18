@@ -1,6 +1,6 @@
 import axios from "axios";
 import { PROD_BACKEND_URL } from "../config";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Panel } from "react-resizable-panels";
 import { ChartScatter } from "lucide-react";
 
@@ -351,35 +351,30 @@ const Viewer = ({
   }, [basketItems]);
 
   // Keep selected dataset IDs valid as basket contents change.
-  useEffect(() => {
-    setSelectedDatasetIds((prev) => {
-      const existingIds = new Set(basketItems.map((item) => item.id));
-      const next = new Set(
-        Array.from(prev).filter((id) => existingIds.has(id)),
-      );
+  const effectiveSelectedDatasetIds = useMemo(() => {
+    const existingIds = new Set(basketItems.map((item) => item.id));
+    const next = new Set(
+      Array.from(selectedDatasetIds).filter((id) => existingIds.has(id)),
+    );
 
-      if (next.size === 0 && basketItems.length === 1) {
-        next.add(basketItems[0].id);
-      }
-
-      return next;
-    });
-  }, [basketItems]);
-
-  // Keep selected plot valid as plot list changes.
-  useEffect(() => {
-    if (plotConfigs.length === 0) {
-      setSelectedPlotId(null);
-      return;
+    if (next.size === 0 && basketItems.length === 1) {
+      next.add(basketItems[0].id);
     }
 
-    setSelectedPlotId((prev) => {
-      if (prev && plotConfigs.some((p) => p.id === prev)) {
-        return prev;
-      }
-      return plotConfigs[0].id;
-    });
-  }, [plotConfigs]);
+    return next;
+  }, [basketItems, selectedDatasetIds]);
+
+  const effectiveSelectedPlotId = useMemo(() => {
+    if (plotConfigs.length === 0) {
+      return null;
+    }
+
+    if (selectedPlotId && plotConfigs.some((p) => p.id === selectedPlotId)) {
+      return selectedPlotId;
+    }
+
+    return plotConfigs[0].id;
+  }, [plotConfigs, selectedPlotId]);
 
   const dispatchSelectedPlotShortcut = useCallback(
     (
@@ -394,25 +389,28 @@ const Viewer = ({
         | "send-to-notes"
         | "export-images",
     ) => {
-      if (!selectedPlotId) return;
+      if (!effectiveSelectedPlotId) return;
       try {
         window.dispatchEvent(
           new CustomEvent("plot-shortcut-action", {
-            detail: { id: selectedPlotId, action },
+            detail: { id: effectiveSelectedPlotId, action },
           }),
         );
       } catch {
         // ignore dispatch failures
       }
     },
-    [selectedPlotId],
+    [effectiveSelectedPlotId],
   );
 
-  const selectedDatasets = getSelectedDatasets(basketItems, selectedDatasetIds);
+  const selectedDatasets = getSelectedDatasets(
+    basketItems,
+    effectiveSelectedDatasetIds,
+  );
   const sharedFields = computeSharedFields(selectedDatasets);
   const enforceSharedGating =
-    selectedDatasetIds.size > 1 &&
-    sharedFields.knownDatasetCount === selectedDatasetIds.size;
+    effectiveSelectedDatasetIds.size > 1 &&
+    sharedFields.knownDatasetCount === effectiveSelectedDatasetIds.size;
 
   // Also update on window resize
   useEffect(() => {
@@ -499,8 +497,8 @@ const Viewer = ({
     dispatchSelectedPlotShortcut("export-images"),
   );
   useShortcut("selected-remove-plot", () => {
-    if (selectedPlotId) {
-      removePlot(selectedPlotId);
+    if (effectiveSelectedPlotId) {
+      removePlot(effectiveSelectedPlotId);
       return;
     }
 
@@ -508,15 +506,15 @@ const Viewer = ({
   });
 
   const getSelectionContextLabel = () => {
-    if (selectedDatasetIds.size === 0) {
+    if (effectiveSelectedDatasetIds.size === 0) {
       return "No dataset selected";
     }
 
-    if (selectedDatasetIds.size === 1) {
+    if (effectiveSelectedDatasetIds.size === 1) {
       return `Selected: ${selectedDatasets[0]?.name ?? "1 dataset"}`;
     }
 
-    return `Selected: ${selectedDatasetIds.size} datasets`;
+    return `Selected: ${effectiveSelectedDatasetIds.size} datasets`;
   };
 
   const handleToggleDatasetSelection = (
@@ -559,7 +557,7 @@ const Viewer = ({
       return;
     }
 
-    if (selectedDatasetIds.size === 0) {
+    if (effectiveSelectedDatasetIds.size === 0) {
       showToast(
         "Select at least one dataset in Basket before plotting.",
         "warning",
@@ -569,7 +567,7 @@ const Viewer = ({
 
     const currentlySelected = getSelectedDatasets(
       basketItems,
-      selectedDatasetIds,
+      effectiveSelectedDatasetIds,
     );
     if (currentlySelected.length === 0) {
       showToast("No selected datasets are available for plotting.", "error");
@@ -613,14 +611,16 @@ const Viewer = ({
   };
 
   useEffect(() => {
-    if (selectedDatasetIds.size !== 1) {
-      previousSelectionKeyRef.current = Array.from(selectedDatasetIds)
+    if (effectiveSelectedDatasetIds.size !== 1) {
+      previousSelectionKeyRef.current = Array.from(effectiveSelectedDatasetIds)
         .sort()
         .join("|");
       return;
     }
 
-    const selectionKey = Array.from(selectedDatasetIds).sort().join("|");
+    const selectionKey = Array.from(effectiveSelectedDatasetIds)
+      .sort()
+      .join("|");
     if (selectionKey === previousSelectionKeyRef.current) {
       return;
     }
@@ -654,7 +654,7 @@ const Viewer = ({
       );
       composer.clearComposer();
     }
-  }, [selectedDatasetIds, selectedDatasets, showToast]);
+  }, [effectiveSelectedDatasetIds, selectedDatasets, showToast]);
 
   const handleDownload = async (items: BasketItem[]) => {
     try {
@@ -737,10 +737,10 @@ const Viewer = ({
       <div className="h-full flex flex-col bg-gray-100 border-r shadow-inner">
         <div ref={containerRef} className="flex flex-col h-full p-2 gap-2">
           {/* Basket Component */}
-          <div ref={basketRef} className="flex-shrink-0">
+          <div ref={basketRef} className="shrink-0">
             <Basket
               items={basketItems}
-              selectedDatasetIds={selectedDatasetIds}
+              selectedDatasetIds={effectiveSelectedDatasetIds}
               onToggleDatasetSelection={handleToggleDatasetSelection}
               onRemoveItem={onRemoveBasketItem}
               onClearAll={onClearBasket}
@@ -757,7 +757,7 @@ const Viewer = ({
           {/* Plot Composer */}
           <div
             ref={composerRef}
-            className="flex-shrink-0 border border-gray-200 rounded-lg"
+            className="shrink-0 border border-gray-200 rounded-lg"
           >
             <PlotComposer
               ref={composerActionRef}
@@ -771,7 +771,7 @@ const Viewer = ({
             className="flex-1 bg-white rounded-lg border border-gray-300 flex flex-col"
             style={{ maxHeight: viewerHeight }}
           >
-            <div className="flex items-center justify-between flex-shrink-0 bg-gray-50 border-b border-gray-200 rounded-t-lg p-2">
+            <div className="flex items-center justify-between shrink-0 bg-gray-50 border-b border-gray-200 rounded-t-lg p-2">
               <h3 className="font-semibold text-gray-900 flex items-center">
                 <ChartScatter
                   size={16}
@@ -900,7 +900,7 @@ const Viewer = ({
                     onAddPlot={addPlot}
                     widthPercent={plotWidthPercent}
                     perPlotWidthMap={perPlotWidthMap}
-                    selectedPlotId={selectedPlotId}
+                    selectedPlotId={effectiveSelectedPlotId}
                     onSelectPlot={setSelectedPlotId}
                   />
                 </div>

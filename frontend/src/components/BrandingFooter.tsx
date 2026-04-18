@@ -27,7 +27,7 @@ const BrandingFooter = () => {
   return (
     <>
       {!brandingCollapsed && (
-        <div className="flex-shrink-0 bg-gradient-to-b from-slate-50 via-white to-slate-100 border-t-2 border-slate-300 shadow-lg">
+        <div className="shrink-0 bg-linear-to-b from-slate-50 via-white to-slate-100 border-t-2 border-slate-300 shadow-lg">
           <div className="px-6 py-3 space-y-3">
             <div className="flex flex-col gap-3">
               <div className="flex items-center justify-center gap-5 pb-2 border-b border-slate-200">
@@ -46,7 +46,7 @@ const BrandingFooter = () => {
                   />
                 </a>
                 {/* Vertical Separator */}
-                <div className="h-8 w-px bg-gradient-to-b from-transparent via-slate-300 to-transparent hidden sm:block" />
+                <div className="h-8 w-px bg-linear-to-b from-transparent via-slate-300 to-transparent hidden sm:block" />
                 <a
                   href="https://www.fz-juelich.de/"
                   target="_blank"
@@ -63,10 +63,10 @@ const BrandingFooter = () => {
                 </a>
               </div>
               <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-slate-100 to-slate-50 rounded-full border border-slate-200 shadow-sm">
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-linear-to-r from-slate-100 to-slate-50 rounded-full border border-slate-200 shadow-sm">
                   <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
                   <span className="font-bold text-sm text-slate-800 tracking-tight">
-                    Qimchi v0.5.0
+                    Qimchi v0.5.1
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -77,7 +77,7 @@ const BrandingFooter = () => {
                       target="_blank"
                       rel="noreferrer noopener"
                       aria-label={label}
-                      className="p-2.5 rounded-lg bg-blue-50/50 hover:bg-gradient-to-br hover:from-blue-100 hover:to-indigo-100 active:bg-blue-200 transition-all duration-300 text-blue-600 hover:text-blue-700 hover:shadow-md border border-blue-100 hover:border-blue-200"
+                      className="p-2.5 rounded-lg bg-blue-50/50 hover:bg-linear-to-br hover:from-blue-100 hover:to-indigo-100 active:bg-blue-200 transition-all duration-300 text-blue-600 hover:text-blue-700 hover:shadow-md border border-blue-100 hover:border-blue-200"
                     >
                       <Icon size={17} strokeWidth={1.8} />
                     </a>
@@ -86,7 +86,7 @@ const BrandingFooter = () => {
                     onClick={openLogModal}
                     aria-label="View notifications log"
                     title="View notifications log"
-                    className="p-2.5 rounded-lg bg-blue-50/50 hover:bg-gradient-to-br hover:from-blue-100 hover:to-indigo-100 active:bg-blue-200 transition-all duration-300 text-blue-600 hover:text-blue-700 hover:shadow-md border border-blue-100 hover:border-blue-200"
+                    className="p-2.5 rounded-lg bg-blue-50/50 hover:bg-linear-to-br hover:from-blue-100 hover:to-indigo-100 active:bg-blue-200 transition-all duration-300 text-blue-600 hover:text-blue-700 hover:shadow-md border border-blue-100 hover:border-blue-200"
                   >
                     <History size={17} strokeWidth={1.8} />
                   </button>
@@ -106,7 +106,7 @@ const BrandingFooter = () => {
       {brandingCollapsed && (
         <button
           onClick={() => setBrandingCollapsed(false)}
-          className="flex-shrink-0 w-full py-2 text-[9px] uppercase tracking-wider font-medium text-slate-500 hover:text-slate-700 bg-slate-50 hover:bg-slate-100 border-t-2 border-slate-300 transition-all duration-200 shadow-sm"
+          className="shrink-0 w-full py-2 text-[9px] uppercase tracking-wider font-medium text-slate-500 hover:text-slate-700 bg-slate-50 hover:bg-slate-100 border-t-2 border-slate-300 transition-all duration-200 shadow-sm"
           title="Expand Footer"
         >
           Expand Footer

@@ -71,15 +71,19 @@ const NotificationLogEntry: React.FC<{
       onClick={() => hasMetadata && setIsExpanded(!isExpanded)}
     >
       <div className="flex items-start gap-3">
-        <div className="flex-shrink-0">{getIcon(log.type)}</div>
+        <div className="shrink-0">{getIcon(log.type)}</div>
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2">
-            <p className="text-sm font-medium break-words leading-tight">
+            <p className="text-sm font-medium wrap-break-word leading-tight">
               {log.message}
             </p>
             {hasMetadata && (
               <div className="text-slate-400 mt-0.5">
-                {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {isExpanded ? (
+                  <ChevronUp size={14} />
+                ) : (
+                  <ChevronDown size={14} />
+                )}
               </div>
             )}
           </div>
@@ -122,6 +126,7 @@ const NotificationLogEntry: React.FC<{
                   backgroundColor: "transparent",
                   "--w-rjv-background-color": "transparent",
                   "--w-rjv-line-color": "rgba(0,0,0,0.05)",
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 } as any
               }
             />
@@ -142,7 +147,6 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
   logs,
   onClear,
 }) => {
-  const [zIndexLocal, setZIndexLocal] = useState<number | undefined>(undefined);
   const zRef = useRef<number | undefined>(undefined);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
 
@@ -177,20 +181,18 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
     if (isOpen) {
       const next = getNextGlobalModalZ();
       zRef.current = next;
-      setZIndexLocal(next);
+      if (wrapperRef.current) {
+        wrapperRef.current.style.zIndex = String(next);
+      }
     }
   }, [isOpen]);
-
-  useEffect(() => {
-    if (wrapperRef.current && zIndexLocal !== undefined) {
-      wrapperRef.current.style.zIndex = String(zIndexLocal);
-    }
-  }, [zIndexLocal]);
 
   const bringToFront = () => {
     const next = getNextGlobalModalZ();
     zRef.current = next;
-    setZIndexLocal(next);
+    if (wrapperRef.current) {
+      wrapperRef.current.style.zIndex = String(next);
+    }
   };
 
   if (!isOpen) return null;

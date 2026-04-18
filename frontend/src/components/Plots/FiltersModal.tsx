@@ -38,6 +38,14 @@ import {
 import Tooltip from "../Tooltip";
 import RadialDial from "./RadialDial";
 
+type BGCorrPoint = {
+  x: number;
+  y: number;
+  z?: number;
+  row_idx?: number;
+  col_idx?: number;
+};
+
 interface FiltersModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -965,7 +973,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
           onDrop={handleDrop}
         >
           {/* Header */}
-          <div className="flex items-center justify-between p-2 bg-gray-200 border-b-2 border-gray-300 drag-handle cursor-move flex-shrink-0">
+          <div className="flex items-center justify-between p-2 bg-gray-200 border-b-2 border-gray-300 drag-handle cursor-move shrink-0">
             <div className="flex items-center gap-2">
               {getPlotTypeIcon(plotType)}
               <h2 className="text-base font-semibold text-gray-800">
@@ -1041,7 +1049,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                         className={`w-full px-3 py-2.5 text-sm font-medium transition-colors flex items-center gap-2 border-b border-gray-200 ${
                           activeTab === key
                             ? "text-blue-600 bg-blue-50 border-l-4 border-l-blue-600 shadow-inner"
-                            : "text-purple-700 hover:text-purple-800 hover:bg-purple-50 bg-gradient-to-r from-purple-50 to-indigo-50 border-l-2 border-l-purple-300"
+                            : "text-purple-700 hover:text-purple-800 hover:bg-purple-50 bg-linear-to-r from-purple-50 to-indigo-50 border-l-2 border-l-purple-300"
                         }`}
                         aria-controls={`tab-panel-${key}`}
                         role="tab"
@@ -1245,6 +1253,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                     : DEFAULT_FILTER_OPTIONS[
                         activeTab as keyof typeof DEFAULT_FILTER_OPTIONS
                       ] || { enabled: false };
+                const selectedPoints =
+                  (filterConfig as { points?: BGCorrPoint[] }).points ?? [];
 
                 return (
                   <div className="h-full flex flex-col">
@@ -1548,7 +1558,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <div className="flex items-start gap-2">
                               <AlertTriangle
                                 size={16}
-                                className="text-yellow-600 mt-0.5 flex-shrink-0"
+                                className="text-yellow-600 mt-0.5 shrink-0"
                               />
                               <div className="text-xs text-yellow-800">
                                 <strong>WARNING:</strong> Output length is same
@@ -1877,37 +1887,34 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               Selected Points
                             </label>
                             <div className="space-y-1 max-h-40 overflow-y-auto border border-gray-100 rounded-lg p-2 bg-gray-50">
-                              {((filterConfig as any).points || []).length ===
-                              0 ? (
+                              {selectedPoints.length === 0 ? (
                                 <span className="text-sm text-gray-400 italic">
                                   No points selected
                                 </span>
                               ) : (
-                                ((filterConfig as any).points || []).map(
-                                  (p: any, i: number) => (
-                                    <div
-                                      key={i}
-                                      className="text-xs font-mono bg-white border border-gray-200 p-2 rounded flex justify-between items-center shadow-sm"
-                                    >
-                                      <div className="flex items-center gap-2">
-                                        <span className="font-bold text-gray-500">
-                                          P{i + 1}:
-                                        </span>
-                                        <span className="text-blue-700">
-                                          ({p.x.toFixed(2)}, {p.y.toFixed(2)}
-                                          {p.z !== undefined &&
-                                            `, Z:${p.z.toFixed(2)}`}
-                                          )
-                                        </span>
-                                      </div>
-                                      {p.row_idx !== undefined && (
-                                        <span className="text-[10px] text-gray-400">
-                                          [{p.row_idx},{p.col_idx}]
-                                        </span>
-                                      )}
+                                selectedPoints.map((p, i: number) => (
+                                  <div
+                                    key={i}
+                                    className="text-xs font-mono bg-white border border-gray-200 p-2 rounded flex justify-between items-center shadow-sm"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-bold text-gray-500">
+                                        P{i + 1}:
+                                      </span>
+                                      <span className="text-blue-700">
+                                        ({p.x.toFixed(2)}, {p.y.toFixed(2)}
+                                        {p.z !== undefined &&
+                                          `, Z:${p.z.toFixed(2)}`}
+                                        )
+                                      </span>
                                     </div>
-                                  ),
-                                )
+                                    {p.row_idx !== undefined && (
+                                      <span className="text-[10px] text-gray-400">
+                                        [{p.row_idx},{p.col_idx}]
+                                      </span>
+                                    )}
+                                  </div>
+                                ))
                               )}
                             </div>
                           </div>

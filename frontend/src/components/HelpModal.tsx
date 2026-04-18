@@ -82,31 +82,19 @@ const ExplorerHelp = memo(() => (
       <h4 className="font-medium text-gray-800">Navigation</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Double-click a folder to navigate into it
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Double-click an SQLite container to browse its datasets
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Type in the path bar to navigate directly to any location
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Use Ctrl/Shift+Click for multi-selection
         </li>
       </ul>
@@ -116,32 +104,22 @@ const ExplorerHelp = memo(() => (
       <h4 className="font-medium text-gray-800">Adding to Basket</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Drag individual datasets to the Basket
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Drag a folder to add all its dataset children to the Basket
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Double-click a dataset to toggle it in/out of the Basket
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
-          Use the <span className="font-mono bg-gray-100 px-1 rounded">+</span>{" "}
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          Use the <span className="font-mono bg-gray-100 px-1 rounded">
+            +
+          </span>{" "}
           button in item context menus
         </li>
       </ul>
@@ -151,24 +129,15 @@ const ExplorerHelp = memo(() => (
       <h4 className="font-medium text-gray-800">Sorting & Filtering</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Sort by Name, Date, Size, or Chrono (newest-first flat list)
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Filter by All, Dataset only, or Folder only
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Use the search bar to filter by name or path
         </li>
       </ul>
@@ -178,18 +147,12 @@ const ExplorerHelp = memo(() => (
       <h4 className="font-medium text-gray-800">Dataset Cycling</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           When exactly one dataset is in the Basket, use the ↑/↓ arrow buttons
           to cycle through datasets in the current view
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Existing plots automatically update to the new dataset
         </li>
       </ul>
@@ -199,18 +162,12 @@ const ExplorerHelp = memo(() => (
       <h4 className="font-medium text-gray-800">Live Measurements</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Toggle the Live button (Radio icon) to see only active live
           measurements, auto-refreshed every second
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           New live measurements are automatically added to the Basket
         </li>
       </ul>
@@ -220,10 +177,7 @@ const ExplorerHelp = memo(() => (
       <h4 className="font-medium text-gray-800">Drag to Notes</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Drag datasets from Explorer directly to the Notes panel to insert
           their paths into the current note
         </li>
@@ -249,24 +203,15 @@ const BasketHelp = memo(() => (
       <h4 className="font-medium text-gray-800">Dataset Cards</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Click a card to select it as the active plotting dataset
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Ctrl/Cmd+Click to multi-select datasets for composite plots
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Drag datasets directly into the Basket drop zone to add them
         </li>
       </ul>
@@ -287,24 +232,15 @@ const BasketHelp = memo(() => (
       </div>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Drag chips to Composer drop zones (X, Y, Z axes)
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Double-click a chip to auto-fill the next empty Composer axis
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Gray chips are not shared across selected datasets and cannot be added
           to the Composer
         </li>
@@ -315,24 +251,15 @@ const BasketHelp = memo(() => (
       <h4 className="font-medium text-gray-800">Basket Actions</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Use the Trash icon to clear all datasets from the Basket
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Use the Download icon to download all Basket datasets as a ZIP
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Per-item: copy filename, download, open notes, or remove
         </li>
       </ul>
@@ -390,7 +317,7 @@ const MetadataHelp = memo(() => (
           </p>
         </div>
 
-        <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm text-amber-800 bg-amber-50/50 border-amber-100">
+        <div className="p-3 rounded-lg border shadow-sm text-amber-800 bg-amber-50/50 border-amber-100">
           <h4 className="font-semibold mb-1 flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
             Performance Note
@@ -423,18 +350,12 @@ const ComposerHelp = memo(() => (
       <h4 className="font-medium text-gray-800">Plot Types</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <strong>LinePlot:</strong> X (any field, max 1) + Y (dependents,
           multiple OK)
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <strong>HeatMap:</strong> X (any, max 1) + Y (any, multiple) + Z
           (dependents, multiple)
         </li>
@@ -445,24 +366,15 @@ const ComposerHelp = memo(() => (
       <h4 className="font-medium text-gray-800">Adding Fields</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Drag chips from Basket cards into the X, Y, or Z drop zones
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Double-click chips to auto-fill axes sequentially (X → Y → Z)
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Invalid drops show a red border and an error message
         </li>
       </ul>
@@ -472,24 +384,15 @@ const ComposerHelp = memo(() => (
       <h4 className="font-medium text-gray-800">Multi-Dataset Plotting</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Multi-select dataset cards in the Basket to plot them all at once
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Only datasets that share the required variables will be plotted
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Incompatible datasets are skipped with a warning notification
         </li>
       </ul>
@@ -499,24 +402,15 @@ const ComposerHelp = memo(() => (
       <h4 className="font-medium text-gray-800">Clearing</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Use the X button on individual fields to remove them
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Click "Clear" on a drop zone to remove all fields from that axis
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Use Alt+Shift+C to clear all Composer fields
         </li>
       </ul>
@@ -541,76 +435,46 @@ const ViewerHelp = memo(() => (
       <h4 className="font-medium text-gray-800">Plot Controls</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Click a plot to select it (highlighted border); use 1–9 keys to select
           by index
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <strong>Filters (F):</strong> Apply signal processing (diff,
           smoothing, BG corr…)
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <strong>Appearance (A):</strong> Colorscale, axis labels, range, title
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <strong>Maximize (M):</strong> Expand a plot to full panel view
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <strong>Swap Axes (S):</strong> Transpose X and Y axes on HeatMaps
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <strong>BG Corr (B):</strong> Toggle background correction overlay
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <strong>LineCut (Shift+X):</strong> Interactive line cut on HeatMaps
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <strong>Reset (R):</strong> Reset plot to original state, removing
           filters and customizations
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <strong>Send to Notes (N):</strong> Export current plot image to Notes
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <strong>Export Images (E):</strong> Download plot as PNG/SVG
         </li>
       </ul>
@@ -620,24 +484,15 @@ const ViewerHelp = memo(() => (
       <h4 className="font-medium text-gray-800">Paint Mode</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Hold Shift while hovering Filters or Appearance to activate Paint mode
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           In Paint mode, Shift+Click other plots to apply copied settings
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Incompatible plot types (e.g., HeatMap → LinePlot) show an error
         </li>
       </ul>
@@ -647,31 +502,19 @@ const ViewerHelp = memo(() => (
       <h4 className="font-medium text-gray-800">Layout Controls</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Use the 33 / 50 / 66 / 100 buttons to set plot width for all plots
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           50% forces side-by-side display of two plots
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Squarify button enforces a 1:1 aspect ratio on all plots
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           "Clear All Plots" removes all plots; Alt+Shift+V shortcut also works
         </li>
       </ul>
@@ -697,34 +540,22 @@ const NotesHelp = memo(() => (
       <h4 className="font-medium text-gray-800">Working with Notes</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Open a note for a dataset via the NotebookPen icon in the Basket or
           Explorer
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Drag dataset paths from the Explorer directly into the Notes panel to
           insert them as links
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Send plot images from the Viewer to Notes via the "Send to Notes" (N)
           button
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Notes use frontmatter (YAML header) to store metadata
         </li>
       </ul>
@@ -734,26 +565,17 @@ const NotesHelp = memo(() => (
       <h4 className="font-medium text-gray-800">Formatting</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Notes support standard Markdown: headers, bold, italic, lists, code
           blocks, tables
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Images sent from the Viewer are saved in a subfolder and linked in the
           note
         </li>
         <li className="flex gap-2">
-          <ChevronRight
-            size={14}
-            className="flex-shrink-0 mt-0.5 text-blue-500"
-          />
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Toggle between Edit and Preview modes using the tab switcher
         </li>
       </ul>
@@ -895,7 +717,6 @@ const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
     initialSection ?? HELP_SECTIONS[0].id,
   );
 
-  const [zIndexLocal, setZIndexLocal] = useState<number | undefined>(undefined);
   const zRef = useRef<number | undefined>(undefined);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
 
@@ -903,7 +724,9 @@ const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
     if (isOpen) {
       const next = getNextGlobalModalZ();
       zRef.current = next;
-      setZIndexLocal(next);
+      if (wrapperRef.current) {
+        wrapperRef.current.style.zIndex = String(next);
+      }
     }
   }, [isOpen]);
 
@@ -917,16 +740,12 @@ const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
     return () => window.removeEventListener("keydown", handleKeydown);
   }, [isOpen, onClose]);
 
-  useEffect(() => {
-    if (wrapperRef.current && zIndexLocal !== undefined) {
-      wrapperRef.current.style.zIndex = String(zIndexLocal);
-    }
-  }, [zIndexLocal]);
-
   const bringToFront = () => {
     const next = getNextGlobalModalZ();
     zRef.current = next;
-    setZIndexLocal(next);
+    if (wrapperRef.current) {
+      wrapperRef.current.style.zIndex = String(next);
+    }
   };
 
   // Sync when initialSection changes (e.g., opened from a specific button)
@@ -958,7 +777,7 @@ const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-2 bg-amber-200 border-b border-amber-300 drag-handle cursor-move flex-shrink-0">
+          <div className="flex items-center justify-between px-4 py-2 bg-amber-200 border-b border-amber-300 drag-handle cursor-move shrink-0">
             <div className="flex items-center gap-2">
               <div className="bg-amber-100 p-1.5 rounded-lg border border-amber-200 shadow-sm">
                 <Lightbulb
@@ -987,7 +806,7 @@ const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
           {/* Body: left tabs + right content */}
           <div className="flex flex-1 min-h-0 bg-white">
             {/* Left: section list */}
-            <div className="w-44 flex-shrink-0 border-r border-gray-200 bg-gray-50 overflow-y-auto">
+            <div className="w-44 shrink-0 border-r border-gray-200 bg-gray-50 overflow-y-auto">
               {HELP_SECTIONS.map((section) => (
                 <button
                   key={section.id}

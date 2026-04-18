@@ -452,7 +452,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
       <div className="font-medium p-2 m-2 h-full flex flex-col">
         {/* Header with search and expand/collapse all button - Fixed at top */}
         {basketItems.filter((item) => item.type === "file").length > 0 && (
-          <div className="mb-4 p-3 bg-white border border-gray-300 rounded-lg flex-shrink-0">
+          <div className="mb-4 p-3 bg-white border border-gray-300 rounded-lg shrink-0">
             {/* Loading progress indicator */}
             {loadingMetadata.size > 0 && (
               <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded-md">

@@ -150,6 +150,30 @@ const DirTree = ({
   const [isLoading, setIsLoading] = useState(false);
   const [apiData, setApiData] = useState<TreeNode[]>([]);
   const autoAddedMeasurements = useRef<Set<string>>(new Set());
+  const basketItemsRef = useRef<BasketItem[]>(basketItems);
+  const onAddToBasketRef = useRef<typeof onAddToBasket>(onAddToBasket);
+  const onStartLoadingAttributesRef = useRef<typeof onStartLoadingAttributes>(
+    onStartLoadingAttributes,
+  );
+  const onUpdateBasketItemAttributesRef = useRef<
+    typeof onUpdateBasketItemAttributes
+  >(onUpdateBasketItemAttributes);
+
+  useEffect(() => {
+    basketItemsRef.current = basketItems;
+  }, [basketItems]);
+
+  useEffect(() => {
+    onAddToBasketRef.current = onAddToBasket;
+  }, [onAddToBasket]);
+
+  useEffect(() => {
+    onStartLoadingAttributesRef.current = onStartLoadingAttributes;
+  }, [onStartLoadingAttributes]);
+
+  useEffect(() => {
+    onUpdateBasketItemAttributesRef.current = onUpdateBasketItemAttributes;
+  }, [onUpdateBasketItemAttributes]);
 
   // Debounce search input
   useEffect(() => {
@@ -338,27 +362,31 @@ const DirTree = ({
                 // Auto-add new live measurements to basket
                 toAdd.forEach((node: TreeNode) => {
                   // Check if already in basket or already auto-added
-                  const inBasket = basketItems?.some(
+                  const inBasket = basketItemsRef.current?.some(
                     (item) => item.id === node.id,
                   );
                   const alreadyAutoAdded = autoAddedMeasurements.current.has(
                     node.id,
                   );
 
-                  if (!inBasket && !alreadyAutoAdded && onAddToBasket) {
+                  if (
+                    !inBasket &&
+                    !alreadyAutoAdded &&
+                    onAddToBasketRef.current
+                  ) {
                     console.log(
                       `Auto-adding live measurement to basket: ${node.name}`,
                     );
-                    onAddToBasket(node);
+                    onAddToBasketRef.current(node);
                     autoAddedMeasurements.current.add(node.id);
 
                     // Load attributes for the new live measurement
                     if (
                       node.type === "file" &&
-                      onStartLoadingAttributes &&
-                      onUpdateBasketItemAttributes
+                      onStartLoadingAttributesRef.current &&
+                      onUpdateBasketItemAttributesRef.current
                     ) {
-                      onStartLoadingAttributes(node.id);
+                      onStartLoadingAttributesRef.current(node.id);
                       axios
                         .post(`${PROD_BACKEND_URL}/load-attrs/`, {
                           path: node.path,
@@ -369,14 +397,20 @@ const DirTree = ({
                             node.id,
                             // response.data,
                           );
-                          onUpdateBasketItemAttributes(node.id, response.data);
+                          onUpdateBasketItemAttributesRef.current?.(
+                            node.id,
+                            response.data,
+                          );
                         })
                         .catch((error) => {
                           console.error(
                             "Error loading attributes for auto-added live measurement:",
                             error,
                           );
-                          onUpdateBasketItemAttributes(node.id, {});
+                          onUpdateBasketItemAttributesRef.current?.(
+                            node.id,
+                            {},
+                          );
                         });
                     }
                   }
@@ -673,7 +707,10 @@ const DirTree = ({
     }
   }, [rootNodes, tree, sortBy, updateDirTreeState]);
   const updateExpandedNodeState = useCallback(
-    (_nodeId: string, _nextExpanded: boolean) => {},
+    (nodeId: string, nextExpanded: boolean) => {
+      void nodeId;
+      void nextExpanded;
+    },
     [],
   );
 
@@ -1033,7 +1070,7 @@ const DirTree = ({
   return (
     <div className="flex flex-col h-full w-full">
       {/* Fixed Toolbar Section */}
-      <div className="flex-shrink-0 space-y-2 mb-2 w-full">
+      <div className="shrink-0 space-y-2 mb-2 w-full">
         {/* Search Bar */}
         <div className="relative">
           <Search
@@ -1123,7 +1160,7 @@ const DirTree = ({
                   }}
                   className={`px-2 py-1 rounded-md transition-all duration-200 ${
                     showLiveOnly
-                      ? "bg-gradient-to-r from-green-500 to-emerald-500 text-white shadow-md hover:shadow-lg hover:from-green-600 hover:to-emerald-600"
+                      ? "bg-linear-to-r from-green-500 to-emerald-500 text-white shadow-md hover:shadow-lg hover:from-green-600 hover:to-emerald-600"
                       : "bg-blue-50 text-gray-600 hover:bg-blue-100 border border-blue-200"
                   }`}
                   title={
@@ -1147,7 +1184,10 @@ const DirTree = ({
                   className="px-2 py-1 flex items-center justify-center text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-md shadow-sm transition-all duration-200 group active:scale-95"
                   title="Help & Tips"
                 >
-                  <Lightbulb size={16} className="group-hover:fill-amber-200 transition-colors" />
+                  <Lightbulb
+                    size={16}
+                    className="group-hover:fill-amber-200 transition-colors"
+                  />
                 </button>
               </Tooltip>
 
@@ -1662,7 +1702,7 @@ const TreeItemComponent = ({
         {/* Drag Handle */}
         <GripVertical
           size={16}
-          className="text-gray-300 mr-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+          className="text-gray-300 mr-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
         />
 
         {/* Expand/Collapse Icon */}
@@ -1683,7 +1723,7 @@ const TreeItemComponent = ({
               }
               onOpenSqliteNode(nodeData);
             }}
-            className="mr-1 flex-shrink-0 p-1 hover:bg-gray-200 rounded transition-colors"
+            className="mr-1 shrink-0 p-1 hover:bg-gray-200 rounded transition-colors"
             aria-label={
               isFolder
                 ? isExpanded
@@ -1701,7 +1741,7 @@ const TreeItemComponent = ({
         )}
 
         {/* File/Folder Icon */}
-        <span className="mr-2 flex-shrink-0 text-sm">
+        <span className="mr-2 shrink-0 text-sm">
           {isFolder ? (
             isExpanded ? (
               <FolderOpenIcon size={16} className="text-blue-500" />
@@ -1728,7 +1768,7 @@ const TreeItemComponent = ({
               {highlightSearchTerm(nodeData.name, searchTerm)}
             </span>
             {isSqliteContainerNode && (
-              <span className="text-[10px] uppercase tracking-wide text-teal-700 bg-teal-100 border border-teal-200 rounded px-1 py-0.5 flex-shrink-0">
+              <span className="text-[10px] uppercase tracking-wide text-teal-700 bg-teal-100 border border-teal-200 rounded px-1 py-0.5 shrink-0">
                 RUNS
               </span>
             )}
@@ -1749,7 +1789,7 @@ const TreeItemComponent = ({
                 e.stopPropagation();
                 await copyFNameToClipboard(nodeData.name);
               }}
-              className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors flex-shrink-0"
+              className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors shrink-0"
               aria-label={`Copy filename: ${nodeData.name}`}
             >
               {isFNameCopied ? (
@@ -1768,7 +1808,7 @@ const TreeItemComponent = ({
                 e.stopPropagation();
                 await copyPathToClipboard(nodeData.path);
               }}
-              className="p-1 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors flex-shrink-0"
+              className="p-1 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors shrink-0"
               aria-label={`Copy full path: ${nodeData.path}`}
             >
               {isPathCopied ? (
@@ -1788,7 +1828,7 @@ const TreeItemComponent = ({
                   e.stopPropagation();
                   onDownload?.(nodeData);
                 }}
-                className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors flex-shrink-0"
+                className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors shrink-0"
                 aria-label="Download dataset"
               >
                 <Download size={14} />
@@ -1805,7 +1845,7 @@ const TreeItemComponent = ({
                   e.stopPropagation();
                   onOpenNotes?.(nodeData);
                 }}
-                className="p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors flex-shrink-0"
+                className="p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors shrink-0"
                 aria-label="Open notes"
               >
                 <NotebookPen size={14} />
@@ -1821,7 +1861,7 @@ const TreeItemComponent = ({
                   e.stopPropagation();
                   onOpenSqliteNode(nodeData);
                 }}
-                className="p-1 rounded transition-colors flex-shrink-0 text-gray-400 hover:text-blue-600 hover:bg-blue-100"
+                className="p-1 rounded transition-colors shrink-0 text-gray-400 hover:text-blue-600 hover:bg-blue-100"
                 aria-label="Open runs"
               >
                 <FolderOpenIcon size={14} />
@@ -1843,7 +1883,7 @@ const TreeItemComponent = ({
                     onAddToBasket?.(nodeData);
                   }
                 }}
-                className={`p-1 rounded transition-colors flex-shrink-0 ${
+                className={`p-1 rounded transition-colors shrink-0 ${
                   isInBasket
                     ? "text-red-500 hover:text-red-700 hover:bg-red-50"
                     : "text-gray-400 hover:text-blue-600 hover:bg-blue-100"
@@ -1868,7 +1908,7 @@ const TreeItemComponent = ({
                 e.stopPropagation();
                 await copyFNameToClipboard(nodeData.name);
               }}
-              className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors flex-shrink-0"
+              className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors shrink-0"
               aria-label={`Copy folder name: ${nodeData.name}`}
             >
               {isFNameCopied ? (
@@ -1887,7 +1927,7 @@ const TreeItemComponent = ({
                 e.stopPropagation();
                 await copyPathToClipboard(nodeData.path);
               }}
-              className="p-1 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors flex-shrink-0"
+              className="p-1 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors shrink-0"
               aria-label={`Copy folder path: ${nodeData.path}`}
             >
               {isPathCopied ? (
@@ -1906,7 +1946,7 @@ const TreeItemComponent = ({
                 e.stopPropagation();
                 onDownloadFolder?.(nodeData);
               }}
-              className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors flex-shrink-0"
+              className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors shrink-0"
               aria-label={`Download folder: ${nodeData.name}`}
             >
               <Download size={14} />
@@ -1922,7 +1962,7 @@ const TreeItemComponent = ({
                   e.stopPropagation();
                   onOpenSampleNotes?.(nodeData);
                 }}
-                className="p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors flex-shrink-0"
+                className="p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors shrink-0"
                 aria-label="Open pooled sample notes"
               >
                 <NotebookPen size={14} />

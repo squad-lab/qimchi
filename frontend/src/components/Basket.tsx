@@ -217,10 +217,7 @@ const FieldItem = ({
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
     >
-      <IconComponent
-        size={15}
-        className={`${config.textColor} flex-shrink-0`}
-      />
+      <IconComponent size={15} className={`${config.textColor} shrink-0`} />
       <span className={`text-xs ${config.textColor} truncate font-medium`}>
         {displayName}
       </span>
@@ -389,25 +386,19 @@ const Basket = ({
     const datasetKind = detectDatasetKind(item.path, item.tags);
     switch (datasetKind) {
       case "zarr":
-        return (
-          <FileArchive size={15} className="text-violet-600 flex-shrink-0" />
-        );
+        return <FileArchive size={15} className="text-violet-600 shrink-0" />;
       case "netcdf":
-        return <FileText size={15} className="text-sky-600 flex-shrink-0" />;
+        return <FileText size={15} className="text-sky-600 shrink-0" />;
       case "hdf5":
-        return (
-          <HardDrive size={15} className="text-indigo-600 flex-shrink-0" />
-        );
+        return <HardDrive size={15} className="text-indigo-600 shrink-0" />;
       case "qcodes":
-        return <Database size={15} className="text-teal-600 flex-shrink-0" />;
+        return <Database size={15} className="text-teal-600 shrink-0" />;
       case "sqlite":
-        return (
-          <Database size={15} className="text-emerald-600 flex-shrink-0" />
-        );
+        return <Database size={15} className="text-emerald-600 shrink-0" />;
       case "csv":
-        return <Table size={15} className="text-orange-600 flex-shrink-0" />;
+        return <Table size={15} className="text-orange-600 shrink-0" />;
       default:
-        return <Database size={15} className="text-green-500 flex-shrink-0" />;
+        return <Database size={15} className="text-green-500 shrink-0" />;
     }
   };
 
@@ -611,7 +602,7 @@ const Basket = ({
                         Boolean(e.ctrlKey || e.metaKey),
                       )
                     }
-                    className={`flex flex-col rounded p-2 transition-all duration-200 border flex-shrink-0 w-[250px] cursor-pointer ${
+                    className={`flex flex-col rounded p-2 transition-all duration-200 border shrink-0 w-[250px] cursor-pointer ${
                       selectedDatasetIds.has(item.id)
                         ? "bg-slate-100 border-slate-400 ring-1 ring-slate-400"
                         : "bg-gray-50 hover:bg-gray-100 border-gray-200"
@@ -625,7 +616,7 @@ const Basket = ({
                           {/* Attributes status */}
                           <div className="mr-1">
                             <Tooltip content={getAttr(item)} position="bottom">
-                              <span className="text-sm text-gray-500 flex-shrink-0">
+                              <span className="text-sm text-gray-500 shrink-0">
                                 {item.attributes ? (
                                   <Info size={15} className="text-blue-500" />
                                 ) : externalLoadingAttributes.has(item.id) ? (
@@ -782,9 +773,9 @@ const Basket = ({
                           {!item.attributes ? (
                             // Loading placeholder
                             <>
-                              <div className="h-5 w-12 bg-blue-200 rounded animate-pulse flex-shrink-0"></div>
-                              <div className="h-5 w-16 bg-blue-200 rounded animate-pulse flex-shrink-0"></div>
-                              <div className="h-5 w-10 bg-blue-200 rounded animate-pulse flex-shrink-0"></div>
+                              <div className="h-5 w-12 bg-blue-200 rounded animate-pulse shrink-0"></div>
+                              <div className="h-5 w-16 bg-blue-200 rounded animate-pulse shrink-0"></div>
+                              <div className="h-5 w-10 bg-blue-200 rounded animate-pulse shrink-0"></div>
                             </>
                           ) : item.attributes.independents &&
                             item.attributes.independents.length > 0 ? (
@@ -825,9 +816,9 @@ const Basket = ({
                           {!item.attributes ? (
                             // Loading placeholder
                             <>
-                              <div className="h-5 w-14 bg-red-200 rounded animate-pulse flex-shrink-0"></div>
-                              <div className="h-5 w-10 bg-red-200 rounded animate-pulse flex-shrink-0"></div>
-                              <div className="h-5 w-12 bg-red-200 rounded animate-pulse flex-shrink-0"></div>
+                              <div className="h-5 w-14 bg-red-200 rounded animate-pulse shrink-0"></div>
+                              <div className="h-5 w-10 bg-red-200 rounded animate-pulse shrink-0"></div>
+                              <div className="h-5 w-12 bg-red-200 rounded animate-pulse shrink-0"></div>
                             </>
                           ) : item.attributes.dependents &&
                             item.attributes.dependents.length > 0 ? (

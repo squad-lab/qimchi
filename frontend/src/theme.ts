@@ -63,7 +63,7 @@ export const BRAND_BORDER_CLASS = themeClasses.accentBorder;
 //   accentIcon: "text-[#6ea030]",
 //   accentFocusRing: "focus:ring-[#8DC63F]",
 //   // SQUAD Lab gradient (teal to yellow)
-//   gradientSquad: "bg-gradient-to-r from-[#54C5D0] via-[#8DC63F] to-[#FFF200]",
+//   gradientSquad: "bg-linear-to-r from-[#54C5D0] via-[#8DC63F] to-[#FFF200]",
 //   textTeal: "text-[#54C5D0]",
 //   textYellow: "text-[#FFF200]",
 //   bgTeal: "bg-[#54C5D0]",

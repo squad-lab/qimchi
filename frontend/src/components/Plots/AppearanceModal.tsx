@@ -806,7 +806,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
           onDrop={handleDrop}
         >
           {/* Header */}
-          <div className="flex items-center justify-between p-2 bg-gray-200 border-b-2 border-gray-300 drag-handle cursor-move flex-shrink-0">
+          <div className="flex items-center justify-between p-2 bg-gray-200 border-b-2 border-gray-300 drag-handle cursor-move shrink-0">
             <div className="flex items-center gap-2">
               {getPlotTypeIcon(plotType)}
               <h2 className="text-base font-semibold text-gray-800">
@@ -884,7 +884,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
           </div>
 
           {/* Tabs */}
-          <div className="flex border-b-2 border-gray-300 bg-gray-50 flex-shrink-0">
+          <div className="flex border-b-2 border-gray-300 bg-gray-50 shrink-0">
             {plotType === "heatmap"
               ? // Heatmap-specific tabs
                 [
@@ -1235,7 +1235,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                             {option.warning ? (
                               <AlertTriangle
                                 size={14}
-                                className="flex-shrink-0 mt-0.5"
+                                className="shrink-0 mt-0.5"
                               />
                             ) : (
                               ""
@@ -1252,10 +1252,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                       localSettings.hmap.colorscale,
                     ) && (
                       <div className="mt-2 flex items-start gap-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
-                        <AlertTriangle
-                          size={14}
-                          className="flex-shrink-0 mt-0.5"
-                        />
+                        <AlertTriangle size={14} className="shrink-0 mt-0.5" />
                         <span>
                           <strong>Warning:</strong> This is a cyclical colormap
                           designed for phase or periodic data. Because it wraps
