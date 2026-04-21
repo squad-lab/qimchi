@@ -1,10 +1,10 @@
-# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.5.0
+# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.5.1
 
 Plotly based data visualization tool for `xarray` data. Optimized to work with the optional [`qcutils`](https://gitlab.com/squad-lab/qcutils) package (the installer no longer installs `qcutils` by default). Qimchi supports any dataset format convertible to `xarray` (see [Supported Dataset Types](#supported-dataset-types) below). Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html).
 
 This repository contains a unified FastAPI application that serves a React-based frontend for the Qimchi plotter.
 
-## v0.5.0 Highlights
+## v0.5.x Highlights
 
 - Unified backend dataset loader: supports `xarray` DataTrees, NetCDF/HDF5, QCoDeS DBs, flat CSV/TXT, and SQLite-backed containers via a single loader.
 - Zarr v3 support while retaining backwards compatibility with v2.
@@ -13,6 +13,7 @@ This repository contains a unified FastAPI application that serves a React-based
 - Background correction: added support for LinePlots (constant + linear) and HeatMaps (constant, row/col mean, plane).
 - Keyboard shortcuts overhaul and many UX improvements (quick keys for Filters, Appearance, Maximized view, Notes, Export, and more).
 - Explorer and Viewer improvements: path history, dataset cycling across types, and more robust filter handling.
+- Help & Tips Modal: consolidated all help text into a single modal with a tabbed interface for usage tips per component.
 - Misc: removed `qcutils` as a core dependency (installer no longer installs it), installer updated with a qcutils cleanup function, and upgrades to frontend/backend toolchains (Vite 8, Plotly, xarray, zarr, etc.).
 
 

@@ -1,5 +1,11 @@
 ## Qimchi Changelog
 
+### v0.5.1 - 2026-04-21
+
+- [Feature] Help modal: consolidated all help text into a single Help modal, added a tabbed interface for each major component with usage tips per component, and added `Shift+H` shortcut to toggle the Help Modal
+- [Misc] Minor UI updates to Appearance and Filter modals
+- [Misc] Linting & build fixes: Tailwind class updates, fixed several linter warnings (including state management inside `useEffect`), and changed chunk size limit to 8000 to suppress large build warning
+
 ### v0.5.0 - 2026-04-02
 
 - [Feature] Dataset overhaul: unified backend loader (`data_loader.py`) with support for xarray DataTrees, NetCDF/HDF5, QCoDeS DBs (`load_by_id()`), flat csv/txt/dat files, and mixed SQLite containers
