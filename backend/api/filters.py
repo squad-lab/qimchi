@@ -243,6 +243,7 @@ class Filter:
         self.data = figure["data"]
         self.num_axes = num_axes
         self.options = options
+        self.warnings = []
 
         # Extract axis data from the dict first
         dat = figure["data"][0]
@@ -281,7 +282,7 @@ class Filter:
         try:
             match self.num_axes:
                 case 1:
-                    self.apply_1d(*args, **kwargs)
+                    self.apply_1d(*args)  # ignore kwargs
                 case 2:
                     self.apply_2d(*args, **kwargs)
                 case _:
@@ -297,7 +298,7 @@ class Filter:
             logger.error(err, exc_info=True)
 
         # Convert go.Figure back to dict for API response
-        return self.new_fig.to_dict()
+        return self.new_fig.to_dict(), self.warnings
 
     def _update_title(self, fil: str) -> None:
         """
@@ -403,7 +404,7 @@ class Differentiate(Filter):
         """
         super().__init__(figure, num_axes, options)
 
-    def apply_1d(self, *_):
+    def apply_1d(self):
         """
         Applies the differentiation filter to a 1D plot.
 
@@ -472,6 +473,34 @@ class Smooth(Filter):
         self.cval = _safe_init(options, "cval", DEFAULT_SAVGOL_OPTS["cval"])
         self.delta = _safe_init(options, "delta", DEFAULT_SAVGOL_OPTS["delta"])
 
+    def _fill_nans(self, data, axis=-1):
+        if not np.any(np.isnan(data)) and not np.any(np.isinf(data)):
+            return data
+
+        data = np.copy(data)
+        # Convert infs to nans for interpolation
+        data[np.isinf(data)] = np.nan
+        
+        warning_text = "Interpolated missing data for Smoothing"
+        if warning_text not in self.warnings:
+            self.warnings.append(warning_text)
+        
+        def _fill_1d(arr):
+            nans = np.isnan(arr)
+            if not np.any(nans):
+                return arr
+            if np.all(nans):
+                return np.zeros_like(arr)
+            
+            x = lambda z: z.nonzero()[0]
+            arr[nans] = np.interp(x(nans), x(~nans), arr[~nans])
+            return arr
+
+        if data.ndim == 1:
+            return _fill_1d(data)
+        else:
+            return np.apply_along_axis(_fill_1d, axis, data)
+
     def apply_1d(self):
         """
         Applies the smoothing filter to a 1D plot.
@@ -502,8 +531,10 @@ class Smooth(Filter):
             f"1D Smooth: Original window={self.window}, safe_window={safe_window}, polyorder={safe_polyorder}"
         )
 
+        clean_y = self._fill_nans(self.y_axis)
+
         self.new_fig.data[0].y = savgol_filter(
-            self.y_axis,
+            clean_y,
             window_length=safe_window,
             polyorder=safe_polyorder,
             deriv=self.deriv,
@@ -568,8 +599,12 @@ class Smooth(Filter):
                 f"Original window: {self.window}, Safe window for axis 0: {window_x}, axis 1: {window_y}"
             )
 
+            # For axis=2, we smooth along 0 then 1. Need to clean both directions or just clean all.
+            # Easiest is to clean along axis 0, smooth, then clean the result along axis 1 (though smoothing shouldn't introduce NaNs)
+            clean_z = self._fill_nans(self.z_axis, axis=0)
+            
             z_data_x = savgol_filter(
-                self.z_axis,
+                clean_z,
                 window_length=window_x,
                 polyorder=safe_polyorder_x,  # Use validated polyorder
                 axis=0,
@@ -604,8 +639,10 @@ class Smooth(Filter):
                 f"Original window: {self.window}, Safe window for axis {self.smooth_axis}: {safe_window}"
             )
 
+            clean_z = self._fill_nans(self.z_axis, axis=self.smooth_axis)
+
             z_data = savgol_filter(
-                self.z_axis,
+                clean_z,
                 window_length=safe_window,
                 polyorder=safe_polyorder,  # Use validated polyorder
                 axis=self.smooth_axis,
@@ -1286,6 +1323,7 @@ def apply_filters(
         return fig
 
     fig_tmp = deepcopy(fig)
+    all_warnings = []
     for fil in filters_order:
         # `filter_opts` is a nested dict. Get the required dict and then pass it
         opts = filters_opts[fil]
@@ -1294,78 +1332,92 @@ def apply_filters(
             case "flip":
                 logger.debug("apply_filters | Applying `Flip` filter...")
                 filt_obj = FlipHeatMap(fig_tmp, fig_num_axes, opts)
-                filt_fig = filt_obj.apply()
+                filt_fig, filter_warnings = filt_obj.apply()
+                all_warnings.extend(filter_warnings)
 
             case "diff":
                 logger.debug("apply_filters | Applying `Differentiate` (1D) filter...")
                 filt_obj = Differentiate(fig_tmp, fig_num_axes, opts)
-                filt_fig = filt_obj.apply()
+                filt_fig, filter_warnings = filt_obj.apply()
+                all_warnings.extend(filter_warnings)
             case "diff_x":
                 logger.debug(
                     "apply_filters | Applying `Differentiate` (2D - x) filter..."
                 )
                 filt_obj = Differentiate(fig_tmp, fig_num_axes, opts)
-                filt_fig = filt_obj.apply(twod_axis=0)
+                filt_fig, filter_warnings = filt_obj.apply(twod_axis=0)
+                all_warnings.extend(filter_warnings)
             case "diff_y":
                 logger.debug(
                     "apply_filters | Applying `Differentiate` (2D - y) filter..."
                 )
                 filt_obj = Differentiate(fig_tmp, fig_num_axes, opts)
-                filt_fig = filt_obj.apply(twod_axis=1)
+                filt_fig, filter_warnings = filt_obj.apply(twod_axis=1)
+                all_warnings.extend(filter_warnings)
 
             case "savgol":
                 logger.debug("apply_filters | Applying `Smooth` filter...")
                 filt_obj = Smooth(fig_tmp, fig_num_axes, opts)
-                filt_fig = filt_obj.apply()
+                filt_fig, filter_warnings = filt_obj.apply()
+                all_warnings.extend(filter_warnings)
 
             case "sma":
                 logger.debug(
                     "apply_filters | Applying `Simple Moving Average` filter..."
                 )
                 filt_obj = SimpleMovingAverage(fig_tmp, fig_num_axes, opts)
-                filt_fig = filt_obj.apply()
+                filt_fig, filter_warnings = filt_obj.apply()
+                all_warnings.extend(filter_warnings)
 
             case "normalize":
                 logger.debug("apply_filters | Applying `Normalize` filter...")
                 filt_obj = Normalize(fig_tmp, fig_num_axes, opts)
-                filt_fig = filt_obj.apply()
+                filt_fig, filter_warnings = filt_obj.apply()
+                all_warnings.extend(filter_warnings)
 
             case "gamma_corr":
                 logger.debug("apply_filters | Applying `Gamma Correction` filter...")
                 filt_obj = GammaCorrection(fig_tmp, fig_num_axes, opts)
-                filt_fig = filt_obj.apply()
+                filt_fig, filter_warnings = filt_obj.apply()
+                all_warnings.extend(filter_warnings)
 
             case "log_corr":
                 logger.debug(
                     "apply_filters | Applying `Logarithmic Correction` filter..."
                 )
                 filt_obj = LogCorrection(fig_tmp, fig_num_axes, opts)
-                filt_fig = filt_obj.apply()
+                filt_fig, filter_warnings = filt_obj.apply()
+                all_warnings.extend(filter_warnings)
 
             case "sig_corr":
                 logger.debug("apply_filters | Applying `Sigmoid Correction` filter...")
                 filt_obj = SigmoidCorrection(fig_tmp, fig_num_axes, opts)
-                filt_fig = filt_obj.apply()
+                filt_fig, filter_warnings = filt_obj.apply()
+                all_warnings.extend(filter_warnings)
 
             case "rescale_intensity":
                 logger.debug("apply_filters | Applying `Rescale Intensity` filter...")
                 filt_obj = RescaleIntensity(fig_tmp, fig_num_axes, opts)
-                filt_fig = filt_obj.apply()
+                filt_fig, filter_warnings = filt_obj.apply()
+                all_warnings.extend(filter_warnings)
 
             case "log_scale":
                 logger.debug("apply_filters | Applying `Logarithmic Scaling` filter...")
                 filt_obj = LogScale(fig_tmp, fig_num_axes, opts)
-                filt_fig = filt_obj.apply()
+                filt_fig, filter_warnings = filt_obj.apply()
+                all_warnings.extend(filter_warnings)
 
             case "rotate":
                 logger.debug("apply_filters | Applying `Rotate HeatMap` filter...")
                 filt_obj = RotateHeatMap(fig_tmp, fig_num_axes, opts)
-                filt_fig = filt_obj.apply()
+                filt_fig, filter_warnings = filt_obj.apply()
+                all_warnings.extend(filter_warnings)
 
             case "polyfit":
                 logger.debug("apply_filters | Applying `Polynomial Fitting` filter...")
                 filt_obj = PolyFit(fig_tmp, fig_num_axes, opts)
-                filt_fig = filt_obj.apply()
+                filt_fig, filter_warnings = filt_obj.apply()
+                all_warnings.extend(filter_warnings)
 
             case (
                 "bg_corr_constant"
@@ -1379,7 +1431,8 @@ def apply_filters(
                 )
                 opts["mode"] = fil.replace("bg_corr_", "")
                 filt_obj = BackgroundCorrection(fig_tmp, fig_num_axes, opts)
-                filt_fig = filt_obj.apply()
+                filt_fig, filter_warnings = filt_obj.apply()
+                all_warnings.extend(filter_warnings)
 
             case _:
                 err = f"No definition for Filter {fil} was found."
@@ -1389,7 +1442,7 @@ def apply_filters(
         logger.debug(f"apply_filters | {fil} applied.")
         fig_tmp = filt_fig
 
-    return filt_fig
+    return filt_fig, list(set(all_warnings))
 
 
 def _generate_plot_json_for_transform(
@@ -1402,7 +1455,7 @@ def _generate_plot_json_for_transform(
     filters_order: list[str],
     filters_opts: dict,
     swap_xy: bool,
-) -> dict:
+) -> tuple[dict, list[str]]:
     """Generate a plot JSON from canonical plot context + transform settings."""
     from .plots import create_line_plots, create_heat_maps
     from .data_loader import load_dataset_sync
@@ -1411,11 +1464,6 @@ def _generate_plot_json_for_transform(
     logger.debug(f"Loaded dataset with dims: {list(dataset.dims)}")
 
     effective_indeps = list(indeps)
-    if plot_type == "HeatMap" and swap_xy and len(effective_indeps) >= 2:
-        effective_indeps[0], effective_indeps[1] = (
-            effective_indeps[1],
-            effective_indeps[0],
-        )
 
     effective_filters_order = list(filters_order)
     effective_filters_opts = deepcopy(filters_opts)
@@ -1435,6 +1483,7 @@ def _generate_plot_json_for_transform(
             indeps=effective_indeps,
             deps=deps,
             slider=slider,
+            swap_xy=swap_xy,
         )
     else:
         raise HTTPException(
@@ -1446,16 +1495,17 @@ def _generate_plot_json_for_transform(
 
     plot_json = plots_data[0]["plotJson"]
 
+    warnings = []
     if effective_filters_order:
         num_axes = 2 if plot_type == "HeatMap" else 1
-        plot_json = apply_filters(
+        plot_json, warnings = apply_filters(
             filters_order=effective_filters_order,
             filters_opts=effective_filters_opts,
             fig=plot_json,
             fig_num_axes=num_axes,
         )
 
-    return plot_json
+    return plot_json, warnings
 
 
 @router.post("/transform-plot", response_model=TransformPlotResponse)
@@ -1470,7 +1520,7 @@ async def transform_plot_endpoint(
         if not ctx:
             raise HTTPException(status_code=404, detail="Unknown plot_ref")
 
-        plot_json = _generate_plot_json_for_transform(
+        plot_json, warnings = _generate_plot_json_for_transform(
             fpath=ctx["fpath"],
             indeps=list(ctx["indeps"]),
             deps=list(ctx["deps"]),
@@ -1483,7 +1533,7 @@ async def transform_plot_endpoint(
 
         plot_json = sanitize_for_json(plot_json)
 
-        return TransformPlotResponse(plot_json=plot_json, plot_ref=request.plot_ref)
+        return TransformPlotResponse(plot_json=plot_json, plot_ref=request.plot_ref, warnings=warnings)
     except HTTPException:
         raise
     except Exception as e:

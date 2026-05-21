@@ -13,6 +13,7 @@ import xarray as xr
 # Local imports
 from .models import PathData, NotesData
 from .logger import logger
+from .data_loader import load_xarray_dataset, _detect_filesystem_format
 
 router = APIRouter()
 
@@ -112,7 +113,8 @@ def _read_dataset_names(path: Path) -> Tuple[str | None, str | None]:
 
     """
     try:
-        ds = xr.open_dataset(path, engine="zarr")
+        fmt = _detect_filesystem_format(path)
+        ds = load_xarray_dataset(path, fmt)
         attrs = ds.attrs if hasattr(ds, "attrs") else {}
         sample_name = attrs.get("Sample Name") or attrs.get("sample_name")
         cryostat_name = attrs.get("Cryostat") or attrs.get("cryostat")
@@ -290,11 +292,19 @@ def _build_initial_sample_pool_body(sample_dir: Path, when: datetime) -> str:
     entries: list[str] = []
 
     try:
-        zarr_dirs = sorted([p for p in sample_dir.rglob("*.zarr") if p.is_dir()])
+        measurement_paths = []
+        for ext in ["*.zarr", "*.nc", "*.h5", "*.hdf5", "*.csv", "*.txt", "*.dat"]:
+            for p in sample_dir.rglob(ext):
+                if ext == "*.zarr" and not p.is_dir():
+                    continue
+                if ext != "*.zarr" and not p.is_file():
+                    continue
+                measurement_paths.append(p)
+        measurement_paths.sort()
     except Exception:
-        zarr_dirs = []
+        measurement_paths = []
 
-    for measurement_path in zarr_dirs:
+    for measurement_path in measurement_paths:
         _, _, measurement_notes_path = _measurement_notes_paths(measurement_path)
         if not measurement_notes_path.exists() or not measurement_notes_path.is_file():
             continue

@@ -2,7 +2,7 @@ import { useState, useCallback } from "react";
 
 // Local imports
 import type { PlotConfiguration } from "../components/interfaces";
-import { isMemoryPath, isZarrPath } from "../utils/datasetPaths";
+import { isMemoryPath, isDatasetPath } from "../utils/datasetPaths";
 
 export interface UsePlotCollectionReturn {
   plotConfigs: PlotConfiguration[];
@@ -34,11 +34,11 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
     }
 
     const lastSegment = segments[segments.length - 1];
-    if (!isZarrPath(lastSegment)) {
+    if (!isDatasetPath(lastSegment)) {
       return null;
     }
 
-    const measurementId = lastSegment.slice(0, -`.zarr`.length);
+    const measurementId = lastSegment.replace(/\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i, "");
     if (!measurementId) {
       return null;
     }

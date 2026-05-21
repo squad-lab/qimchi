@@ -36,7 +36,7 @@ const App: React.FC = () => {
           .replace(/^memory:\/\//, "")
           .split("/")
           .pop()
-          ?.replace(/\.zarr$/i, "")
+          ?.replace(/\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i, "")
           .toLowerCase(),
       })),
     [basketItems],
@@ -158,7 +158,7 @@ const App: React.FC = () => {
         .replace(/^memory:\/\//, "")
         .split("/")
         .pop()
-        ?.replace(/\.zarr$/i, "")
+        ?.replace(/\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i, "")
         .toLowerCase();
 
       const matched = datasetKeys.find((entry) => entry.key === key);

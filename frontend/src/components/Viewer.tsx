@@ -30,7 +30,7 @@ import {
   getSelectedDatasets,
   isComposerCompatibleWithDataset,
 } from "../utils/datasetFieldSelectors";
-import { isDatasetPath, isMemoryPath, isZarrPath } from "../utils/datasetPaths";
+import { isDatasetPath, isMemoryPath } from "../utils/datasetPaths";
 
 interface ViewerProps {
   defaultWidth?: number; // In percentage (0-100)
@@ -102,9 +102,10 @@ const Viewer = ({
     );
 
     const buildMemoryPath = (item: BasketItem): string | null => {
-      const baseName = item.name?.endsWith(".zarr")
-        ? item.name.slice(0, -5)
-        : item.name;
+      const baseName = item.name?.replace(
+        /\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i,
+        "",
+      );
       if (!baseName) {
         return null;
       }
@@ -137,7 +138,7 @@ const Viewer = ({
           // Preserve the memory path we were already using for the same dataset
           preferredPath = prevItem.path;
         } else if (
-          isZarrPath(newItem.path) &&
+          isDatasetPath(newItem.path) &&
           isLiveDataset &&
           !isDiskFallback
         ) {
@@ -183,11 +184,12 @@ const Viewer = ({
       // Skip auto-plotting if there are existing plots AND this specific item already has plots
       // Check if any existing plot uses this item's path (either directly or via memory://)
       if (plotConfigs.length > 0) {
-        const itemBaseName = item.name?.endsWith(".zarr")
-          ? item.name.slice(0, -5)
-          : item.name;
+        const itemBaseName = item.name?.replace(
+          /\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i,
+          "",
+        );
         const itemMemoryPath =
-          isZarrPath(item.path) && itemBaseName
+          isDatasetPath(item.path) && itemBaseName
             ? `memory://${itemBaseName}`
             : null;
 

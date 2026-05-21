@@ -66,10 +66,9 @@ import { useShortcut } from "../hooks/useGlobalShortcuts";
 import {
   detectDatasetKind,
   hasDatasetTag,
-  isSqliteContainerPath,
   isDatasetNode,
   isDatasetPath,
-  isZarrPath,
+  isSqliteContainerPath,
 } from "../utils/datasetPaths";
 
 // Global cache to persist data across component mounts/unmounts
@@ -1626,7 +1625,7 @@ const TreeItemComponent = ({
   const isSampleFolder =
     isFolder &&
     (nodeData.children || []).some(
-      (child) => child.type === "file" && isZarrPath(child.path),
+      (child) => child.type === "file" && isDatasetPath(child.path),
     );
 
   // Check if this item is in the basket

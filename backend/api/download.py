@@ -38,12 +38,12 @@ async def download_dataset(path: PathData) -> FileResponse:
 
     # NOTE: The datasets are .zarr folders, so we need to zip them before downloading
 
-    if not path.exists() or not path.is_dir():
+    if not path.exists():
         logger.error(
-            f"download_dataset | Path does not exist or is not a directory: {path}"
+            f"download_dataset | Path does not exist: {path}"
         )
         raise HTTPException(
-            status_code=404, detail="Path does not exist or is not a directory"
+            status_code=404, detail="Path does not exist"
         )
 
     try:
@@ -54,12 +54,15 @@ async def download_dataset(path: PathData) -> FileResponse:
 
         # Create the zip file
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-            # Add the main dataset (.zarr folder)
-            for root, dirs, files in os.walk(path):
-                for file in files:
-                    file_path = Path(root) / file
-                    arcname = file_path.relative_to(path.parent)
-                    zipf.write(file_path, arcname)
+            # Add the main dataset
+            if path.is_dir():
+                for root, dirs, files in os.walk(path):
+                    for file in files:
+                        file_path = Path(root) / file
+                        arcname = file_path.relative_to(path.parent)
+                        zipf.write(file_path, arcname)
+            else:
+                zipf.write(path, path.name)
 
             # Add the associated notes/metadata folder if it exists
             # Following the same pattern as load_notes function
@@ -110,11 +113,11 @@ async def download_selected_datasets(paths: list[PathData]) -> FileResponse:
     if not paths:
         raise HTTPException(status_code=400, detail="No paths provided")
 
-    # Validate all paths exist and are directories
+    # Validate all paths exist
     valid_paths = []
     for path_data in paths:
         path = Path(path_data.path)
-        if not path.exists() or not path.is_dir():
+        if not path.exists():
             logger.warning(f"download_selected_datasets | Invalid path: {path}")
             continue
         valid_paths.append(path)
@@ -131,15 +134,18 @@ async def download_selected_datasets(paths: list[PathData]) -> FileResponse:
         # Create the zip file containing all datasets
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
             for dataset_path in valid_paths:
-                # Add each dataset as a folder in the zip
-                for root, dirs, files in os.walk(dataset_path):
-                    for file in files:
-                        file_path = Path(root) / file
-                        # Use dataset name as folder prefix to avoid conflicts
-                        arcname = Path(dataset_path.name) / file_path.relative_to(
-                            dataset_path
-                        )
-                        zipf.write(file_path, arcname)
+                # Add each dataset as a folder/file in the zip
+                if dataset_path.is_dir():
+                    for root, dirs, files in os.walk(dataset_path):
+                        for file in files:
+                            file_path = Path(root) / file
+                            # Use dataset name as folder prefix to avoid conflicts
+                            arcname = Path(dataset_path.name) / file_path.relative_to(
+                                dataset_path
+                            )
+                            zipf.write(file_path, arcname)
+                else:
+                    zipf.write(dataset_path, dataset_path.name)
 
                 # Add the associated notes/metadata folder if it exists
                 # Following the same pattern as load_notes function
@@ -229,8 +235,9 @@ async def download_multiple_datasets(data: PathsData) -> FileResponse:
                 # Add file directly to zip root
                 zipf.write(file_path, file_path.name)
 
-                # If it's a .zarr file, also add the associated notes/metadata folder if it exists
-                if file_path.suffix == ".zarr":
+                # If it's a supported dataset, also add the associated notes/metadata folder if it exists
+                dataset_extensions = {".zarr", ".nc", ".h5", ".hdf5", ".csv", ".txt", ".dat"}
+                if file_path.suffix in dataset_extensions or file_path.name.endswith(".zarr"):
                     dataset_uuid = file_path.stem
                     notes_folder = file_path.parent / dataset_uuid
 
@@ -257,7 +264,7 @@ async def download_multiple_datasets(data: PathsData) -> FileResponse:
                         arcname = Path(dir_path.name) / file_path.relative_to(dir_path)
                         zipf.write(file_path, arcname)
 
-                # If the directory itself is a .zarr dataset, add its notes folder
+                # If the directory itself is a dataset, add its notes folder
                 if dir_path.name.endswith(".zarr"):
                     dataset_uuid = dir_path.stem
                     notes_folder = dir_path.parent / dataset_uuid
@@ -275,25 +282,27 @@ async def download_multiple_datasets(data: PathsData) -> FileResponse:
                                 ) / notes_file_path.relative_to(notes_folder)
                                 zipf.write(notes_file_path, arcname)
                 else:
-                    # If directory contains .zarr files, also add associated notes/metadata folders
-                    for zarr_file in dir_path.glob("*.zarr"):
-                        dataset_uuid = zarr_file.stem
-                        notes_folder = dir_path / dataset_uuid
+                    # If directory contains datasets, also add associated notes/metadata folders
+                    dataset_extensions = ["*.zarr", "*.nc", "*.h5", "*.hdf5", "*.csv", "*.txt", "*.dat"]
+                    for ext in dataset_extensions:
+                        for ds_file in dir_path.glob(ext):
+                            dataset_uuid = ds_file.stem
+                            notes_folder = dir_path / dataset_uuid
 
-                        if notes_folder.exists() and notes_folder.is_dir():
-                            logger.debug(
-                                f"download_multiple_datasets | Adding notes folder for directory: {notes_folder}"
-                            )
-                            for root, dirs, files in os.walk(notes_folder):
-                                for file in files:
-                                    notes_file_path = Path(root) / file
-                                    # Place notes in a folder structure matching the directory
-                                    arcname = (
-                                        Path(dir_path.name)
-                                        / dataset_uuid
-                                        / notes_file_path.relative_to(notes_folder)
-                                    )
-                                    zipf.write(notes_file_path, arcname)
+                            if notes_folder.exists() and notes_folder.is_dir():
+                                logger.debug(
+                                    f"download_multiple_datasets | Adding notes folder for directory: {notes_folder}"
+                                )
+                                for root, dirs, files in os.walk(notes_folder):
+                                    for file in files:
+                                        notes_file_path = Path(root) / file
+                                        # Place notes in a folder structure matching the directory
+                                        arcname = (
+                                            Path(dir_path.name)
+                                            / dataset_uuid
+                                            / notes_file_path.relative_to(notes_folder)
+                                        )
+                                        zipf.write(notes_file_path, arcname)
 
         logger.debug(
             f"download_multiple_datasets | Created zip file: {zip_path} with {len(valid_files)} files and {len(valid_dirs)} directories"
@@ -358,21 +367,23 @@ async def download_folder(path: PathData) -> FileResponse:
                     arcname = file_path.relative_to(path.parent)
                     zipf.write(file_path, arcname)
 
-            # Also add notes folders for any .zarr datasets found in the folder
-            for zarr_path in path.glob("*.zarr"):
-                dataset_uuid = zarr_path.stem
-                notes_folder = path / dataset_uuid
+            # Also add notes folders for any datasets found in the folder
+            dataset_extensions = ["*.zarr", "*.nc", "*.h5", "*.hdf5", "*.csv", "*.txt", "*.dat"]
+            for ext in dataset_extensions:
+                for ds_path in path.glob(ext):
+                    dataset_uuid = ds_path.stem
+                    notes_folder = path / dataset_uuid
 
-                if notes_folder.exists() and notes_folder.is_dir():
-                    logger.debug(
-                        f"download_folder | Adding notes folder: {notes_folder}"
-                    )
-                    for root, dirs, files in os.walk(notes_folder):
-                        for file in files:
-                            file_path = Path(root) / file
-                            # Preserve the folder structure in the zip
-                            arcname = file_path.relative_to(path.parent)
-                            zipf.write(file_path, arcname)
+                    if notes_folder.exists() and notes_folder.is_dir():
+                        logger.debug(
+                            f"download_folder | Adding notes folder: {notes_folder}"
+                        )
+                        for root, dirs, files in os.walk(notes_folder):
+                            for file in files:
+                                file_path = Path(root) / file
+                                # Preserve the folder structure in the zip
+                                arcname = file_path.relative_to(path.parent)
+                                zipf.write(file_path, arcname)
 
         logger.debug(f"download_folder | Created zip file: {zip_path}")
 

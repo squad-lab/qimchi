@@ -42,6 +42,7 @@ class PlotRequest(BaseModel):
     filters_order: List[str] = Field(default_factory=list)
     filters_opts: Dict = Field(default_factory=dict)
     slider: Dict = Field(default_factory=dict)  # For data slicing/selection
+    swap_xy: bool = False
 
 
 class PlotResponse(BaseModel):
@@ -62,6 +63,7 @@ class TransformPlotRequest(BaseModel):
 class TransformPlotResponse(BaseModel):
     plot_json: dict
     plot_ref: str
+    warnings: List[str] = Field(default_factory=list)
 
 
 class WatchPath(BaseModel):

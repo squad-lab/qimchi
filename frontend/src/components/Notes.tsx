@@ -152,10 +152,10 @@ export default function Notes({
       ? externalSelectedItemId
       : internalSelectedItemId;
 
-  const zarrItems = useMemo(
+  const datasetItems = useMemo(
     () =>
       basketItems.filter(
-        (item) => item.type === "file" && item.path.endsWith(".zarr"),
+        (item) => item.type === "file" && /\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i.test(item.path),
       ),
     [basketItems],
   );
@@ -163,7 +163,7 @@ export default function Notes({
   const sampleGroups = useMemo(() => {
     const groups = new Map<string, SampleGroup>();
 
-    zarrItems.forEach((item) => {
+    datasetItems.forEach((item) => {
       const samplePath = inferSamplePath(item.path);
       const samplePathParts = samplePath.split("/").filter(Boolean);
 
@@ -197,7 +197,7 @@ export default function Notes({
     return Array.from(groups.values()).sort((a, b) =>
       a.sampleName.localeCompare(b.sampleName),
     );
-  }, [zarrItems, getAttrValue, inferSamplePath]);
+  }, [datasetItems, getAttrValue, inferSamplePath]);
 
   const selectedSample = sampleGroups.find(
     (group) => group.key === selectedSampleKey,
@@ -205,7 +205,7 @@ export default function Notes({
 
   const selectedMeasurement =
     selectedScope === "measurement"
-      ? zarrItems.find((item) => item.id === selectedItemId) || null
+      ? datasetItems.find((item) => item.id === selectedItemId) || null
       : null;
 
   const selectedTarget = useMemo(() => {
@@ -253,13 +253,13 @@ export default function Notes({
   useEffect(() => {
     if (!selectedItemId) return;
 
-    const selected = zarrItems.find((item) => item.id === selectedItemId);
+    const selected = datasetItems.find((item) => item.id === selectedItemId);
     if (!selected) return;
 
     const samplePath = inferSamplePath(selected.path).toLowerCase();
     setSelectedSampleKey(samplePath);
     setSelectedScope("measurement");
-  }, [selectedItemId, zarrItems, inferSamplePath]);
+  }, [selectedItemId, datasetItems, inferSamplePath]);
 
   // Initialize sample + measurement selection when basket changes.
   useEffect(() => {
@@ -287,7 +287,7 @@ export default function Notes({
         if (firstMeasurement) {
           handleSelectionChange(firstMeasurement.id);
         }
-      } else if (!zarrItems.some((item) => item.id === selectedItemId)) {
+      } else if (!datasetItems.some((item) => item.id === selectedItemId)) {
         const fallback = sampleGroups[0].items[0];
         handleSelectionChange(fallback?.id || null);
       }
@@ -297,7 +297,7 @@ export default function Notes({
     selectedItemId,
     selectedSampleKey,
     selectedScope,
-    zarrItems,
+    datasetItems,
     handleSelectionChange,
   ]);
 
@@ -413,13 +413,13 @@ export default function Notes({
           .replace(/^memory:\/\//, "")
           .split("/")
           .pop()
-          ?.replace(/\.zarr$/i, "")
+          ?.replace(/\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i, "")
           .toLowerCase() ===
           normalizePath(datasetPath)
             .replace(/^memory:\/\//, "")
             .split("/")
             .pop()
-            ?.replace(/\.zarr$/i, "")
+            ?.replace(/\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i, "")
             .toLowerCase();
 
       const shouldRefreshSample =
@@ -809,7 +809,7 @@ export default function Notes({
 
           {/* Row 2: Left Last Saved, Right Autosave indicator */}
           <div className="flex items-center justify-between">
-            {zarrItems.length > 0 && (
+            {datasetItems.length > 0 && (
               <div className="text-xs text-gray-600">
                 {lastSavedAt ? (
                   <span>

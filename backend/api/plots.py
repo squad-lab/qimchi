@@ -10,13 +10,14 @@ import xarray as xr
 from pathlib import Path
 from typing import Dict, List
 from fastapi import APIRouter, HTTPException
+from fastapi.concurrency import run_in_threadpool
 
 # Local imports
 from .figures import Line, HeatMap, DEFAULT_THEME
 from .filters import apply_filters
 from .models import PlotRequest, PlotResponse
 from .logger import logger
-from .data_loader import MEMORY_PROTOCOL, load_dataset_sync, resolve_to_disk_path
+from .data_loader import MEMORY_PROTOCOL, load_dataset_async, resolve_to_disk_path
 from .json_utils import sanitize_for_json
 
 
@@ -124,22 +125,35 @@ def _validate_plot_type(plot_type: str) -> bool:
     return plot_type in supported_types
 
 
-def load_dataset(fpath: str) -> xr.Dataset:
+
+def _apply_filters_sync(
+    plots: List[Dict], filters_order: List, filters_opts: Dict
+) -> List[Dict]:
     """
-    Load dataset via centralized data_loader module.
-
-    Args:
-        fpath (str): Dataset reference path.
-
-    Returns:
-        xr.Dataset: The loaded dataset.
+    Apply filters to a list of plot dicts synchronously.
+    Intended to be called via run_in_threadpool so filter numpy work
+    does not block the async event loop.
 
     """
-    try:
-        return load_dataset_sync(fpath)
-    except Exception as e:
-        logger.error(f"Failed to load dataset from {fpath}: {e}")
-        raise HTTPException(status_code=400, detail=f"Failed to load dataset: {e}")
+    filtered_plots = []
+    for plot in plots:
+        try:
+            num_axes = 2 if plot["type"] == "HeatMap" else 1
+            filtered_plot_json, warnings = apply_filters(
+                filters_order=filters_order,
+                filters_opts=filters_opts,
+                fig=plot["plotJson"],
+                fig_num_axes=num_axes,
+            )
+            filtered_plot = plot.copy()
+            filtered_plot["plotJson"] = filtered_plot_json
+            filtered_plot["warnings"] = warnings
+            filtered_plot["title"] = f"{plot['title']} (Filtered)"
+            filtered_plots.append(filtered_plot)
+        except Exception as e:
+            logger.error(f"Failed to apply filters to plot {plot['id']}: {e}")
+            filtered_plots.append(plot)
+    return filtered_plots
 
 
 def validate_variables(
@@ -262,9 +276,30 @@ def apply_data_slicing(
 
     if slider_vals:
         logger.debug(f"Applying slider selection: {slider_vals}")
-        # Use xarray's sel method with nearest neighbor to select specific slices
-        # Dash: data_array.sel(**slider_vals, method="nearest")
-        return dataset.sel(**slider_vals, method="nearest")
+        try:
+            # Use xarray's sel method with nearest neighbor to select specific slices
+            return dataset.sel(**slider_vals, method="nearest")
+        except Exception as e:
+            logger.warning(f"sel(method='nearest') failed: {e}. Falling back to manual isel.")
+            # Fallback for duplicate coordinate values ("reindexing only valid for uniquely valued Index objects")
+            isel_dict = {}
+            for dim, val in slider_vals.items():
+                if dim in dataset.coords:
+                    arr = dataset.coords[dim].values
+                    # Extract the numerical value (handling datetimes or other types gracefully if needed, but assuming numerical)
+                    try:
+                        # Find the index of the closest value
+                        idx = int(np.nanargmin(np.abs(arr - float(val))))
+                        isel_dict[dim] = idx
+                    except Exception as fallback_err:
+                        logger.error(f"Fallback indexing failed for dimension {dim}: {fallback_err}")
+                        pass
+                else:
+                    logger.debug(f"Dimension {dim} not in coords, skipping manual isel for this dim.")
+            
+            if isel_dict:
+                return dataset.isel(**isel_dict)
+            return dataset
     else:
         logger.debug("No valid slider dimensions found, returning original dataset")
         return dataset
@@ -301,16 +336,16 @@ def create_line_plots(
             # logger.debug(f"create_line_plots | indeps={indeps} deps={deps} slider={bool(slider)}")
             metadata = dataset.attrs
 
-            # Generate slider configuration for dimensions not being plotted (like Dash _update_slider())
-            if not slider:  # Check for None or empty dict
-                auto_slider_config = gen_slider_config(dataset, indeps)
-                logger.debug(
-                    f"create_line_plots || Auto-generated slider config for {fpath}: {auto_slider_config}"
-                )
-                slider_for_slicing = auto_slider_config
-            else:
-                auto_slider_config = slider
-                slider_for_slicing = slider
+            # Always generate accurate slider configuration from the dataset dimensions
+            auto_slider_config = gen_slider_config(dataset, indeps)
+            
+            # If a slider config is provided (e.g. from frontend LineCut), update the values
+            if slider:
+                for dim, config in slider.items():
+                    if dim in auto_slider_config and "value" in config:
+                        auto_slider_config[dim]["value"] = config["value"]
+                        
+            slider_for_slicing = auto_slider_config
 
             # Apply data slicing if slider is provided
             if slider_for_slicing:
@@ -395,6 +430,7 @@ def create_heat_maps(
     indeps: List[str],
     deps: List[str],
     slider: Dict = None,
+    swap_xy: bool = False,
 ) -> List[Dict]:
     """
     Creates HeatMap(s) based on the datasets and parameters.
@@ -404,6 +440,8 @@ def create_heat_maps(
         fpaths (List[str]): List of file paths corresponding to datasets.
         indeps (List[str]): List of independent variable names (X, Y axes).
         deps (List[str]): List of dependent variable names (Z values).
+        slider (Dict, optional): Slider configuration for slicing data.
+        swap_xy (bool, optional): Whether to swap the X and Y axes.
 
     Returns:
         List[Dict]: List of plot dictionaries containing plot data and metadata.
@@ -422,16 +460,16 @@ def create_heat_maps(
             # )
             metadata = dataset.attrs
 
-            # Generate slider config for non-plotted dimensions (like Dash _update_slider())
-            if not slider:  # Check for None or empty dict
-                auto_slider_config = gen_slider_config(dataset, indeps)
-                logger.debug(
-                    f"Auto-generated slider config for heatmap {fpath}: {auto_slider_config}"
-                )
-                slider_for_slicing = auto_slider_config
-            else:
-                auto_slider_config = slider
-                slider_for_slicing = slider
+            # Always generate accurate slider configuration from the dataset dimensions
+            auto_slider_config = gen_slider_config(dataset, indeps)
+            
+            # If a slider config is provided (e.g. from frontend LineCut), update the values
+            if slider:
+                for dim, config in slider.items():
+                    if dim in auto_slider_config and "value" in config:
+                        auto_slider_config[dim]["value"] = config["value"]
+                        
+            slider_for_slicing = auto_slider_config
 
             # Apply data slicing if slider is provided
             if slider_for_slicing:
@@ -445,7 +483,10 @@ def create_heat_maps(
                 )
 
             # Use first two independents as X, Y and all dependents as Z values
-            x_var, y_var = indeps[0], indeps[1]
+            if swap_xy:
+                x_var, y_var = indeps[1], indeps[0]
+            else:
+                x_var, y_var = indeps[0], indeps[1]
 
             for dep in deps:
                 heat_map = HeatMap(
@@ -479,7 +520,7 @@ def create_heat_maps(
 
                 context = {
                     "fpath": context_fpath,
-                    "indeps": [x_var, y_var],
+                    "indeps": [indeps[0], indeps[1]],
                     "deps": [dep],
                     "plotType": "HeatMap",
                 }
@@ -574,7 +615,7 @@ async def create_plots(request: PlotRequest) -> PlotResponse:
         datasets = []
         for fpath in request.fpaths:
             try:
-                dataset = load_dataset(fpath)
+                dataset = await load_dataset_async(fpath)
                 # Store the path in dataset attributes for reference
                 dataset.attrs["path"] = fpath
                 datasets.append(dataset)
@@ -598,54 +639,56 @@ async def create_plots(request: PlotRequest) -> PlotResponse:
                 )
 
         # Validate variables
-        validation = validate_variables(datasets, request.indeps, request.deps)
+        effective_indeps = list(request.indeps)
+
+        validation = validate_variables(datasets, effective_indeps, request.deps)
         if not validation["valid"]:
+            # For live (memory://) datasets, this can be a transient read race:
+            # open_live_dataset() fetches metadata and data in two separate WebSocket
+            # round-trips. Under load, the server may return a partial/empty data_dict,
+            # causing variables to be silently dropped from the assembled Dataset.
+            # The dataset loads without error but contains no variables, failing validation.
+            # Skip this poll cycle; the next one will succeed once the server is free.
+            is_live_request = any(
+                fpath.startswith(MEMORY_PROTOCOL) for fpath in request.fpaths
+            )
+            if is_live_request:
+                logger.warning(
+                    f"Transient variable validation failure for live dataset: "
+                    f"{'; '.join(validation['errors'])}. Skipping update."
+                )
+                return PlotResponse(
+                    plots=[],
+                    success=True,
+                    message="Skipping update due to transient variable unavailability",
+                    skip_update=True,
+                )
             return PlotResponse(
                 plots=[],
                 success=False,
                 message=f"Variable validation failed: {'; '.join(validation['errors'])}",
             )
 
-        # Create plots based on type
+        # Create plots based on type — run in a thread so numpy/plotly work
+        # doesn't block the async event loop for other concurrent requests.
         plots = []
         if request.plotType == "LinePlot":
-            plots = create_line_plots(
-                datasets, request.fpaths, request.indeps, request.deps, request.slider
+            plots = await run_in_threadpool(
+                create_line_plots,
+                datasets, request.fpaths, effective_indeps, request.deps, request.slider,
             )
         elif request.plotType == "HeatMap":
-            plots = create_heat_maps(
-                datasets, request.fpaths, request.indeps, request.deps, request.slider
+            plots = await run_in_threadpool(
+                create_heat_maps,
+                datasets, request.fpaths, effective_indeps, request.deps, request.slider, request.swap_xy
             )
 
-        # Apply filters if requested
+        # Apply filters if requested — also CPU-bound, run in a thread.
         if request.filters_order:
-            filtered_plots = []
-            for plot in plots:
-                try:
-                    # Determine number of axes based on plot type
-                    num_axes = 2 if plot["type"] == "HeatMap" else 1
-
-                    # Apply filters to the plot
-                    filtered_plot_json = apply_filters(
-                        filters_order=request.filters_order,
-                        filters_opts=request.filters_opts,
-                        fig=plot["plotJson"],
-                        fig_num_axes=num_axes,
-                    )
-
-                    # Update the plot with filtered data
-                    filtered_plot = plot.copy()
-                    filtered_plot["plotJson"] = filtered_plot_json
-                    filtered_plot["title"] = f"{plot['title']} (Filtered)"
-
-                    filtered_plots.append(filtered_plot)
-
-                except Exception as e:
-                    logger.error(f"Failed to apply filters to plot {plot['id']}: {e}")
-                    # If filtering fails, keep the original plot
-                    filtered_plots.append(plot)
-
-            plots = filtered_plots
+            plots = await run_in_threadpool(
+                _apply_filters_sync,
+                plots, request.filters_order, request.filters_opts,
+            )
 
         logger.info(f"Successfully created {len(plots)} plots")
         logger.info(f"Plot IDs: {[plot['id'] for plot in plots]}")

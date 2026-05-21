@@ -168,48 +168,72 @@ async def get_measurement_data(
     return response.get("data", {})
 
 
+async def get_live_snapshot(
+    measurement_id: str, ws_url: str = DEFAULT_WS_URL
+) -> dict:
+    """
+    Fetch variable names and all data for a measurement in a single round-trip.
+
+    Args:
+        measurement_id (str): The measurement ID.
+        ws_url (str): WebSocket server URL.
+
+    Returns:
+        dict with keys: coords, data_vars, var_dims, data, attrs.
+
+    """
+    request = {"action": "get_snapshot", "measurement_id": measurement_id}
+    response = await _send_request(request, ws_url)
+    if not response.get("success"):
+        raise RuntimeError(
+            f"Failed to get snapshot for {measurement_id}: {response.get('error')}"
+        )
+    return response
+
+
 async def open_live_dataset(
     measurement_id: str, ws_url: str = DEFAULT_WS_URL
 ) -> xr.Dataset:
     """
-    Open a live measurement as an xarray Dataset by fetching from WebSocket.
+    Open a live measurement as an xarray Dataset via a single WebSocket round-trip.
+
+    Uses the get_snapshot action so variable names and data are fetched atomically,
+    eliminating the race between the old two-call approach (get_data for metadata,
+    then get_data for arrays).
 
     Args:
-        measurement_id (str): The measurement ID
-        ws_url (str): WebSocket server URL
+        measurement_id (str): The measurement ID.
+        ws_url (str): WebSocket server URL.
 
     Returns:
-        xarray.Dataset with current data from memory
+        xarray.Dataset with current data from memory.
 
     """
-    # Get metadata first
-    logger.debug(f"Fetching metadata for {measurement_id}...")
-    info = await get_measurement_info(measurement_id, ws_url)
-    logger.debug(f"Metadata: coords={info['coords']}, data_vars={info['data_vars']}")
-
-    # Fetch all coordinates and data variables
-    all_vars = info["coords"] + info["data_vars"]
-    logger.debug(f"Fetching data for variables: {all_vars}")
-    data_dict = await get_measurement_data(measurement_id, all_vars, ws_url)
-    logger.debug(f"Received data for {len(data_dict)} variables")
-
-    # Build xarray Dataset
     import numpy as np
 
+    snapshot = await get_live_snapshot(measurement_id, ws_url)
+    coord_names: List[str] = snapshot.get("coords", [])
+    data_var_names: List[str] = snapshot.get("data_vars", [])
+    var_dims: dict = snapshot.get("var_dims", {})
+    data_dict: dict = snapshot.get("data", {})
+    attrs: dict = snapshot.get("attrs", {})
+
     coords = {}
+    for name in coord_names:
+        if name in data_dict:
+            coords[name] = np.array(data_dict[name])
+
     data_vars = {}
+    for name in data_var_names:
+        if name in data_dict:
+            dims = var_dims.get(name, coord_names)  # fall back to all coords
+            data_vars[name] = (dims, np.array(data_dict[name]))
 
-    for coord_name in info["coords"]:
-        if coord_name in data_dict:
-            coords[coord_name] = np.array(data_dict[coord_name])
-
-    for var_name in info["data_vars"]:
-        if var_name in data_dict:
-            data_vars[var_name] = (info["coords"], np.array(data_dict[var_name]))
-
-    ds = xr.Dataset(data_vars=data_vars, coords=coords, attrs=info["attrs"])
-    logger.debug(f"Created Dataset with {len(ds.data_vars)} data variables")
-
+    ds = xr.Dataset(data_vars=data_vars, coords=coords, attrs=attrs)
+    logger.debug(
+        f"[live_client] snapshot built: {len(ds.data_vars)} vars, "
+        f"{len(ds.coords)} coords for {measurement_id}"
+    )
     return ds
 
 

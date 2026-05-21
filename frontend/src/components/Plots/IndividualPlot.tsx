@@ -13,6 +13,7 @@ import type {
   PlotConfiguration,
 } from "../../components/interfaces";
 import { useToast } from "../../hooks/useToast";
+import { usePlotStore } from "../../stores/plotStore";
 
 type PlotlyJSON = {
   data: Data[];
@@ -25,7 +26,7 @@ type CreatePlotOptions = {
   skipIfPending?: boolean;
 };
 
-const MEMORY_REFRESH_INTERVAL_MS = 500;
+const MEMORY_REFRESH_INTERVAL_MS = 750;
 
 const inferSourceFromPath = (path: string): "memory" | "disk" => {
   const inferred = path.startsWith("memory://") ? "memory" : "disk";
@@ -56,7 +57,19 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
     Record<string, SliderConfig>
   >({});
   const currentConfigRef = useRef(currentConfig);
+  const getPlotState = usePlotStore((state) => state.getPlotState);
+
+  // Initialize from store synchronously
+  const [initialSwapState] = useState(() => {
+    const plotState = getPlotState(config.id);
+    return plotState && typeof plotState.axes_swapped === "boolean"
+      ? plotState.axes_swapped
+      : false;
+  });
+
+  const isAxesSwappedRef = useRef(initialSwapState);
   const hasInitialized = useRef(false);
+  const shownWarningsRef = useRef<Set<string>>(new Set());
   const { showToast } = useToast();
   const fetchInFlight = useRef(false);
   const autoRefreshTimer = useRef<number | null>(null);
@@ -110,6 +123,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
           filters_order: plotConfig.filters_order || [],
           filters_opts: plotConfig.filters_opts || {},
           slider: plotConfig.slider || {},
+          swap_xy: isAxesSwappedRef.current,
         };
 
         const response = await PlotAPI.createPlots(request);
@@ -118,6 +132,15 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
           // Take the first plot from the response
           const plot = response.plots[0];
           setPlotRef(plot.plot_ref);
+
+          if (plot.warnings && plot.warnings.length > 0) {
+            plot.warnings.forEach((warning) => {
+              if (!shownWarningsRef.current.has(warning)) {
+                showToast(warning, "warning");
+                shownWarningsRef.current.add(warning);
+              }
+            });
+          }
 
           // Track consecutive non-live responses. The backend returns is_live=false
           // both for transient WebSocket failures (recovers next poll) and for
@@ -208,6 +231,9 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
           } else {
             setAvailableSliders({});
           }
+        } else if (response.skip_update) {
+          // Transient backend error (e.g. file lock during live measurement).
+          // Keep the existing plot and silently skip this refresh cycle.
         } else {
           const errorMsg = response.message || "No plots created";
           setError(errorMsg);
@@ -496,6 +522,9 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         onFiltersModalOpenChange={setIsFiltersModalOpen}
         availableSliders={availableSliders}
         onAddPlot={onAddPlot}
+        onSwapAxesChange={(swapped) => {
+          isAxesSwappedRef.current = swapped;
+        }}
       />
     </div>
   );

@@ -66,6 +66,7 @@ type Props = {
   onFiltersModalOpenChange?: (isOpen: boolean) => void;
   availableSliders?: Record<string, SliderConfig>; // Sliders from backend
   onAddPlot?: (config: Omit<PlotConfiguration, "id">) => void;
+  onSwapAxesChange?: (swapped: boolean) => void;
 };
 
 // Default appearance settings based on backend
@@ -227,6 +228,7 @@ const PlotWrapper: React.FC<Props> = ({
   onFiltersModalOpenChange,
   availableSliders = {},
   onAddPlot,
+  onSwapAxesChange,
 }) => {
   const { showToast } = useToast();
 
@@ -548,8 +550,8 @@ const PlotWrapper: React.FC<Props> = ({
         return;
       }
       const key = e.key.toLowerCase();
-      if (key === "x") setLineCutAxis("x");
-      else if (key === "y") setLineCutAxis("y");
+      if (key === "x") setLineCutAxis("y");
+      else if (key === "y") setLineCutAxis("x");
       else if (key === "escape") {
         setIsLineCutActive(false);
         setLineCutAxis(null);
@@ -1216,14 +1218,32 @@ const PlotWrapper: React.FC<Props> = ({
         delete nextSliders[remainVar];
         nextSliders[cutVar] = normalizedCutSlider;
 
-        const filtersOrder = appliedFilters.map((f) => f.name);
-        const filtersOpts = appliedFilters.reduce(
-          (acc, filter) => {
-            acc[filter.name] = filter.options ?? {};
-            return acc;
-          },
-          {} as Record<string, unknown>,
-        );
+        const valid1DFilters = new Set([
+          "diff",
+          "savgol",
+          "sma",
+          "normalize",
+          "log_scale",
+          "polyfit",
+          "bg_corr_constant",
+          "bg_corr_linear",
+        ]);
+
+        const filtersOrder: string[] = [];
+        const filtersOpts: Record<string, unknown> = {};
+
+        appliedFilters.forEach((filter) => {
+          let name = filter.name;
+          // Translate 2D diff to 1D diff
+          if (name === "diff_x" || name === "diff_y") {
+            name = "diff";
+          }
+
+          if (valid1DFilters.has(name) && !filtersOrder.includes(name)) {
+            filtersOrder.push(name);
+            filtersOpts[name] = filter.options ?? {};
+          }
+        });
 
         onAddPlot({
           fpath: plotConfig.fpath,
@@ -1290,12 +1310,12 @@ const PlotWrapper: React.FC<Props> = ({
         }
         if (typeof plotState.axes_swapped === "boolean") {
           setAreAxesSwapped(plotState.axes_swapped);
+          onSwapAxesChange?.(plotState.axes_swapped);
         }
       } else {
-        // No persisted state, but check if plotConfig has filter settings from backend
+        // No persisted state, but check if plotConfig has filter or slider settings
         if (plotConfig.filters_order && plotConfig.filters_order.length > 0) {
           // Convert backend filter config to UI filter format
-          // This is a simplified conversion - you might need to enhance this based on your filter structure
           const filtersFromConfig = plotConfig.filters_order.map(
             (filterName) => ({
               name: filterName,
@@ -1306,11 +1326,22 @@ const PlotWrapper: React.FC<Props> = ({
           console.log("Loaded filters from plot config:", filtersFromConfig);
 
           // Set the filters and trigger reapplication by clearing and resetting them
-          // This approach ensures the filters are applied to the new dataset
           setAppliedFilters([]);
           setTimeout(() => {
             setAppliedFilters(filtersFromConfig);
+            if (plotConfig.id) {
+              setPlotFilters(plotConfig.id, filtersFromConfig);
+            }
           }, 100);
+        }
+
+        if (plotConfig.slider && Object.keys(plotConfig.slider).length > 0) {
+          console.log("Loaded sliders from plot config:", plotConfig.slider);
+          setSliderConfig(plotConfig.slider);
+          lastAppliedSliders.current = { ...plotConfig.slider };
+          if (plotConfig.id) {
+            setPlotSliders(plotConfig.id, plotConfig.slider);
+          }
         }
       }
     }
@@ -1934,8 +1965,11 @@ const PlotWrapper: React.FC<Props> = ({
                 });
               }
             }, 200);
-
-            showToast("Sliders applied successfully", "success");
+            if (result.warnings && result.warnings.length > 0) {
+              result.warnings.forEach((warn) => showToast(warn, "warning"));
+            } else {
+              showToast("Sliders applied successfully", "success");
+            }
           } catch (error) {
             console.error("Error applying sliders:", error);
             showToast("Failed to apply sliders", "error");
@@ -2117,6 +2151,10 @@ const PlotWrapper: React.FC<Props> = ({
             setAppliedFilters(filters);
             setBasePlotJson(filteredPlotJson);
             setCustomizedPlotJson(filteredWithAppearance);
+
+            if (result.warnings && result.warnings.length > 0) {
+              result.warnings.forEach((warn) => showToast(warn, "warning"));
+            }
 
             // Delay backend config update
             setTimeout(() => {
@@ -2615,6 +2653,7 @@ const PlotWrapper: React.FC<Props> = ({
     try {
       setIsApplyingFilters(true);
       setAreAxesSwapped(false);
+      onSwapAxesChange?.(false);
 
       // Reset state locally
       const defaultSettings = getInitialSettings(plotType);
@@ -2693,6 +2732,7 @@ const PlotWrapper: React.FC<Props> = ({
 
     const newSwapped = !areAxesSwapped;
     setAreAxesSwapped(newSwapped);
+    onSwapAxesChange?.(newSwapped);
     if (plotConfig?.id) {
       setPlotAxesSwapped(plotConfig.id, newSwapped);
     }
@@ -3553,11 +3593,11 @@ const PlotWrapper: React.FC<Props> = ({
                           <p className="text-[10px] text-gray-400 mt-1 max-w-[150px]">
                             Press{" "}
                             <kbd className="font-sans border px-1 rounded bg-white shadow-sm">
-                              X
+                              Y
                             </kbd>{" "}
                             for Vertical mode or{" "}
                             <kbd className="font-sans border px-1 rounded bg-white shadow-sm">
-                              Y
+                              X
                             </kbd>{" "}
                             for Horizontal mode.
                           </p>
