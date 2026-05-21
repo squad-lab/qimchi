@@ -1,4 +1,4 @@
-# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.5.1
+# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.5.2
 
 Plotly based data visualization tool for `xarray` data. Optimized to work with the optional [`qcutils`](https://gitlab.com/squad-lab/qcutils) package (the installer no longer installs `qcutils` by default). Qimchi supports any dataset format convertible to `xarray` (see [Supported Dataset Types](#supported-dataset-types) below). Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html).
 
@@ -290,7 +290,7 @@ For manual installation with full control over the setup process, follow these s
    cd ..\backend
    $env:PYTHONPATH="$PWD"
    $env:SERVE_STATIC_FILES="true"
-   uvicorn main:app --host 127.0.0.1 --port 8001 --workers 8 --log-level info --ws-max-size 200000000 --ws-ping-interval 20 --ws-ping-timeout 20
+   uvicorn main:app --host 127.0.0.1 --port 8001 --workers 1 --log-level info --ws-max-size 200000000 --ws-ping-interval 20 --ws-ping-timeout 20
    ```
 
 #### Linux/macOS
@@ -375,7 +375,7 @@ For manual installation with full control over the setup process, follow these s
    cd ../backend
    export PYTHONPATH="$PWD"
    export SERVE_STATIC_FILES="true"
-   uvicorn main:app --host 0.0.0.0 --port 8001 --workers 8 --log-level info --ws-max-size 200000000 --ws-ping-interval 20 --ws-ping-timeout 20
+   uvicorn main:app --host 0.0.0.0 --port 8001 --workers 1 --log-level info --ws-max-size 200000000 --ws-ping-interval 20 --ws-ping-timeout 20
    ```
 
 **Access the application:**

@@ -230,7 +230,7 @@ PORT=$PORT
 source "$VENV_DIR/bin/activate"
 cd "\$QIMCHI_DIR/qimchi/backend"
 echo "Starting QIMCHI server on http://127.0.0.1:\$PORT"
-uvicorn main:app --host 127.0.0.1 --port \$PORT --workers 8 --ws-max-size 200000000
+uvicorn main:app --host 127.0.0.1 --port \$PORT --workers 1 --ws-max-size 200000000
 EOF
 
 chmod +x "$CLI_PATH"

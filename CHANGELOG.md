@@ -1,5 +1,18 @@
 ## Qimchi Changelog
 
+### v0.5.2 - 2026-05-21
+
+- [Feature] LineCuts enhancements: Better handling of filter inheritance; Swapped LineCuts vert/horiz shortcuts - X is now for a horizontal cut, and Y vertical
+- [Feature] Added warnings to plots to show in case of a non-ideal fallback
+- [Fix] Fixed Notes not showing up for non .zarr measurements
+- [Fix] Fixed downloads for non .zarr datasets
+- [Fix] Fixed and made Swap XY more stable for heatmaps
+- [Fix] LivePlots - Some ops moved to threadpool to avoid blocking main thread
+- [Fix] LivePlots - Better handling of transient data access errors (hidden from frontend)
+- [Misc] Removed unique code for .zarr
+- [Misc] LivePlots - Increased refresh time to 750ms
+- [Misc] Smooth filter now `_fill_nans()` for data interpolation and safer application - shows a warning to the user
+
 ### v0.5.1 - 2026-04-21
 
 - [Feature] Help modal: consolidated all help text into a single Help modal, added a tabbed interface for each major component with usage tips per component, and added `Shift+H` shortcut to toggle the Help Modal
