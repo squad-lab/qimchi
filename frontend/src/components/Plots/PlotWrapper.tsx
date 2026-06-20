@@ -359,11 +359,19 @@ const PlotWrapper: React.FC<Props> = ({
         const status = statusResponse.data.status;
 
         if (status === "completed") {
-          // Download the zip file
-          const downloadUrl = `${PROD_BACKEND_URL}${statusResponse.data.download_url}`;
           const filename =
             statusResponse.data.zip_filename || "plot_images.zip";
 
+          // Desktop mode: the backend already wrote the zip to disk (WebView2
+          // can't save browser downloads), so just report where it landed.
+          const savedTo: string | undefined = statusResponse.data.saved_to;
+          if (savedTo) {
+            showToast(`Saved to ${savedTo}`, "success");
+            return;
+          }
+
+          // Browser mode: download the zip via a blob + anchor click.
+          const downloadUrl = `${PROD_BACKEND_URL}${statusResponse.data.download_url}`;
           const downloadResponse = await axios.get(downloadUrl, {
             responseType: "blob",
           });

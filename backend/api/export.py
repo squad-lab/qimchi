@@ -6,6 +6,7 @@ FastAPI endpoint to export Plotly plots as PNG, PDF and SVG.
 import asyncio
 import json
 import os
+import shutil
 import tempfile
 import time
 import uuid
@@ -270,6 +271,31 @@ def _export_plot_images_sync(
     }
 
 
+def _desktop_export_dir() -> Path | None:
+    """
+    Directory to save export zips into when running as the desktop app.
+
+    The pywebview/WebView2 shell silently drops browser-initiated downloads,
+    so in desktop mode the backend (which is local) writes the zip to disk
+    itself. Returns None in server/Docker mode, where the browser handles the
+    download as before. # TODO: Remove if webview is the only target.
+
+    Controlled by env: QIMCHI_DESKTOP=1 enables it; QIMCHI_EXPORT_DIR overrides
+    the destination (default: ~/Downloads). Set by the desktop launcher.
+    
+    """
+    if os.environ.get("QIMCHI_DESKTOP", "").lower() not in ("1", "true", "yes"):
+        return None
+    override = os.environ.get("QIMCHI_EXPORT_DIR")
+    target = Path(override).expanduser() if override else (Path.home() / "Downloads")
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+    except OSError:
+        logger.exception("Could not create desktop export dir %s", target)
+        return None
+
+
 async def _run_export_task(
     task_id: str,
     plot_json: Dict,
@@ -301,6 +327,19 @@ async def _run_export_task(
         _export_tasks[task_id]["zip_path"] = result["zip_path"]
         _export_tasks[task_id]["zip_filename"] = result["zip_filename"]
         logger.info(f"Export task {task_id} completed successfully")
+
+        # Desktop mode
+        save_dir = _desktop_export_dir()
+        if save_dir:
+            try:
+                dest = save_dir / result["zip_filename"]
+                if dest.exists():
+                    dest = save_dir / f"{dest.stem}__{task_id[:8]}{dest.suffix}"
+                shutil.copy2(result["zip_path"], dest)
+                _export_tasks[task_id]["saved_to"] = str(dest)
+                logger.info(f"Export task {task_id} saved to {dest}")
+            except Exception:
+                logger.exception(f"Failed to save export zip into {save_dir}")
 
     except Exception as e:
         logger.error(f"Export task {task_id} failed: {e}", exc_info=True)
@@ -668,6 +707,9 @@ async def get_export_status(task_id: str) -> JSONResponse:
         response["zip_filename"] = task.get("result", {}).get(
             "zip_filename", "plot_images.zip"
         )
+        # Present only in desktop mode: the backend already wrote the zip here.
+        if task.get("saved_to"):
+            response["saved_to"] = task["saved_to"]
     elif task["status"] == "failed":
         response["error"] = task.get("error", "Unknown error")
 
