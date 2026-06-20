@@ -34,7 +34,7 @@ auto_tag_version:
       EOF
     - export CURRENT_VERSION=$(cat current_version.txt)
     - echo "Current version in pyproject.toml is v$CURRENT_VERSION"
-    
+
     # Check if this version tag already exists
     - git fetch --tags
     - |
@@ -42,7 +42,7 @@ auto_tag_version:
         echo "Tag v$CURRENT_VERSION already exists, skipping tag creation"
         exit 0
       fi
-    
+
     # Check if version line was changed in this commit
     - |
       # Check if this is the first commit (no parent)
@@ -53,15 +53,15 @@ auto_tag_version:
         echo "Successfully created initial tag v$CURRENT_VERSION"
         exit 0
       fi
-      
+
       # Check if version line was changed in this commit
       if git diff HEAD~1 HEAD -- backend/pyproject.toml | grep -E '^\+[[:space:]]*version[[:space:]]*='; then
         echo "Version was updated in this commit, creating tag v$CURRENT_VERSION"
-        
+
         # Create and push the tag
         git tag -a "v$CURRENT_VERSION" -m "Release version $CURRENT_VERSION"
         git push origin "v$CURRENT_VERSION"
-        
+
         echo "Successfully created and pushed tag v$CURRENT_VERSION"
       else
         echo "Version line was not changed in this commit, skipping tag creation"
@@ -90,123 +90,55 @@ docker:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
       when: on_success
 
+# Builds the self-contained Windows desktop app (PyInstaller + pywebview) via
+# build_local.ps1 -- a single qimchi.exe that bundles the backend and serves the
+# built SPA in a native window. Replaces the old qimchi.bat-wrapper exe.
 build_qimchi_exe:
   stage: build
   tags:
     - saas-windows-medium-amd64
+  before_script:
+    # The hosted Windows runner (Windows Server 2022) already ships Node.js +
+    # npm and Python 3.13. Only uv is missing -- install it via its standalone
+    # PowerShell installer; uv then manages Python + all backend deps.
+    - powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+    - $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+    - uv --version
+    - node --version
+    - npm --version
   script:
-    # - 'dir env:'
-    # Extract version from pyproject.toml
     - $VERSION = (Select-String -Path "backend/pyproject.toml" -Pattern 'version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
-    - echo "Building Qimchi v$VERSION for Windows"
-    
-    # Create build directory
-    - New-Item -ItemType Directory -Force -Path packaging/build
-    
-    # Copy batch file and icon to build directory
-    - Copy-Item qimchi.bat packaging/build/
-    - Copy-Item frontend/public/qimchi-logo.ico packaging/build/
-    
-    # Create a Python wrapper that calls the batch file
-    - |
-      $pythonWrapper = @'
-      import subprocess
-      import sys
-      import os
-      
-      # Get the directory where the exe is located
-      exe_dir = os.path.dirname(sys.executable)
-      
-      if getattr(sys, 'frozen', False):
-          # Running as compiled exe - PyInstaller extracts to sys._MEIPASS temp directory
-          bundle_dir = sys._MEIPASS
-          bat_path = os.path.join(bundle_dir, "qimchi.bat")
-      else:
-          # Running as script
-          bundle_dir = os.path.dirname(os.path.abspath(__file__))
-          bat_path = os.path.join(bundle_dir, "qimchi.bat")
-      
-      if os.path.exists(bat_path):
-          print(f"Found batch file at: {bat_path}")
-          print(f"Running from exe directory: {exe_dir}")
-          # Run the batch file with exe directory as working directory
-          result = subprocess.run([bat_path], shell=True, cwd=exe_dir)
-          sys.exit(result.returncode)
-      else:
-          print(f"ERROR: qimchi.bat not found!")
-          print(f"Searched in bundle directory: {bundle_dir}")
-          print(f"Exe directory: {exe_dir}")
-          print(f"sys._MEIPASS: {getattr(sys, '_MEIPASS', 'Not available')}")
-          if os.path.exists(bundle_dir):
-              print(f"Bundle directory contents: {os.listdir(bundle_dir)}")
-          input("Press Enter to exit...")
-          sys.exit(1)
-      '@
-      $pythonWrapper | Out-File -FilePath "packaging/build/qimchi_launcher.py" -Encoding UTF8
-    
-    # Install PyInstaller
-    - python -m pip install pyinstaller
-    
-    # Build EXE with PyInstaller, bundling the batch file
-    - $iconPath = Join-Path (Get-Location) "packaging\build\qimchi-logo.ico"
-    - $batPath = Join-Path (Get-Location) "qimchi.bat"
-    - python -m PyInstaller --onefile --console --icon="$iconPath" --add-data "${batPath};." --name="qimchi" --distpath="packaging/build" --workpath="packaging/build/pyinstaller_work" --specpath="packaging/build" "packaging/build/qimchi_launcher.py"
-    
-    # Verify EXE was created
+    - echo "Building Qimchi v$VERSION (pywebview desktop) for Windows"
+    # build_local.ps1 builds the frontend, sets up backend/.venv (datasets extra
+    # + PyInstaller + pywebview + pythonnet via uv) and produces the onefile at
+    # packaging/build/qimchi.exe.
+    - ./build_local.ps1
     - if (!(Test-Path "packaging/build/qimchi.exe")) { throw "EXE build failed" }
     - $exeSize = (Get-Item "packaging/build/qimchi.exe").Length / 1MB
     - echo "Successfully built qimchi.exe ($([math]::Round($exeSize, 2)) MB)"
-    
-    # # Download certificate from GitLab secure files
+
+    # --- Code signing (optional; enable once a cert is in GitLab secure files) -
     # - |
-    #   echo "Downloading certificate from GitLab secure files..."
     #   glab securefile download cert.p12 -o packaging/build/cert.p12
-    #   if (!(Test-Path "packaging/build/cert.p12")) {
-    #     throw "Failed to download cert.p12 from GitLab secure files"
-    #   }
-    #   echo "Certificate downloaded successfully"
-    
-    # # Sign the EXE with the certificate
-    # - |
-    #   echo "Signing qimchi.exe..."
-    #   # Use signtool from Windows SDK to sign the executable
-    #   $signtoolPath = "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe"
-    #   $signtool = Get-Item $signtoolPath | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-      
-    #   if (!$signtool) {
-    #     throw "signtool.exe not found - cannot sign executable"
-    #   }
-      
-    #   $signArgs = @(
-    #     "sign",
-    #     "/debug",
-    #     "/f", "packaging/build/cert.p12",
-    #     "/fd", "SHA256",
-    #     "/tr", "http://timestamp.digicert.com",
-    #     "/td", "SHA256",
-    #     "/p", "$SIGN_PASS",
-    #     "packaging/build/qimchi.exe"
-    #   )
-      
-    #   & $signtool.FullName $signArgs
-      
-    #   if ($LASTEXITCODE -ne 0) {
-    #     throw "Failed to sign qimchi.exe (exit code: $LASTEXITCODE)"
-    #   }
-    #   echo "Successfully signed qimchi.exe"
-      
-    #   # Clean up certificate file
-    #   Remove-Item "packaging/build/cert.p12" -Force
-    
+    #   $signtool = Get-Item "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+    #     Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    #   & $signtool.FullName sign /fd SHA256 /f packaging/build/cert.p12 /p $SIGN_PASS `
+    #     /tr http://timestamp.digicert.com /td SHA256 packaging/build/qimchi.exe
+    #   if ($LASTEXITCODE -ne 0) { throw "Failed to sign qimchi.exe" }
+    #   Remove-Item packaging/build/cert.p12 -Force
   artifacts:
-    name: "qimchi-v$VERSION-windows"
+    name: "qimchi-windows"
     paths:
       - packaging/build/qimchi.exe
-      - packaging/build/qimchi.bat
     expire_in: 180 days
   rules:
+    # Release build on version tags...
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
       when: on_success
+    # ...and a manual build on the packaging branch for testing the pipeline.
+    - if: $CI_COMMIT_BRANCH == "packaging"
+      when: manual
+      allow_failure: true
 
 release_windows:
   stage: release_windows
@@ -223,24 +155,23 @@ release_windows:
     name: "Qimchi $CI_COMMIT_TAG"
     description: |-
       # Qimchi $CI_COMMIT_TAG - Windows Release
-      
+
       ### Installation
       1. Download `qimchi.exe` above or click [here](${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi.exe?job=build_qimchi_exe).
-      2. Double-click to run the installer.
-      3. Access the web interface at http://localhost:8001.
-      
+      2. Double-click to launch. It runs a bundled local server and opens the Qimchi window — no separate Python/Node/Git install is needed.
+
       ### Linux/macOS Installation
       For Linux and macOS users, please see the [Docker Installation](${CI_PROJECT_URL}/-/blob/main/README.md#linuxmacos-docker-installation) or [Expert Installation](${CI_PROJECT_URL}/-/blob/main/README.md#expert-installation) instructions in the README.
-      
+
       ### What's New
-      See the [commit history](${CI_PROJECT_URL}/-/commits/${CI_COMMIT_TAG}) for changes in this release.
-      
+      See the [CHANGELOG](${CI_PROJECT_URL}/-/blob/${CI_COMMIT_TAG}/CHANGELOG.md) and the [commit history](${CI_PROJECT_URL}/-/commits/${CI_COMMIT_TAG}).
+
       ### Requirements
-      - Windows 11 24H2+ with winget installed
-      - Internet connection for first-time setup
+      - Windows 11 24H2+ (x64) with the Edge WebView2 runtime (should come preinstalled on Windows 11).
+      - For PNG/SVG image export: a Chrome/Chromium. If none is found, Qimchi downloads "Chrome for Testing" once on first use.
     assets:
       links:
-        - name: "qimchi.exe (Windows Installer)"
+        - name: "qimchi.exe (Windows desktop app)"
           url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi.exe?job=build_qimchi_exe"
           link_type: "package"
   rules:
