@@ -98,11 +98,16 @@ build_qimchi_exe:
   tags:
     - saas-windows-medium-amd64
   before_script:
-    # The hosted Windows runner (Windows Server 2022) already ships Node.js +
-    # npm and Python 3.13. Only uv is missing -- install it via its standalone
-    # PowerShell installer; uv then manages Python + all backend deps.
+    # uv manages Python 3.13 + all backend deps.
     - powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
     - $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+    # The runner's preinstalled Node is 21.7.3, which Vite 8/rolldown reject
+    # (engines: ^20.19 || >=22.12). On 21.x npm SKIPS rolldown's native binding
+    # and `vite build` crashes. Pin a supported Node, fetched via preinstalled curl.
+    - $nodeVer = "22.12.0"
+    - curl.exe -fsSL -o "$env:TEMP\node.zip" "https://nodejs.org/dist/v$nodeVer/node-v$nodeVer-win-x64.zip"
+    - Expand-Archive "$env:TEMP\node.zip" -DestinationPath "$env:CI_PROJECT_DIR\.node" -Force
+    - $env:Path = "$env:CI_PROJECT_DIR\.node\node-v$nodeVer-win-x64;$env:Path"
     - uv --version
     - node --version
     - npm --version
