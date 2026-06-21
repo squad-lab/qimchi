@@ -17,6 +17,9 @@ import {
   FileText,
   HardDrive,
   Table,
+  Monitor,
+  FolderOpen,
+  Download,
 } from "lucide-react";
 import { Rnd } from "react-rnd";
 
@@ -583,6 +586,127 @@ const NotesHelp = memo(() => (
   </div>
 ));
 
+const DesktopHelp = memo(() => (
+  <div className="space-y-4 text-sm text-gray-700">
+    <div>
+      <h3 className="text-xl font-bold text-gray-900 mb-2 flex items-center gap-2">
+        <Monitor size={20} className="text-cyan-600" />
+        Desktop App
+      </h3>
+      <p className="text-gray-600 mb-3">
+        The Qimchi desktop app is a single self-contained executable — it runs a
+        local server inside a native window, with no separate Python/Node
+        install. The features below are unique to it and don't apply when Qimchi
+        is opened in a normal web browser.
+      </p>
+      <div className="p-3 rounded-lg border shadow-sm text-amber-800 bg-amber-50/50 border-amber-100">
+        <h4 className="font-semibold mb-1 flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+          Alpha
+        </h4>
+        <p className="text-xs leading-relaxed">
+          The desktop build is an early/alpha release. If something looks off,
+          the debug log (see below) is the first place to check.
+        </p>
+      </div>
+    </div>
+
+    <div className="space-y-2">
+      <h4 className="font-medium text-gray-800 flex items-center gap-1.5">
+        <FolderOpen size={15} className="text-[#6ea030]" />
+        Open folder (native dialog)
+      </h4>
+      <ul className="space-y-1.5 text-gray-600">
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          Click the green <span className="font-mono bg-gray-100 px-1 rounded">
+            Load folder
+          </span>{" "}
+          button in the Explorer to open your operating system's folder picker
+          and browse to a data directory
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          You can still type a path into the bar and press Enter, as in the
+          browser version
+        </li>
+      </ul>
+    </div>
+
+    <div className="space-y-2">
+      <h4 className="font-medium text-gray-800 flex items-center gap-1.5">
+        <Download size={15} className="text-blue-500" />
+        Image export saves to Downloads
+      </h4>
+      <ul className="space-y-1.5 text-gray-600">
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          Exporting plot images (<span className="font-mono bg-gray-100 px-1 rounded">
+            E
+          </span>) saves a ZIP straight to your{" "}
+          <span className="font-mono bg-gray-100 px-1 rounded">Downloads</span>{" "}
+          folder — the success toast shows the exact path
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          The individual PNG/SVG files are also written next to the dataset
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          On the first export, a one-time copy of Chrome may be downloaded if no
+          system Chrome/Chromium is found — it's required by the image renderer
+        </li>
+      </ul>
+    </div>
+
+    <div className="space-y-2">
+      <h4 className="font-medium text-gray-800">Persistent settings</h4>
+      <ul className="space-y-1.5 text-gray-600">
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          Your Basket, plots, and panel layout persist across restarts
+        </li>
+      </ul>
+    </div>
+
+    <div className="space-y-2">
+      <h4 className="font-medium text-gray-800 flex items-center gap-1.5">
+        <HardDrive size={15} className="text-indigo-600" />
+        App data — <span className="font-mono bg-gray-100 px-1 rounded">
+          ~/.qimchi
+        </span>
+      </h4>
+      <p className="text-gray-600 mb-1 text-xs">
+        Everything the desktop app stores lives under{" "}
+        <span className="font-mono bg-gray-100 px-1 rounded">~/.qimchi</span>{" "}
+        (i.e. <span className="font-mono bg-gray-100 px-1 rounded">
+          %USERPROFILE%\.qimchi
+        </span>{" "}
+        on Windows):
+      </p>
+      <ul className="space-y-1.5 text-gray-600">
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          <span className="font-mono bg-gray-100 px-1 rounded">webview/</span> —
+          saved settings &amp; layout
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          <span className="font-mono bg-gray-100 px-1 rounded">
+            qimchi_debug.log
+          </span>{" "}
+          — startup &amp; runtime log for troubleshooting
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          <span className="font-mono bg-gray-100 px-1 rounded">chrome/</span> —
+          the downloaded browser used for image export
+        </li>
+      </ul>
+    </div>
+  </div>
+));
+
 const KeyboardHelp = memo(() => (
   <div className="space-y-4 text-sm text-gray-700">
     <div>
@@ -695,6 +819,12 @@ const HELP_SECTIONS: HelpSection[] = [
     label: "Notes",
     icon: <NotebookPen size={16} />,
     content: <NotesHelp />,
+  },
+  {
+    id: "desktop",
+    label: "Desktop App",
+    icon: <Monitor size={16} />,
+    content: <DesktopHelp />,
   },
   {
     id: "shortcuts",

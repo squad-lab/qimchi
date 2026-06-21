@@ -12,6 +12,15 @@ import { TreeNode } from "./treeUtils";
 import Tooltip from "./Tooltip";
 import { useSidebarStore } from "../stores/sidebarStore";
 
+// Native APIs exposed by the pywebview desktop shell (absent in browser/Docker).
+declare global {
+  interface Window {
+    pywebview?: {
+      api: { open_folder_dialog: () => Promise<string> };
+    };
+  }
+}
+
 interface ExplorerProps {
   onSelectNode: (node: TreeNode) => void;
   basketItems: BasketItem[];
@@ -84,6 +93,25 @@ const Explorer = ({
       updateExplorerState({ path: nextPath, submittedPath: nextPath });
       pushHistory(nextPath);
     }
+  };
+
+  // Desktop (pywebview): open the native folder picker and load the choice.
+  // Browser/Docker: fall back to loading the typed path.
+  const handleLoadFolder = async () => {
+    const api = window.pywebview?.api;
+    if (api?.open_folder_dialog) {
+      try {
+        const chosen = (await api.open_folder_dialog())?.trim();
+        if (chosen) {
+          updateExplorerState({ path: chosen, submittedPath: chosen });
+          pushHistory(chosen);
+        }
+        return;
+      } catch (err) {
+        console.error("Folder dialog failed:", err);
+      }
+    }
+    handleSubmit();
   };
 
   const handlePathChange = (newPath: string) => {
@@ -227,7 +255,7 @@ const Explorer = ({
         <Tooltip content="Load folder" className="flex">
           <button
             type="button"
-            onClick={handleSubmit}
+            onClick={handleLoadFolder}
             className="bg-[#6ea030] hover:bg-[#5a8526] text-white px-4 py-2 rounded-r transition-colors focus:outline-none focus:ring focus:ring-[#8DC63F] flex items-center justify-center"
             title="Load folder"
           >

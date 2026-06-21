@@ -25,15 +25,24 @@ def _bundle_dir() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
 
-def _log_path() -> str:
-    # Write the debug log next to the executable (predictable location),
-    # falling back to the temp dir if that's not writable.
-    if getattr(sys, "frozen", False):
-        base = os.path.dirname(sys.executable)
-    else:
-        base = os.path.dirname(os.path.abspath(__file__))
+def _qimchi_home() -> str:
+    """
+    The desktop app's home dir (~/.qimchi): persistent WebView2 storage,
+    logs, and the downloaded Chrome all live here.
+    
+    """
+    home = os.path.join(os.path.expanduser("~"), ".qimchi")
     try:
-        candidate = os.path.join(base, "qimchi_debug.log")
+        os.makedirs(home, exist_ok=True)
+    except OSError:
+        pass
+    return home
+
+
+def _log_path() -> str:
+    # Debug log lives in ~/.qimchi (falls back to the temp dir if not writable).
+    try:
+        candidate = os.path.join(_qimchi_home(), "qimchi_debug.log")
         open(candidate, "a").close()
         return candidate
     except OSError:
@@ -47,7 +56,7 @@ def _persistent_chrome_dir() -> str:
     Persistent, writable dir for a downloaded Chrome (survives across runs).
 
     """
-    return os.path.join(os.path.expanduser("~"), ".qimchi", "chrome")
+    return os.path.join(_qimchi_home(), "chrome")
 
 
 def _find_installed_chrome() -> str | None:
@@ -116,6 +125,24 @@ def _ensure_chrome_for_kaleido(log) -> None:
 
     threading.Thread(target=_download, daemon=True).start()
     log("[chrome] fetching Chrome in background; app will open now.")
+
+
+class _Api:
+    """
+    Native APIs exposed to the SPA as window.pywebview.api (desktop only).
+    
+    """
+    def open_folder_dialog(self) -> str:
+        """
+        Open the OS folder picker; return the chosen absolute path (or "").
+        
+        """
+        import webview
+
+        result = webview.windows[0].create_file_dialog(webview.FOLDER_DIALOG)
+        if not result:
+            return ""
+        return result[0] if isinstance(result, (list, tuple)) else str(result)
 
 
 def main() -> None:
@@ -202,7 +229,10 @@ def main() -> None:
             time.sleep(0.25)
 
     if ready:
-        webview.create_window("Qimchi", health_url.replace("/health", "/"))
+        # js_api exposes the native folder picker to the SPA's Explorer.
+        webview.create_window(
+            "Qimchi", health_url.replace("/health", "/"), js_api=_Api()
+        )
     else:
         detail = server_error.get("tb", "Server did not respond within 60s.")
         log("Server never became ready. Showing error window.")
@@ -216,7 +246,12 @@ def main() -> None:
         )
         webview.create_window("Qimchi - startup error", html=html)
 
-    webview.start()
+    # private_mode=False + a persistent storage_path so the SPA's localStorage
+    # (zustand-persisted basket/plot/sidebar state) survives across launches.
+    # pywebview defaults to private_mode=True, which wipes it every time.
+    storage_path = os.path.join(_qimchi_home(), "webview")
+    os.makedirs(storage_path, exist_ok=True)
+    webview.start(private_mode=False, storage_path=storage_path)
 
 
 if __name__ == "__main__":
