@@ -95,7 +95,7 @@ docker:
 # Builds the self-contained Windows desktop app (PyInstaller + pywebview) via
 # build_local.ps1 -- a single qimchi.exe that bundles the backend and serves the
 # built SPA in a native window. Replaces the old qimchi.bat-wrapper exe.
-build_qimchi_exe:
+build-windows:
   stage: build
   tags:
     - saas-windows-medium-amd64
@@ -350,7 +350,7 @@ release_windows:
   stage: release_windows
   image: registry.gitlab.com/gitlab-org/release-cli:latest
   needs:
-    - job: build_qimchi_exe
+    - job: build-windows
       artifacts: true
   script:
     - echo "Creating release for $CI_COMMIT_TAG"
@@ -363,7 +363,7 @@ release_windows:
       # Qimchi $CI_COMMIT_TAG - Windows Release
 
       ### Installation
-      1. Download `qimchi-setup.exe` above or click [here](${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-setup.exe?job=build_qimchi_exe).
+      1. Download `qimchi-setup.exe` above or click [here](${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-setup.exe?job=build-windows).
       2. Run the installer — no administrator rights needed for a per-user install.
          It creates a Start Menu entry and an optional desktop shortcut.
 
@@ -379,7 +379,7 @@ release_windows:
     assets:
       links:
         - name: "qimchi-setup.exe (Windows installer)"
-          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-setup.exe?job=build_qimchi_exe"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-setup.exe?job=build-windows"
           link_type: "package"
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
