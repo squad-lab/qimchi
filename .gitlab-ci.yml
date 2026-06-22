@@ -117,7 +117,10 @@ build_qimchi_exe:
     - uv --version
     - node --version
     - npm --version
-    - ISCC.exe /? 2>&1 | Select-Object -First 1  # verify Inno Setup is on PATH
+    # Verify Inno Setup is on PATH. Don't run `ISCC.exe /?` -- it prints its
+    # usage banner and exits 1 (no script file given), which the PowerShell
+    # executor treats as a failed step.
+    - (Get-Command ISCC.exe).Source
   script:
     - $VERSION = (Select-String -Path "backend/pyproject.toml" -Pattern 'version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
     - echo "Building Qimchi v$VERSION (pywebview desktop) for Windows"
