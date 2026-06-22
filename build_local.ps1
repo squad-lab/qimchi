@@ -39,7 +39,7 @@ Write-Host "Ensuring vendor/fd-windows/fd.exe is present..."
 New-Item -ItemType Directory -Force -Path "vendor\fd-windows" | Out-Null
 $fdDest = "vendor\fd-windows\fd.exe"
 if (!(Test-Path $fdDest)) {
-    Write-Host "  fd.exe not found — downloading from GitHub releases..."
+    Write-Host "  fd.exe not found -- downloading from GitHub releases..."
     try {
         $rel   = Invoke-RestMethod "https://api.github.com/repos/sharkdp/fd/releases/latest"
         $asset = $rel.assets | Where-Object {
@@ -99,7 +99,7 @@ $pyiArgs = @(
 $appDir = "packaging/build/qimchi"
 $appExe = "$appDir/qimchi.exe"
 if (!(Test-Path $appExe)) {
-    throw "PyInstaller build failed — $appExe not found"
+    throw "PyInstaller build failed -- $appExe not found"
 }
 $dirSize = (Get-ChildItem -Recurse $appDir | Measure-Object -Property Length -Sum).Sum / 1MB
 Write-Host "Built $appDir ($([math]::Round($dirSize, 0)) MB total)"
@@ -118,7 +118,7 @@ foreach ($cand in $isccCandidates) {
 }
 
 if (!$isccExe) {
-    Write-Warning "ISCC.exe not found — skipping installer build."
+    Write-Warning "ISCC.exe not found -- skipping installer build."
     Write-Warning "Install Inno Setup 6 (https://jrsoftware.org/isinfo.php or: choco install innosetup) then re-run."
     Write-Host "Packaged app is at: $(Get-Location)\$appDir"
 } else {
@@ -126,7 +126,7 @@ if (!$isccExe) {
     & $isccExe "/DAppVersion=$VERSION" "/Q" "packaging\setup.iss"
     $installerPath = "packaging\build\qimchi-setup.exe"
     if (!(Test-Path $installerPath)) {
-        throw "Inno Setup build failed — $installerPath not found"
+        throw "Inno Setup build failed -- $installerPath not found"
     }
     $installerSize = (Get-Item $installerPath).Length / 1MB
     Write-Host "Installer: $(Get-Location)\$installerPath ($([math]::Round($installerSize, 0)) MB)"
