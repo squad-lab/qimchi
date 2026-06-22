@@ -108,8 +108,11 @@ Write-Host "Built $appDir ($([math]::Round($dirSize, 0)) MB total)"
 Write-Host "Building Inno Setup installer..."
 # Locate ISCC.exe (installed by choco install innosetup or manually).
 $isccExe = $null
+# Windows PowerShell 5.1 (the CI runner's shell) has no ?. operator, so resolve
+# the ISCC.exe command separately before building the candidate list.
+$isccCmd = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
 $isccCandidates = @(
-    (Get-Command "ISCC.exe" -ErrorAction SilentlyContinue)?.Source,
+    $(if ($isccCmd) { $isccCmd.Source }),
     "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
 )
