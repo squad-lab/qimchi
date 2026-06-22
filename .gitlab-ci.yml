@@ -8,6 +8,7 @@ stages:
   - build
   - release_windows
   - release_macos
+  - release_linux
 
 auto_tag_version:
   stage: auto_tag_version
@@ -252,6 +253,96 @@ release_macos:
       when: manual
       allow_failure: true
 
+# Builds the self-contained Linux desktop app (PyInstaller + pywebview GTK) via
+# scripts/build_linux.sh -- produces qimchi-x86_64.AppImage, a single executable
+# that bundles the backend and serves the built SPA in a GTK/WebKit2GTK window.
+# Uses GitLab's shared Linux runners (Docker, ubuntu:22.04) -- no special runner
+# tag needed.
+build-linux:
+  stage: build
+  image: ubuntu:22.04
+  before_script:
+    - |
+      apt-get update -qq
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+          python3-pip curl file patchelf squashfs-tools imagemagick \
+          libgirepository1.0-dev gcc pkg-config libcairo2-dev \
+          gir1.2-gtk-3.0 gir1.2-webkit2-4.0 libwebkit2gtk-4.0-dev
+      # uv: install via pip into /usr/local/bin so it is on PATH in script:.
+      pip3 install --quiet uv
+      # Pin Node 22.12 -- same constraint as Windows/macOS: Vite 8/rolldown needs
+      # ^20.19 || >=22.12.  Extract into /usr/local so node/npm land on PATH.
+      NODE_VER="22.12.0"
+      curl -fsSL "https://nodejs.org/dist/v${NODE_VER}/node-v${NODE_VER}-linux-x64.tar.gz" \
+          | tar -xz -C /usr/local --strip-components=1
+      uv --version
+      node --version
+      npm --version
+  script:
+    - VERSION=$(grep 'version[[:space:]]*=' backend/pyproject.toml | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
+    - echo "Building Qimchi v$VERSION (pywebview desktop) for Linux"
+    - bash scripts/build_linux.sh
+    - |
+      ARCH=$(uname -m)
+      if [ ! -f "packaging/build/qimchi-${ARCH}.AppImage" ]; then
+        echo "Error: AppImage build failed"
+        exit 1
+      fi
+      echo "Successfully built qimchi-${ARCH}.AppImage ($(du -m packaging/build/qimchi-${ARCH}.AppImage | cut -f1) MB)"
+  artifacts:
+    name: "qimchi-linux"
+    paths:
+      - packaging/build/qimchi-*.AppImage
+    expire_in: 180 days
+  rules:
+    # Release build on version tags.
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: on_success
+    # Manual test build on the packaging branch.
+    - if: $CI_COMMIT_BRANCH == "packaging"
+      when: manual
+      allow_failure: true
+
+release_linux:
+  stage: release_linux
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: build-linux
+      artifacts: true
+  script:
+    - echo "Attaching Linux AppImage to release $CI_COMMIT_TAG"
+    - VERSION=${CI_COMMIT_TAG#v}
+  release:
+    tag_name: "$CI_COMMIT_TAG"
+    name: "Qimchi $CI_COMMIT_TAG"
+    description: |-
+      ### Linux Installation
+      1. Download `qimchi-x86_64.AppImage` below.
+      2. Make it executable and run it:
+         ```
+         chmod +x qimchi-x86_64.AppImage
+         ./qimchi-x86_64.AppImage
+         ```
+
+      ### Requirements
+      - x86_64 Linux (kernel 4.4+, glibc 2.31+)
+      - WebKit2GTK runtime (pywebview GTK backend):
+        - Ubuntu/Debian: `sudo apt-get install libwebkit2gtk-4.0-37`
+        - Fedora: `sudo dnf install webkit2gtk4.0`
+        - Arch: `sudo pacman -S webkit2gtk`
+      - For PNG/SVG export: Chrome or Chromium installed; if none is found
+        Qimchi downloads "Chrome for Testing" on first use.
+
+      See the [CHANGELOG](${CI_PROJECT_URL}/-/blob/${CI_COMMIT_TAG}/CHANGELOG.md) for what's new.
+    assets:
+      links:
+        - name: "qimchi-x86_64.AppImage (Linux)"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-x86_64.AppImage?job=build-linux"
+          link_type: "package"
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: on_success
+
 release_windows:
   stage: release_windows
   image: registry.gitlab.com/gitlab-org/release-cli:latest
@@ -280,7 +371,7 @@ release_windows:
       See the [CHANGELOG](${CI_PROJECT_URL}/-/blob/${CI_COMMIT_TAG}/CHANGELOG.md) and the [commit history](${CI_PROJECT_URL}/-/commits/${CI_COMMIT_TAG}).
 
       ### Requirements
-      - Windows 10 1809+ / Windows 11 (x64) with the Edge WebView2 runtime (preinstalled on Windows 11; available free for Windows 10).
+      - Windows 11 (x64) with the Edge WebView2 runtime (preinstalled).
       - For PNG/SVG image export: a Chrome/Chromium. If none is found, Qimchi downloads "Chrome for Testing" once on first use.
     assets:
       links:
