@@ -103,7 +103,11 @@ const Sidebar = ({
       >
         <div className="flex flex-col h-screen">
           <div className="flex-1 overflow-hidden">
-            <PanelGroup direction="vertical" className="h-full">
+            <PanelGroup
+              direction="vertical"
+              className="h-full"
+              autoSaveId="qimchi-sidebar-layout"
+            >
               {/* Explorer */}
               <button
                 onClick={() => setExplorerCollapsed(!explorerCollapsed)}

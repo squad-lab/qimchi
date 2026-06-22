@@ -8,25 +8,24 @@ type OptionWithIconType = {
   icon?: React.ComponentType<{ size?: number; className?: string }> | string;
 };
 
-// Helper function to format title showing only UUID with truncation
+// Helper function to format title: shows UUID for qcutils datasets, truncated title otherwise
 const formatTitleWithUUID = (title: string, maxLength = 15) => {
   if (!title) return "Plot";
 
-  // Extract UUID if present
   const uuid = extractUUID(title);
 
   if (uuid) {
-    // If UUID fits within maxLength, show it all
     if (uuid.length <= maxLength) {
       return uuid;
     }
-
-    // If UUID is too long, truncate it with "..."
     return `${uuid.substring(0, maxLength - 3)}...`;
   }
 
-  // If no UUID found, return "Plot"
-  return "Plot";
+  // No UUID (non-qcutils dataset): show the title itself, truncated
+  if (title.length <= maxLength) {
+    return title;
+  }
+  return `${title.substring(0, maxLength - 3)}...`;
 };
 
 // Helper function to get plot type icon

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { PROD_BACKEND_URL } from "../config";
 import axios from "axios";
 import {
@@ -230,6 +231,161 @@ const FieldItem = ({
     </Tooltip>
   ) : (
     content
+  );
+};
+
+// A horizontal, scrollable row of independent/dependent field chips. When the
+// chips overflow the panel width, a dropdown button appears; hovering it shows
+// the FULL list in a wrapped popup (portaled to <body> so it escapes the
+// basket's overflow-clipping ancestors). Horizontal scroll is kept as-is.
+const FieldsRow = ({
+  type,
+  loading,
+  fields,
+  itemName,
+  itemPath,
+  selectedItems,
+  onToggleSelect,
+  onAutofillComposerField,
+  isChipEnabled,
+  highlightedFields,
+}: {
+  type: "independent" | "dependent";
+  loading: boolean;
+  fields: string[];
+  itemName: string;
+  itemPath: string;
+  selectedItems?: Set<string>;
+  onToggleSelect?: (itemId: string, ctrlPressed: boolean) => void;
+  onAutofillComposerField?: (field: BasketFieldSelection) => void;
+  isChipEnabled: (field: string) => boolean;
+  highlightedFields: Set<string>;
+}) => {
+  const sectionRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<number | undefined>(undefined);
+  const [overflowing, setOverflowing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [rect, setRect] = useState<
+    { top: number; left: number; width: number } | null
+  >(null);
+
+  // Detect horizontal overflow (re-checks on resize and when fields change).
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const check = () => setOverflowing(el.scrollWidth > el.clientWidth + 1);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fields, loading]);
+
+  const isIndep = type === "independent";
+  const palette = isIndep
+    ? "bg-blue-50 border-blue-200"
+    : "bg-red-50 border-red-200";
+  const placeholderBg = isIndep ? "bg-blue-200" : "bg-red-200";
+  const emptyText = isIndep ? "text-blue-400" : "text-red-400";
+  // Right-edge fade so the cut-off chips look intentional, plus a soft pill button.
+  const fadeFrom = isIndep
+    ? "from-blue-50 via-blue-50/90"
+    : "from-red-50 via-red-50/90";
+
+  const renderChip = (f: string) => (
+    <FieldItem
+      key={f}
+      item={f}
+      basketItemId={itemName}
+      basketItemPath={itemPath}
+      type={type}
+      selectedItems={selectedItems}
+      onToggleSelect={onToggleSelect}
+      isDisabled={!isChipEnabled(f)}
+      isHighlighted={highlightedFields.has(`${itemName}-${f}`)}
+      onAutofillComposerField={onAutofillComposerField}
+    />
+  );
+
+  const expand = () => {
+    window.clearTimeout(closeTimer.current);
+    const el = sectionRef.current;
+    if (el) {
+      const r = el.getBoundingClientRect();
+      setRect({ top: r.top, left: r.left, width: r.width });
+    }
+    setExpanded(true);
+  };
+  const scheduleCollapse = () => {
+    closeTimer.current = window.setTimeout(() => setExpanded(false), 100);
+  };
+
+  const canExpand = !loading && fields.length > 0 && overflowing;
+
+  return (
+    <div
+      ref={sectionRef}
+      className={`relative max-h-[64px] p-1 rounded border ${palette}`}
+      onMouseEnter={canExpand ? expand : undefined}
+      onMouseLeave={canExpand ? scheduleCollapse : undefined}
+    >
+      <div
+        ref={scrollRef}
+        className="overflow-x-auto overflow-y-hidden scrollbar-thin scrollbar-track-gray-100 scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400"
+      >
+        <div className="flex flex-nowrap gap-1 w-max h-[32px] items-center">
+          {loading ? (
+            <>
+              <div
+                className={`h-5 w-12 ${placeholderBg} rounded animate-pulse shrink-0`}
+              ></div>
+              <div
+                className={`h-5 w-16 ${placeholderBg} rounded animate-pulse shrink-0`}
+              ></div>
+              <div
+                className={`h-5 w-10 ${placeholderBg} rounded animate-pulse shrink-0`}
+              ></div>
+            </>
+          ) : fields.length > 0 ? (
+            fields.map(renderChip)
+          ) : (
+            <div className={`text-xs ${emptyText} flex items-center w-full h-5`}>
+              No {type} variables
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Overflow hint: right-edge opacity fade (hidden once expanded). */}
+      {canExpand && !expanded && (
+        <div
+          className={`pointer-events-none absolute inset-y-0 right-0 w-10 rounded-r bg-gradient-to-l ${fadeFrom} to-transparent`}
+        />
+      )}
+
+      {/* On hover, the row "extends" into a wrapped overlay showing every chip.
+          Portaled to <body> so it escapes the basket's overflow-clipping
+          ancestors; same width/background/border/position as the row, so it
+          reads as the same container simply growing taller. */}
+      {expanded &&
+        rect &&
+        createPortal(
+          <div
+            onMouseEnter={expand}
+            onMouseLeave={scheduleCollapse}
+            style={{
+              position: "fixed",
+              top: rect.top,
+              left: rect.left,
+              width: rect.width,
+            }}
+            className={`qimchi-fade-in z-[9999] p-1 rounded border shadow-lg ${palette}`}
+          >
+            <div className="flex flex-wrap gap-1">{fields.map(renderChip)}</div>
+          </div>,
+          document.body,
+        )}
+    </div>
   );
 };
 
@@ -768,90 +924,34 @@ const Basket = ({
                     {/* Fields section with fixed height and loading placeholders */}
                     <div className="space-y-1.5">
                       {/* Independents Section */}
-                      <div className="max-h-[64px] overflow-x-auto overflow-y-hidden scrollbar-thin scrollbar-track-gray-100 scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 p-1 bg-blue-50 rounded border border-blue-200">
-                        <div className="flex flex-nowrap gap-1 w-max h-[32px] items-center">
-                          {!item.attributes ? (
-                            // Loading placeholder
-                            <>
-                              <div className="h-5 w-12 bg-blue-200 rounded animate-pulse shrink-0"></div>
-                              <div className="h-5 w-16 bg-blue-200 rounded animate-pulse shrink-0"></div>
-                              <div className="h-5 w-10 bg-blue-200 rounded animate-pulse shrink-0"></div>
-                            </>
-                          ) : item.attributes.independents &&
-                            item.attributes.independents.length > 0 ? (
-                            item.attributes.independents.map((indep) => {
-                              const fieldId = `${item.name}-${indep}`;
-                              const isEnabled = isSharedChipEnabled(
-                                indep,
-                                "independent",
-                              );
-                              return (
-                                <FieldItem
-                                  key={indep}
-                                  item={indep}
-                                  basketItemId={item.name}
-                                  basketItemPath={item.path}
-                                  type="independent"
-                                  selectedItems={selectedItems}
-                                  onToggleSelect={handleToggleSelect}
-                                  isDisabled={!isEnabled}
-                                  isHighlighted={highlightedFields.has(fieldId)}
-                                  onAutofillComposerField={
-                                    onAutofillComposerField
-                                  }
-                                />
-                              );
-                            })
-                          ) : (
-                            <div className="text-xs text-blue-400 flex items-center w-full h-5">
-                              No independent variables
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                      <FieldsRow
+                        type="independent"
+                        loading={!item.attributes}
+                        fields={item.attributes?.independents ?? []}
+                        itemName={item.name}
+                        itemPath={item.path}
+                        selectedItems={selectedItems}
+                        onToggleSelect={handleToggleSelect}
+                        onAutofillComposerField={onAutofillComposerField}
+                        isChipEnabled={(f) =>
+                          isSharedChipEnabled(f, "independent")
+                        }
+                        highlightedFields={highlightedFields}
+                      />
 
                       {/* Dependents Section */}
-                      <div className="max-h-[64px] overflow-x-auto overflow-y-hidden scrollbar-thin scrollbar-track-gray-100 scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 p-1 bg-red-50 rounded border border-red-200">
-                        <div className="flex flex-nowrap gap-1 w-max h-[32px] items-center">
-                          {!item.attributes ? (
-                            // Loading placeholder
-                            <>
-                              <div className="h-5 w-14 bg-red-200 rounded animate-pulse shrink-0"></div>
-                              <div className="h-5 w-10 bg-red-200 rounded animate-pulse shrink-0"></div>
-                              <div className="h-5 w-12 bg-red-200 rounded animate-pulse shrink-0"></div>
-                            </>
-                          ) : item.attributes.dependents &&
-                            item.attributes.dependents.length > 0 ? (
-                            item.attributes.dependents.map((dep) => {
-                              const fieldId = `${item.name}-${dep}`;
-                              const isEnabled = isSharedChipEnabled(
-                                dep,
-                                "dependent",
-                              );
-                              return (
-                                <FieldItem
-                                  key={dep}
-                                  item={dep}
-                                  basketItemId={item.name}
-                                  basketItemPath={item.path}
-                                  type="dependent"
-                                  selectedItems={selectedItems}
-                                  onToggleSelect={handleToggleSelect}
-                                  isDisabled={!isEnabled}
-                                  isHighlighted={highlightedFields.has(fieldId)}
-                                  onAutofillComposerField={
-                                    onAutofillComposerField
-                                  }
-                                />
-                              );
-                            })
-                          ) : (
-                            <div className="text-xs text-red-400 flex items-center w-full h-5">
-                              No dependent variables
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                      <FieldsRow
+                        type="dependent"
+                        loading={!item.attributes}
+                        fields={item.attributes?.dependents ?? []}
+                        itemName={item.name}
+                        itemPath={item.path}
+                        selectedItems={selectedItems}
+                        onToggleSelect={handleToggleSelect}
+                        onAutofillComposerField={onAutofillComposerField}
+                        isChipEnabled={(f) => isSharedChipEnabled(f, "dependent")}
+                        highlightedFields={highlightedFields}
+                      />
                     </div>
                   </div>
                 ))}

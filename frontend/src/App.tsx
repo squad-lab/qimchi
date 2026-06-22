@@ -132,7 +132,8 @@ const App: React.FC = () => {
         }
         console.log("Added to basket:", item.name);
         added = true;
-        return [...prev, item];
+        // Prepend so newly added items appear at the beginning of the basket.
+        return [item, ...prev];
       });
 
       // Keep Notes dropdown aligned to the latest added basket item.
