@@ -1,0 +1,13 @@
+# fd binaries are downloaded at build time; do not commit them.
+fd-windows/fd.exe
+fd-linux/fd
+fd-macos/fd
+
+# appimagetool AppImage is downloaded at build time; do not commit.
+appimagetool/*.AppImage
+
+# Keep the directory placeholders.
+!fd-windows/.gitkeep
+!fd-linux/.gitkeep
+!fd-macos/.gitkeep
+!appimagetool/.gitkeep
