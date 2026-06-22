@@ -10,6 +10,7 @@ import {
   Search,
   ChevronDown,
   ChevronUp,
+  ScrollText,
 } from "lucide-react";
 import { Rnd } from "react-rnd";
 import JsonView from "@uiw/react-json-view";
@@ -195,6 +196,19 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
     }
   };
 
+  // Desktop-only: the launcher exposes a way to tail ~/.qimchi/qimchi_debug.log
+  // in a real terminal. Hidden in the browser/Docker build (no window.pywebview).
+  const canOpenLog =
+    typeof window !== "undefined" && !!window.pywebview?.api?.open_log_terminal;
+
+  const openDebugLog = async () => {
+    try {
+      await window.pywebview?.api?.open_log_terminal?.();
+    } catch (err) {
+      console.error("Failed to open debug log terminal:", err);
+    }
+  };
+
   if (!isOpen) return null;
 
   const getIcon = (type: string) => {
@@ -250,6 +264,15 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
               Notifications Log
             </h3>
             <div className="flex items-center gap-1">
+              {canOpenLog && (
+                <button
+                  onClick={openDebugLog}
+                  className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                  title="Open debug log (live) in a terminal"
+                >
+                  <ScrollText size={16} />
+                </button>
+              )}
               {logs.length > 0 && (
                 <button
                   onClick={onClear}

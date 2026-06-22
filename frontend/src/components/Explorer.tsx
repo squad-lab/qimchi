@@ -11,15 +11,7 @@ import DirTree from "./DirTree";
 import { TreeNode } from "./treeUtils";
 import Tooltip from "./Tooltip";
 import { useSidebarStore } from "../stores/sidebarStore";
-
-// Native APIs exposed by the pywebview desktop shell (absent in browser/Docker).
-declare global {
-  interface Window {
-    pywebview?: {
-      api: { open_folder_dialog: () => Promise<string> };
-    };
-  }
-}
+// window.pywebview types: see src/pywebview.d.ts
 
 interface ExplorerProps {
   onSelectNode: (node: TreeNode) => void;
