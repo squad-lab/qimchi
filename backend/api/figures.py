@@ -351,7 +351,7 @@ class Line(QimchiFigure):
         if "Device Type" in self.meta and "Wafer ID" in self.meta:
             plot_title = f"{self.meta.get('Device Type', '')} {self.meta.get('Wafer ID', '')} {self.meta.get('Sample Name', '')} {self.meta.get('Measurement ID', '')}"
         else:
-            plot_title = "Line Plot"
+            plot_title = f"{dep_var} vs {self.ind[0]}"
 
         layout = {
             "title": {
@@ -589,7 +589,7 @@ class HeatMap(QimchiFigure):
         if "Device Type" in self.meta and "Wafer ID" in self.meta:
             plot_title = f"{self.meta.get('Device Type', '')} {self.meta.get('Wafer ID', '')} {self.meta.get('Sample Name', '')} {self.meta.get('Measurement ID', '')}"
         else:
-            plot_title = "Heat Map"
+            plot_title = f"{dep_var} vs {self.ind[1]}, {self.ind[0]}"
 
         layout = {
             "title": {
