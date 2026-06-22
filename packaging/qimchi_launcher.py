@@ -20,7 +20,7 @@ import sys
 # Paths / logging
 def _bundle_dir() -> str:
     if getattr(sys, "frozen", False):
-        # PyInstaller onefile extraction dir
+        # PyInstaller onefile (temp extraction dir) or onedir (_internal/ subdir)
         return sys._MEIPASS  # type: ignore[attr-defined]
     return os.path.dirname(os.path.abspath(__file__))
 
@@ -130,12 +130,16 @@ def _ensure_chrome_for_kaleido(log) -> None:
 class _Api:
     """
     Native APIs exposed to the SPA as window.pywebview.api (desktop only).
-    
+
     """
+
+    def __init__(self, log_fn) -> None:
+        self._log = log_fn
+
     def open_folder_dialog(self) -> str:
         """
         Open the OS folder picker; return the chosen absolute path (or "").
-        
+
         """
         import webview
 
@@ -143,6 +147,184 @@ class _Api:
         if not result:
             return ""
         return result[0] if isinstance(result, (list, tuple)) else str(result)
+
+    def apply_update(self, asset_url: str) -> None:
+        """
+        Download the installer to a temp file, launch it silently, then close
+        the app.  Called from JS when the user clicks "Update now".
+
+        Runs in a daemon thread so the UI stays responsive during download.
+
+        """
+        import threading
+
+        def _install() -> None:
+            import subprocess
+            import tempfile
+
+            self._log(f"[updater] downloading installer from {asset_url}")
+            try:
+                import requests
+
+                resp = requests.get(asset_url, stream=True, timeout=180)
+                resp.raise_for_status()
+                fd, tmp = tempfile.mkstemp(suffix="-qimchi-setup.exe")
+                with os.fdopen(fd, "wb") as f:
+                    for chunk in resp.iter_content(65536):
+                        f.write(chunk)
+            except Exception as exc:
+                self._log(f"[updater] download failed: {exc!r}")
+                return
+
+            self._log(f"[updater] launching installer: {tmp}")
+            try:
+                # DETACHED_PROCESS + CREATE_NEW_PROCESS_GROUP so the installer
+                # keeps running after this process exits.
+                flags = 0
+                if os.name == "nt":
+                    flags = (
+                        subprocess.DETACHED_PROCESS
+                        | subprocess.CREATE_NEW_PROCESS_GROUP
+                    )
+                subprocess.Popen(
+                    [tmp, "/VERYSILENT", "/SUPPRESSMSGBOXES"],
+                    creationflags=flags,
+                    close_fds=True,
+                )
+            except Exception as exc:
+                self._log(f"[updater] failed to launch installer: {exc!r}")
+                return
+
+            # Close the window so the process exits cleanly and the installer
+            # can replace qimchi.exe once it's no longer in use.
+            self._log("[updater] closing app for update…")
+            import webview
+
+            if webview.windows:
+                webview.windows[0].destroy()
+
+        threading.Thread(target=_install, daemon=True).start()
+
+
+def _update_dialog_js(tag: str, current: str, notes: str, asset_url: str) -> str:
+    """
+    Return a self-contained JS snippet that injects an update-available overlay
+    into the running SPA.  All dynamic strings are JSON-encoded to prevent XSS /
+    injection issues regardless of what the GitLab release notes contain.
+
+    """
+    import json
+
+    return f"""(function() {{
+    if (document.getElementById('qimchi-updater-overlay')) return;
+
+    var tag       = {json.dumps(tag)};
+    var current   = {json.dumps(current)};
+    var notes     = {json.dumps(notes)};
+    var assetUrl  = {json.dumps(asset_url)};
+
+    var overlay = document.createElement('div');
+    overlay.id  = 'qimchi-updater-overlay';
+    overlay.style.cssText = [
+        'position:fixed;inset:0;z-index:99999',
+        'background:rgba(0,0,0,.65)',
+        'display:flex;align-items:center;justify-content:center',
+        'font-family:system-ui,sans-serif'
+    ].join(';');
+
+    var card = document.createElement('div');
+    card.style.cssText = [
+        'background:#1c1c1e;color:#e5e5e7',
+        'border:1px solid #3a3a3c;border-radius:10px',
+        'padding:24px 28px;max-width:520px;width:90%',
+        'box-shadow:0 24px 64px rgba(0,0,0,.6)',
+        'display:flex;flex-direction:column;gap:14px'
+    ].join(';');
+
+    var title = document.createElement('div');
+    title.style.cssText = 'font-size:1.05rem;font-weight:600;color:#f5f5f7';
+    title.textContent = 'Qimchi ' + tag + ' is available';
+
+    var sub = document.createElement('div');
+    sub.style.cssText = 'font-size:.8rem;color:#8e8e93';
+    sub.textContent = 'You are running ' + current + '.';
+
+    var notesBox = document.createElement('pre');
+    notesBox.style.cssText = [
+        'margin:0;padding:12px 14px',
+        'background:#111113;border:1px solid #2c2c2e;border-radius:6px',
+        'font-size:.78rem;line-height:1.5;color:#c7c7cc',
+        'max-height:220px;overflow-y:auto',
+        'white-space:pre-wrap;word-break:break-word'
+    ].join(';');
+    notesBox.textContent = notes || '(No release notes.)';
+
+    var btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:10px;justify-content:flex-end;margin-top:4px';
+
+    var btnSkip = document.createElement('button');
+    btnSkip.textContent = 'Skip';
+    btnSkip.style.cssText = [
+        'padding:7px 18px;border-radius:6px;border:1px solid #3a3a3c',
+        'background:transparent;color:#aeaeb2;cursor:pointer;font-size:.875rem'
+    ].join(';');
+
+    var btnUpdate = document.createElement('button');
+    btnUpdate.id = 'qimchi-updater-btn';
+    btnUpdate.textContent = 'Update now';
+    btnUpdate.style.cssText = [
+        'padding:7px 18px;border-radius:6px;border:none',
+        'background:#0a84ff;color:#fff;cursor:pointer',
+        'font-size:.875rem;font-weight:500'
+    ].join(';');
+
+    btnSkip.onclick   = function() {{ overlay.remove(); }};
+    btnUpdate.onclick = function() {{
+        btnUpdate.disabled    = true;
+        btnUpdate.textContent = 'Downloading…';
+        btnUpdate.style.opacity = '.6';
+        if (window.pywebview && window.pywebview.api) {{
+            window.pywebview.api.apply_update(assetUrl);
+        }}
+    }};
+
+    btnRow.appendChild(btnSkip);
+    btnRow.appendChild(btnUpdate);
+    card.appendChild(title);
+    card.appendChild(sub);
+    card.appendChild(notesBox);
+    card.appendChild(btnRow);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+}})();"""
+
+
+def _run_update_check(window, log) -> None:
+    """
+    Background thread: fetch the latest GitLab release and show an update
+    dialog if a newer version is available.  Never raises.
+
+    """
+    import time
+
+    # Give the SPA a moment to render before injecting the overlay.
+    time.sleep(3)
+    try:
+        from api.updater import check_for_update, current_version
+
+        result = check_for_update()
+        if result is None:
+            log("[updater] no update available")
+            return
+        js = _update_dialog_js(
+            tag=result["tag"],
+            current=current_version(),
+            notes=result["notes"],
+            asset_url=result["asset_url"],
+        )
+        window.evaluate_js(js)
+    except Exception as exc:
+        log(f"[updater] unexpected error: {exc!r}")
 
 
 def main() -> None:
@@ -228,12 +410,16 @@ def main() -> None:
         except Exception:
             time.sleep(0.25)
 
+    # The _Api instance is shared between the folder-picker and the updater so
+    # both have access to the log function.
+    api = _Api(log)
+
     if ready:
-        # js_api exposes the native folder picker to the SPA's Explorer.
-        webview.create_window(
-            "Qimchi", health_url.replace("/health", "/"), js_api=_Api()
+        window = webview.create_window(
+            "Qimchi", health_url.replace("/health", "/"), js_api=api
         )
     else:
+        window = None
         detail = server_error.get("tb", "Server did not respond within 60s.")
         log("Server never became ready. Showing error window.")
         html = (
@@ -251,7 +437,20 @@ def main() -> None:
     # pywebview defaults to private_mode=True, which wipes it every time.
     storage_path = os.path.join(_qimchi_home(), "webview")
     os.makedirs(storage_path, exist_ok=True)
-    webview.start(private_mode=False, storage_path=storage_path)
+
+    # Run the update check in the background after the window is ready.
+    # Only run when the app started successfully and we're in a frozen build.
+    if window is not None and getattr(sys, "frozen", False):
+        def _on_loaded() -> None:
+            _run_update_check(window, log)
+
+        webview.start(
+            func=_on_loaded,
+            private_mode=False,
+            storage_path=storage_path,
+        )
+    else:
+        webview.start(private_mode=False, storage_path=storage_path)
 
 
 if __name__ == "__main__":
