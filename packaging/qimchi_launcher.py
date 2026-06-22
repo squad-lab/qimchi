@@ -205,6 +205,64 @@ class _Api:
 
         threading.Thread(target=_install, daemon=True).start()
 
+    def open_log_terminal(self) -> bool:
+        """
+        Open the debug log in a terminal that follows it live (best-effort).
+
+        Spawns a SYSTEM terminal (powershell / tail / Terminal.app), never the
+        frozen exe, so there is no re-launch/fork-bomb risk. Returns False if no
+        terminal could be launched.
+
+        """
+        import shutil
+        import subprocess
+
+        log = _log_path()
+        try:
+            if os.name == "nt":
+                subprocess.Popen(
+                    [
+                        "powershell",
+                        "-NoExit",
+                        "-Command",
+                        f"Get-Content -LiteralPath '{log}' -Wait",
+                    ],
+                    creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+                )
+                return True
+            if sys.platform == "darwin":
+                subprocess.Popen(
+                    [
+                        "osascript",
+                        "-e",
+                        f'tell application "Terminal" to do script "tail -f \\"{log}\\""',
+                        "-e",
+                        'tell application "Terminal" to activate',
+                    ]
+                )
+                return True
+            # Linux: try common terminal emulators in order.
+            for term in (
+                "x-terminal-emulator",
+                "gnome-terminal",
+                "konsole",
+                "xfce4-terminal",
+                "xterm",
+            ):
+                if shutil.which(term):
+                    if term in ("gnome-terminal", "xfce4-terminal"):
+                        subprocess.Popen(
+                            [term, "--", "bash", "-c", f"tail -f '{log}'"]
+                        )
+                    elif term == "konsole":
+                        subprocess.Popen([term, "-e", "bash", "-c", f"tail -f '{log}'"])
+                    else:
+                        subprocess.Popen([term, "-e", f"tail -f '{log}'"])
+                    return True
+            return False
+        except Exception:
+            return False
+
 
 def _update_dialog_js(tag: str, current: str, notes: str, asset_url: str) -> str:
     """
@@ -416,7 +474,10 @@ def main() -> None:
 
     if ready:
         window = webview.create_window(
-            "Qimchi", health_url.replace("/health", "/"), js_api=api
+            "Qimchi",
+            health_url.replace("/health", "/"),
+            js_api=api,
+            maximized=True,
         )
     else:
         window = None
