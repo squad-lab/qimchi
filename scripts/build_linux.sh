@@ -96,7 +96,10 @@ uv pip install --python "$PYTHON_EXE" -e "./backend[datasets]"
 # pygobject: Python bindings for GLib/GTK/WebKit2GTK (pywebview GTK backend).
 # Requires system headers at build time: libgirepository1.0-dev, libcairo2-dev.
 # Requires system libs at runtime: libwebkit2gtk-4.0 or libwebkit2gtk-4.1.
-uv pip install --python "$PYTHON_EXE" pyinstaller pywebview uvicorn pygobject
+# Pin <3.52: pygobject 3.52+ requires girepository-2.0 (glib >= 2.80), which
+# Ubuntu 22.04 does not ship -- it provides girepository-1.0 (1.72) via
+# libgirepository1.0-dev.  The 3.50.x series builds against girepository-1.0.
+uv pip install --python "$PYTHON_EXE" pyinstaller pywebview uvicorn "pygobject<3.52"
 
 # ── 5. PyInstaller (onedir) ───────────────────────────────────────────────────
 echo "Building onedir app with PyInstaller..."
