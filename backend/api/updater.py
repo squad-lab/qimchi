@@ -7,28 +7,53 @@ pywebview window reference.
 
 Public API:
     check_for_update() -> dict | None
-        Returns {"tag": str, "notes": str, "asset_url": str} if a newer
-        Windows installer is available, else None.
+        Returns update metadata if a newer release has an asset for this
+        platform, else None.
 
     current_version() -> str
         The running version string (from importlib.metadata).
+
 """
 
 from __future__ import annotations
 
 import logging
+import sys
 
 _log = logging.getLogger(__name__)
 
 # Public GitLab Releases API endpoint for the project.
-# Uses the URL-encoded project path so no numeric project-id look-up is needed.
 _RELEASES_URL = (
     "https://gitlab.com/api/v4/projects/squad-lab%2Fqimchi/releases?per_page=1"
 )
 
 
+def _platform_asset_match(name: str, url: str) -> tuple[str, str] | None:
+    """
+    Return (platform, install_mode) when a release asset fits this OS.
+
+    """
+    haystack = f"{name} {url}".lower()
+    if sys.platform == "win32":
+        if "setup.exe" in haystack:
+            return ("windows", "run-installer")
+        return None
+    if sys.platform == "darwin":
+        if ".dmg" in haystack:
+            return ("macos", "open-download")
+        return None
+    if sys.platform.startswith("linux"):
+        if ".appimage" in haystack:
+            return ("linux", "open-download")
+        return None
+    return None
+
+
 def current_version() -> str:
-    """Return the running version from package metadata, or '0.0.0' if unknown."""
+    """
+    Return the running version from package metadata, or '0.0.0' if unknown.
+
+    """
     try:
         from importlib.metadata import version
 
@@ -50,11 +75,12 @@ def check_for_update() -> dict | None:
     """
     Fetch the latest GitLab release and compare against the running version.
 
-    Returns a dict with keys "tag", "notes", "asset_url" when a newer Windows
-    installer is available; returns None otherwise (no update, network error, or
-    no installer asset found for this platform).
+    Returns a dict with keys "tag", "notes", "asset_url", "asset_name",
+    "platform", and "install_mode" when a newer release has an asset for this
+    platform; returns None otherwise (no update, network error, or no asset).
 
-    Never raises — all errors are logged at INFO level and treated as "no update".
+    Never raises - all errors are logged at INFO level and treated as "no update".
+
     """
     try:
         import requests  # transitive via qcodes; always present in the bundle
@@ -76,22 +102,34 @@ def check_for_update() -> dict | None:
 
     notes: str = latest.get("description", "")
 
-    # Find the Windows installer asset link.
     asset_url = ""
+    asset_name = ""
+    platform = ""
+    install_mode = ""
     for link in latest.get("assets", {}).get("links", []):
         name = (link.get("name") or "").lower()
         url = link.get("direct_asset_url") or link.get("url") or ""
-        if "setup.exe" in name or "setup.exe" in url.lower():
+        match = _platform_asset_match(name, url)
+        if match:
             asset_url = url
+            asset_name = link.get("name") or ""
+            platform, install_mode = match
             break
 
-    # Only report an actionable update when a Windows installer exists.
     if not asset_url:
         _log.info(
-            "[updater] %s is newer but no Windows installer asset found; skipping",
+            "[updater] %s is newer but no %s asset found; skipping",
             tag,
+            sys.platform,
         )
         return None
 
     _log.info("[updater] update available: %s → %s", current_version(), tag)
-    return {"tag": tag, "notes": notes, "asset_url": asset_url}
+    return {
+        "tag": tag,
+        "notes": notes,
+        "asset_url": asset_url,
+        "asset_name": asset_name,
+        "platform": platform,
+        "install_mode": install_mode,
+    }

@@ -148,10 +148,20 @@ class _Api:
             return ""
         return result[0] if isinstance(result, (list, tuple)) else str(result)
 
-    def apply_update(self, asset_url: str) -> None:
+    def apply_update(
+        self,
+        asset_url: str,
+        asset_name: str = "",
+        platform: str = "",
+        install_mode: str = "",
+    ) -> None:
         """
-        Download the installer to a temp file, launch it silently, then close
-        the app.  Called from JS when the user clicks "Update now".
+        Download the platform update asset and hand it off to the OS.
+
+        Windows runs the Inno Setup installer silently, then closes the app.
+        macOS opens the downloaded DMG. Linux downloads the AppImage, marks it
+        executable, and opens the containing folder so the user can replace or
+        run it.
 
         Runs in a daemon thread so the UI stays responsive during download.
 
@@ -168,40 +178,57 @@ class _Api:
 
                 resp = requests.get(asset_url, stream=True, timeout=180)
                 resp.raise_for_status()
-                fd, tmp = tempfile.mkstemp(suffix="-qimchi-setup.exe")
+                suffix = _update_asset_suffix(asset_name, asset_url, platform)
+                fd, tmp = tempfile.mkstemp(suffix=suffix)
                 with os.fdopen(fd, "wb") as f:
                     for chunk in resp.iter_content(65536):
-                        f.write(chunk)
+                        if chunk:
+                            f.write(chunk)
             except Exception as exc:
                 self._log(f"[updater] download failed: {exc!r}")
                 return
 
-            self._log(f"[updater] launching installer: {tmp}")
+            self._log(f"[updater] downloaded update asset: {tmp}")
             try:
-                # DETACHED_PROCESS + CREATE_NEW_PROCESS_GROUP so the installer
-                # keeps running after this process exits.
-                flags = 0
-                if os.name == "nt":
+                if platform == "windows" or os.name == "nt":
+                    # DETACHED_PROCESS + CREATE_NEW_PROCESS_GROUP so the installer
+                    # keeps running after this process exits.
                     flags = (
                         subprocess.DETACHED_PROCESS
                         | subprocess.CREATE_NEW_PROCESS_GROUP
                     )
-                subprocess.Popen(
-                    [tmp, "/VERYSILENT", "/SUPPRESSMSGBOXES"],
-                    creationflags=flags,
-                    close_fds=True,
-                )
+                    self._log(f"[updater] launching installer: {tmp}")
+                    subprocess.Popen(
+                        [tmp, "/VERYSILENT", "/SUPPRESSMSGBOXES"],
+                        creationflags=flags,
+                        close_fds=True,
+                    )
+                    self._log("[updater] closing app for update...")
+                    import webview
+
+                    if webview.windows:
+                        webview.windows[0].destroy()
+                    return
+                if platform == "macos" or sys.platform == "darwin":
+                    self._log(f"[updater] opening downloaded DMG: {tmp}")
+                    subprocess.Popen(["open", tmp], close_fds=True)
+                    return
+                if platform == "linux" or sys.platform.startswith("linux"):
+                    if _try_replace_running_appimage(tmp, self._log):
+                        import webview
+
+                        if webview.windows:
+                            webview.windows[0].destroy()
+                        return
+                    target = _linux_update_download_path(asset_name, tmp)
+                    self._log(f"[updater] downloaded AppImage to: {target}")
+                    _open_containing_folder(target, self._log)
+                    return
             except Exception as exc:
-                self._log(f"[updater] failed to launch installer: {exc!r}")
+                self._log(f"[updater] failed to apply update: {exc!r}")
                 return
 
-            # Close the window so the process exits cleanly and the installer
-            # can replace qimchi.exe once it's no longer in use.
-            self._log("[updater] closing app for update…")
-            import webview
-
-            if webview.windows:
-                webview.windows[0].destroy()
+            _open_containing_folder(tmp, self._log)
 
         threading.Thread(target=_install, daemon=True).start()
 
@@ -264,7 +291,90 @@ class _Api:
             return False
 
 
-def _update_dialog_js(tag: str, current: str, notes: str, asset_url: str) -> str:
+def _update_asset_suffix(asset_name: str, asset_url: str, platform: str) -> str:
+    lower = f"{asset_name} {asset_url}".lower()
+    if platform == "windows" or "setup.exe" in lower:
+        return "-qimchi-setup.exe"
+    if platform == "macos" or ".dmg" in lower:
+        return "-qimchi.dmg"
+    if platform == "linux" or ".appimage" in lower:
+        return "-qimchi.AppImage"
+    return "-qimchi-update"
+
+
+def _linux_update_download_path(asset_name: str, tmp: str) -> str:
+    import shutil
+
+    downloads = os.path.join(os.path.expanduser("~"), "Downloads")
+    os.makedirs(downloads, exist_ok=True)
+    name = asset_name if asset_name.lower().endswith(".appimage") else "qimchi.AppImage"
+    safe_name = "".join(c for c in name if c.isalnum() or c in "._- ()").strip()
+    target = os.path.join(downloads, safe_name or "qimchi.AppImage")
+    shutil.move(tmp, target)
+    os.chmod(target, 0o755)
+    return target
+
+
+def _try_replace_running_appimage(tmp: str, log) -> bool:
+    if not sys.platform.startswith("linux"):
+        return False
+    current = os.environ.get("APPIMAGE", "")
+    if not current or not os.path.isfile(current):
+        return False
+    folder = os.path.dirname(current)
+    if not os.access(current, os.W_OK) or not os.access(folder, os.W_OK):
+        log("[updater] running AppImage is not writable; downloading update instead")
+        return False
+
+    import shutil
+    import subprocess
+
+    staged = f"{current}.new"
+    try:
+        shutil.move(tmp, staged)
+        os.chmod(staged, 0o755)
+        os.replace(staged, current)
+        log(f"[updater] replaced running AppImage: {current}")
+        try:
+            subprocess.Popen([current], close_fds=True)
+        except Exception as exc:
+            log(f"[updater] replaced AppImage but failed to relaunch: {exc!r}")
+        return True
+    except Exception as exc:
+        log(f"[updater] in-place AppImage update failed: {exc!r}")
+        try:
+            if os.path.exists(staged):
+                shutil.move(staged, tmp)
+        except Exception:
+            pass
+        return False
+
+
+def _open_containing_folder(path: str, log) -> None:
+    import subprocess
+
+    folder = os.path.dirname(path)
+    try:
+        if os.name == "nt":
+            subprocess.Popen(["explorer", "/select,", path], close_fds=True)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", path], close_fds=True)
+        else:
+            opener = "xdg-open"
+            subprocess.Popen([opener, folder], close_fds=True)
+    except Exception as exc:
+        log(f"[updater] failed to open update location: {exc!r}")
+
+
+def _update_dialog_js(
+    tag: str,
+    current: str,
+    notes: str,
+    asset_url: str,
+    asset_name: str,
+    platform: str,
+    install_mode: str,
+) -> str:
     """
     Return a self-contained JS snippet that injects an update-available overlay
     into the running SPA.  All dynamic strings are JSON-encoded to prevent XSS /
@@ -280,6 +390,10 @@ def _update_dialog_js(tag: str, current: str, notes: str, asset_url: str) -> str
     var current   = {json.dumps(current)};
     var notes     = {json.dumps(notes)};
     var assetUrl  = {json.dumps(asset_url)};
+    var assetName = {json.dumps(asset_name)};
+    var platform  = {json.dumps(platform)};
+    var installMode = {json.dumps(install_mode)};
+    var actionText = platform === 'windows' ? 'Update now' : 'Download update';
 
     var overlay = document.createElement('div');
     overlay.id  = 'qimchi-updater-overlay';
@@ -329,7 +443,7 @@ def _update_dialog_js(tag: str, current: str, notes: str, asset_url: str) -> str
 
     var btnUpdate = document.createElement('button');
     btnUpdate.id = 'qimchi-updater-btn';
-    btnUpdate.textContent = 'Update now';
+    btnUpdate.textContent = actionText;
     btnUpdate.style.cssText = [
         'padding:7px 18px;border-radius:6px;border:none',
         'background:#0a84ff;color:#fff;cursor:pointer',
@@ -339,10 +453,10 @@ def _update_dialog_js(tag: str, current: str, notes: str, asset_url: str) -> str
     btnSkip.onclick   = function() {{ overlay.remove(); }};
     btnUpdate.onclick = function() {{
         btnUpdate.disabled    = true;
-        btnUpdate.textContent = 'Downloading…';
+        btnUpdate.textContent = 'Downloading...';
         btnUpdate.style.opacity = '.6';
         if (window.pywebview && window.pywebview.api) {{
-            window.pywebview.api.apply_update(assetUrl);
+            window.pywebview.api.apply_update(assetUrl, assetName, platform, installMode);
         }}
     }};
 
@@ -379,6 +493,9 @@ def _run_update_check(window, log) -> None:
             current=current_version(),
             notes=result["notes"],
             asset_url=result["asset_url"],
+            asset_name=result.get("asset_name", ""),
+            platform=result.get("platform", ""),
+            install_mode=result.get("install_mode", ""),
         )
         window.evaluate_js(js)
     except Exception as exc:

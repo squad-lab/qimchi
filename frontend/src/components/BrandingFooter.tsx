@@ -66,7 +66,7 @@ const BrandingFooter = () => {
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-linear-to-r from-slate-100 to-slate-50 rounded-full border border-slate-200 shadow-sm">
                   <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
                   <span className="font-bold text-sm text-slate-800 tracking-tight">
-                    Qimchi v0.6.1
+                    Qimchi v0.6.2
                   </span>
                 </div>
                 <div className="flex items-center gap-2">

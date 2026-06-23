@@ -5,6 +5,7 @@ FastAPI endpoint for many Explorer/DirTree related operations.
 
 import asyncio
 import hashlib
+import os
 import subprocess  # Windows compat
 import xarray as xr
 
@@ -36,6 +37,25 @@ from . import live_measurements
 
 
 router = APIRouter()
+
+
+def _run_fd_capture(cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
+    """Run fd without flashing console windows in the packaged Windows app."""
+    run_kwargs = {}
+    if os.name == "nt":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+        run_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        run_kwargs["startupinfo"] = startupinfo
+    return subprocess.run(
+        cmd,
+        input=None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        **run_kwargs,
+    )
 
 
 def _extract_measurement_id(memory_path: str) -> str:
@@ -268,20 +288,8 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
         str(path),
     ]
 
-    result_dirs = subprocess.run(
-        cmd_zarr_dirs,
-        input=None,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    result_files = subprocess.run(
-        cmd_dataset_files,
-        input=None,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
+    result_dirs = _run_fd_capture(cmd_zarr_dirs)
+    result_files = _run_fd_capture(cmd_dataset_files)
 
     if result_dirs.returncode != 0:
         err = result_dirs.stderr.decode("utf-8", errors="replace")

@@ -30,7 +30,9 @@ async def test_get_directory_tree_zarr_monkeypatched(tmp_path, monkeypatch):
             self.stdout = stdout
             self.stderr = stderr
 
-    def _mock_subprocess_run(cmd, input=None, stdout=None, stderr=None, check=False):
+    def _mock_subprocess_run(
+        cmd, input=None, stdout=None, stderr=None, check=False, **kwargs
+    ):
         if cmd and cmd[0] == "fdfind":
             out = ("\n".join(fd_paths) + "\n").encode("utf-8")
             return _MockResult(0, out, b"")
@@ -80,7 +82,9 @@ async def test_get_directory_tree_includes_netcdf_and_hdf5(tmp_path, monkeypatch
             self.stdout = stdout
             self.stderr = stderr
 
-    def _mock_subprocess_run(cmd, input=None, stdout=None, stderr=None, check=False):
+    def _mock_subprocess_run(
+        cmd, input=None, stdout=None, stderr=None, check=False, **kwargs
+    ):
         # zarr directory call
         if "-t" in cmd and "d" in cmd:
             return _MockResult(0, b"", b"")
@@ -120,7 +124,9 @@ async def test_get_directory_tree_includes_sqlite(tmp_path, monkeypatch):
             self.stdout = stdout
             self.stderr = stderr
 
-    def _mock_subprocess_run(cmd, input=None, stdout=None, stderr=None, check=False):
+    def _mock_subprocess_run(
+        cmd, input=None, stdout=None, stderr=None, check=False, **kwargs
+    ):
         # zarr directory call
         if "-t" in cmd and "d" in cmd:
             return _MockResult(0, b"", b"")
@@ -162,7 +168,9 @@ async def test_get_directory_tree_includes_flat_tables(tmp_path, monkeypatch):
             self.stdout = stdout
             self.stderr = stderr
 
-    def _mock_subprocess_run(cmd, input=None, stdout=None, stderr=None, check=False):
+    def _mock_subprocess_run(
+        cmd, input=None, stdout=None, stderr=None, check=False, **kwargs
+    ):
         if "-t" in cmd and "d" in cmd:
             return _MockResult(0, b"", b"")
         if "-t" in cmd and "f" in cmd:

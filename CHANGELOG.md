@@ -1,5 +1,10 @@
 ## Qimchi Changelog
 
+### v0.6.2 - 2026-06-23
+
+- [Feature] Desktop updater now selects platform-specific release assets: Windows installer, Linux AppImage, and macOS DMG.
+- [Fix] Windows desktop Explorer no longer flashes console windows while `fd.exe` scans folders.
+
 ### v0.6.1 - 2026-06-23
 
 - [Misc] GitLab CI uses larger hosted runners for Docker/Linux builds and the macOS DMG validation job.
