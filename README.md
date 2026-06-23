@@ -1,8 +1,18 @@
-# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.5.2
+# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.6.0
 
 Plotly based data visualization tool for `xarray` data. Optimized to work with the optional [`qcutils`](https://gitlab.com/squad-lab/qcutils) package (the installer no longer installs `qcutils` by default). Qimchi supports any dataset format convertible to `xarray` (see [Supported Dataset Types](#supported-dataset-types) below). Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html).
 
 This repository contains a unified FastAPI application that serves a React-based frontend for the Qimchi plotter.
+
+## v0.6.x Highlights
+
+> [!TIP]
+> 🧪 **Desktop app (alpha):** a self-contained desktop build (PyInstaller + pywebview) that runs Qimchi in a native window, with no separate Git/Python/Node install required. Per-OS installers: a Windows installer (`qimchi-setup.exe`), a Linux AppImage, and a macOS DMG. Download from the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases). Feedback welcome.
+
+- In-app auto-updater: the desktop app checks GitLab Releases on startup and offers a one-click "Update now".
+- Clearer plot titles: default titles now show the variables (e.g. `Y vs X`) instead of the generic "Line Plot"/"Heat Map".
+- Basket UX: newly added items appear at the top, and independent/dependent variable rows reveal the full field list in a hover popup when they overflow.
+- Persistent layout: sidebar width and section heights are remembered across reloads.
 
 ## v0.5.x Highlights
 

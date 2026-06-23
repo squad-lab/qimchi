@@ -1,5 +1,23 @@
 ## Qimchi Changelog
 
+### v0.6.0 - 2026-06-21
+
+- [Feature] Self-contained desktop app (PyInstaller + pywebview) that bundles the backend and serves the SPA in a native window -- no separate install of Git/Python/Node required. Per-OS installers: Windows Inno Setup `qimchi-setup.exe`, Linux AppImage, macOS DMG. Download from the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases).
+- [Feature] In-app auto-updater: on startup the desktop app checks GitLab Releases and offers a one-click "Update now" that downloads and runs the new installer.
+- [Feature] Native folder picker: the Explorer "Load folder" button opens the OS folder dialog in the desktop app.
+- [Feature] Desktop export: image-export zips are saved directly to `~/Downloads` (the embedded WebView cannot persist browser-initiated downloads).
+- [Feature] First-run Chrome provisioning for Kaleido image export: if no system Chrome/Chromium is found, "Chrome for Testing" is downloaded once to `~/.qimchi/chrome`.
+- [Feature] Desktop: app window opens maximized on launch.
+- [Feature] Desktop: "Open debug log" button in the Notifications Log opens `~/.qimchi/qimchi_debug.log` live in a system terminal.
+- [Feature] Basket: newly added items prepend to the top of the list.
+- [Feature] Basket: independent/dependent variable rows scroll horizontally and reveal the full field list in a hover popup when the chips overflow the panel width.
+- [Feature] Plots: default plot titles now show the variables (e.g. `Y vs X`) instead of the generic "Line Plot"/"Heat Map"; plot tab titles fall back to the (truncated) dataset name when no UUID is present.
+- [Feature] Persistent panel layout: sidebar width and section heights are saved to localStorage and restored across reloads.
+- [Fix] QCoDeS `.db` loading in the packaged app (bundle qcodes config data files).
+- [Misc] GitLab CI builds the Windows installer and Linux AppImage and attaches them to tagged releases (a macOS DMG job is in place, pending a build runner).
+- [Misc] Packaged build includes the datasets extra (NetCDF/HDF5/polars) and is built from `backend/.venv`.
+- [Misc] Pinned the supported Node engine to `^20.19.0 || >=22.12.0` (Vite 8 / rolldown requirement).
+
 ### v0.5.2 - 2026-05-21
 
 - [Feature] LineCuts enhancements: Better handling of filter inheritance; Swapped LineCuts vert/horiz shortcuts - X is now for a horizontal cut, and Y vertical
