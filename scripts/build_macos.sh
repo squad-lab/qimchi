@@ -154,7 +154,7 @@ echo "Creating DMG..."
 DMG_OUT="packaging/build/qimchi.dmg"
 rm -f "$DMG_OUT"
 
-create-dmg \
+if ! create-dmg \
     --volname "Qimchi $VERSION" \
     --window-pos 200 120 \
     --window-size 600 400 \
@@ -163,7 +163,16 @@ create-dmg \
     --app-drop-link 450 185 \
     --hide-extension "qimchi.app" \
     "$DMG_OUT" \
-    "$APP_BUNDLE"
+    "$APP_BUNDLE"; then
+    echo "create-dmg Finder styling failed; falling back to a plain compressed DMG..."
+    rm -f "$DMG_OUT"
+    hdiutil create \
+        -volname "Qimchi $VERSION" \
+        -srcfolder "$APP_BUNDLE" \
+        -ov \
+        -format UDZO \
+        "$DMG_OUT"
+fi
 
 DMG_MB=$(du -m "$DMG_OUT" | cut -f1)
 echo "Built $REPO_ROOT/$DMG_OUT (${DMG_MB} MB)"

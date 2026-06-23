@@ -76,6 +76,8 @@ auto_tag_version:
 docker:
   image: jonoh/docker-buildx-qemu
   stage: build
+  tags:
+    - saas-linux-2xlarge-amd64
   services:
     - docker:28-dind
   before_script:
@@ -96,8 +98,19 @@ docker:
 build-windows:
   stage: build
   tags:
-    - saas-windows-medium-amd64
+    - windows
   before_script:
+    # Inno Setup 6 -- builds the Windows installer after PyInstaller.
+    # The custom Windows container may not have Chocolatey preinstalled.
+    - |
+      if (!(Get-Command choco -ErrorAction SilentlyContinue)) {
+        Set-ExecutionPolicy Bypass -Scope Process -Force
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+        iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        $env:Path = "$env:ProgramData\chocolatey\bin;$env:Path"
+      }
+    - choco install innosetup --yes --no-progress
+    - $env:Path = "$env:ProgramFiles\Inno Setup 6;$env:Path"
     # uv manages Python 3.13 + all backend deps.
     - powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
     - $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
@@ -107,11 +120,9 @@ build-windows:
     - $nodeVer = "22.12.0"
     - curl.exe -fsSL -o "$env:TEMP\node.zip" "https://nodejs.org/dist/v$nodeVer/node-v$nodeVer-win-x64.zip"
     - Expand-Archive "$env:TEMP\node.zip" -DestinationPath "$env:CI_PROJECT_DIR\.node" -Force
-    - $env:Path = "$env:CI_PROJECT_DIR\.node\node-v$nodeVer-win-x64;$env:Path"
-    # Inno Setup 6 — builds the Windows installer after PyInstaller.
-    # Chocolatey is preinstalled on the SaaS Windows runner.
-    - choco install innosetup --yes --no-progress
-    - $env:Path = "$env:ProgramFiles\Inno Setup 6;$env:Path"
+    - $nodeExe = Get-ChildItem -Path "$env:CI_PROJECT_DIR\.node" -Recurse -Filter node.exe | Select-Object -First 1
+    - if (!$nodeExe) { throw "Downloaded Node archive did not contain node.exe" }
+    - $env:Path = "$($nodeExe.DirectoryName);$env:Path"
     - uv --version
     - node --version
     - npm --version
@@ -161,20 +172,21 @@ build-windows:
       allow_failure: true
 
 # Builds the self-contained macOS desktop app (PyInstaller + pywebview) via
-# scripts/build_macos.sh — produces qimchi.app (bundled by create-dmg into
+# scripts/build_macos.sh - produces qimchi.app (bundled by create-dmg into
 # qimchi.dmg).  Requires a self-hosted macOS runner tagged "macos".
 # Kept as when:manual until a runner is validated and signing is set up.
 build-macos:
   stage: build
+  image: macos-15-xcode-16
   tags:
-    - macos
+    - saas-macos-large-m2pro
   before_script:
     - |
       # uv for Python dependency management
       curl -LsSf https://astral.sh/uv/install.sh | sh
       export PATH="$HOME/.local/bin:$PATH"
 
-      # Pin Node 22.12 — same constraint as Windows: Vite 8/rolldown needs
+      # Pin Node 22.12 - same constraint as Windows: Vite 8/rolldown needs
       # ^20.19 || >=22.12 and macOS runners often ship an older Node.
       NODE_VER="22.12.0"
       ARCH=$(uname -m)
@@ -196,7 +208,7 @@ build-macos:
     - bash scripts/build_macos.sh
     - |
       if [ ! -f "packaging/build/qimchi.dmg" ]; then
-        echo "Error: DMG build failed — packaging/build/qimchi.dmg not found"
+        echo "Error: DMG build failed - packaging/build/qimchi.dmg not found"
         exit 1
       fi
     - echo "Successfully built qimchi.dmg ($(du -m packaging/build/qimchi.dmg | cut -f1) MB)"
@@ -209,10 +221,9 @@ build-macos:
       - packaging/build/qimchi.dmg
     expire_in: 180 days
   rules:
-    # Release build on version tags (manual until a runner is validated).
+    # Release build on version tags.
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
-      when: manual
-      allow_failure: true
+      when: on_success
     # Manual test build on the packaging branch.
     - if: $CI_COMMIT_BRANCH == "packaging"
       when: manual
@@ -225,6 +236,8 @@ build-macos:
 # tag needed.
 build-linux:
   stage: build
+  tags:
+    - saas-linux-2xlarge-amd64
   image: ubuntu:22.04
   before_script:
     - |

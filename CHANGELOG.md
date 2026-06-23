@@ -1,5 +1,9 @@
 ## Qimchi Changelog
 
+### v0.6.1 - 2026-06-23
+
+- [Misc] GitLab CI uses larger hosted runners for Docker/Linux builds and the macOS DMG validation job.
+
 ### v0.6.0 - 2026-06-21
 
 - [Feature] Self-contained desktop app (PyInstaller + pywebview) that bundles the backend and serves the SPA in a native window -- no separate install of Git/Python/Node required. Per-OS installers: Windows Inno Setup `qimchi-setup.exe`, Linux AppImage, macOS DMG. Download from the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases).
