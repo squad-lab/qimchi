@@ -284,8 +284,6 @@ build-linux:
 # Single release job: depends on every platform build and attaches all assets to
 # ONE GitLab Release. Three separate release jobs each ran `release-cli create`
 # for the same tag, which collides ("release already exists"); one job avoids that.
-# build-macos is left out of `needs` (no runner yet); add its asset link + `needs`
-# entry (both commented below) once the DMG builds in CI.
 release:
   stage: release
   # Pinned: the :latest image bundles glab, whose wrapper mishandles URL-based
@@ -297,8 +295,8 @@ release:
       artifacts: true
     - job: build-linux
       artifacts: true
-    # - job: build-macos
-    #   artifacts: true
+    - job: build-macos
+      artifacts: true
   # No `release:` keyword: runner 19.0-pre's keyword generation drops --assets-link
   # (and/or routes through the broken glab wrapper). We call release-cli directly so
   # the asset links actually attach.
@@ -323,6 +321,12 @@ release:
         - Fedora: sudo dnf install webkit2gtk4.0
         - Arch: sudo pacman -S webkit2gtk
 
+      ## macOS
+      1. Download qimchi.dmg below.
+      2. Open the DMG and drag Qimchi.app to Applications.
+      3. On first launch, macOS may require opening it via Control-click -> Open because the app is not notarized yet.
+      - Requires Apple Silicon macOS. The current DMG is built on the GitLab macOS M2 Pro runner.
+
       ## Image export (all platforms)
       For PNG/SVG export, Chrome or Chromium must be installed; if none is found, Qimchi downloads "Chrome for Testing" on first use.
 
@@ -336,7 +340,8 @@ release:
         --tag-name "$CI_COMMIT_TAG" \
         --description "$NOTES" \
         --assets-link "{\"name\":\"qimchi-x86_64.AppImage (Linux)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-x86_64.AppImage?job=build-linux\",\"link_type\":\"package\"}" \
-        --assets-link "{\"name\":\"qimchi-setup.exe (Windows installer)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-setup.exe?job=build-windows\",\"link_type\":\"package\"}"
+        --assets-link "{\"name\":\"qimchi-setup.exe (Windows installer)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-setup.exe?job=build-windows\",\"link_type\":\"package\"}" \
+        --assets-link "{\"name\":\"qimchi.dmg (macOS)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi.dmg?job=build-macos\",\"link_type\":\"package\"}"
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
       when: on_success
