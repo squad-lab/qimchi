@@ -6,9 +6,7 @@ variables:
 stages:
   - auto_tag_version
   - build
-  - release_windows
-  - release_macos
-  - release_linux
+  - release
 
 auto_tag_version:
   stage: auto_tag_version
@@ -220,42 +218,6 @@ build-macos:
       when: manual
       allow_failure: true
 
-release_macos:
-  stage: release_macos
-  image: registry.gitlab.com/gitlab-org/release-cli:latest
-  needs:
-    - job: build-macos
-      artifacts: true
-  script:
-    - echo "Attaching macOS DMG to release $CI_COMMIT_TAG"
-    - VERSION=${CI_COMMIT_TAG#v}
-  release:
-    tag_name: "$CI_COMMIT_TAG"
-    name: "Qimchi $CI_COMMIT_TAG"
-    description: |-
-      ### macOS Installation
-      1. Download `qimchi.dmg` and open it.
-      2. Drag **Qimchi.app** to the **Applications** folder.
-      3. On first launch, right-click → Open to bypass Gatekeeper (unsigned build).
-
-      For PNG/SVG export, Chrome or Chromium must be installed; if none is found
-      Qimchi downloads "Chrome for Testing" on first use.
-
-      ### Requirements
-      - macOS 12 Monterey or later (arm64 or x86_64)
-      - WebKit is built into macOS — no extra runtime needed
-
-      See the [CHANGELOG](${CI_PROJECT_URL}/-/blob/${CI_COMMIT_TAG}/CHANGELOG.md) for what's new.
-    assets:
-      links:
-        - name: "qimchi.dmg (macOS)"
-          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi.dmg?job=build-macos"
-          link_type: "package"
-  rules:
-    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
-      when: manual
-      allow_failure: true
-
 # Builds the self-contained Linux desktop app (PyInstaller + pywebview GTK) via
 # scripts/build_linux.sh -- produces qimchi-x86_64.AppImage, a single executable
 # that bundles the backend and serves the built SPA in a GTK/WebKit2GTK window.
@@ -306,81 +268,62 @@ build-linux:
       when: manual
       allow_failure: true
 
-release_linux:
-  stage: release_linux
-  image: registry.gitlab.com/gitlab-org/release-cli:latest
-  needs:
-    - job: build-linux
-      artifacts: true
-  script:
-    - echo "Attaching Linux AppImage to release $CI_COMMIT_TAG"
-    - VERSION=${CI_COMMIT_TAG#v}
-  release:
-    tag_name: "$CI_COMMIT_TAG"
-    name: "Qimchi $CI_COMMIT_TAG"
-    description: |-
-      ### Linux Installation
-      1. Download `qimchi-x86_64.AppImage` below.
-      2. Make it executable and run it:
-         ```
-         chmod +x qimchi-x86_64.AppImage
-         ./qimchi-x86_64.AppImage
-         ```
-
-      ### Requirements
-      - x86_64 Linux (kernel 4.4+, glibc 2.31+)
-      - WebKit2GTK runtime (pywebview GTK backend):
-        - Ubuntu/Debian: `sudo apt-get install libwebkit2gtk-4.0-37`
-        - Fedora: `sudo dnf install webkit2gtk4.0`
-        - Arch: `sudo pacman -S webkit2gtk`
-      - For PNG/SVG export: Chrome or Chromium installed; if none is found
-        Qimchi downloads "Chrome for Testing" on first use.
-
-      See the [CHANGELOG](${CI_PROJECT_URL}/-/blob/${CI_COMMIT_TAG}/CHANGELOG.md) for what's new.
-    assets:
-      links:
-        - name: "qimchi-x86_64.AppImage (Linux)"
-          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-x86_64.AppImage?job=build-linux"
-          link_type: "package"
-  rules:
-    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
-      when: on_success
-
-release_windows:
-  stage: release_windows
-  image: registry.gitlab.com/gitlab-org/release-cli:latest
+# Single release job: depends on every platform build and attaches all assets to
+# ONE GitLab Release. Three separate release jobs each ran `release-cli create`
+# for the same tag, which collides ("release already exists"); one job avoids that.
+# build-macos is left out of `needs` (no runner yet); add its asset link + `needs`
+# entry (both commented below) once the DMG builds in CI.
+release:
+  stage: release
+  # Pinned: the :latest image bundles glab, whose wrapper mishandles URL-based
+  # assets:links ("stat ...: no such file or directory"). v0.16.0 has no glab, so
+  # the runner falls back to the classic release-cli binary.
+  image: registry.gitlab.com/gitlab-org/release-cli:v0.16.0
   needs:
     - job: build-windows
       artifacts: true
+    - job: build-linux
+      artifacts: true
+    # - job: build-macos
+    #   artifacts: true
+  # No `release:` keyword: runner 19.0-pre's keyword generation drops --assets-link
+  # (and/or routes through the broken glab wrapper). We call release-cli directly so
+  # the asset links actually attach.
   script:
-    - echo "Creating release for $CI_COMMIT_TAG"
-    - VERSION=${CI_COMMIT_TAG#v}
-    - echo "Version is $VERSION"
-  release:
-    tag_name: "$CI_COMMIT_TAG"
-    name: "Qimchi $CI_COMMIT_TAG"
-    description: |-
-      # Qimchi $CI_COMMIT_TAG - Windows Release
+    - |
+      # Release notes (heredoc: $CI_* expand; no backticks present).
+      NOTES=$(cat <<EOF
+      # Qimchi $CI_COMMIT_TAG
 
-      ### Installation
-      1. Download `qimchi-setup.exe` above or click [here](${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-setup.exe?job=build-windows).
-      2. Run the installer — no administrator rights needed for a per-user install.
-         It creates a Start Menu entry and an optional desktop shortcut.
+      ## Windows
+      1. Download qimchi-setup.exe below.
+      2. Run the installer -- no administrator rights needed for a per-user install. It creates a Start Menu entry and an optional desktop shortcut.
+      - Requires Windows 11 (x64) with the Edge WebView2 runtime (preinstalled).
 
-      ### Linux/macOS Installation
-      For Linux and macOS users, please see the [Docker Installation](${CI_PROJECT_URL}/-/blob/main/README.md#linuxmacos-docker-installation) or [Expert Installation](${CI_PROJECT_URL}/-/blob/main/README.md#expert-installation) instructions in the README.
+      ## Linux
+      1. Download the qimchi-x86_64.AppImage asset below.
+      2. Make it executable and run it from a terminal:
+             chmod +x qimchi-x86_64.AppImage
+             ./qimchi-x86_64.AppImage
+      - Requires x86_64 Linux (kernel 4.4+, glibc 2.31+) and the WebKit2GTK runtime:
+        - Ubuntu/Debian: sudo apt-get install libwebkit2gtk-4.0-37
+        - Fedora: sudo dnf install webkit2gtk4.0
+        - Arch: sudo pacman -S webkit2gtk
 
-      ### What's New
-      See the [CHANGELOG](${CI_PROJECT_URL}/-/blob/${CI_COMMIT_TAG}/CHANGELOG.md) and the [commit history](${CI_PROJECT_URL}/-/commits/${CI_COMMIT_TAG}).
+      ## Image export (all platforms)
+      For PNG/SVG export, Chrome or Chromium must be installed; if none is found, Qimchi downloads "Chrome for Testing" on first use.
 
-      ### Requirements
-      - Windows 11 (x64) with the Edge WebView2 runtime (preinstalled).
-      - For PNG/SVG image export: a Chrome/Chromium. If none is found, Qimchi downloads "Chrome for Testing" once on first use.
-    assets:
-      links:
-        - name: "qimchi-setup.exe (Windows installer)"
-          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-setup.exe?job=build-windows"
-          link_type: "package"
+      See the [CHANGELOG](${CI_PROJECT_URL}/-/blob/${CI_COMMIT_TAG}/CHANGELOG.md) and the [commit history](${CI_PROJECT_URL}/-/commits/${CI_COMMIT_TAG}) for what's new.
+      EOF
+      )
+      # delete-then-create makes re-runs idempotent (a pre-existing release would 409).
+      release-cli delete --tag-name "$CI_COMMIT_TAG" 2>/dev/null || true
+      release-cli create \
+        --name "Qimchi $CI_COMMIT_TAG" \
+        --tag-name "$CI_COMMIT_TAG" \
+        --description "$NOTES" \
+        --assets-link "{\"name\":\"qimchi-x86_64.AppImage (Linux)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-x86_64.AppImage?job=build-linux\",\"link_type\":\"package\"}" \
+        --assets-link "{\"name\":\"qimchi-setup.exe (Windows installer)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-setup.exe?job=build-windows\",\"link_type\":\"package\"}"
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
       when: on_success
