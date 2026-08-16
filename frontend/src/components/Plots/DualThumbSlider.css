@@ -86,3 +86,12 @@
   border-radius: 2px;
   z-index: 20;
 }
+
+/* Dark mode (Atom One Dark) */
+.dark .dual-thumb-slider-track {
+  background-color: #3e4451;
+}
+
+.dark .dual-thumb-slider-range {
+  background-color: #61afef;
+}

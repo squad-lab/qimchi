@@ -10,7 +10,8 @@ import { Layout, Config, Data } from "plotly.js";
 import * as Plotly from "plotly.js";
 
 // Local imports
-import { lightTheme, applyThemeToLayout } from "./themes";
+import { lightTheme, darkTheme, applyThemeToLayout } from "./themes";
+import { useThemeStore } from "../../stores/themeStore";
 
 type PlotlyJSON = {
   data: Data[];
@@ -42,6 +43,8 @@ const PlotComponent: React.FC<Props> = React.memo(
   ({ plotJson, onRelayout, onClick, onHover }) => {
     // Defer plot JSON updates to reduce flickering during rapid appearance changes
     const deferredPlotJson = useDeferredValue(plotJson);
+    const appTheme = useThemeStore((state) => state.theme);
+    const plotTheme = appTheme === "dark" ? darkTheme : lightTheme;
 
     const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
     const plotRef = useRef<HTMLDivElement>(null);
@@ -90,7 +93,7 @@ const PlotComponent: React.FC<Props> = React.memo(
     // Enhanced layout with better visual styling using theme
     const enhancedLayout: Partial<Layout> = useMemo(() => {
       const baseLayout = {
-        ...applyThemeToLayout(deferredPlotJson.layout, lightTheme),
+        ...applyThemeToLayout(deferredPlotJson.layout, plotTheme),
         autosize: true,
         width: dimensions.width || undefined,
         height: dimensions.height || undefined,
@@ -105,7 +108,7 @@ const PlotComponent: React.FC<Props> = React.memo(
           zeroline: false,
           linewidth: 2,
           showgrid: false,
-          linecolor: "black",
+          linecolor: plotTheme.colors.text,
         },
         yaxis: {
           ...deferredPlotJson.layout.yaxis,
@@ -116,7 +119,7 @@ const PlotComponent: React.FC<Props> = React.memo(
           zeroline: false,
           linewidth: 2,
           showgrid: false,
-          linecolor: "black",
+          linecolor: plotTheme.colors.text,
         },
       };
 
@@ -132,6 +135,7 @@ const PlotComponent: React.FC<Props> = React.memo(
       dimensions.width,
       dimensions.height,
       structureChanged,
+      plotTheme,
     ]);
 
     const enhancedConfig: Partial<Config> = useMemo(

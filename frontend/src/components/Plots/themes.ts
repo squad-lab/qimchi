@@ -31,21 +31,22 @@ export const lightTheme: PlotTheme = {
 export const darkTheme: PlotTheme = {
   name: "dark",
   colors: {
+    // Atom One Dark syntax accents, used as the categorical line/marker palette.
     primary: [
-      "#60A5FA", // blue-400
-      "#F87171", // red-400
-      "#34D399", // emerald-400
-      "#FBBF24", // amber-400
-      "#A78BFA", // violet-400
-      "#22D3EE", // cyan-400
-      "#FB923C", // orange-400
-      "#A3E635", // lime-400
+      "#61AFEF", // blue
+      "#E06C75", // red
+      "#98C379", // green
+      "#E5C07B", // yellow
+      "#C678DD", // purple
+      "#56B6C2", // cyan
+      "#D19A66", // orange
+      "#ABB2BF", // mono (muted foreground, for an 8th series)
     ],
-    background: "#1F2937",
-    paper: "#1F2937",
-    text: "#F3F4F6",
-    grid: "#374151",
-    zeroline: "#4B5563",
+    background: "rgba(0,0,0,0)",
+    paper: "rgba(0,0,0,0)",
+    text: "#ABB2BF",
+    grid: "#3E4451",
+    zeroline: "#5C6370",
   },
   font: {
     family: '"Inter", "Segoe UI", "Roboto", sans-serif',

@@ -12,8 +12,10 @@ import { TreeNode } from "./components/treeUtils";
 import { BasketItem } from "./components/Basket";
 import { AttrData } from "./components/interfaces";
 import { useSidebarStore } from "./stores/sidebarStore";
+import { useThemeStore } from "./stores/themeStore";
 import HelpModal from "./components/HelpModal";
 import { useShortcut } from "./hooks/useGlobalShortcuts";
+import { isDatasetPath, detectDatasetKind } from "./utils/datasetPaths";
 
 const App: React.FC = () => {
   const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
@@ -25,7 +27,13 @@ const App: React.FC = () => {
     null,
   );
   const [isHelpOpen, setIsHelpOpen] = useState(false);
-  const { setSidebarCollapsed, setNotesCollapsed } = useSidebarStore();
+  const { setSidebarCollapsed, setNotesCollapsed, updateExplorerState } =
+    useSidebarStore();
+  const theme = useThemeStore((state) => state.theme);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+  }, [theme]);
 
   const datasetKeys = useMemo(
     () =>
@@ -213,6 +221,61 @@ const App: React.FC = () => {
   };
 
   useShortcut("toggle-help", () => setIsHelpOpen((prev) => !prev));
+
+  // Deep-link open (used by the open_in_qimchi MCP tool). On first load, read
+  // ?dataset=<abs path> or ?folder=<abs path> from the URL:
+  //   - dataset: add it to the basket + load attrs; Viewer auto-plots defaults.
+  //   - folder:  root the Explorer there (same as the Explorer's path box).
+  // The params are stripped afterwards so a manual reload doesn't re-trigger.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const datasetParam = params.get("dataset");
+    const folderParam = params.get("folder");
+    if (!datasetParam && !folderParam) return;
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete("dataset");
+    url.searchParams.delete("folder");
+    window.history.replaceState({}, "", url.toString());
+
+    if (folderParam) {
+      setSidebarCollapsed(false);
+      updateExplorerState({ path: folderParam, submittedPath: folderParam });
+    }
+
+    if (datasetParam && isDatasetPath(datasetParam)) {
+      const name =
+        datasetParam
+          .replace(/\\/g, "/")
+          .replace(/\/+$/, "")
+          .split("/")
+          .pop() || datasetParam;
+      const item: BasketItem = {
+        id: datasetParam,
+        name,
+        path: datasetParam,
+        type: "file",
+        tags: [detectDatasetKind(datasetParam)],
+      };
+      handleAddToBasket(item);
+      handleStartLoadingAttributes(item.id);
+      axios
+        .post(`${PROD_BACKEND_URL}/load-attrs/`, { path: datasetParam })
+        .then((response) =>
+          handleUpdateBasketItemAttributes(item.id, response.data),
+        )
+        .catch((error) => {
+          console.error("Deep-link attribute load failed:", error);
+          setLoadingAttributes((prev) => {
+            const next = new Set(prev);
+            next.delete(item.id);
+            return next;
+          });
+        });
+    }
+    // Run once on mount; handlers are stable for this purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <ToastProvider>

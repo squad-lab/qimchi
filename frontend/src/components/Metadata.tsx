@@ -13,6 +13,7 @@ import axios from "axios";
 import JsonView from "@uiw/react-json-view";
 import { BasketItem } from "./Basket";
 import { useSidebarStore } from "../stores/sidebarStore";
+import { useThemeStore } from "../stores/themeStore";
 import Tooltip from "./Tooltip";
 import { useToast } from "../hooks/useToast";
 
@@ -56,6 +57,40 @@ const metadataCustomTheme = {
   "--w-rjv-type-null-color": "#dc3545",
   "--w-rjv-type-nan-color": "#fd7e14",
   "--w-rjv-type-undefined-color": "#dc3545",
+};
+
+// Dark counterpart of the metadata JSON view (Atom One Dark palette).
+const metadataDarkTheme = {
+  "--w-rjv-font-family": "Martian Mono",
+  "--w-rjv-color": "#abb2bf",
+  "--w-rjv-key-number": "#61afef",
+  "--w-rjv-key-string": "#abb2bf",
+  "--w-rjv-background-color": "inherit",
+  "--w-rjv-line-color": "#3e4451",
+  "--w-rjv-arrow-color": "#7f848e",
+  "--w-rjv-edit-color": "var(--w-rjv-color)",
+  "--w-rjv-info-color": "#7f848e",
+  "--w-rjv-update-color": "#abb2bf",
+  "--w-rjv-copied-color": "#abb2bf",
+  "--w-rjv-copied-success-color": "#98c379",
+
+  "--w-rjv-curlybraces-color": "#abb2bf",
+  "--w-rjv-colon-color": "#abb2bf",
+  "--w-rjv-brackets-color": "#abb2bf",
+  "--w-rjv-ellipsis-color": "#e06c75",
+  "--w-rjv-quotes-color": "var(--w-rjv-key-string)",
+  "--w-rjv-quotes-string-color": "var(--w-rjv-type-string-color)",
+
+  "--w-rjv-type-string-color": "#98c379",
+  "--w-rjv-type-int-color": "#d19a66",
+  "--w-rjv-type-float-color": "#d19a66",
+  "--w-rjv-type-bigint-color": "#d19a66",
+  "--w-rjv-type-boolean-color": "#d19a66",
+  "--w-rjv-type-date-color": "#56b6c2",
+  "--w-rjv-type-url-color": "#61afef",
+  "--w-rjv-type-null-color": "#e06c75",
+  "--w-rjv-type-nan-color": "#e5c07b",
+  "--w-rjv-type-undefined-color": "#e06c75",
 };
 
 // Progress bar component to avoid inline styles
@@ -741,7 +776,12 @@ const MetadataCard = memo(
     metadata?: Metadata;
     isCardCollapsed: boolean;
     onToggle: () => void;
-  }) => (
+  }) => {
+    const jsonTheme =
+      useThemeStore((state) => state.theme) === "dark"
+        ? metadataDarkTheme
+        : metadataCustomTheme;
+    return (
     <div className="mb-4 border border-gray-300 rounded-lg overflow-hidden">
       {/* Card Header */}
       <div
@@ -785,7 +825,7 @@ const MetadataCard = memo(
                   <strong className="text-sm">{key}:</strong>
                   <JsonView
                     value={parsedValue as object}
-                    style={metadataCustomTheme as React.CSSProperties}
+                    style={jsonTheme as React.CSSProperties}
                     indentWidth={10}
                     displayDataTypes={false}
                     enableClipboard={true}
@@ -798,7 +838,8 @@ const MetadataCard = memo(
         </div>
       )}
     </div>
-  ),
+    );
+  },
 );
 
 MetadataCard.displayName = "MetadataCard";

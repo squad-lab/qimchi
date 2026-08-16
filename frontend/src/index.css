@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Class-based dark mode: toggled via the `dark` class on <html> (see
+   src/App.tsx), driven by src/stores/themeStore.ts. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 html,
 body {
   overflow: hidden;
@@ -229,6 +233,364 @@ select {
 .notes-markdown-editor .w-md-editor-toolbar svg {
   width: 15px;
   height: 15px;
+}
+
+/* ============================================================
+   Dark mode -- Atom One Dark palette.
+   Qimchi's brand green (see theme.ts) is intentionally left as-is;
+   only the pale accent tints below get dark-safe counterparts.
+   Everything else here remaps the neutral gray/slate/white scale
+   plus a curated set of semantic "light chip" colors so existing
+   components pick up dark mode without per-component rewrites.
+   ============================================================ */
+
+:root {
+  --qimchi-accent-header-bg: #dff1bd;
+  --qimchi-accent-light-bg: #f4fae8;
+  --qimchi-accent-overlay: rgba(223, 241, 189, 0.6);
+  --qimchi-accent-text: #2f4a11;
+  --qimchi-accent-border-light: #cfe59b;
+}
+
+.dark {
+  --qimchi-accent-header-bg: #2d3b1f;
+  --qimchi-accent-light-bg: #26301c;
+  --qimchi-accent-overlay: rgba(45, 59, 31, 0.6);
+  --qimchi-accent-text: #b8d98a;
+  --qimchi-accent-border-light: #4a5c34;
+}
+
+.dark body {
+  background-color: #282c34;
+  color: #abb2bf;
+}
+
+.dark .drag-over {
+  background-color: #22344a;
+  border-color: #61afef;
+}
+
+.dark .modebar {
+  background: rgba(40, 44, 52, 0.85) !important;
+  border-color: rgba(171, 178, 191, 0.15) !important;
+}
+
+.dark .scrollbar-track-gray-100::-webkit-scrollbar-track {
+  background: #21252b;
+}
+.dark .scrollbar-thumb-gray-300::-webkit-scrollbar-thumb {
+  background: #4b5263;
+}
+.dark .hover\:scrollbar-thumb-gray-400:hover::-webkit-scrollbar-thumb,
+.dark .scrollbar-thumb-gray-300::-webkit-scrollbar-thumb:hover {
+  background: #5c6370;
+}
+.dark .scrollbar-thin {
+  scrollbar-color: #4b5263 #21252b;
+}
+
+/* Neutral surface ramp. The numbering is conceptually inverted from
+   light mode: 50 (near-white bg) becomes the deepest dark surface,
+   900 (near-black text) becomes the brightest text. */
+.dark .bg-gray-50,
+.dark .bg-slate-50 {
+  background-color: #21252b;
+}
+.dark .bg-gray-100,
+.dark .bg-slate-100 {
+  background-color: #282c34;
+}
+.dark .bg-gray-200,
+.dark .bg-slate-200 {
+  background-color: #323842;
+}
+.dark .bg-gray-300,
+.dark .bg-slate-300 {
+  background-color: #3e4451;
+}
+.dark .bg-white,
+.dark .group-hover\:bg-white {
+  background-color: #282c34;
+}
+.dark .border-white {
+  border-color: #3e4451;
+}
+
+.dark .border-gray-100,
+.dark .border-slate-100 {
+  border-color: #282c34;
+}
+.dark .border-gray-200,
+.dark .border-slate-200 {
+  border-color: #323842;
+}
+.dark .border-gray-300,
+.dark .border-slate-300 {
+  border-color: #3e4451;
+}
+.dark .ring-slate-400 {
+  --tw-ring-color: #5c6370;
+}
+
+.dark .text-gray-300,
+.dark .text-slate-300 {
+  color: #3e4451;
+}
+.dark .text-gray-400,
+.dark .text-slate-400 {
+  color: #828997;
+}
+.dark .text-gray-500,
+.dark .text-slate-500 {
+  color: #9da5b4;
+}
+.dark .text-gray-600,
+.dark .text-slate-600 {
+  color: #abb2bf;
+}
+.dark .text-gray-700,
+.dark .text-slate-700 {
+  color: #c8ccd4;
+}
+.dark .text-gray-800,
+.dark .text-slate-800 {
+  color: #dcdfe4;
+}
+.dark .text-gray-900,
+.dark .text-slate-900 {
+  color: #f3f3f3;
+}
+
+.dark .hover\:bg-gray-50:hover {
+  background-color: #21252b;
+}
+.dark .hover\:bg-gray-100:hover,
+.dark .hover\:bg-slate-100:hover {
+  background-color: #282c34;
+}
+.dark .hover\:bg-gray-200:hover,
+.dark .hover\:bg-slate-200:hover {
+  background-color: #323842;
+}
+.dark .hover\:bg-gray-300:hover {
+  background-color: #3e4451;
+}
+.dark .hover\:bg-gray-700:hover {
+  background-color: #4b5263;
+}
+.dark .hover\:text-gray-600:hover,
+.dark .hover\:text-slate-600:hover {
+  color: #abb2bf;
+}
+.dark .hover\:text-gray-700:hover,
+.dark .hover\:text-slate-700:hover {
+  color: #c8ccd4;
+}
+.dark .hover\:text-gray-800:hover,
+.dark .hover\:text-slate-800:hover {
+  color: #dcdfe4;
+}
+
+/* Semantic "light chip" colors (badges, dropzones, error/warning boxes):
+   dark-tinted backgrounds + lightened text so contrast survives the
+   surface flip. Related hues share an Atom One Dark accent. */
+
+/* blue / sky */
+.dark .bg-blue-50,
+.dark .bg-sky-50 {
+  background-color: #1c2733;
+}
+.dark .bg-blue-100 {
+  background-color: #223244;
+}
+.dark .bg-blue-200 {
+  background-color: #2b3f57;
+}
+.dark .border-blue-100,
+.dark .border-sky-100 {
+  border-color: #2b3f57;
+}
+.dark .border-blue-200 {
+  border-color: #35507a;
+}
+.dark .text-blue-600 {
+  color: #7cc0f7;
+}
+.dark .text-blue-700 {
+  color: #8fc8f8;
+}
+.dark .text-blue-800 {
+  color: #a9d5fa;
+}
+.dark .text-blue-900 {
+  color: #c3e2fb;
+}
+
+/* indigo / violet (tag UI: chips + TagPopover) */
+.dark .bg-indigo-50 {
+  background-color: #262436;
+}
+.dark .bg-indigo-100 {
+  background-color: #262c44;
+}
+.dark .border-indigo-100 {
+  border-color: #333050;
+}
+.dark .border-indigo-300 {
+  border-color: #414873;
+}
+.dark .text-indigo-600 {
+  color: #a5b4fc;
+}
+.dark .text-indigo-700 {
+  color: #b4c0fd;
+}
+.dark .text-indigo-800 {
+  color: #c7d2fe;
+}
+.dark .bg-violet-50 {
+  background-color: #2b2233;
+}
+.dark .border-violet-100 {
+  border-color: #3a2d45;
+}
+
+/* red */
+.dark .bg-red-50 {
+  background-color: #2c1e20;
+}
+.dark .bg-red-100 {
+  background-color: #3a2529;
+}
+.dark .bg-red-200 {
+  background-color: #4a2e33;
+}
+.dark .border-red-100 {
+  border-color: #4a2e33;
+}
+.dark .border-red-200 {
+  border-color: #5c3941;
+}
+.dark .text-red-600 {
+  color: #ef8790;
+}
+.dark .text-red-700 {
+  color: #f29aa2;
+}
+.dark .text-red-800 {
+  color: #f5aeb4;
+}
+.dark .text-red-900 {
+  color: #f8c2c7;
+}
+
+/* green / emerald */
+.dark .bg-green-50,
+.dark .bg-emerald-50 {
+  background-color: #212a1c;
+}
+.dark .bg-green-100,
+.dark .bg-emerald-100 {
+  background-color: #283522;
+}
+.dark .bg-green-200 {
+  background-color: #33452c;
+}
+.dark .border-green-200 {
+  border-color: #3d5334;
+}
+.dark .border-emerald-100 {
+  border-color: #2c3625;
+}
+.dark .text-green-600 {
+  color: #aed596;
+}
+.dark .text-green-800 {
+  color: #cce4bd;
+}
+
+/* amber / yellow */
+.dark .bg-amber-50,
+.dark .bg-yellow-50 {
+  background-color: #2e2716;
+}
+.dark .bg-amber-100,
+.dark .bg-yellow-100 {
+  background-color: #3a301b;
+}
+.dark .bg-amber-200,
+.dark .bg-yellow-200 {
+  background-color: #4a3e22;
+}
+.dark .border-amber-100 {
+  border-color: #4a3e22;
+}
+.dark .border-amber-200,
+.dark .border-yellow-200 {
+  border-color: #5c4d2b;
+}
+.dark .text-amber-600,
+.dark .text-yellow-600 {
+  color: #e9c98c;
+}
+.dark .text-amber-700 {
+  color: #edd29d;
+}
+.dark .text-amber-800,
+.dark .text-yellow-800 {
+  color: #f0dbae;
+}
+
+/* teal / cyan */
+.dark .bg-teal-100 {
+  background-color: #1c333a;
+}
+.dark .border-teal-200 {
+  border-color: #24424b;
+}
+.dark .text-teal-700 {
+  color: #7cc9d2;
+}
+
+/* orange */
+.dark .bg-orange-50 {
+  background-color: #2e2519;
+}
+.dark .bg-orange-100 {
+  background-color: #3a2e1e;
+}
+.dark .border-orange-100 {
+  border-color: #4a3a26;
+}
+
+/* BrandingFooter (see BrandingFooter.tsx). These use gradient stops,
+   opacity-modified backgrounds and hover/active states that the utility
+   remaps above can't reach; the `.dark .qimchi-*` selectors carry enough
+   specificity (0,2,0) to beat the base Tailwind utilities regardless of
+   CSS source order (unlike the :where()-based `dark:` variant). */
+.dark .qimchi-footer {
+  background-image: linear-gradient(to bottom, #282c34, #282c34, #21252b);
+}
+.dark .qimchi-footer-badge {
+  background-image: linear-gradient(to right, #323842, #282c34);
+}
+.dark .qimchi-footer-sep {
+  background-image: linear-gradient(to bottom, transparent, #3e4451, transparent);
+}
+.dark .qimchi-footer-toggle:hover {
+  background-color: #323842;
+}
+.dark .qimchi-icon-btn {
+  background-color: #1c2733;
+  border-color: #2b3f57;
+}
+.dark .qimchi-icon-btn:hover {
+  background-image: linear-gradient(to bottom right, #223244, #262436);
+  border-color: #35507a;
+  color: #8fc8f8;
+}
+.dark .qimchi-icon-btn:active {
+  background-color: #2b3f57;
 }
 
 /* Global media rules */

@@ -10,15 +10,18 @@ export const themeColors = {
   accentIcon: "#6ea030",
 } as const;
 
+// Pale accent tints (header/light bg, overlay, text-on-tint, light border) are
+// backed by CSS variables so they can flip in dark mode (see index.css) while
+// the saturated brand green below stays fixed in both themes.
 export const themeClasses = {
   accentBg: "bg-[rgba(140,198,62,0.6)]",
   accentHoverBg: "hover:bg-[rgba(110,160,48,0.65)]",
   accentBorder: "border-[#7ab134]",
-  accentBorderLight: "border-[#cfe59b]",
-  accentHeaderBg: "bg-[#dff1bd]",
-  accentLightBg: "bg-[#f4fae8]",
-  accentOverlay: "bg-[rgba(223,241,189,0.6)]",
-  accentText: "text-[#2f4a11]",
+  accentBorderLight: "border-[var(--qimchi-accent-border-light)]",
+  accentHeaderBg: "bg-[var(--qimchi-accent-header-bg)]",
+  accentLightBg: "bg-[var(--qimchi-accent-light-bg)]",
+  accentOverlay: "bg-[var(--qimchi-accent-overlay)]",
+  accentText: "text-[var(--qimchi-accent-text)]",
   accentIcon: "text-[#6ea030]",
   accentFocusRing: "focus:ring-[#8cc63e]",
 } as const;
