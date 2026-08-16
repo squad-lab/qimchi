@@ -27,11 +27,19 @@ def _bundle_dir() -> str:
 
 def _qimchi_home() -> str:
     """
-    The desktop app's home dir (~/.qimchi): persistent WebView2 storage,
-    logs, and the downloaded Chrome all live here.
-    
+    The desktop app's home dir: persistent WebView storage, logs, the version
+    marker and the downloaded Chrome all live here.
+
+    Honours QIMCHI_HOME so this stays in step with the backend's resolver
+    (backend/api/shared/paths.py::qimchi_home). They must agree.
+
     """
-    home = os.path.join(os.path.expanduser("~"), ".qimchi")
+    override = os.environ.get("QIMCHI_HOME")
+    home = (
+        os.path.expanduser(override)
+        if override
+        else os.path.join(os.path.expanduser("~"), ".qimchi")
+    )
     try:
         os.makedirs(home, exist_ok=True)
     except OSError:
@@ -40,15 +48,105 @@ def _qimchi_home() -> str:
 
 
 def _log_path() -> str:
-    # Debug log lives in ~/.qimchi (falls back to the temp dir if not writable).
+    """
+    Path of the launcher's raw stdout/stderr log.
+
+    Lives in <home>/logs alongside the backend's qimchi.log so all logs are in
+    one place. ~/.qimchi survives updates (they replace program files only), so
+    this history is preserved -- see _open_log_file for why it is appended to
+    rather than truncated.
+
+    """
     try:
-        candidate = os.path.join(_qimchi_home(), "qimchi_debug.log")
+        logs_dir = os.path.join(_qimchi_home(), "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        candidate = os.path.join(logs_dir, "qimchi_debug.log")
+
+        # Move a pre-consolidation log into logs/ so history isn't orphaned.
+        legacy = os.path.join(_qimchi_home(), "qimchi_debug.log")
+        if os.path.isfile(legacy) and not os.path.exists(candidate):
+            try:
+                os.replace(legacy, candidate)
+            except OSError:
+                pass
+
         open(candidate, "a").close()
         return candidate
     except OSError:
         import tempfile
 
         return os.path.join(tempfile.gettempdir(), "qimchi_debug.log")
+
+
+# Roll the debug log at this size so appending forever can't fill the disk.
+_DEBUG_LOG_MAX_BYTES = 10 * 1024 * 1024
+
+
+def _open_log_file(path: str):
+    """
+    Open the debug log for APPEND, rolling it once when it gets large.
+
+    """
+    try:
+        if os.path.isfile(path) and os.path.getsize(path) > _DEBUG_LOG_MAX_BYTES:
+            os.replace(path, path + ".1")  # keep exactly one previous roll
+    except OSError:
+        pass
+
+    handle = open(path, "a", buffering=1, encoding="utf-8")
+    try:
+        import datetime
+
+        stamp = datetime.datetime.now().isoformat(timespec="seconds")
+        handle.write(f"\n===== Qimchi session started {stamp} =====\n")
+    except Exception:
+        pass
+    return handle
+
+
+def _app_version() -> str:
+    """Running version from package metadata ('unknown' if unavailable)."""
+    try:
+        from importlib.metadata import version
+
+        return version("qimchi-api")
+    except Exception:
+        return "unknown"
+
+
+def _purge_webview_cache_on_upgrade(storage_path: str, log) -> None:
+    """
+    Drop the WebView's HTTP cache when the app version has changed.
+
+    """
+    import shutil
+
+    marker = os.path.join(_qimchi_home(), ".last_version")
+    current = _app_version()
+    previous = None
+    try:
+        if os.path.exists(marker):
+            with open(marker, "r", encoding="utf-8") as fh:
+                previous = fh.read().strip()
+    except OSError:
+        pass
+
+    if previous == current:
+        return
+
+    # WebView2 (Windows) layout; other platforms simply have no such dirs.
+    default_profile = os.path.join(storage_path, "EBWebView", "Default")
+    for name in ("Cache", "Code Cache"):
+        target = os.path.join(default_profile, name)
+        if os.path.isdir(target):
+            shutil.rmtree(target, ignore_errors=True)
+            log(f"[cache] purged WebView '{name}' (version {previous} -> {current})")
+
+    try:
+        with open(marker, "w", encoding="utf-8") as fh:
+            fh.write(current)
+    except OSError:
+        log("[cache] could not record app version marker (will retry next launch)")
 
 
 def _persistent_chrome_dir() -> str:
@@ -521,7 +619,7 @@ def main() -> None:
     import uvicorn
     import webview
 
-    log_file = open(_log_path(), "w", buffering=1, encoding="utf-8")
+    log_file = _open_log_file(_log_path())
 
     def log(msg: str) -> None:
         print(msg, file=log_file)
@@ -615,6 +713,7 @@ def main() -> None:
     # pywebview defaults to private_mode=True, which wipes it every time.
     storage_path = os.path.join(_qimchi_home(), "webview")
     os.makedirs(storage_path, exist_ok=True)
+    _purge_webview_cache_on_upgrade(storage_path, log)
 
     # Run the update check in the background after the window is ready.
     # Only run when the app started successfully and we're in a frozen build.
