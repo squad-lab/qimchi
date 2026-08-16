@@ -20,6 +20,9 @@ import {
   Monitor,
   FolderOpen,
   Download,
+  Heart,
+  Trash2,
+  Tag as TagIcon,
 } from "lucide-react";
 import { Rnd } from "react-rnd";
 
@@ -101,6 +104,85 @@ const ExplorerHelp = memo(() => (
           Use Ctrl/Shift+Click for multi-selection
         </li>
       </ul>
+    </div>
+
+    <div className="space-y-2">
+      <h4 className="font-medium text-gray-800 flex items-center gap-2">
+        <Heart size={15} className="text-red-500" />
+        Hearts, Trash &amp; Tags
+      </h4>
+      <p className="text-gray-600">
+        Mark measurements so you can find them again. These are saved to your
+        Qimchi library and follow a measurement even if you rename or move its
+        file.
+      </p>
+      <ul className="space-y-1.5 text-gray-600">
+        <li className="flex gap-2">
+          <Heart size={14} className="shrink-0 mt-0.5 text-red-500" />
+          Heart a measurement from its row in the tree
+        </li>
+        <li className="flex gap-2">
+          <Trash2 size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          Trash hides it from view without touching the file on disk
+        </li>
+        <li className="flex gap-2">
+          <TagIcon size={14} className="shrink-0 mt-0.5 text-indigo-500" />
+          Tags are your own labels &mdash; a measurement can carry several
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          Select several with Ctrl/Shift+Click, then use the heart, trash or tag
+          buttons in the toolbar to apply to all of them at once
+        </li>
+      </ul>
+
+      <h4 className="font-medium text-gray-800 pt-2">Filtering</h4>
+      <ul className="space-y-1.5 text-gray-600">
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          Open the funnel icon in the toolbar for the filter row:{" "}
+          <span className="font-semibold">Hearted</span>,{" "}
+          <span className="font-semibold">Hide Trash</span> and{" "}
+          <span className="font-semibold">Tags</span>
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          The <span className="font-semibold">Tags</span> dropdown is searchable;
+          picking several matches measurements carrying{" "}
+          <span className="italic">any</span> of them
+        </li>
+      </ul>
+
+      <h4 className="font-medium text-gray-800 pt-2">Searching by tag</h4>
+      <p className="text-gray-600">
+        You can also filter by tag straight from the search box, combined with
+        an ordinary name search:
+      </p>
+      <div className="space-y-1.5 rounded-lg border border-gray-200 bg-gray-50 p-2.5 font-mono text-xs text-gray-700">
+        <div>
+          <span className="text-indigo-600">#cooldown</span>
+          <span className="ml-2 font-sans text-gray-500">
+            &mdash; measurements tagged &ldquo;cooldown&rdquo;
+          </span>
+        </div>
+        <div>
+          <span className="text-indigo-600">#&quot;Custom tag&quot;</span>
+          <span className="ml-2 font-sans text-gray-500">
+            &mdash; quote tag names containing spaces
+          </span>
+        </div>
+        <div>
+          <span className="text-indigo-600">#cooldown</span> sweep
+          <span className="ml-2 font-sans text-gray-500">
+            &mdash; tagged AND named &ldquo;sweep&rdquo;
+          </span>
+        </div>
+      </div>
+      <p className="text-xs text-gray-500">
+        A tag name that doesn&apos;t exist matches nothing, so check the
+        spelling if results disappear. Tags typed here combine with any picked
+        in the Tags dropdown.
+      </p>
     </div>
 
     <div className="space-y-2">

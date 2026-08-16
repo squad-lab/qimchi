@@ -3,19 +3,67 @@ FastAPI endpoints for loading and saving notes associated with .zarr datasets.
 
 """
 
+import asyncio
+import os
 import re
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Tuple
-from fastapi import APIRouter, HTTPException
-import xarray as xr
+from fastapi import APIRouter, Depends, HTTPException
 
 # Local imports
 from .models import PathData, NotesData
 from .logger import logger
 from .data_loader import load_xarray_dataset, _detect_filesystem_format
+from .db_models import LOCAL_USER_ID, Note, _utcnow
+from .shared.db import require_db, session_scope
 
-router = APIRouter()
+# Notes are DB-backed, so both endpoints are guarded. Loading must 503 rather
+# than return empty on a DB failure: an empty editor reads as "my notes are
+# gone", inviting the user to retype them into a save that will also fail.
+router = APIRouter(dependencies=[Depends(require_db)])
+
+# Measurement notes are DB-backed (source of truth). When enabled (default), a
+# ``.md`` sidecar mirror is also written and the pooled sample rollup is kept in
+# sync -- this preserves the existing file-based workflow. Disable to run
+# DB-only (e.g. for datasets with no writable sidecar location).
+_MD_EXPORT_ENABLED = os.getenv("QIMCHI_NOTES_MD_EXPORT", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+
+def _parse_iso(ts: str | None) -> datetime:
+    """Best-effort parse of an ISO timestamp string, defaulting to now (UTC)."""
+    if ts:
+        try:
+            return datetime.fromisoformat(ts)
+        except ValueError:
+            pass
+    return _utcnow()
+
+
+def _db_get_note(uuid: str) -> Tuple[str, datetime] | None:
+    """Return (body, updated_at) for a measurement note, or None if absent."""
+    with session_scope() as session:
+        note = session.get(Note, (uuid, LOCAL_USER_ID))
+        if note is None:
+            return None
+        return note.body, note.updated_at
+
+
+def _db_upsert_note(uuid: str, body: str, when: datetime | None = None) -> datetime:
+    """Insert or update a measurement note; returns the stored timestamp."""
+    ts = when or _utcnow()
+    with session_scope() as session:
+        note = session.get(Note, (uuid, LOCAL_USER_ID))
+        if note is None:
+            session.add(Note(uuid=uuid, user_id=LOCAL_USER_ID, body=body, updated_at=ts))
+        else:
+            note.body = body
+            note.updated_at = ts
+    return ts
 
 
 FRONTMATTER_TEMPLATE = '---\nLast Saved: "{timestamp}"\nFilename: "{filename}"\n\n---\n'
@@ -455,6 +503,54 @@ async def load_notes(path: PathData) -> Dict:
         f"load_notes | POST scope={path.note_scope} path={resolved_path}, notes_path={notes_path}"
     )
 
+    # Measurement notes are DB-backed, with a one-time read-through import from
+    # the legacy .md sidecar (then served from the DB).
+    if path.note_scope != "sample":
+        try:
+            db = await asyncio.to_thread(_db_get_note, dataset_uuid)
+            if db is not None:
+                body, updated = db
+                return {
+                    "notes": body,
+                    "last_saved": updated.isoformat(),
+                    "filename": dataset_uuid,
+                }
+            # Import an existing sidecar once, if present.
+            if notes_path.exists() and notes_path.is_file():
+                with open(notes_path, "r", encoding="utf-8") as f:
+                    file_text = f.read()
+                body, last_saved, filename = _parse_frontmatter(file_text)
+                await asyncio.to_thread(
+                    _db_upsert_note, dataset_uuid, body or "", _parse_iso(last_saved)
+                )
+                logger.debug(
+                    f"load_notes | imported sidecar into DB for {dataset_uuid}"
+                )
+                return {
+                    "notes": body,
+                    "last_saved": last_saved,
+                    "filename": filename or dataset_uuid,
+                }
+            # No note yet. Optionally seed an empty .md mirror (file workflow).
+            if _MD_EXPORT_ENABLED:
+                try:
+                    _ensure_notes_file(notes_path, dataset_uuid)
+                except Exception:
+                    logger.debug(
+                        "load_notes | could not seed .md sidecar (DB-only ok)",
+                        exc_info=True,
+                    )
+            return {
+                "notes": "",
+                "last_saved": None,
+                "filename": dataset_uuid,
+                "note_scope": "measurement",
+                "notes_path": str(notes_path),
+            }
+        except Exception as e:
+            logger.error(f"load_notes | DB error: {str(e)}", exc_info=True)
+            return {"notes": "", "error": f"Error loading notes: {str(e)}"}
+
     try:
         if notes_path.exists() and notes_path.is_file():
             with open(notes_path, "r", encoding="utf-8") as f:
@@ -522,6 +618,51 @@ async def save_notes(data: NotesData) -> Dict:
     logger.debug(
         f"save_notes | POST scope={data.note_scope} path={resolved_path}, notes_path={notes_path}"
     )
+
+    # Measurement notes: DB is the source of truth. The .md mirror + pooled
+    # sample rollup are best-effort and only when QIMCHI_NOTES_MD_EXPORT is on.
+    if data.note_scope != "sample":
+        now = datetime.now(timezone.utc)
+        try:
+            prev = await asyncio.to_thread(_db_get_note, dataset_uuid)
+            previous_measurement_body = prev[0].rstrip() if prev else None
+            await asyncio.to_thread(_db_upsert_note, dataset_uuid, data.notes or "", now)
+        except Exception as e:
+            logger.error(f"save_notes | DB error: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Error saving notes: {str(e)}")
+
+        frontmatter = _make_frontmatter(dataset_uuid, now)
+        sample_rollup = None
+        if _MD_EXPORT_ENABLED:
+            try:
+                notes_dir.mkdir(parents=True, exist_ok=True)
+                with open(notes_path, "w", encoding="utf-8") as f:
+                    f.write(frontmatter + (data.notes or ""))
+                sample_rollup = append_sample_rollup(
+                    resolved_path,
+                    data.notes or "",
+                    now,
+                    sample_path=data.sample_path,
+                    sample_name=data.sample_name,
+                    cryostat_name=data.cryostat_name,
+                    previous_measurement_notes_body=previous_measurement_body,
+                )
+            except Exception:
+                logger.warning(
+                    "save_notes | .md mirror/rollup failed (DB save succeeded)",
+                    exc_info=True,
+                )
+
+        logger.debug(f"save_notes | Saved notes to DB for {dataset_uuid}")
+        return {
+            "message": "Notes saved successfully.",
+            "path": str(notes_path),
+            "last_saved": now.isoformat(),
+            "filename": dataset_uuid,
+            "note_scope": "measurement",
+            "frontmatter": frontmatter,
+            "sample_rollup": sample_rollup,
+        }
 
     try:
         # Create the directory if it doesn't exist

@@ -102,3 +102,43 @@ begin
   else
     Result := ExpandConstant('{localappdata}\Qimchi');
 end;
+
+{ On uninstall, offer to remove only the app's CACHE from ~/.qimchi:
+  the downloaded Chrome for image export (about 150 MB), the WebView storage
+  (saved window/UI state), and the debug log. The library database
+  (qimchi.db -- notes, hearts, tags) is deliberately KEPT so annotations
+  survive a reinstall/upgrade, as are exports (~/Downloads), the datasets, and
+  the shared ~/.qcutils. }
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  QimchiHome: string;
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    { ~ resolves to %USERPROFILE% for os.path.expanduser in the launcher. }
+    QimchiHome := ExpandConstant('{%USERPROFILE%}\.qimchi');
+    if DirExists(QimchiHome) then
+    begin
+      { No prompt possible in silent mode -> preserve everything. }
+      if UninstallSilent then
+        Exit;
+      if MsgBox('Also remove the Qimchi cache?' + #13#10 +
+          'This clears the downloaded Chrome for image export (about 150 MB), ' +
+          'saved window/UI state, and the debug log.' + #13#10#13#10 +
+          'Your library (notes, hearts, tags), exported plots, and datasets are KEPT.',
+          mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+      begin
+        { Delete cache items individually -- never qimchi.db (and its -wal/-shm
+          and .bak backups), which holds the user's library. }
+        DelTree(QimchiHome + '\chrome', True, True, True);
+        DelTree(QimchiHome + '\webview', True, True, True);
+        { Logs are consolidated in <home>\logs (app log + rotation backups and
+          the launcher's debug log). Remove the whole directory, plus the
+          pre-consolidation files that older versions left in the home root. }
+        DelTree(QimchiHome + '\logs', True, True, True);
+        DeleteFile(QimchiHome + '\qimchi_debug.log');
+        DeleteFile(QimchiHome + '\qimchi.log');
+      end;
+    end;
+  end;
+end;

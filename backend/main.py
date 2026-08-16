@@ -1,4 +1,5 @@
 import os
+import asyncio
 import atexit
 import logging
 import plotly.io as pio
@@ -6,7 +7,7 @@ from plotly import graph_objects as go
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from concurrent.futures import ProcessPoolExecutor
@@ -21,7 +22,9 @@ from api import (
     filters,
     export,
     live_measurements,
+    library,
 )
+from api.shared.db import db_status, run_migrations, seed_local_user, set_db_status
 
 # Load environment variables from file
 load_dotenv()
@@ -94,8 +97,12 @@ async def export_health() -> dict:
     """
     Health check endpoint for the export_plot_images service.
 
+    Also reports whether the library database came up, so the SPA can disable
+    hearts/tags/notes with a reason instead of letting them fail on click.
+
     """
-    return {"ok": True, "id": "qimchi"}
+    db_ready, db_error = db_status()
+    return {"ok": True, "id": "qimchi", "dbReady": db_ready, "dbError": db_error}
 
 
 # FastAPI app instance with a lifespan handler to create/shutdown export workers
@@ -105,6 +112,21 @@ async def lifespan(app: FastAPI):
     then shut down the pool on application shutdown.
     """
     try:
+        # Bring the Qimchi database up to head and seed the implicit local user.
+        # Runs off the event loop. A DB failure must not stop the app from
+        # serving plots -- that is Qimchi's core job and it needs no database --
+        # but it must not be silent either: notes are DB-backed, so a quiet
+        # failure would let the user type notes that are never persisted.
+        # Record the reason so the routers can return 503 and the UI can
+        # disable the library affordances instead of failing on click.
+        try:
+            await asyncio.to_thread(run_migrations)
+            await asyncio.to_thread(seed_local_user)
+            set_db_status(True, None)
+        except Exception as exc:
+            logging.exception("Qimchi DB init failed (library features disabled)")
+            set_db_status(False, f"{type(exc).__name__}: {exc}")
+
         app.state.kaleido_sync_started = _start_kaleido_sync_server("api-process")
 
         # Pre-spawn worker processes; keep conservative worker count
@@ -193,45 +215,57 @@ app.include_router(plots.router)
 app.include_router(filters.router)
 app.include_router(export.router)
 app.include_router(live_measurements.router)
+app.include_router(library.router)
 
 
 # Root route to serve the SPA (only when FastAPI serves static files)
 if serve_static:
     # print(f"Serving static files from FastAPI backend from {frontend_dist_path}")
 
-    @app.get("/qimchi-logo.png")
-    async def get_favicon():
-        """Serve the favicon/logo."""
-        favicon_path = os.path.join(frontend_dist_path, "qimchi-logo.png")
-        if os.path.exists(favicon_path):
-            return FileResponse(favicon_path, media_type="image/png")
-        else:
-            return {"error": "Favicon not found"}
+    # Root-level assets from frontend/dist.
+    # Only /assets is mounted as a static directory, 
+    # so every file the SPA references from the dist 
+    # root needs a route here
+    _ROOT_ASSETS = {
+        "qimchi-logo.png": "image/png",
+        "SQUAD-logo-dark.webp": "image/webp",  # shown in light theme
+        "SQUAD-logo-light.png": "image/png",  # shown in dark theme
+        "FZJ-logo.svg": "image/svg+xml",
+    }
 
-    @app.get("/SQUAD-logo-dark.webp")
-    async def get_squad_logo():
-        """Serve the SQUAD Lab logo."""
-        logo_path = os.path.join(frontend_dist_path, "SQUAD-logo-dark.webp")
-        if os.path.exists(logo_path):
-            return FileResponse(logo_path, media_type="image/webp")
-        else:
-            return {"error": "SQUAD logo not found"}
+    def _register_root_asset(filename: str, media_type: str) -> None:
+        # Factory so each route closes over its own filename (not the loop var).
+        @app.get(f"/{filename}", name=f"root_asset_{filename}")
+        async def _serve_root_asset():
+            asset_path = os.path.join(frontend_dist_path, filename)
+            if os.path.exists(asset_path):
+                return FileResponse(asset_path, media_type=media_type)
+            raise HTTPException(status_code=404, detail=f"{filename} not found")
 
-    @app.get("/FZJ-logo.svg")
-    async def get_fzj_logo():
-        """Serve the FZJ logo."""
-        logo_path = os.path.join(frontend_dist_path, "FZJ-logo.svg")
-        if os.path.exists(logo_path):
-            return FileResponse(logo_path, media_type="image/svg+xml")
-        else:
-            return {"error": "FZJ logo not found"}
+    for _asset_name, _asset_type in _ROOT_ASSETS.items():
+        _register_root_asset(_asset_name, _asset_type)
 
     @app.get("/")
     async def read_root():
-        """Serve the React SPA at the root route."""
+        """Serve the React SPA at the root route.
+
+        index.html must never be cached. Vite content-hashes the JS/CSS under
+        /assets (safe to cache forever), but the hashes only take effect if the
+        shell that references them is re-fetched. A cached index.html keeps
+        pointing at the previous build's filenames -- which is how an updated
+        app can still render the old UI, and after an auto-update those files
+        are gone entirely.
+        """
         index_path = os.path.join(frontend_dist_path, "index.html")
         if os.path.exists(index_path):
-            return FileResponse(index_path)
+            return FileResponse(
+                index_path,
+                headers={
+                    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                },
+            )
         else:
             return {
                 "error": "Frontend not built. Please run 'npm run build' in the frontend directory."

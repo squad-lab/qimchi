@@ -52,6 +52,10 @@ import {
   MoveUp,
   MoveDown,
   Radio,
+  Heart,
+  HeartCrack,
+  Trash2,
+  Tag as TagIcon,
 } from "lucide-react";
 
 // Local imports
@@ -59,6 +63,9 @@ import { TreeNode, convertApiNode } from "./treeUtils";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useToast } from "../hooks/useToast";
 import { useSidebarStore } from "../stores/sidebarStore";
+import { useLibraryStore, normalizePath } from "../stores/libraryStore";
+import TagPopover from "./TagPopover";
+import TagFilterMenu from "./TagFilterMenu";
 import Tooltip from "./Tooltip";
 import { BasketItem } from "./Basket";
 import type { AttrData } from "./interfaces";
@@ -142,6 +149,71 @@ const DirTree = ({
     showLiveOnly,
     // lastPath, // TODO: Use this to track the last loaded path
   } = componentStates.dirTree;
+
+  // Library (heart/trash/tag) state + DirTree filters (see stores/libraryStore).
+  const libStatesByPath = useLibraryStore((s) => s.statesByPath);
+  const filterHeartedOnly = useLibraryStore((s) => s.filterHeartedOnly);
+  const hideTrashed = useLibraryStore((s) => s.hideTrashed);
+  const selectedTagIds = useLibraryStore((s) => s.selectedTagIds);
+  const libraryTags = useLibraryStore((s) => s.tags);
+  const setFilterHeartedOnly = useLibraryStore((s) => s.setFilterHeartedOnly);
+  const setHideTrashed = useLibraryStore((s) => s.setHideTrashed);
+  const toggleSelectedTag = useLibraryStore((s) => s.toggleSelectedTag);
+  const applyHeartMany = useLibraryStore((s) => s.applyHeartMany);
+  const applyTrashMany = useLibraryStore((s) => s.applyTrashMany);
+  const applyTagMany = useLibraryStore((s) => s.applyTagMany);
+  const createLibraryTag = useLibraryStore((s) => s.createTag);
+  const [bulkTagAnchor, setBulkTagAnchor] = useState<HTMLElement | null>(null);
+  const clearSelectedTags = useLibraryStore((s) => s.clearSelectedTags);
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
+  const tagFilterBtnRef = useRef<HTMLButtonElement | null>(null);
+  const fetchLibraryStates = useLibraryStore((s) => s.fetchStates);
+  const checkDbStatus = useLibraryStore((s) => s.checkDbStatus);
+  const dbAvailable = useLibraryStore((s) => s.dbAvailable);
+  const dbError = useLibraryStore((s) => s.dbError);
+
+  // Confirm the library DB is up before loading persisted hearts/trash: if it
+  // isn't, the controls are disabled rather than failing on click.
+  useEffect(() => {
+    void checkDbStatus().then(() => fetchLibraryStates());
+  }, [checkDbStatus, fetchLibraryStates]);
+
+  // Split the search box into "#tag" tokens and plain text, so tags can be
+  // filtered by typing as well as from the Tags dropdown.
+  // "#cooldown sweep" = tag AND name-contains.
+  const { searchTags, searchText, unknownSearchTags } = useMemo(() => {
+    const raw = searchTerm ?? "";
+    const wanted: string[] = [];
+    // Tag names may contain spaces (e.g. "Custom tag")
+    const tagPattern = /#"([^"]+)"|#(\S+)/g;
+    let match: RegExpExecArray | null;
+    while ((match = tagPattern.exec(raw)) !== null) {
+      wanted.push((match[1] ?? match[2]).toLowerCase());
+    }
+    const rest = raw.replace(tagPattern, " ").split(/\s+/).filter(Boolean);
+    const byName = new Map(
+      libraryTags.map((t) => [t.name.toLowerCase(), t.id]),
+    );
+    const ids: number[] = [];
+    const unknown: string[] = [];
+    for (const name of wanted) {
+      const id = byName.get(name);
+      if (id === undefined) unknown.push(name);
+      else ids.push(id);
+    }
+    return {
+      searchTags: ids,
+      searchText: rest.join(" "),
+      unknownSearchTags: unknown,
+    };
+  }, [searchTerm, libraryTags]);
+
+  // Tags from the dropdown and from the search box combine (match ANY, as
+  // before).
+  const effectiveTagIds = useMemo(
+    () => Array.from(new Set([...selectedTagIds, ...searchTags])),
+    [selectedTagIds, searchTags],
+  );
 
   // Local state that doesn't need persistence
   const [draggedItem, setDraggedItem] = useState<string | null>(null);
@@ -440,6 +512,21 @@ const DirTree = ({
     };
   }, [showLiveOnly]); // Only re-run when showLiveOnly changes
 
+  // Signature that changes only when a library filter is active AND the
+  // relevant heart/trash state changes.
+  const libFilterSignature = useMemo(() => {
+    if (!filterHeartedOnly && !hideTrashed && effectiveTagIds.length === 0)
+      return "";
+    return Object.entries(libStatesByPath)
+      .filter(([, v]) => v.hearted || v.trashed || v.tags.length > 0)
+      .map(
+        ([k, v]) =>
+          `${k}:${v.hearted ? 1 : 0}${v.trashed ? 1 : 0}:${v.tags.join(",")}`,
+      )
+      .sort()
+      .join("|");
+  }, [libStatesByPath, filterHeartedOnly, hideTrashed, effectiveTagIds]);
+
   // Process and filter data for headless-tree with sorting
   const processedData = useMemo(() => {
     const allNodes = new Map<string, TreeNode>();
@@ -504,15 +591,36 @@ const DirTree = ({
 
     // Helper function to check if a node matches search
     const matchesSearch = (node: TreeNode): boolean => {
-      if (!searchTerm) return true;
+      if (!searchText) return true;
       return (
-        node.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        node.path.toLowerCase().includes(searchTerm.toLowerCase())
+        node.name.toLowerCase().includes(searchText.toLowerCase()) ||
+        node.path.toLowerCase().includes(searchText.toLowerCase())
       );
     };
 
     // Helper function to check if a node should be included based on filter
+    const libraryFilterActive =
+      filterHeartedOnly ||
+      hideTrashed ||
+      effectiveTagIds.length > 0 ||
+      unknownSearchTags.length > 0;
     const shouldIncludeNode = (node: TreeNode): boolean => {
+      // Library (heart/trash/tag) filters apply to file nodes; folders are kept
+      // only when they contain matching descendants (via hasMatchingChildren).
+      if (node.type === "file") {
+        // A "#name" that matches no known tag can never match a measurement.
+        if (unknownSearchTags.length > 0) return false;
+        const st = libStatesByPath[normalizePath(node.path)];
+        if (hideTrashed && st?.trashed) return false;
+        if (filterHeartedOnly && !st?.hearted) return false;
+        if (
+          effectiveTagIds.length > 0 &&
+          !effectiveTagIds.some((id) => st?.tags?.includes(id))
+        )
+          return false;
+      } else if (libraryFilterActive) {
+        return false;
+      }
       if (filterBy === "all") return true;
       if (filterBy === "dataset" || filterBy === "zarr") {
         return isDatasetPath(node.path) || hasDatasetTag(node.tags);
@@ -593,7 +701,21 @@ const DirTree = ({
 
     const processedRootNodes = processNodes(apiData);
     return { allNodes, rootNodes: processedRootNodes };
-  }, [apiData, filterBy, sortBy, sortDirection, searchTerm]);
+    // libStatesByPath is read inside but intentionally gated by libFilterSignature
+    // (see above) so hearts don't re-derive the tree when no filter is active.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    apiData,
+    filterBy,
+    sortBy,
+    sortDirection,
+    searchText,
+    filterHeartedOnly,
+    hideTrashed,
+    effectiveTagIds,
+    unknownSearchTags,
+    libFilterSignature,
+  ]);
 
   // Get root level nodes for tree (now comes from processedData)
   const rootNodes = useMemo(() => {
@@ -603,7 +725,7 @@ const DirTree = ({
   // Initialize headless-tree with search feature
   // Use a key that changes when switching between chrono and non-chrono modes
   // This forces the tree to completely re-initialize
-  const treeKey = `${sortBy}-${filterBy}-${searchTerm}`;
+  const treeKey = `${sortBy}-${filterBy}-${searchText}-${filterHeartedOnly ? "h" : ""}${hideTrashed ? "t" : ""}-${effectiveTagIds.join(",")}-${unknownSearchTags.join(",")}`;
 
   const tree = useTree<TreeNode>({
     rootItemId: "root",
@@ -857,6 +979,55 @@ const DirTree = ({
         onAddToBasket?.(node);
       }
     });
+  };
+
+  // Bulk library actions over the current multi-selection
+  // Datasets only: folders have no measurement identity. The target state is
+  // computed from the selection so a mixed set resolves one way (heart all if
+  // any is unhearted, otherwise unheart all) rather than flipping each item.
+  const getSelectedDatasetPaths = (): string[] =>
+    getSelectedNodes()
+      .filter((node) => node.type === "file")
+      .map((node) => node.path);
+
+  const handleBulkHeart = async () => {
+    const paths = getSelectedDatasetPaths();
+    if (paths.length === 0) return;
+    const target = !paths.every(
+      (p) => libStatesByPath[normalizePath(p)]?.hearted,
+    );
+    await applyHeartMany(paths, target);
+  };
+
+  const handleBulkTrash = async () => {
+    const paths = getSelectedDatasetPaths();
+    if (paths.length === 0) return;
+    const target = !paths.every(
+      (p) => libStatesByPath[normalizePath(p)]?.trashed,
+    );
+    await applyTrashMany(paths, target);
+  };
+
+  const handleBulkTag = async (tagId: number) => {
+    const paths = getSelectedDatasetPaths();
+    if (paths.length === 0) return;
+    const add = !paths.every((p) =>
+      libStatesByPath[normalizePath(p)]?.tags?.includes(tagId),
+    );
+    await applyTagMany(paths, tagId, add);
+  };
+
+  // Tags carried by every selected dataset (drives the popover's checkmarks).
+  const commonSelectedTagIds = (): number[] => {
+    const paths = getSelectedDatasetPaths();
+    if (paths.length === 0) return [];
+    return (libraryTags ?? [])
+      .map((t) => t.id)
+      .filter((id) =>
+        paths.every((p) =>
+          libStatesByPath[normalizePath(p)]?.tags?.includes(id),
+        ),
+      );
   };
 
   // Download all selected files/folders as ZIP
@@ -1321,6 +1492,65 @@ const DirTree = ({
                 </button>
               </Tooltip>
 
+              {/* Bulk library actions over the selected datasets */}
+              {(() => {
+                const n = getSelectedDatasetPaths().length;
+                const disabled = n === 0 || !dbAvailable;
+                const suffix = `${n} dataset${n === 1 ? "" : "s"}`;
+                const reason = !dbAvailable
+                  ? "Library unavailable"
+                  : n === 0
+                    ? "Select datasets first"
+                    : null;
+                return (
+                  <>
+                    <Tooltip
+                      content={reason ?? `Heart / unheart ${suffix}`}
+                      position="top"
+                    >
+                      <button
+                        type="button"
+                        onClick={handleBulkHeart}
+                        disabled={disabled}
+                        className="px-2 py-1 text-gray-600 hover:bg-red-200 rounded disabled:opacity-50 transition-colors"
+                        title={reason ?? `Heart / unheart ${suffix}`}
+                      >
+                        <Heart size={16} />
+                      </button>
+                    </Tooltip>
+                    <Tooltip
+                      content={reason ?? `Trash / restore ${suffix}`}
+                      position="top"
+                    >
+                      <button
+                        type="button"
+                        onClick={handleBulkTrash}
+                        disabled={disabled}
+                        className="px-2 py-1 text-gray-600 hover:bg-amber-200 rounded disabled:opacity-50 transition-colors"
+                        title={reason ?? `Trash / restore ${suffix}`}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </Tooltip>
+                    <Tooltip content={reason ?? `Tag ${suffix}`} position="top">
+                      <button
+                        type="button"
+                        onClick={(e) =>
+                          setBulkTagAnchor(
+                            bulkTagAnchor ? null : e.currentTarget,
+                          )
+                        }
+                        disabled={disabled}
+                        className="px-2 py-1 text-gray-600 hover:bg-indigo-200 rounded disabled:opacity-50 transition-colors"
+                        title={reason ?? `Tag ${suffix}`}
+                      >
+                        <TagIcon size={16} />
+                      </button>
+                    </Tooltip>
+                  </>
+                );
+              })()}
+
               {/* Dataset cycling buttons */}
               <Tooltip
                 content={
@@ -1367,6 +1597,49 @@ const DirTree = ({
           </div>
         </div>
 
+        {/* Searchable tag-filter dropdown (see TagFilterMenu). */}
+        {tagMenuOpen && tagFilterBtnRef.current && (
+          <TagFilterMenu
+            anchorEl={tagFilterBtnRef.current}
+            tags={libraryTags}
+            selectedTagIds={selectedTagIds}
+            onToggle={toggleSelectedTag}
+            onClear={clearSelectedTags}
+            onClose={() => setTagMenuOpen(false)}
+          />
+        )}
+
+        {/* Bulk tag picker for the current multi-selection. Checkmarks show the
+            tags common to ALL selected datasets; toggling applies to all. */}
+        {bulkTagAnchor && (
+          <TagPopover
+            anchorEl={bulkTagAnchor}
+            tags={libraryTags}
+            currentTagIds={commonSelectedTagIds()}
+            onToggle={(tagId) => void handleBulkTag(tagId)}
+            onCreate={createLibraryTag}
+            onClose={() => setBulkTagAnchor(null)}
+          />
+        )}
+
+        {/* If Library DB is unavailable */}
+        {!dbAvailable && (
+          <div
+            className="mt-1 px-2 py-1.5 rounded-md border border-amber-300 bg-amber-50 text-amber-900 text-[11px] leading-snug"
+            role="status"
+            title={dbError ?? undefined}
+          >
+            <span className="font-semibold">Library unavailable.</span> Hearts,
+            tags and notes can&apos;t be saved this session. Plotting still
+            works.
+            {dbError && (
+              <span className="block mt-0.5 font-mono opacity-80 wrap-break-word">
+                {dbError}
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Filter Controls */}
         {showFilters && (
           <div className="p-1 bg-gray-50 rounded-md">
@@ -1392,6 +1665,90 @@ const DirTree = ({
                 ))}
               </div>
             </div>
+
+            {/* Row 2 -- library filters: hearted / trashed / tags. Kept separate
+                from the node-type row above: those pick WHAT KIND of node to
+                show, these filter by the user's own annotations. */}
+            <div className="mt-1 flex flex-wrap gap-1 justify-center items-center">
+              <button
+                type="button"
+                onClick={() => setFilterHeartedOnly(!filterHeartedOnly)}
+                disabled={!dbAvailable}
+                title="Show only hearted measurements"
+                className={`flex items-center gap-1 px-2 py-1 text-xs rounded disabled:opacity-40 disabled:cursor-not-allowed ${
+                  filterHeartedOnly
+                    ? "bg-red-100 text-red-700"
+                    : "bg-white text-gray-600 hover:bg-gray-100"
+                }`}
+              >
+                <Heart
+                  size={12}
+                  className={
+                    filterHeartedOnly ? "fill-red-500 text-red-500" : ""
+                  }
+                />
+                Hearted
+              </button>
+              <button
+                type="button"
+                onClick={() => setHideTrashed(!hideTrashed)}
+                disabled={!dbAvailable}
+                title="Hide trashed measurements"
+                className={`flex items-center gap-1 px-2 py-1 text-xs rounded disabled:opacity-40 disabled:cursor-not-allowed ${
+                  hideTrashed
+                    ? "bg-blue-100 text-blue-800"
+                    : "bg-white text-gray-600 hover:bg-gray-100"
+                }`}
+              >
+                <Trash2 size={12} />
+                Hide Trash
+              </button>
+              {/* Tag filter: a dropdown rather than a chip row, because tags are
+                  Gmail-style labels that accumulate without bound. */}
+              {libraryTags.length > 0 && (
+                <button
+                  ref={tagFilterBtnRef}
+                  type="button"
+                  onClick={() => setTagMenuOpen((open) => !open)}
+                  disabled={!dbAvailable}
+                  title="Filter by tags"
+                  className={`flex items-center gap-1 px-2 py-1 text-xs rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    selectedTagIds.length > 0
+                      ? "bg-indigo-100 text-indigo-800 border-indigo-300"
+                      : "bg-white text-gray-600 border-gray-200 hover:bg-gray-100"
+                  }`}
+                >
+                  <TagIcon size={12} />
+                  Tags
+                  {selectedTagIds.length > 0 && ` (${selectedTagIds.length})`}
+                  <ChevronDown size={12} />
+                </button>
+              )}
+            </div>
+
+            {/* Selected tags stay visible as removable chips so an active
+                filter is never hidden inside a closed menu. */}
+            {libraryTags.length > 0 && (
+              <div className="mt-1 flex flex-col items-center gap-1">
+                {selectedTagIds.length > 0 && (
+                  <div className="flex flex-wrap gap-1 justify-center">
+                    {libraryTags
+                      .filter((tag) => selectedTagIds.includes(tag.id))
+                      .map((tag) => (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          onClick={() => toggleSelectedTag(tag.id)}
+                          title={`Remove filter: ${tag.name}`}
+                          className="px-2 py-0.5 text-[11px] rounded-full border bg-indigo-100 text-indigo-800 border-indigo-300 hover:bg-indigo-200"
+                        >
+                          #{tag.name} &times;
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1414,7 +1771,8 @@ const DirTree = ({
           onDoubleClick={onDoubleClick}
           onOpenSqliteNode={(node) => onPathChange?.(node.path)}
           onToggleFolderExpand={updateExpandedNodeState}
-          searchTerm={searchTerm}
+          // Only the plain-text part highlights; "#tag" tokens are a filter
+          searchTerm={searchText}
           basketItems={basketItems}
           path={path}
         />
@@ -1622,6 +1980,16 @@ const TreeItemComponent = ({
     isSqliteContainerPath(nodeData.path) && !nodeData.path.includes("#");
   const isDatasetLeafNode = isDatasetNode(nodeData) && !isSqliteContainerNode;
   const datasetKind = detectDatasetKind(nodeData.path, nodeData.tags);
+  // Library (heart/trash) state for this node, keyed by normalized path.
+  const libState = useLibraryStore(
+    (s) => s.statesByPath[normalizePath(nodeData.path)],
+  );
+  const toggleHeart = useLibraryStore((s) => s.toggleHeart);
+  const toggleTrash = useLibraryStore((s) => s.toggleTrash);
+  const allTags = useLibraryStore((s) => s.tags);
+  const toggleTag = useLibraryStore((s) => s.toggleTag);
+  const createTag = useLibraryStore((s) => s.createTag);
+  const [tagAnchor, setTagAnchor] = useState<HTMLElement | null>(null);
   const isSampleFolder =
     isFolder &&
     (nodeData.children || []).some(
@@ -1762,7 +2130,7 @@ const TreeItemComponent = ({
                 isDatasetPath(nodeData.path)
                   ? "text-purple-700 font-medium"
                   : "text-gray-800"
-              }`}
+              } ${libState?.trashed ? "line-through opacity-50" : ""}`}
             >
               {highlightSearchTerm(nodeData.name, searchTerm)}
             </span>
@@ -1833,6 +2201,98 @@ const TreeItemComponent = ({
                 <Download size={14} />
               </button>
             </Tooltip>
+          )}
+
+          {/* Heart / Trash Buttons - dataset leaves (qcutils measurements) */}
+          {isDatasetLeafNode && (
+            <Tooltip
+              content={libState?.hearted ? "Unheart" : "Heart"}
+              position="top"
+            >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleHeart(nodeData.path);
+                }}
+                className={`group/heart p-1 rounded transition-colors shrink-0 ${
+                  libState?.hearted
+                    ? "text-red-500 hover:bg-red-50"
+                    : "text-gray-400 hover:text-red-500 hover:bg-red-50"
+                }`}
+                aria-label={libState?.hearted ? "Remove heart" : "Heart"}
+              >
+                {libState?.hearted ? (
+                  <>
+                    <Heart
+                      size={14}
+                      className="fill-red-500 text-red-500 group-hover/heart:hidden"
+                    />
+                    <HeartCrack
+                      size={14}
+                      className="hidden text-red-500 group-hover/heart:block"
+                    />
+                  </>
+                ) : (
+                  <Heart size={14} />
+                )}
+              </button>
+            </Tooltip>
+          )}
+
+          {isDatasetLeafNode && (
+            <Tooltip
+              content={libState?.trashed ? "Restore" : "Trash"}
+              position="top"
+            >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleTrash(nodeData.path);
+                }}
+                className={`p-1 rounded transition-colors shrink-0 ${
+                  libState?.trashed
+                    ? "text-red-600 hover:bg-red-50"
+                    : "text-gray-400 hover:text-red-600 hover:bg-red-50"
+                }`}
+                aria-label={libState?.trashed ? "Restore from trash" : "Trash"}
+              >
+                <Trash2 size={14} />
+              </button>
+            </Tooltip>
+          )}
+
+          {/* Tags Button + popover - dataset leaves */}
+          {isDatasetLeafNode && (
+            <Tooltip content="Tags" position="top">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const el = e.currentTarget as HTMLElement;
+                  setTagAnchor((a) => (a ? null : el));
+                }}
+                className={`p-1 rounded transition-colors shrink-0 ${
+                  (libState?.tags?.length ?? 0) > 0
+                    ? "text-indigo-600 hover:bg-indigo-50"
+                    : "text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"
+                }`}
+                aria-label="Edit tags"
+              >
+                <TagIcon size={14} />
+              </button>
+            </Tooltip>
+          )}
+          {tagAnchor && (
+            <TagPopover
+              anchorEl={tagAnchor}
+              tags={allTags}
+              currentTagIds={libState?.tags ?? []}
+              onToggle={(tagId) => toggleTag(nodeData.path, tagId)}
+              onCreate={createTag}
+              onClose={() => setTagAnchor(null)}
+            />
           )}
 
           {/* Open Notes Button - any dataset leaf except sqlite container nodes */}

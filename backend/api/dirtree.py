@@ -1008,6 +1008,59 @@ async def _load_dataset_for_metadata(path_ref: str) -> xr.Dataset:
         raise HTTPException(status_code=400, detail=msg) from exc
 
 
+# The attrs surfaced by /load-attrs/ (the Explorer's metadata strip).
+ATTR_KEYS: list = [
+    "Timestamp",
+    "Cryostat",
+    "Wafer ID",
+    "Device Type",
+    "Sample Name",
+    "Experiment Name",
+    "Measurement ID",  # CONCERN: Already present in filename
+    # "Instruments Snapshot"
+]
+
+
+def build_attrs_payload(data: xr.Dataset) -> Dict:
+    """
+    Project a dataset onto the ``/load-attrs/`` response shape.
+
+    Shared with the library's metadata cache so a cached payload is byte-for-byte
+    what the endpoint would have produced -- if these ever diverged, a cache hit
+    would return a different shape from a cache miss.
+
+    Args:
+        data (xr.Dataset): The xarray dataset from which to extract metadata.
+
+    Returns:
+        Dict: A dictionary containing the selected metadata attributes, independents, and dependents.
+
+    """
+    metadata: dict = data.attrs
+    if not isinstance(metadata, dict):
+        metadata = dict(metadata)
+
+    indeps: list = list(data.coords.keys())  # Coordinates -> independents
+    deps: list = list(data.data_vars.keys())  # Data variables -> dependents
+
+    # Flat tables have no coord/var split: every column is both.
+    tabular_columns = metadata.get("qimchi_all_columns")
+    if isinstance(tabular_columns, list) and tabular_columns:
+        indeps = [str(col) for col in tabular_columns]
+        deps = [str(col) for col in tabular_columns]
+
+    attr_json: dict = {}
+    for key in ATTR_KEYS:
+        value = metadata.get(key, "N/A")
+        attr_json[key] = (
+            value if isinstance(value, (str, int, float, bool, list, dict)) else str(value)
+        )
+
+    attr_json["independents"] = indeps
+    attr_json["dependents"] = deps
+    return attr_json
+
+
 @router.post("/load-attrs/")
 async def get_meta_attrs(path: PathData) -> Dict:
     """
@@ -1023,57 +1076,25 @@ async def get_meta_attrs(path: PathData) -> Dict:
     raw_path = path.path
     logger.debug(f"get_meta_attrs | POST path={raw_path}")
 
+    # NOTE: Read-through cache: metadata is assumed unchanging, so once a dataset has
+    # been opened its attrs are served from the DB instead of re-reading the
+    # file. The cached row is only used while its stat fingerprint still
+    # matches (see api/library.py::get_cached_attrs).
+    from .library import get_cached_attrs, store_cached_attrs
+
+    cached = await get_cached_attrs(raw_path)
+    if cached is not None:
+        logger.debug(f"get_meta_attrs | cache hit for {raw_path}")
+        return sanitize_for_json(cached)
+
     data: Optional[xr.Dataset] = None
 
     try:
         data = await _load_dataset_for_metadata(raw_path)
-        metadata: dict = data.attrs  # Metadata
-        coords: xr.core.coordinates.DatasetCoordinates = (
-            data.coords
-        )  # NOTE: Coordinates - Independents
-        data_vars: xr.core.dataset_variables.DataVariables = (
-            data.data_vars
-        )  # NOTE: Data variables - Dependents
-
-        indeps: list = list(coords.keys())
-        deps: list = list(data_vars.keys())
-        tabular_columns = metadata.get("qimchi_all_columns")
-        if isinstance(tabular_columns, list) and tabular_columns:
-            indeps = [str(col) for col in tabular_columns]
-            deps = [str(col) for col in tabular_columns]
-
-        logger.debug(f"get_meta_attrs | {indeps=}")
-        logger.debug(f"get_meta_attrs | {deps=}")
-
-        # Convert metadata to a dictionary if it's not already
-        if not isinstance(metadata, dict):
-            metadata = dict(metadata)
-
-        attr_keys: list = [
-            "Timestamp",
-            "Cryostat",
-            "Wafer ID",
-            "Device Type",
-            "Sample Name",
-            "Experiment Name",
-            "Measurement ID",  # CONCERN: Already present in filename
-            # "Instruments Snapshot"
-        ]
-
-        attr_dict: dict = {key: metadata.get(key, "N/A") for key in attr_keys}
-
-        # Ensure metadata is JSON serializable
-        attr_json = {}
-        for k, v in attr_dict.items():
-            if isinstance(v, (str, int, float, bool, list, dict)):
-                attr_json[k] = v
-            else:
-                attr_json[k] = str(v)
-
-        # Add indeps and deps to the metadata
-        attr_json["independents"] = indeps
-        attr_json["dependents"] = deps
-
+        attr_json = build_attrs_payload(data)
+        # Pass the open dataset so a content-signature UUID can be derived
+        # without re-reading the file.
+        await store_cached_attrs(raw_path, attr_json, data)
         return sanitize_for_json(attr_json)
 
     except HTTPException:
