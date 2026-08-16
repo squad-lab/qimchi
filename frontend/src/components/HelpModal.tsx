@@ -140,16 +140,20 @@ const ExplorerHelp = memo(() => (
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Open the funnel icon in the toolbar for the filter row:{" "}
-          <span className="font-semibold">Hearted</span>,{" "}
-          <span className="font-semibold">Hide Trash</span> and{" "}
-          <span className="font-semibold">Tags</span>
+          <span>
+            Open the funnel icon in the toolbar for the filter row:{" "}
+            <span className="font-semibold">Hearted</span>,{" "}
+            <span className="font-semibold">Hide Trash</span> and{" "}
+            <span className="font-semibold">Tags</span>
+          </span>
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          The <span className="font-semibold">Tags</span> dropdown is searchable;
-          picking several matches measurements carrying{" "}
-          <span className="italic">any</span> of them
+          <span>
+            The <span className="font-semibold">Tags</span> dropdown is searchable;
+            picking several matches measurements carrying{" "}
+            <span className="italic">any</span> of them
+          </span>
         </li>
       </ul>
 
@@ -202,10 +206,12 @@ const ExplorerHelp = memo(() => (
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Use the <span className="font-mono bg-gray-100 px-1 rounded">
-            +
-          </span>{" "}
-          button in item context menus
+          <span>
+            Use the <span className="font-mono bg-gray-100 px-1 rounded">
+              +
+            </span>{" "}
+            button in item context menus
+          </span>
         </li>
       </ul>
     </div>
@@ -701,11 +707,13 @@ const DesktopHelp = memo(() => (
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Click the green <span className="font-mono bg-gray-100 px-1 rounded">
-            Load folder
-          </span>{" "}
-          button in the Explorer to open your operating system's folder picker
-          and browse to a data directory
+          <span>
+            Click the green <span className="font-mono bg-gray-100 px-1 rounded">
+              Load folder
+            </span>{" "}
+            button in the Explorer to open your operating system's folder picker
+            and browse to a data directory
+          </span>
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
@@ -723,11 +731,13 @@ const DesktopHelp = memo(() => (
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Exporting plot images (<span className="font-mono bg-gray-100 px-1 rounded">
-            E
-          </span>) saves a ZIP straight to your{" "}
-          <span className="font-mono bg-gray-100 px-1 rounded">Downloads</span>{" "}
-          folder — the success toast shows the exact path
+          <span>
+            Exporting plot images (<span className="font-mono bg-gray-100 px-1 rounded">
+              E
+            </span>) saves a ZIP straight to your{" "}
+            <span className="font-mono bg-gray-100 px-1 rounded">Downloads</span>{" "}
+            folder — the success toast shows the exact path
+          </span>
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
@@ -769,20 +779,26 @@ const DesktopHelp = memo(() => (
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <span className="font-mono bg-gray-100 px-1 rounded">webview/</span> —
-          saved settings &amp; layout
+          <span>
+            <span className="font-mono bg-gray-100 px-1 rounded">webview/</span> —
+            saved settings &amp; layout
+          </span>
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <span className="font-mono bg-gray-100 px-1 rounded">
-            qimchi_debug.log
-          </span>{" "}
-          — startup &amp; runtime log for troubleshooting
+          <span>
+            <span className="font-mono bg-gray-100 px-1 rounded">
+              qimchi_debug.log
+            </span>{" "}
+            — startup &amp; runtime log for troubleshooting
+          </span>
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <span className="font-mono bg-gray-100 px-1 rounded">chrome/</span> —
-          the downloaded browser used for image export
+          <span>
+            <span className="font-mono bg-gray-100 px-1 rounded">chrome/</span> —
+            the downloaded browser used for image export
+          </span>
         </li>
       </ul>
     </div>
