@@ -58,12 +58,12 @@ async def test_create_plots_accepts_netcdf_hdf5_file_paths(
     fpath = tmp_path / f"dataset{suffix}"
     fpath.write_text("placeholder")
 
-    def _mock_load_dataset(_path: str):
+    async def _mock_load_dataset_async(_path: str):
         ds = _sample_dataset()
         ds.attrs["path"] = str(fpath)
         return ds
 
-    monkeypatch.setattr(plots, "load_dataset", _mock_load_dataset)
+    monkeypatch.setattr(plots, "load_dataset_async", _mock_load_dataset_async)
 
     req = PlotRequest(
         fpaths=[str(fpath)],
@@ -109,7 +109,7 @@ async def test_create_plots_accepts_flat_table_file_paths(
     fpath = tmp_path / f"dataset{suffix}"
     fpath.write_text("x,y\n0,1\n1,2\n")
 
-    def _mock_load_dataset(_path: str):
+    async def _mock_load_dataset_async(_path: str):
         ds = xr.Dataset(
             coords={
                 "row": [0, 1],
@@ -120,7 +120,7 @@ async def test_create_plots_accepts_flat_table_file_paths(
         ds.attrs["path"] = str(fpath)
         return ds
 
-    monkeypatch.setattr(plots, "load_dataset", _mock_load_dataset)
+    monkeypatch.setattr(plots, "load_dataset_async", _mock_load_dataset_async)
 
     req = PlotRequest(
         fpaths=[str(fpath)],
@@ -141,12 +141,12 @@ async def test_create_plots_accepts_sqlite_run_reference_path(tmp_path, monkeypa
     db_path.write_text("placeholder")
     ref_path = f"{db_path}#run_id=1"
 
-    def _mock_load_dataset(_path: str):
+    async def _mock_load_dataset_async(_path: str):
         ds = _sample_dataset()
         ds.attrs["path"] = ref_path
         return ds
 
-    monkeypatch.setattr(plots, "load_dataset", _mock_load_dataset)
+    monkeypatch.setattr(plots, "load_dataset_async", _mock_load_dataset_async)
 
     req = PlotRequest(
         fpaths=[ref_path],
