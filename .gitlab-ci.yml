@@ -43,29 +43,24 @@ auto_tag_version:
         exit 0
       fi
 
-    # Check if version line was changed in this commit
+    # Tag whenever the default branch carries a version that has no tag yet.
+    #
+    # This deliberately does NOT ask "was the version line changed in this
+    # commit". That test read `git diff HEAD~1 HEAD -- backend/pyproject.toml`,
+    # whose first parent depends on how the branch was merged: merging preview
+    # with --no-ff puts the bump in the merge diff and works, but a
+    # fast-forward (or squash, or rebase) leaves HEAD~1 as a preview commit
+    # that does not touch the version -- so the bump would land on main and
+    # silently produce no tag and no release.
+    #
+    # The "tag already exists" check above is what keeps this idempotent, so
+    # re-running on unrelated pushes is a no-op and merge strategy no longer
+    # matters.
     - |
-      # Check if this is the first commit (no parent)
-      if ! git rev-parse HEAD~1 >/dev/null 2>&1; then
-        echo "First commit detected - creating initial tag v$CURRENT_VERSION"
-        git tag -a "v$CURRENT_VERSION" -m "Release version $CURRENT_VERSION"
-        git push origin "v$CURRENT_VERSION"
-        echo "Successfully created initial tag v$CURRENT_VERSION"
-        exit 0
-      fi
-
-      # Check if version line was changed in this commit
-      if git diff HEAD~1 HEAD -- backend/pyproject.toml | grep -E '^\+[[:space:]]*version[[:space:]]*='; then
-        echo "Version was updated in this commit, creating tag v$CURRENT_VERSION"
-
-        # Create and push the tag
-        git tag -a "v$CURRENT_VERSION" -m "Release version $CURRENT_VERSION"
-        git push origin "v$CURRENT_VERSION"
-
-        echo "Successfully created and pushed tag v$CURRENT_VERSION"
-      else
-        echo "Version line was not changed in this commit, skipping tag creation"
-      fi
+      echo "No tag exists for v$CURRENT_VERSION -- creating it"
+      git tag -a "v$CURRENT_VERSION" -m "Release version $CURRENT_VERSION"
+      git push origin "v$CURRENT_VERSION"
+      echo "Successfully created and pushed tag v$CURRENT_VERSION"
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: on_success
@@ -98,6 +93,17 @@ tag_preview:
           f.write(data['project']['version'])
       EOF
     - export CURRENT_VERSION=$(cat current_version.txt)
+    - |
+      # An rc is a candidate for an UNRELEASED version. If vX.Y.Z is already
+      # tagged, the version needs bumping on this branch first -- otherwise we
+      # would mint v0.6.2-rc.1 *after* v0.6.2 shipped, which reads as a
+      # release candidate for something already released.
+      if git rev-parse "v${CURRENT_VERSION}" >/dev/null 2>&1; then
+        echo "v${CURRENT_VERSION} is already released."
+        echo "Bump the version in backend/pyproject.toml on this branch"
+        echo "before cutting a preview build."
+        exit 1
+      fi
     - |
       # Highest existing rc for this version, then +1. Sorted numerically so
       # rc.10 beats rc.9 (a plain sort would not).
