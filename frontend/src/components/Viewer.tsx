@@ -19,7 +19,11 @@ import { usePlotStore } from "../stores/plotStore";
 import { useSidebarStore } from "../stores/sidebarStore";
 import { useToast } from "../hooks/useToast";
 import Tooltip from "./Tooltip";
-import { generateAutoPlotConfigs } from "../utils/autoPlot";
+import {
+  generateAutoPlotConfigs,
+  replicateCustomPlots,
+  type ReplicationSource,
+} from "../utils/autoPlot";
 import {
   useGlobalShortcutsInit,
   useShortcut,
@@ -57,8 +61,15 @@ const Viewer = ({
   onUpdateBasketItemAttributes,
   onOpenNotesItem,
 }: ViewerProps) => {
-  const { plotConfigs, addPlot, removePlot, clearPlots, updatePlotDataSource } =
-    usePlotCollection();
+  const {
+    plotConfigs,
+    addPlot,
+    addPlots,
+    removePlot,
+    setPlotPinned,
+    clearPlots,
+    updatePlotDataSource,
+  } = usePlotCollection();
   const { getPlotState } = usePlotStore();
   const {
     sidebarCollapsed,
@@ -153,7 +164,12 @@ const Viewer = ({
       const preferMemory =
         isMemoryPath(preferredPath) || isMemoryPath(prevItem.path);
 
-      updatePlotDataSource(preferredPath, { preferMemory });
+      updatePlotDataSource(preferredPath, {
+        preferMemory,
+        // Lets a pinned plot's follower inherit its applied filters (those
+        // live in plotStore, keyed by plot id, so they cannot be cloned).
+        getFilters: (plotId) => getPlotState(plotId)?.applied_filters,
+      });
       console.log(
         `Updated ${plotConfigs.length} plots with new dataset: ${preferredPath}`,
       );
@@ -227,17 +243,55 @@ const Viewer = ({
           lineplotFilters,
         );
 
-        if (result.success && result.plotConfigs.length > 0) {
-          // Add each generated plot config to the viewer
-          result.plotConfigs.forEach((config) => {
-            addPlot(config);
-          });
+        // Mirror the user's custom plots onto the new measurement, so a
+        // hand-built view isn't recreated by hand for every dataset.
+        //
+        // Deduplicated by plot *shape* (type + variables)
+        const replicationSources = (() => {
+          const seen = new Set<string>();
+          const sources: ReplicationSource[] = [];
+
+          for (const config of plotConfigs) {
+            if (config.origin !== "custom") continue;
+            const shape = [
+              config.plotType,
+              [...config.indeps].sort().join(","),
+              [...config.deps].sort().join(","),
+            ].join("|");
+            if (seen.has(shape)) continue;
+            seen.add(shape);
+            sources.push({
+              config,
+              filters: getPlotState(config.id)?.applied_filters,
+            });
+          }
+          return sources;
+        })();
+
+        const replicated = replicateCustomPlots(item, replicationSources);
+
+        if (
+          result.success &&
+          result.plotConfigs.length + replicated.plotConfigs.length > 0
+        ) {
+          // Batch: one group, prepended together so the defaults keep their
+          // own order while still landing ahead of older plots.
+          addPlots([...result.plotConfigs, ...replicated.plotConfigs]);
           const filterMsg =
             (heatmapFilters?.length ?? 0) > 0 ||
             (lineplotFilters?.length ?? 0) > 0
               ? " with copied filters"
               : "";
-          showToast(result.message + filterMsg, "success");
+          const customMsg = replicated.plotConfigs.length
+            ? ` + ${replicated.plotConfigs.length} custom`
+            : "";
+          const skipMsg = replicated.skipped.length
+            ? ` (skipped ${replicated.skipped.join("; ")})`
+            : "";
+          showToast(
+            result.message + filterMsg + customMsg + skipMsg,
+            "success",
+          );
         } else {
           // Only show error if there were actual issues (not just non-qualifying items)
           if (
@@ -256,9 +310,7 @@ const Viewer = ({
 
         if (result.success && result.plotConfigs.length > 0) {
           // Add each generated plot config to the viewer
-          result.plotConfigs.forEach((config) => {
-            addPlot(config);
-          });
+          addPlots(result.plotConfigs);
           showToast(result.message, "success");
         } else {
           // Only show error if there were actual issues (not just non-qualifying items)
@@ -274,7 +326,7 @@ const Viewer = ({
   }, [
     basketItems,
     loadingAttributes,
-    addPlot,
+    addPlots,
     showToast,
     plotConfigs,
     getPlotState,
@@ -595,6 +647,9 @@ const Viewer = ({
         : "disk";
 
       addPlot({
+        // Composer-built: mark custom so it is replicated onto measurements
+        // added later (see replicateCustomPlots).
+        origin: "custom",
         fpath: dataset.path,
         indeps: snapshot.indeps,
         deps: snapshot.deps,
@@ -899,6 +954,7 @@ const Viewer = ({
                   <PlotContainer
                     plotConfigs={plotConfigs}
                     onRemovePlot={removePlot}
+                    onSetPlotPinned={setPlotPinned}
                     onAddPlot={addPlot}
                     widthPercent={plotWidthPercent}
                     perPlotWidthMap={perPlotWidthMap}

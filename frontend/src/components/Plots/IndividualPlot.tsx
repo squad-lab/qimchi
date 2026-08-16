@@ -37,6 +37,7 @@ const inferSourceFromPath = (path: string): "memory" | "disk" => {
 interface IndividualPlotProps {
   config: PlotConfiguration;
   onRemove: (id: string) => void;
+  onSetPinned?: (id: string, pinned: boolean) => void;
   onAddPlot?: (config: Omit<PlotConfiguration, "id">) => void;
 }
 
@@ -45,6 +46,7 @@ type PlotLiveStatus = "live" | "paused" | "error" | "completed";
 const IndividualPlot: React.FC<IndividualPlotProps> = ({
   config,
   onRemove,
+  onSetPinned,
   onAddPlot,
 }) => {
   const [plotJson, setPlotJson] = useState<PlotlyJSON | null>(null);
@@ -517,6 +519,9 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         plotRef={plotRef}
         plotStatus={plotStatus}
         onClose={handleClose}
+        onTogglePinned={
+          onSetPinned ? (pinned) => onSetPinned(config.id, pinned) : undefined
+        }
         plotConfig={currentConfig}
         onUpdateConfig={handleConfigUpdate}
         onFiltersModalOpenChange={setIsFiltersModalOpen}

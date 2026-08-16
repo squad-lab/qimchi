@@ -68,6 +68,7 @@ export function generateAutoPlotConfigs(
       }
 
       plotConfigs.push({
+        origin: "auto" as const,
         fpath,
         indeps: independents.slice(0, 2), // Take first 2 independents
         deps: [dependents[0]], // Take first dependent
@@ -93,6 +94,7 @@ export function generateAutoPlotConfigs(
       }
 
       plotConfigs.push({
+        origin: "auto" as const,
         fpath,
         indeps: [independents[0]], // Take first independent
         deps: [dependents[0]], // Take first dependent
@@ -127,4 +129,87 @@ export function generateAutoPlotConfigs(
       plotConfigs: [],
     };
   }
+}
+
+/**
+ * Source plot to replicate onto another measurement: its configuration plus
+ * the filters currently applied to it (those live in plotStore, not the config).
+ */
+export interface ReplicationSource {
+  config: PlotConfiguration;
+  filters?: AppliedFilter[];
+}
+
+export interface ReplicationResult {
+  plotConfigs: Omit<PlotConfiguration, "id">[];
+  /** Human-readable reasons plots were skipped, for the toast. */
+  skipped: string[];
+}
+
+/**
+ * Recreate the user's custom plots against a newly added measurement.
+ *
+ * When a measurement is added while another is loaded, the default-plot pass
+ * only produces the standard heatmap/lineplot. Any carefully built custom view
+ * would have to be rebuilt by hand for every new measurement, so we mirror
+ * each custom plot: same plot type, same dependents/independents, same filters.
+ *
+ * A plot is only replicated when EVERY variable it uses exists in the target measurement
+ */
+export function replicateCustomPlots(
+  item: BasketItem,
+  sources: ReplicationSource[]
+): ReplicationResult {
+  const result: ReplicationResult = { plotConfigs: [], skipped: [] };
+
+  if (!isDatasetPath(item.path) || !item.attributes) return result;
+
+  const { independents = [], dependents = [] } = item.attributes;
+  const haveIndep = new Set(independents);
+  const haveDep = new Set(dependents);
+
+  const fpath = item.path;
+  const source = isMemoryPath(fpath) ? "memory" : "disk";
+
+  for (const { config, filters } of sources) {
+    const missing = [
+      ...config.indeps.filter((name) => !haveIndep.has(name)),
+      ...config.deps.filter((name) => !haveDep.has(name)),
+    ];
+
+    if (missing.length > 0) {
+      result.skipped.push(
+        `${config.plotType} (${[...new Set(missing)].join(", ")} not in this measurement)`
+      );
+      continue;
+    }
+
+    // Carry the applied filters across. plotStore keys state by plot id and the
+    // replica gets a fresh id, so the filters have to travel in the config.
+    let filters_order = config.filters_order;
+    let filters_opts = config.filters_opts;
+    if (filters?.length) {
+      filters_order = filters.map((f) => f.name);
+      filters_opts = filters.reduce<Record<string, unknown>>((acc, f) => {
+        acc[f.name] = f.options;
+        return acc;
+      }, {});
+    }
+
+    result.plotConfigs.push({
+      fpath,
+      indeps: [...config.indeps],
+      deps: [...config.deps],
+      plotType: config.plotType,
+      filters_order,
+      filters_opts,
+      slider: config.slider,
+      appearance_settings: config.appearance_settings,
+      source,
+      preferredSource: source,
+      origin: "custom",
+    });
+  }
+
+  return result;
 }

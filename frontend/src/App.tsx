@@ -222,6 +222,7 @@ const App: React.FC = () => {
 
   useShortcut("toggle-help", () => setIsHelpOpen((prev) => !prev));
 
+  // TODO: WIP <:egg:>
   // Deep-link open (used by the open_in_qimchi MCP tool). On first load, read
   // ?dataset=<abs path> or ?folder=<abs path> from the URL:
   //   - dataset: add it to the basket + load attrs; Viewer auto-plots defaults.
@@ -245,11 +246,8 @@ const App: React.FC = () => {
 
     if (datasetParam && isDatasetPath(datasetParam)) {
       const name =
-        datasetParam
-          .replace(/\\/g, "/")
-          .replace(/\/+$/, "")
-          .split("/")
-          .pop() || datasetParam;
+        datasetParam.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop() ||
+        datasetParam;
       const item: BasketItem = {
         id: datasetParam,
         name,

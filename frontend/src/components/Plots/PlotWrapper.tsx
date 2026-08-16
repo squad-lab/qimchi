@@ -22,6 +22,8 @@ import {
   Crosshair,
   Scissors,
   Split,
+  Pin,
+  PinOff,
 } from "lucide-react";
 
 import { Data, Layout, Config } from "plotly.js";
@@ -61,6 +63,8 @@ type Props = {
   plotRef?: string;
   plotStatus?: PlotLiveStatus;
   onClose?: () => void;
+  /** Toggle whether this plot stays on its measurement during Next/Prev. */
+  onTogglePinned?: (pinned: boolean) => void;
   plotConfig?: PlotConfiguration;
   onUpdateConfig?: (config: Partial<PlotConfiguration>) => void;
   onFiltersModalOpenChange?: (isOpen: boolean) => void;
@@ -223,6 +227,7 @@ const PlotWrapper: React.FC<Props> = ({
   plotRef,
   plotStatus = "completed",
   onClose,
+  onTogglePinned,
   plotConfig,
   onUpdateConfig,
   onFiltersModalOpenChange,
@@ -3762,6 +3767,39 @@ const PlotWrapper: React.FC<Props> = ({
                     title="Close"
                   >
                     <X size={16} className="text-red-600" />
+                  </button>
+                </Tooltip>
+              )}
+
+              {/* Pin: hold this plot on its current measurement while
+                  Next/Prev repoints the others. */}
+              {onTogglePinned && (
+                <Tooltip
+                  content={
+                    plotConfig?.pinned
+                      ? "Unpin - follow Next/Prev again"
+                      : "Pin to this measurement (Next/Prev won't change it)"
+                  }
+                  position="left"
+                >
+                  <button
+                    onClick={() => onTogglePinned(!plotConfig?.pinned)}
+                    className={`p-1.5 rounded transition-colors ${
+                      plotConfig?.pinned
+                        ? "bg-amber-100 hover:bg-amber-200"
+                        : "hover:bg-gray-300"
+                    }`}
+                    title={plotConfig?.pinned ? "Unpin" : "Pin to measurement"}
+                    aria-pressed={Boolean(plotConfig?.pinned)}
+                  >
+                    {plotConfig?.pinned ? (
+                      <Pin
+                        size={16}
+                        className="text-amber-600 fill-amber-500"
+                      />
+                    ) : (
+                      <PinOff size={16} className="text-gray-500" />
+                    )}
                   </button>
                 </Tooltip>
               )}

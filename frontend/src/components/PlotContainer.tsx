@@ -9,6 +9,7 @@ interface PlotContainerProps {
   plotConfigs: PlotConfiguration[];
   className?: string;
   onRemovePlot: (id: string) => void;
+  onSetPlotPinned?: (id: string, pinned: boolean) => void;
   // widthPercent: number from 0..100 used as each plot's width
   widthPercent?: number;
   // Optional per-plot overrides keyed by plot id
@@ -22,6 +23,7 @@ const PlotContainer: React.FC<PlotContainerProps> = ({
   plotConfigs,
   className = "",
   onRemovePlot,
+  onSetPlotPinned,
   onAddPlot,
   widthPercent,
   perPlotWidthMap,
@@ -97,6 +99,7 @@ const PlotContainer: React.FC<PlotContainerProps> = ({
               <IndividualPlot
                 config={config}
                 onRemove={onRemovePlot}
+                onSetPinned={onSetPlotPinned}
                 onAddPlot={onAddPlot}
               />
             </div>
