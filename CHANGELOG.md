@@ -1,5 +1,21 @@
 ## Qimchi Changelog
 
+### v0.7.0 - 2026-08-16
+
+- [Feature] Dark mode: an app-wide dark theme (Atom One Dark palette) with a light/dark toggle in the branding footer. The choice is remembered across restarts and defaults to your system preference. Plots, the metadata JSON view, filters, and sliders all follow the theme; the Qimchi brand green is preserved in both modes.
+- [Feature] Library: heart, trash and tag your measurements. Marks are saved to a local database and shown in the Explorer, with filters for hearted-only, hiding trash, and tags. Select several measurements and apply any of them at once.
+- [Feature] Tags work like labels -- a measurement can carry several. Filter by them from the searchable Tags dropdown, or type `#tag` (or `#"two words"`) in the Explorer search box alongside an ordinary name search.
+- [Feature] Marks follow a measurement even if you rename or move its file. Qimchi identifies a measurement by its qcutils ID, a QCoDeS run GUID, or -- for datasets with neither -- a signature derived from the data itself. Nothing is written next to your files.
+- [Feature] Notes are stored in the database instead of `.md` sidecars, so QCoDeS runs and artefacts can have notes too. Existing sidecar notes are imported on first open, and the `.md` mirror is still written unless `QIMCHI_NOTES_MD_EXPORT` is off.
+- [Feature] Plots: new plots now appear on the left, matching the Basket. Pin a plot to hold it on its measurement while Next/Prev moves the others, so you can compare two datasets side by side.
+- [Feature] Adding a measurement reproduces your custom plots for it, with the same variables and filters, instead of only the default heatmap and line plot. Plots whose variables are missing from the new measurement are skipped and named.
+- [Fix] The SQUAD Lab logo no longer fails to load in dark mode, and matches the light-mode size.
+- [Fix] Updating no longer risks leaving the app showing the previous version's interface, or a blank window.
+- [Fix] The app no longer writes its log into its own installation folder, which could make a silent update skip files.
+- [Fix] Logs are kept across restarts and updates instead of the debug log being wiped on every launch, and are consolidated in `~/.qimchi/logs`.
+- [Misc] Measurement metadata is read once and cached, so reopening a dataset no longer re-reads the file.
+- [Misc] Windows uninstaller now offers to also remove the app's runtime data and cache (`~/.qimchi`: saved settings/window state, logs, and the ~150 MB downloaded Chrome used for image export). Your library, exported plots, notes, and datasets are left untouched.
+
 ### v0.6.2 - 2026-06-23
 
 - [Feature] Desktop updater now selects platform-specific release assets: Windows installer, Linux AppImage, and macOS DMG.

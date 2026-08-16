@@ -50,7 +50,9 @@ const BrandingFooter = () => {
                   className="transition-all duration-200"
                 >
                   <img
-                    src={isDark ? "/SQUAD-logo-light.png" : "/SQUAD-logo-dark.webp"}
+                    src={
+                      isDark ? "/SQUAD-logo-light.png" : "/SQUAD-logo-dark.webp"
+                    }
                     alt="SQUAD Lab logo"
                     className="h-9 sm:h-11 w-auto object-contain filter drop-shadow-sm hover:drop-shadow-md"
                     loading="lazy"
@@ -77,7 +79,7 @@ const BrandingFooter = () => {
                 <div className="qimchi-footer-badge flex items-center gap-2 px-3 py-1.5 bg-linear-to-r from-slate-100 to-slate-50 rounded-full border border-slate-200 shadow-sm">
                   <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
                   <span className="font-bold text-sm text-slate-800 tracking-tight">
-                    Qimchi v0.6.2
+                    Qimchi v0.7.0
                   </span>
                 </div>
                 <div className="flex items-center gap-2">

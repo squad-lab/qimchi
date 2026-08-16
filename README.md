@@ -1,48 +1,52 @@
-# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.6.2
+# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.7.0
 
 Plotly based data visualization tool for `xarray` data. Optimized to work with the optional [`qcutils`](https://gitlab.com/squad-lab/qcutils) package (the installer no longer installs `qcutils` by default). Qimchi supports any dataset format convertible to `xarray` (see [Supported Dataset Types](#supported-dataset-types) below). Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html).
 
 This repository contains a unified FastAPI application that serves a React-based frontend for the Qimchi plotter.
 
-## v0.6.x Highlights
+## v0.7.x Highlights
 
 > [!TIP]
-> 🧪 **Desktop app (alpha):** a self-contained desktop build (PyInstaller + pywebview) that runs Qimchi in a native window, with no separate Git/Python/Node install required. Per-OS installers: a Windows installer (`qimchi-setup.exe`), a Linux AppImage, and a macOS DMG. Download from the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases). Feedback welcome.
+> 🖥️ **Desktop app:** a self-contained build that runs Qimchi in a native window, with no separate Git/Python/Node install. Per-OS installers -- Windows (`qimchi-setup.exe`), Linux AppImage, macOS DMG -- on the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases). The app checks for updates on startup and offers a one-click "Update now".
 
-- In-app auto-updater: the desktop app checks GitLab Releases on startup and offers a one-click "Update now".
-- Clearer plot titles: default titles now show the variables (e.g. `Y vs X`) instead of the generic "Line Plot"/"Heat Map".
-- Basket UX: newly added items appear at the top, and independent/dependent variable rows reveal the full field list in a hover popup when they overflow.
-- Persistent layout: sidebar width and section heights are remembered across reloads.
+- **Library:** heart, trash and tag your measurements. Marks are saved locally and shown in the Explorer, with filters for hearted-only, hiding trash, and tags. Select several measurements and apply any of them at once.
+- **Tags work like labels** -- a measurement can carry several. Filter from the searchable Tags dropdown, or type `#tag` (or `#"two words"`) in the Explorer search alongside an ordinary name search.
+- **Marks follow a measurement** even if you rename or move its file. Qimchi identifies it by its qcutils ID, a QCoDeS run GUID, or -- failing both -- a signature derived from the data itself. Nothing is written next to your files.
+- **Notes** live in the library instead of `.md` sidecars, so QCoDeS runs and artefacts can have notes too. Existing sidecar notes are imported automatically.
+- **Dark mode**, with a toggle in the footer. Follows your system preference by default; plots, metadata and filters all follow the theme.
+- **Plot pinning:** hold a plot on its measurement while Next/Prev moves the others, to compare two datasets side by side. Adding a measurement also reproduces your custom plots for it, with the same variables and filters.
 
-## v0.5.x Highlights
+## Earlier highlights (v0.5.x -- v0.6.x)
 
-- Unified backend dataset loader: supports `xarray` DataTrees, NetCDF/HDF5, QCoDeS DBs, flat CSV/TXT, and SQLite-backed containers via a single loader.
-- Zarr v3 support while retaining backwards compatibility with v2.
-- Custom dataset support and loader templates: see [docs/custom_datasets.md](docs/custom_datasets.md).
-- LineCuts: interactive horizontal/vertical slicing with live preview and improved backend plot creation.
-- Background correction: added support for LinePlots (constant + linear) and HeatMaps (constant, row/col mean, plane).
-- Keyboard shortcuts overhaul and many UX improvements (quick keys for Filters, Appearance, Maximized view, Notes, Export, and more).
-- Explorer and Viewer improvements: path history, dataset cycling across types, and more robust filter handling.
-- Help & Tips Modal: consolidated all help text into a single modal with a tabbed interface for usage tips per component.
-- Misc: removed `qcutils` as a core dependency (installer no longer installs it), installer updated with a qcutils cleanup function, and upgrades to frontend/backend toolchains (Vite 8, Plotly, xarray, zarr, etc.).
+- **Load any `xarray`-convertible dataset:** one loader handles Zarr (v2 and v3), `xarray` DataTrees, NetCDF/HDF5, QCoDeS DBs, flat CSV/TXT and SQLite-backed containers. Custom formats via loader templates -- see [docs/custom_datasets.md](docs/custom_datasets.md).
+- **Create LineCuts:** interactive horizontal/vertical slicing with live preview.
+- **Perform Background correction:** LinePlots (constant, linear) and HeatMaps (constant, row/col mean, plane).
+- **Explorer and Viewer:** path history, dataset cycling across formats, robust filter handling, and a persistent layout (sidebar width and section heights survive reloads).
+- **Keyboard shortcuts** throughout -- Filters, Appearance, Maximized view, Notes, Export -- with a Help & Tips modal documenting each component.
+- Plot titles name the variables (`Y vs X`) rather than "Line Plot"/"Heat Map"; the Basket shows newest first and reveals overflowing variable lists on hover.
 
 
 <!-- Full API documentation and more can be found [here](https://qimchi.squad-lab.org) -->
 
 ## Table of Contents
 
-- [Installation](#installation)
-   - [Windows](#windows)
-   - [Linux/macOS: Docker Installation](#linuxmacos-docker-installation)
+- [ Qimchi v0.7.0](#-qimchi-v070)
+  - [v0.7.x Highlights](#v07x-highlights)
+  - [Earlier highlights (v0.5.x -- v0.6.x)](#earlier-highlights-v05x----v06x)
+  - [Table of Contents](#table-of-contents)
+  - [Installation](#installation)
+    - [Windows](#windows)
+    - [Linux/macOS](#linuxmacos)
+    - [Docker Installation](#docker-installation)
       - [Prerequisites](#prerequisites)
       - [Basic Setup](#basic-setup)
       - [Advanced Setup (with HTTPS)](#advanced-setup-with-https)
-   - [Expert Installation](#expert-installation)
+    - [Expert Installation](#expert-installation)
       - [Windows](#windows-1)
-      - [Linux/macOS](#linuxmacos)
-- [Environment Variables](#environment-variables)
-- [Supported Dataset Types](#supported-dataset-types)
-- [Measurements](#measurements)
+      - [Linux/macOS](#linuxmacos-1)
+  - [Environment Variables](#environment-variables)
+  - [Supported Dataset Types](#supported-dataset-types)
+  - [Measurements](#measurements)
 
 ## Installation
 
