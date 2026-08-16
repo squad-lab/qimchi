@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Build script for Qimchi Linux AppImage (PyInstaller + pywebview GTK).
 #
+# Build-hygiene note: artifacts are deleted before the step that produces them,
+# so the existence checks afterwards actually prove THIS run created them --
+# otherwise a failed step leaves the previous run's output in place and the
+# build reports success for a stale binary.
+#
 # Prerequisites (install once, Debian/Ubuntu):
 #   sudo apt-get install -y libgirepository1.0-dev gcc pkg-config libcairo2-dev \
 #       gir1.2-gtk-3.0 gir1.2-webkit2-4.0 libwebkit2gtk-4.0-dev \
@@ -55,6 +60,12 @@ echo "Ensuring vendor/fd-linux/fd is present..."
 mkdir -p vendor/fd-linux
 FD_DEST="vendor/fd-linux/fd"
 
+# A truncated/failed download leaves a small fd that passes -f and then breaks
+# the Explorer at runtime, so check it is plausibly a real binary.
+if [ -f "$FD_DEST" ] && [ "$(wc -c < "$FD_DEST")" -lt 200000 ]; then
+    echo "  fd present but looks truncated -- re-downloading."
+    rm -f "$FD_DEST"
+fi
 if [ ! -f "$FD_DEST" ]; then
     echo "  fd not found -- downloading from GitHub releases..."
     ARCH=$(uname -m)
@@ -87,12 +98,23 @@ fi
 # ── 4. Python environment ─────────────────────────────────────────────────────
 echo "Setting up Python environment (backend/.venv)..."
 PYTHON_EXE="backend/.venv/bin/python"
+# Presence is not enough: uv garbage-collects managed base interpreters on
+# upgrade, leaving a python that exists but cannot run. Verify by running it.
+if [ -f "$PYTHON_EXE" ] && ! "$PYTHON_EXE" -c "import sys" >/dev/null 2>&1; then
+    echo "  backend/.venv interpreter does not run (stale base Python) -- recreating."
+    rm -rf backend/.venv
+fi
 if [ ! -f "$PYTHON_EXE" ]; then
     uv venv --python 3.13 backend/.venv
 fi
+"$PYTHON_EXE" -c "import sys" >/dev/null
 
-echo "Installing dependencies (backend + datasets extra + build tools)..."
-uv pip install --python "$PYTHON_EXE" -e "./backend[datasets]"
+echo "Installing dependencies (backend + datasets/test extras + build tools)..."
+# The test extra keeps pytest-asyncio present: without it every async test
+# ERRORS instead of failing, which hides real breakage in the suite.
+uv pip install --python "$PYTHON_EXE" -e "./backend[datasets,test]"
+# copy_metadata("qimchi-api") in the spec needs the editable install's metadata.
+"$PYTHON_EXE" -c "import importlib.metadata as m; m.distribution('qimchi-api')"
 # pygobject: Python bindings for GLib/GTK/WebKit2GTK (pywebview GTK backend).
 # Requires system headers at build time: libgirepository1.0-dev, libcairo2-dev.
 # Requires system libs at runtime: libwebkit2gtk-4.0 or libwebkit2gtk-4.1.
@@ -103,16 +125,19 @@ uv pip install --python "$PYTHON_EXE" pyinstaller pywebview uvicorn "pygobject<3
 
 # ── 5. PyInstaller (onedir) ───────────────────────────────────────────────────
 echo "Building onedir app with PyInstaller..."
+APP_DIR="packaging/build/qimchi"
+APP_BIN="$APP_DIR/qimchi"
+# Clear before building so the check below proves THIS run produced the binary.
+rm -rf "$APP_DIR"
+
 "$PYTHON_EXE" -m PyInstaller \
     --clean --noconfirm \
     --distpath packaging/build \
     --workpath packaging/build/pyinstaller_work \
     packaging/qimchi.spec
 
-APP_DIR="packaging/build/qimchi"
-APP_BIN="$APP_DIR/qimchi"
 if [ ! -f "$APP_BIN" ]; then
-    echo "Error: PyInstaller build failed -- $APP_BIN not found" >&2
+    echo "Error: PyInstaller reported success but $APP_BIN was not produced" >&2
     exit 1
 fi
 APP_SIZE_MB=$(du -sm "$APP_DIR" | cut -f1)

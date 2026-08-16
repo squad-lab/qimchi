@@ -36,6 +36,8 @@ dependencies = [
     "xarray~=2026.2.0",
     "zarr>=3.1.6,<4",
     # "qcutils",  # Handled via .bat installer
+    "sqlmodel>=0.0.24",
+    "alembic>=1.14",
 ]
 
 [project.optional-dependencies]
@@ -77,6 +79,14 @@ dev = [
 
 [tool.uv]
 package = true
+
+# Explicit package discovery. `migrations/` (Alembic) is a top-level directory
+# but NOT an importable package -- it is loaded from the filesystem by path and
+# bundled as data by packaging/qimchi.spec. Without this, setuptools' flat-layout
+# auto-discovery sees both `api` and `migrations` and refuses to build.
+[tool.setuptools.packages.find]
+include = ["api*"]
+namespaces = false
 
 [project.urls]
 homepage = "https://gitlab.com/squad-lab/qimchi"

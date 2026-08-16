@@ -87,6 +87,12 @@ echo "Ensuring vendor/fd-macos/fd is present..."
 mkdir -p vendor/fd-macos
 FD_DEST="vendor/fd-macos/fd"
 
+# A truncated/failed download leaves a small fd that passes -f and then breaks
+# the Explorer at runtime, so check it is plausibly a real binary.
+if [ -f "$FD_DEST" ] && [ "$(wc -c < "$FD_DEST")" -lt 200000 ]; then
+    echo "  fd present but looks truncated — re-downloading."
+    rm -f "$FD_DEST"
+fi
 if [ ! -f "$FD_DEST" ]; then
     echo "  fd not found — downloading from GitHub releases..."
 
@@ -123,25 +129,39 @@ fi
 # are present.  On macOS, pywebview uses the system WKWebView — no pythonnet.
 echo "Setting up Python environment (backend/.venv)..."
 PYTHON_EXE="backend/.venv/bin/python"
+# Presence is not enough: uv garbage-collects managed base interpreters on
+# upgrade, leaving a python that exists but cannot run. Verify by running it.
+if [ -f "$PYTHON_EXE" ] && ! "$PYTHON_EXE" -c "import sys" >/dev/null 2>&1; then
+    echo "  backend/.venv interpreter does not run (stale base Python) — recreating."
+    rm -rf backend/.venv
+fi
 if [ ! -f "$PYTHON_EXE" ]; then
     uv venv --python 3.13 backend/.venv
 fi
+"$PYTHON_EXE" -c "import sys" >/dev/null
 
-echo "Installing dependencies (backend + datasets extra + build tools)..."
-uv pip install --python "$PYTHON_EXE" -e "./backend[datasets]"
+echo "Installing dependencies (backend + datasets/test extras + build tools)..."
+# The test extra keeps pytest-asyncio present: without it every async test
+# ERRORS instead of failing, which hides real breakage in the suite.
+uv pip install --python "$PYTHON_EXE" -e "./backend[datasets,test]"
 uv pip install --python "$PYTHON_EXE" pyinstaller pywebview uvicorn
+# copy_metadata("qimchi-api") in the spec needs the editable install's metadata.
+"$PYTHON_EXE" -c "import importlib.metadata as m; m.distribution('qimchi-api')"
 
 # ── 5. PyInstaller (.app bundle) ──────────────────────────────────────────────
 echo "Building .app bundle with PyInstaller..."
+APP_BUNDLE="packaging/build/qimchi.app"
+# Clear before building so the check below proves THIS run produced the bundle.
+rm -rf "$APP_BUNDLE"
+
 "$PYTHON_EXE" -m PyInstaller \
     --clean --noconfirm \
     --distpath packaging/build \
     --workpath packaging/build/pyinstaller_work \
     packaging/qimchi.spec
 
-APP_BUNDLE="packaging/build/qimchi.app"
 if [ ! -d "$APP_BUNDLE" ]; then
-    echo "Error: PyInstaller build failed — $APP_BUNDLE not found" >&2
+    echo "Error: PyInstaller reported success but $APP_BUNDLE was not produced" >&2
     exit 1
 fi
 echo "Built $APP_BUNDLE"

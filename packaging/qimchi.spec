@@ -77,6 +77,17 @@ datas += collect_data_files("qcodes")
 # frozen build so the updater can compare the running version against releases.
 datas += copy_metadata("qimchi-api")
 
+# Alembic migrations are loaded from the filesystem by path (not imported), so
+# they must be bundled as data at _internal/migrations/. api/shared/db.py's
+# run_migrations() resolves them via sys._MEIPASS/migrations when frozen.
+datas += [(os.path.join(_repo_root, "backend", "migrations"), "migrations")]
+# Some DB deps read their own package metadata at import time.
+for _pkg in ("alembic", "sqlalchemy", "sqlmodel", "mako"):
+    try:
+        datas += copy_metadata(_pkg)
+    except Exception:
+        pass
+
 hiddenimports = [
     "main",
     "netCDF4",
@@ -97,6 +108,12 @@ hiddenimports = [
 ]
 hiddenimports += collect_submodules("api")
 hiddenimports += collect_submodules("qcodes")
+# DB stack: alembic + sqlalchemy pull dialects/migration modules dynamically;
+# greenlet + mako are imported indirectly. Collect them so the frozen app can
+# run migrations on startup.
+hiddenimports += collect_submodules("alembic")
+hiddenimports += collect_submodules("sqlalchemy")
+hiddenimports += ["sqlmodel", "greenlet", "mako", "mako.template"]
 # pywebview loads its platform backend dynamically; name it explicitly so
 # PyInstaller includes it.
 if sys.platform == "linux":

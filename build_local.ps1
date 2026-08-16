@@ -1,15 +1,54 @@
 $ErrorActionPreference = "Stop"
 
+# NOTE: $ErrorActionPreference only governs CMDLETS. A failing native command
+# (uv, npm, pyinstaller, ISCC) sets $LASTEXITCODE and execution continues, so
+# every native call below is followed by Assert-LastExit. Without this a failed
+# dependency install silently cascades into a "successful" build of stale output.
+function Assert-LastExit {
+    param([Parameter(Mandatory = $true)][string]$What)
+    if ($LASTEXITCODE -ne 0) {
+        throw "$What failed (exit code $LASTEXITCODE)"
+    }
+}
+
+# Artifacts must be removed BEFORE the step that produces them. Otherwise a
+# failed step leaves last run's file in place and the usual "Test-Path" check
+# reports success for output that can be old.
+function Remove-StaleArtifact {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (Test-Path $Path) {
+        Remove-Item -Recurse -Force $Path -ErrorAction SilentlyContinue
+    }
+    if (Test-Path $Path) {
+        throw "Could not clear previous artifact at $Path (is it running or open?)"
+    }
+}
+
+# A running Qimchi locks files inside packaging/build/qimchi (it writes a
+# .__qimchi.lock into its own bundle dir), which makes both the PyInstaller
+# clean and the Inno Setup compile fail with an unhelpful sharing violation.
+# Fail fast with an actionable message instead.
+$runningQimchi = Get-Process -Name "qimchi" -ErrorAction SilentlyContinue
+if ($runningQimchi) {
+    $ids = ($runningQimchi | ForEach-Object { $_.Id }) -join ", "
+    throw "Qimchi is running (PID $ids) and will lock build output. Close it (or: Stop-Process -Id $ids -Force) and re-run."
+}
+
 # Extract version from pyproject.toml for use in the installer filename/metadata.
 $VERSION = (Select-String -Path "backend/pyproject.toml" -Pattern 'version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
 Write-Host "Building Qimchi v$VERSION..."
 
 # ── 1. Frontend ───────────────────────────────────────────────────────────────
 Write-Host "Building React frontend..."
-cd frontend
+Set-Location frontend
 npm install
+Assert-LastExit "npm install"
 npm run build
-cd ..
+Assert-LastExit "npm run build (tsc/vite)"
+Set-Location ..
+if (!(Test-Path "frontend/dist/index.html")) {
+    throw "Frontend build produced no dist/index.html"
+}
 
 # ── 2. Staging area ───────────────────────────────────────────────────────────
 Write-Host "Creating packaging/build directory..."
@@ -38,7 +77,14 @@ Get-ChildItem -Path $backendStage -Recurse -Force -Directory -Filter "__pycache_
 Write-Host "Ensuring vendor/fd-windows/fd.exe is present..."
 New-Item -ItemType Directory -Force -Path "vendor\fd-windows" | Out-Null
 $fdDest = "vendor\fd-windows\fd.exe"
-if (!(Test-Path $fdDest)) {
+# Presence alone isn't enough: a truncated/failed download leaves a small or
+# empty fd.exe that passes Test-Path and then breaks the Explorer at runtime.
+$fdOk = (Test-Path $fdDest) -and ((Get-Item $fdDest).Length -gt 200KB)
+if ((Test-Path $fdDest) -and (!$fdOk)) {
+    Write-Warning "  fd.exe present but looks truncated -- re-downloading."
+    Remove-Item -Force $fdDest -ErrorAction SilentlyContinue
+}
+if (!$fdOk) {
     Write-Host "  fd.exe not found -- downloading from GitHub releases..."
     try {
         $rel   = Invoke-RestMethod "https://api.github.com/repos/sharkdp/fd/releases/latest"
@@ -72,15 +118,39 @@ Write-Host "Setting up Python environment (backend/.venv -- the complete env)...
 # netCDF4/polars, so we deliberately do NOT use it.
 $buildVenv = Join-Path (Get-Location) "backend\.venv"
 $pythonExe = Join-Path $buildVenv "Scripts\python.exe"
-if (!(Test-Path $pythonExe)) {
+
+# Test-Path is not enough: uv-managed base interpreters get garbage-collected on
+# upgrade, which leaves python.exe on disk pointing at a home that no longer
+# exists. It looks fine and fails on first use. Actually run it.
+$venvOk = $false
+if (Test-Path $pythonExe) {
+    & $pythonExe -c "import sys" 2>&1 | Out-Null
+    $venvOk = ($LASTEXITCODE -eq 0)
+    if (!$venvOk) {
+        Write-Warning "  backend/.venv exists but its interpreter does not run"
+        Write-Warning "  (its uv-managed base Python was probably removed) -- recreating."
+        Remove-Item -Recurse -Force $buildVenv -ErrorAction SilentlyContinue
+    }
+}
+if (!$venvOk) {
     uv venv --python 3.13 $buildVenv
+    Assert-LastExit "uv venv"
+    & $pythonExe -c "import sys" 2>&1 | Out-Null
+    Assert-LastExit "newly created venv interpreter"
 }
 
-Write-Host "Installing dependencies (backend + datasets extra + build tools)..."
+Write-Host "Installing dependencies (backend + datasets/test extras + build tools)..."
 # Editable backend WITH the datasets extra so NetCDF/HDF5/polars loaders work.
-uv pip install --python $pythonExe -e ".\backend[datasets]"
+uv pip install --python $pythonExe -e ".\backend[datasets,test]"
+Assert-LastExit "uv pip install backend[datasets,test]"
 # pythonnet is required by pywebview's EdgeChromium (WebView2) backend on Windows.
 uv pip install --python $pythonExe pyinstaller pywebview pythonnet uvicorn
+Assert-LastExit "uv pip install build tools"
+
+# The spec calls copy_metadata("qimchi-api"); if the editable install silently
+# produced no metadata, PyInstaller fails minutes later with an opaque error.
+& $pythonExe -c "import importlib.metadata as m; m.distribution('qimchi-api')" 2>&1 | Out-Null
+Assert-LastExit "qimchi-api metadata check (editable install incomplete?)"
 
 # ── 5. PyInstaller (onedir) ───────────────────────────────────────────────────
 Write-Host "Building onedir app with PyInstaller..."
@@ -88,6 +158,13 @@ Write-Host "Building onedir app with PyInstaller..."
 # Output: packaging/build/qimchi/           <-- COLLECT output dir
 #           qimchi.exe
 #           _internal/  (Python runtime, deps, fd.exe, frontend/backend data)
+$appDir = "packaging/build/qimchi"
+$appExe = "$appDir/qimchi.exe"
+# Clear the previous app BEFORE building, so the check afterwards proves this
+# run produced it. Otherwise a failed PyInstaller run leaves the old onedir in
+# place and the build reports success for an old binary.
+Remove-StaleArtifact $appDir
+
 $pyiArgs = @(
     "--clean", "--noconfirm",
     "--distpath", "packaging/build",
@@ -95,11 +172,10 @@ $pyiArgs = @(
     "packaging/qimchi.spec"
 )
 & $pythonExe -m PyInstaller @pyiArgs
+Assert-LastExit "PyInstaller"
 
-$appDir = "packaging/build/qimchi"
-$appExe = "$appDir/qimchi.exe"
 if (!(Test-Path $appExe)) {
-    throw "PyInstaller build failed -- $appExe not found"
+    throw "PyInstaller reported success but $appExe was not produced"
 }
 $dirSize = (Get-ChildItem -Recurse $appDir | Measure-Object -Property Length -Sum).Sum / 1MB
 Write-Host "Built $appDir ($([math]::Round($dirSize, 0)) MB total)"
@@ -114,22 +190,29 @@ $isccCmd = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
 $isccCandidates = @(
     $(if ($isccCmd) { $isccCmd.Source }),
     "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
-    "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+    "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+    # Inno Setup's non-admin ("just me") install lands here and is NOT on PATH.
+    "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
 )
 foreach ($cand in $isccCandidates) {
     if ($cand -and (Test-Path $cand)) { $isccExe = $cand; break }
 }
 
+$installerPath = "packaging\build\qimchi-setup.exe"
+# Clear the previous installer BEFORE this step, including on the skip path.
+Remove-StaleArtifact $installerPath
+
 if (!$isccExe) {
-    Write-Warning "ISCC.exe not found -- skipping installer build."
+    Write-Warning "ISCC.exe not found -- SKIPPING installer build."
     Write-Warning "Install Inno Setup 6 (https://jrsoftware.org/isinfo.php or: choco install innosetup) then re-run."
+    Write-Warning "NOTE: no qimchi-setup.exe was produced by this run."
     Write-Host "Packaged app is at: $(Get-Location)\$appDir"
 } else {
     # /Q = quiet (no progress window); /DAppVersion passes the version to the script.
     & $isccExe "/DAppVersion=$VERSION" "/Q" "packaging\setup.iss"
-    $installerPath = "packaging\build\qimchi-setup.exe"
+    Assert-LastExit "Inno Setup (ISCC)"
     if (!(Test-Path $installerPath)) {
-        throw "Inno Setup build failed -- $installerPath not found"
+        throw "ISCC reported success but $installerPath was not produced"
     }
     $installerSize = (Get-Item $installerPath).Length / 1MB
     Write-Host "Installer: $(Get-Location)\$installerPath ($([math]::Round($installerSize, 0)) MB)"
