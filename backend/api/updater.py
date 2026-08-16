@@ -18,13 +18,22 @@ Public API:
 from __future__ import annotations
 
 import logging
+import re
 import sys
 
 _log = logging.getLogger(__name__)
 
+# Preview/prerelease tags: v0.6.4-rc.1, -alpha.2, -beta.3.
+_PRERELEASE_RE = re.compile(r"^v?\d+(?:\.\d+)*-(?:rc|alpha|beta)\.\d+$")
+
 # Public GitLab Releases API endpoint for the project.
+#
+# per_page must be > 1: preview (-rc) tags publish Releases too, and they are
+# newest-first, so fetching a single release would usually return a prerelease
+# and hide the newest stable one behind it. 20 is plenty to find a stable
+# release beneath any run of previews.
 _RELEASES_URL = (
-    "https://gitlab.com/api/v4/projects/squad-lab%2Fqimchi/releases?per_page=1"
+    "https://gitlab.com/api/v4/projects/squad-lab%2Fqimchi/releases?per_page=20"
 )
 
 
@@ -62,11 +71,32 @@ def current_version() -> str:
         return "0.0.0"
 
 
+def is_prerelease(tag: str) -> bool:
+    """
+    True for a preview tag such as ``v0.6.4-rc.1``.
+
+    Preview builds are download-only: the updater must never offer one, so the
+    channel is decided purely by the tag shape.
+
+    """
+    return bool(_PRERELEASE_RE.match(tag or ""))
+
+
 def _parse_ver(tag: str) -> tuple[int, ...]:
-    """'v0.5.3' → (0, 5, 3)."""
-    cleaned = tag.lstrip("v")
+    """
+    Version tuple for ordering. ``'v0.5.3'`` -> ``(0, 5, 3, 1)``.
+
+    A trailing element marks stability: 1 for a release, 0 for a prerelease, so
+    ``v0.6.4-rc.1`` (0,6,4,0) sorts *below* ``v0.6.4`` (0,6,4,1) but still above
+    ``v0.6.3``. Without that, a user running an rc would be offered the older
+    stable build as an "update" -- a silent downgrade.
+
+    """
+    cleaned = (tag or "").lstrip("v")
+    prerelease = 0 if _PRERELEASE_RE.match(tag or "") else 1
+    base = cleaned.split("-", 1)[0]
     try:
-        return tuple(int(x) for x in cleaned.split("."))
+        return tuple(int(x) for x in base.split(".")) + (prerelease,)
     except ValueError:
         return (0,)
 
@@ -95,9 +125,26 @@ def check_for_update() -> dict | None:
     if not releases:
         return None
 
-    latest = releases[0]
-    tag = latest.get("tag_name", "")
-    if not tag or _parse_ver(tag) <= _parse_ver(current_version()):
+    # Pick the newest STABLE release, scanning the whole list.
+    #
+    # Two reasons not to just take releases[0]: preview builds are
+    # download-only, so a prerelease at the top must be skipped rather than
+    # ending the search; and GitLab's ordering is by creation date, so a
+    # back-dated or re-cut release could otherwise mask a newer one. Taking
+    # releases[0] blindly meant that publishing a single preview release
+    # silently stopped ALL stable users from being offered updates.
+    stable = [
+        rel
+        for rel in releases
+        if rel.get("tag_name") and not is_prerelease(rel["tag_name"])
+    ]
+    if not stable:
+        _log.info("[updater] no stable release found (%d prereleases)", len(releases))
+        return None
+
+    latest = max(stable, key=lambda rel: _parse_ver(rel["tag_name"]))
+    tag = latest["tag_name"]
+    if _parse_ver(tag) <= _parse_ver(current_version()):
         return None
 
     notes: str = latest.get("description", "")

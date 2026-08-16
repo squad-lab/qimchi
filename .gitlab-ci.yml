@@ -73,6 +73,48 @@ auto_tag_version:
   #       - backend/pyproject.toml
   # allow_failure: false
 
+# Cut a PREVIEW release from the `preview` branch: vX.Y.Z-rc.N, where N is the
+# next unused rc for the version currently in pyproject.toml.
+#
+# Manual on purpose. Each tag fans out to three platform builds, and macOS runs
+# on GitLab's SaaS macOS runner (billed at a higher multiplier) -- auto-tagging
+# every push to preview would burn minutes on commits nobody wants to test.
+tag_preview:
+  stage: auto_tag_version
+  image: python:3.13-alpine
+  before_script:
+    - apk add --no-cache git
+    - pip3 install toml --break-system-packages
+    - git config --global user.name "Janitor"
+    - git config --global user.email "squad@fz-juelich.de"
+    - git remote set-url origin https://squad_janitor:$CI_FORMAT@$CI_SERVER_HOST/$CI_PROJECT_NAMESPACE/$CI_PROJECT_NAME
+    - git fetch --tags
+  script:
+    - |
+      python3 << 'EOF'
+      import toml
+      data = toml.load('backend/pyproject.toml')
+      with open('current_version.txt', 'w') as f:
+          f.write(data['project']['version'])
+      EOF
+    - export CURRENT_VERSION=$(cat current_version.txt)
+    - |
+      # Highest existing rc for this version, then +1. Sorted numerically so
+      # rc.10 beats rc.9 (a plain sort would not).
+      NEXT=$(git tag -l "v${CURRENT_VERSION}-rc.*" \
+        | sed -E "s/.*-rc\.([0-9]+)$/\1/" \
+        | sort -n | tail -1)
+      NEXT=$(( ${NEXT:-0} + 1 ))
+      PREVIEW_TAG="v${CURRENT_VERSION}-rc.${NEXT}"
+      echo "Creating preview tag $PREVIEW_TAG"
+      git tag -a "$PREVIEW_TAG" -m "Preview release $PREVIEW_TAG"
+      git push origin "$PREVIEW_TAG"
+      echo "Pushed $PREVIEW_TAG -- builds + a preview release will follow."
+  rules:
+    - if: $CI_COMMIT_BRANCH == "preview"
+      when: manual
+      allow_failure: true
+
 docker:
   image: jonoh/docker-buildx-qemu
   stage: build
@@ -87,9 +129,21 @@ docker:
   script:
     - VERSION=$(grep '^[[:space:]]*version[[:space:]]*=' backend/pyproject.toml | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')
     - update-binfmts --enable
-    - docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull -t "$CI_REGISTRY/squad-lab/qimchi:latest" -t "$CI_REGISTRY/squad-lab/qimchi:$VERSION" --push .
+    # Preview (-rc) tags publish a VERSIONED image only. `:latest` must keep
+    # pointing at the newest stable, or `docker pull qimchi` would silently
+    # hand people a preview build.
+    - |
+      TAG_ARGS="-t $CI_REGISTRY/squad-lab/qimchi:$VERSION"
+      case "$CI_COMMIT_TAG" in
+        *-rc.*) echo "Preview tag $CI_COMMIT_TAG -- leaving :latest on the stable image" ;;
+        *)      TAG_ARGS="$TAG_ARGS -t $CI_REGISTRY/squad-lab/qimchi:latest" ;;
+      esac
+      echo "Image tags: $TAG_ARGS"
+      docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull $TAG_ARGS --push .
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: on_success
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-rc\.\d+$/
       when: on_success
 
 # Builds the self-contained Windows desktop app (PyInstaller + pywebview) via
@@ -163,18 +217,24 @@ build-windows:
       - packaging/build/qimchi-setup.exe
     expire_in: 180 days
   rules:
-    # Release build on version tags...
+    # Stable release build on version tags.
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
       when: on_success
-    # ...and a manual build on the packaging branch for testing the pipeline.
-    - if: $CI_COMMIT_BRANCH == "packaging"
+    # Preview release build on -rc tags (cut from the `preview` branch).
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-rc\.\d+$/
+      when: on_success
+    # Manual ad-hoc build on the preview branch itself (no tag, no release).
+    - if: $CI_COMMIT_BRANCH == "preview"
       when: manual
       allow_failure: true
 
 # Builds the self-contained macOS desktop app (PyInstaller + pywebview) via
 # scripts/build_macos.sh - produces qimchi.app (bundled by create-dmg into
-# qimchi.dmg).  Requires a self-hosted macOS runner tagged "macos".
-# Kept as when:manual until a runner is validated and signing is set up.
+# qimchi.dmg).  Runs on GitLab's HOSTED SaaS macOS runner
+# (saas-macos-large-m2pro, image macos-15-xcode-16) -- no self-hosted Mac
+# needed. Note SaaS macOS minutes bill at a higher multiplier, and `release`
+# declares `needs: build-macos artifacts: true`, so a macOS failure blocks the
+# whole release. Signing is still stubbed (scripts/sign_macos.sh).
 build-macos:
   stage: build
   image: macos-15-xcode-16
@@ -221,11 +281,14 @@ build-macos:
       - packaging/build/qimchi.dmg
     expire_in: 180 days
   rules:
-    # Release build on version tags.
+    # Stable release build on version tags.
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
       when: on_success
-    # Manual test build on the packaging branch.
-    - if: $CI_COMMIT_BRANCH == "packaging"
+    # Preview release build on -rc tags (cut from the `preview` branch).
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-rc\.\d+$/
+      when: on_success
+    # Manual ad-hoc build on the preview branch itself (no tag, no release).
+    - if: $CI_COMMIT_BRANCH == "preview"
       when: manual
       allow_failure: true
 
@@ -273,11 +336,14 @@ build-linux:
       - packaging/build/qimchi-*.AppImage
     expire_in: 180 days
   rules:
-    # Release build on version tags.
+    # Stable release build on version tags.
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
       when: on_success
-    # Manual test build on the packaging branch.
-    - if: $CI_COMMIT_BRANCH == "packaging"
+    # Preview release build on -rc tags (cut from the `preview` branch).
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-rc\.\d+$/
+      when: on_success
+    # Manual ad-hoc build on the preview branch itself (no tag, no release).
+    - if: $CI_COMMIT_BRANCH == "preview"
       when: manual
       allow_failure: true
 
@@ -302,9 +368,24 @@ release:
   # the asset links actually attach.
   script:
     - |
+      # Preview (-rc) tags get a clearly-labelled release. The in-app updater
+      # ignores prereleases entirely (api/updater.py::is_prerelease), so these
+      # are download-only and are never offered to stable installs.
+      case "$CI_COMMIT_TAG" in
+        *-rc.*)
+          RELEASE_NAME="Qimchi $CI_COMMIT_TAG (preview)"
+          PREVIEW_BANNER="**Preview build -- not a stable release.** Expect rough edges. The in-app updater ignores preview builds, so you will not be offered this automatically, nor updated away from it: install stable releases manually."
+          ;;
+        *)
+          RELEASE_NAME="Qimchi $CI_COMMIT_TAG"
+          PREVIEW_BANNER=""
+          ;;
+      esac
       # Release notes (heredoc: $CI_* expand; no backticks present).
       NOTES=$(cat <<EOF
       # Qimchi $CI_COMMIT_TAG
+
+      $PREVIEW_BANNER
 
       ## Windows
       1. Download qimchi-setup.exe below.
@@ -336,12 +417,16 @@ release:
       # delete-then-create makes re-runs idempotent (a pre-existing release would 409).
       release-cli delete --tag-name "$CI_COMMIT_TAG" 2>/dev/null || true
       release-cli create \
-        --name "Qimchi $CI_COMMIT_TAG" \
+        --name "$RELEASE_NAME" \
         --tag-name "$CI_COMMIT_TAG" \
         --description "$NOTES" \
         --assets-link "{\"name\":\"qimchi-x86_64.AppImage (Linux)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-x86_64.AppImage?job=build-linux\",\"link_type\":\"package\"}" \
         --assets-link "{\"name\":\"qimchi-setup.exe (Windows installer)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-setup.exe?job=build-windows\",\"link_type\":\"package\"}" \
         --assets-link "{\"name\":\"qimchi.dmg (macOS)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi.dmg?job=build-macos\",\"link_type\":\"package\"}"
   rules:
+    # Stable release.
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: on_success
+    # Preview release (download-only; the updater never offers prereleases).
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-rc\.\d+$/
       when: on_success
