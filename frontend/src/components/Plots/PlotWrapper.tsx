@@ -3315,7 +3315,7 @@ const PlotWrapper: React.FC<Props> = ({
                   className="h-full bg-white border-l border-gray-200 flex flex-col z-30 transition-all duration-300 animate-in slide-in-from-right"
                   style={{ width: "50%" }}
                 >
-                  <div className="flex items-center justify-between p-3 border-b border-gray-100 bg-gray-50/50 dark:bg-gray-900/50">
+                  <div className="flex items-center p-3 border-b border-gray-100 bg-gray-50/50 dark:bg-gray-900/50">
                     <div className="flex items-center gap-2">
                       <div className="p-1 px-2 bg-blue-100 text-blue-700 rounded-md text-[10px] font-black uppercase tracking-tighter">
                         LineCut Preview
@@ -3332,15 +3332,6 @@ const PlotWrapper: React.FC<Props> = ({
                           : "None"}
                       </span>
                     </div>
-                    <button
-                      onClick={() => {
-                        setIsLineCutActive(false);
-                        setLineCutPreviewJson(null);
-                      }}
-                      className="p-1 hover:bg-red-50 text-red-500 rounded transition-colors"
-                    >
-                      <X size={14} />
-                    </button>
                   </div>
 
                   <div className="flex-1 p-2 relative">

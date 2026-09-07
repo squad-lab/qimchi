@@ -2,7 +2,7 @@ import axios from "axios";
 import { PROD_BACKEND_URL } from "../config";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Panel } from "react-resizable-panels";
-import { ChartScatter } from "lucide-react";
+import { ChartScatter, Trash2 } from "lucide-react";
 
 // Local imports
 import Basket, { BasketFieldSelection, BasketItem } from "./Basket";
@@ -776,12 +776,14 @@ const Viewer = ({
                   ))}
                 </div>
 
-                <Tooltip content="Remove all plots from the viewer" position="left">
+                <Tooltip content="Clear All Plots" position="left">
                   <button
                     onClick={clearPlots}
-                    className="px-3 py-1 text-sm text-red-600 hover:bg-gray-300 rounded transition-colors"
+                    type="button"
+                    aria-label="Clear All Plots"
+                    className="p-1.5 text-red-600 hover:bg-gray-300 rounded transition-colors"
                   >
-                    Clear All Plots
+                    <Trash2 size={16} aria-hidden="true" />
                   </button>
                 </Tooltip>
               </div>
