@@ -1,17 +1,25 @@
-# Every job runs on the largest hosted Linux runner unless it names its own
-# tag; the Windows and macOS build jobs do, and keep theirs. Note the minute
-# multiplier: a 2xlarge burns CI minutes far faster than the default small
-# runner, which is cheap here only because the jobs are short.
+# Bookkeeping jobs use GitLab's default small Linux runner (1x). Tests and
+# builds opt into the fastest runner explicitly below; Windows keeps its
+# existing project runner and macOS keeps the hosted M2 Pro runner.
 default:
   image: "python:3.13"
-  tags:
-    - saas-linux-2xlarge-amd64
 
 variables:
   DOCKER_HOST: "tcp://docker:2375"
   DOCKER_DRIVER: "overlay2"
   CI_BUILD_ARCHS: linux/amd64 #, linux/arm64
   UV_CACHE_DIR: "$CI_PROJECT_DIR/.uv-cache"
+  # NOTE: Run pipeline -> select preview -> choose a target here for a one-off
+  # installer build that does not create a release tag.
+  AD_HOC_DESKTOP_BUILD:
+    value: "none"
+    options:
+      - "none"
+      - "windows"
+      - "linux"
+      - "macos"
+      - "all"
+    description: "Optional ad-hoc desktop build target for a preview web pipeline"
 stages:
   - test
   - auto_tag_version
@@ -20,15 +28,14 @@ stages:
 
 pytest:
   stage: test
-  # The suite runs in under a minute; anything near this is a hang, and the
-  # per-test timeout in backend/pyproject.toml should have caught it first.
+  tags:
+    - saas-linux-2xlarge-amd64
   timeout: 20m
   before_script:
     - curl -LsSf https://astral.sh/uv/install.sh | sh
     - export PATH="$HOME/.local/bin:$PATH"
   script:
-    # The `test` extra carries pytest-asyncio; without it every async test
-    # ERRORS instead of failing, which hides real breakage.
+    # The `test` extra carries pytest-asyncio; without it every async test ERRORS instead of failing.
     - cd backend
     - uv sync --locked --extra test --extra datasets
     - uv lock --check
@@ -50,6 +57,8 @@ pytest:
 frontend-quality:
   stage: test
   image: node:22.12.0
+  tags:
+    - saas-linux-2xlarge-amd64
   variables:
     NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.npm"
   script:
@@ -179,6 +188,8 @@ tag_preview:
 docker:
   image: jonoh/docker-buildx-qemu
   stage: build
+  tags:
+    - saas-linux-2xlarge-amd64
   services:
     - docker:28-dind
   before_script:
@@ -213,6 +224,10 @@ build-windows:
   stage: build
   tags:
     - windows
+  # The Windows runner is the release bottleneck. Put this job in its queue as
+  # soon as the pipeline is created instead of waiting for the Linux tests and
+  # earlier stages. Linux/macOS builds can finish while Windows is still busy.
+  needs: []
   before_script:
     # Inno Setup 6 -- builds the Windows installer after PyInstaller.
     # The custom Windows container may not have Chocolatey preinstalled.
@@ -283,10 +298,11 @@ build-windows:
     # Preview release build on -rc tags (cut from the `preview` branch).
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-rc\.\d+$/
       when: on_success
-    # Manual ad-hoc build on the preview branch itself (no tag, no release).
-    - if: $CI_COMMIT_BRANCH == "preview"
-      when: manual
-      allow_failure: true
+    # Explicit ad-hoc build from Run pipeline (no tag, no release). Keeping
+    # this out of ordinary preview push pipelines prevents it from occupying
+    # the sole Windows runner just before tag_preview starts the release build.
+    - if: '$CI_COMMIT_BRANCH == "preview" && $CI_PIPELINE_SOURCE == "web" && $AD_HOC_DESKTOP_BUILD =~ /^(windows|all)$/'
+      when: on_success
 
 # Builds the self-contained macOS desktop app (PyInstaller + pywebview) via
 # scripts/build_macos.sh - produces qimchi.app (bundled by create-dmg into
@@ -347,19 +363,20 @@ build-macos:
     # Preview release build on -rc tags (cut from the `preview` branch).
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-rc\.\d+$/
       when: on_success
-    # Manual ad-hoc build on the preview branch itself (no tag, no release).
-    - if: $CI_COMMIT_BRANCH == "preview"
-      when: manual
-      allow_failure: true
+    # Explicit ad-hoc build from Run pipeline (no tag, no release).
+    - if: '$CI_COMMIT_BRANCH == "preview" && $CI_PIPELINE_SOURCE == "web" && $AD_HOC_DESKTOP_BUILD =~ /^(macos|all)$/'
+      when: on_success
 
 # Builds the self-contained Linux desktop app (PyInstaller + pywebview GTK) via
 # scripts/build_linux.sh -- produces qimchi-x86_64.AppImage, a single executable
 # that bundles the backend and serves the built SPA in a GTK/WebKit2GTK window.
-# Uses GitLab's shared Linux runners (Docker, ubuntu:22.04) -- no special runner
-# tag needed.
+# Uses GitLab's fastest hosted Linux runner (Docker, ubuntu:22.04); unlike the
+# bookkeeping jobs, this expensive build intentionally opts into 2xlarge.
 build-linux:
   stage: build
   image: ubuntu:22.04
+  tags:
+    - saas-linux-2xlarge-amd64
   before_script:
     - |
       apt-get update -qq
@@ -400,10 +417,9 @@ build-linux:
     # Preview release build on -rc tags (cut from the `preview` branch).
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-rc\.\d+$/
       when: on_success
-    # Manual ad-hoc build on the preview branch itself (no tag, no release).
-    - if: $CI_COMMIT_BRANCH == "preview"
-      when: manual
-      allow_failure: true
+    # Explicit ad-hoc build from Run pipeline (no tag, no release).
+    - if: '$CI_COMMIT_BRANCH == "preview" && $CI_PIPELINE_SOURCE == "web" && $AD_HOC_DESKTOP_BUILD =~ /^(linux|all)$/'
+      when: on_success
 
 # Single release job: depends on every platform build and attaches all assets to
 # ONE GitLab Release. Three separate release jobs each ran `release-cli create`
