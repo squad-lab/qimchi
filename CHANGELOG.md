@@ -5,16 +5,34 @@
 - [Feature] Dark mode: an app-wide dark theme (Atom One Dark palette) with a light/dark toggle in the branding footer. The choice is remembered across restarts and defaults to your system preference. Plots, the metadata JSON view, filters, and sliders all follow the theme; the Qimchi brand green is preserved in both modes.
 - [Feature] Library: heart, trash and tag your measurements. Marks are saved to a local database and shown in the Explorer, with filters for hearted-only, hiding trash, and tags. Select several measurements and apply any of them at once.
 - [Feature] Tags work like labels -- a measurement can carry several. Filter by them from the searchable Tags dropdown, or type `#tag` (or `#"two words"`) in the Explorer search box alongside an ordinary name search.
-- [Feature] Marks follow a measurement even if you rename or move its file. Qimchi identifies a measurement by its qcutils ID, a QCoDeS run GUID, or -- for datasets with neither -- a signature derived from the data itself. Nothing is written next to your files.
+- [Feature] Marks follow a measurement even if you rename or move its file. Qimchi identifies a measurement by its qanary (formerly, qcutils) ID, a QCoDeS run GUID, or -- for datasets with neither -- a signature derived from the data itself. Nothing is written next to your files.
 - [Feature] Notes are stored in the database instead of `.md` sidecars, so QCoDeS runs and artefacts can have notes too. Existing sidecar notes are imported on first open, and the `.md` mirror is still written unless `QIMCHI_NOTES_MD_EXPORT` is off.
 - [Feature] Plots: new plots now appear on the left, matching the Basket. Pin a plot to hold it on its measurement while Next/Prev moves the others, so you can compare two datasets side by side.
 - [Feature] Adding a measurement reproduces your custom plots for it, with the same variables and filters, instead of only the default heatmap and line plot. Plots whose variables are missing from the new measurement are skipped and named.
+- [Feature] Tags can be renamed and deleted from the tag popover. Renaming keeps every measurement that carries the tag; deleting asks first and says how many datasets are affected. A name that is already taken is refused rather than quietly merging two tags into one.
+- [Feature] Keyboard shortcuts for the Explorer selection: `Alt+Shift+H` hearts it and `Alt+Shift+T` trashes it, both across the whole multi-selection. They are listed with the rest in Help.
+- [Feature] Exported images carry their measurement with them. Each PNG holds its tags, heart/trash state and IDs in the image metadata, and the same details are written to `metadata.json` inside the export zip.
 - [Fix] The SQUAD Lab logo no longer fails to load in dark mode, and matches the light-mode size.
 - [Fix] Updating no longer risks leaving the app showing the previous version's interface, or a blank window.
 - [Fix] The app no longer writes its log into its own installation folder, which could make a silent update skip files.
 - [Fix] Logs are kept across restarts and updates instead of the debug log being wiped on every launch, and are consolidated in `~/.qimchi/logs`.
+- [Fix] Live qanary plots no longer flicker between live and disk state when a measurement finishes during a refresh, and the release test now exercises the published qanary package reproducibly.
+- [Fix] The Docker image now includes database migrations and dataset readers, and nginx forwards the library and plot-transform APIs used by the frontend.
+- [Fix] The first image export is no longer slow. The export workers and the browser they drive now start with the app, in the background, instead of on your first export -- a wait of several seconds that only ever hit the first plot you exported.
+- [Fix] Plot titles are no longer dark on a dark background in dark mode.
+- [Fix] The Live/Completed badge no longer stretches into a large square when plots are squarified.
+- [Fix] The fade at the right edge of a full Basket slot no longer shows as a pale band in dark mode.
+- [Fix] Qimchi no longer keeps contacting a measurement that has already finished, nor mistakes a later run that reused the same port for it. A finished measurement is read from disk straight away.
+- [Misc] Live measurements are now discovered through `~/.qimchi/live_measurements.db` instead of `~/.qcutils/`. Upgrade Qimchi and your measurement packages together; once running measurements show up again, the old `~/.qcutils` folder can be deleted.
+- [Misc] The companion measurement package qcutils is now called qanary. Measurements it identified are relabelled in the library database on first launch; your hearts, tags, trash and notes are unaffected.
 - [Misc] Measurement metadata is read once and cached, so reopening a dataset no longer re-reads the file.
 - [Misc] Windows uninstaller now offers to also remove the app's runtime data and cache (`~/.qimchi`: saved settings/window state, logs, and the ~150 MB downloaded Chrome used for image export). Your library, exported plots, notes, and datasets are left untouched.
+- [Misc] CI now verifies the locked backend environment and runs frontend ESLint, Prettier, and production-build checks; frontend formatting and linting are available as npm scripts.
+- [Misc] Hovering the filter button now lists the filters applied to that plot, by name and in the order they are applied.
+- [Misc] Trashed measurements are quieter: greyed out, no red on the icon, and only Restore responds -- so a trashed dataset cannot be opened or plotted by accident.
+- [Misc] Following a live measurement now transfers only the rows measured since the last refresh instead of the whole grid every time, which keeps a long sweep as cheap to watch at the end as at the start. Takes effect once your producers run qimchi-connect 0.3.0 or newer.
+- [Misc] Dark mode colours -- panel titles, the Explorer tree, dataset icons -- come from theme tokens instead of values written into components, so the two themes stay in step. Dataset icons keep one colour in both themes, so a kind is recognisable either way.
+- [Misc] Qimchi now runs against QCoDeS 0.59.
 
 ### v0.6.2 - 2026-06-23
 
