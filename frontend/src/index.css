@@ -124,10 +124,7 @@ select {
 }
 
 .tooltip-top {
-  transform: translate(
-    calc(var(--tooltip-x) - 50%),
-    calc(var(--tooltip-y) - 100%)
-  );
+  transform: translate(calc(var(--tooltip-x) - 50%), calc(var(--tooltip-y) - 100%));
 }
 
 .tooltip-bottom {
@@ -135,10 +132,7 @@ select {
 }
 
 .tooltip-left {
-  transform: translate(
-    calc(var(--tooltip-x) - 100%),
-    calc(var(--tooltip-y) - 50%)
-  );
+  transform: translate(calc(var(--tooltip-x) - 100%), calc(var(--tooltip-y) - 50%));
 }
 
 .tooltip-right {
@@ -253,16 +247,124 @@ select {
 }
 
 .dark {
-  --qimchi-accent-header-bg: #2d3b1f;
+  /* --qimchi-accent-header-bg: #2d3b1f; */
+  --qimchi-accent-header-bg: rgba(110, 160, 48, 0.82);
   --qimchi-accent-light-bg: #26301c;
   --qimchi-accent-overlay: rgba(45, 59, 31, 0.6);
   --qimchi-accent-text: #b8d98a;
   --qimchi-accent-border-light: #4a5c34;
 }
 
+/* ==============================================================
+   Formalized theme tokens
+   --------------------------------------------------------------
+   These exist so a value can differ per mode from ONE place. A
+   colour written into a component -- text-[#cddaf3], or an alpha
+   tuned by hand -- cannot: #cddaf3 reads well on a dark panel and
+   is nearly invisible on a light one. Anything that needs to flip
+   between themes belongs here, and components reference the
+   classes below.
+   ============================================================== */
+:root {
+  /* Sidebar section headers (Explorer / Metadata / Notes). */
+  --qimchi-panel-title-fg: #22330d;
+  --qimchi-panel-title-bg: rgba(140, 198, 62, 0.85);
+  --qimchi-panel-title-bg-hover: rgba(110, 160, 48, 0.8);
+
+  /* DirTree rows. Folders take the strongest contrast against the
+     page; datasets sit one step in from it, so the hierarchy reads
+     without needing a second hue. */
+  --qimchi-tree-folder-fg: #010409;
+  --qimchi-tree-dataset-fg: #46536b;
+
+  /* Trashed rows: still findable, plainly out of the way. */
+  --qimchi-trashed-fg: #9aa3af;
+  --qimchi-trashed-opacity: 0.5;
+
+  /* Basket overflow fade. Must match each slot's own tint, or the
+     fade shows up as a pale band over a dark panel. */
+  --qimchi-basket-fade-indep: #eff6ff; /* bg-blue-50 */
+  --qimchi-basket-fade-dep: #fef2f2; /* bg-red-50  */
+
+  /* Chrome that previously hardcoded an alpha per component. */
+  --qimchi-surface-border: rgba(229, 231, 235, 0.8);
+  --qimchi-modebar-bg: rgba(255, 255, 255, 0.85);
+}
+
+.dark {
+  /* White at 0.85 rather than pure white: full white on the accent
+     green vibrates. */
+  --qimchi-panel-title-fg: rgba(255, 255, 255, 0.85);
+  --qimchi-panel-title-bg: rgba(140, 198, 62, 0.8);
+  --qimchi-panel-title-bg-hover: rgba(110, 160, 48, 0.8);
+
+  --qimchi-tree-folder-fg: #f0f6fc;
+  --qimchi-tree-dataset-fg: #cddaf3;
+
+  --qimchi-trashed-fg: #6b7280;
+  --qimchi-trashed-opacity: 0.5;
+
+  --qimchi-basket-fade-indep: #1c2733; /* .dark .bg-blue-50 */
+  --qimchi-basket-fade-dep: #2c1e20; /* .dark .bg-red-50  */
+
+  --qimchi-surface-border: rgba(62, 68, 81, 0.8);
+  --qimchi-modebar-bg: rgba(40, 44, 52, 0.85);
+}
+
+/* Dataset-type icons keep one identity in both themes, so a .zarr
+   always looks like a .zarr. Mid-tone hues, chosen to stay legible
+   on the light page (#f0f6fc) and the dark one (#010409) alike --
+   which is why they are not in the .dark block. */
+:root {
+  --qimchi-icon-zarr: #cd9900;
+  --qimchi-icon-netcdf: #3b9ae1;
+  --qimchi-icon-hdf5: #8b7bf3;
+  --qimchi-icon-qcodes: #17a5a5;
+  --qimchi-icon-sqlite: #2fa86a;
+  --qimchi-icon-csv: #e2803c;
+  --qimchi-icon-generic: #6cb33f;
+}
+
+/* Label only -- the tint arrives via themeClasses.accentBg, which
+   points at the same token. */
+.qimchi-panel-title {
+  color: var(--qimchi-panel-title-fg);
+}
+
+.qimchi-tree-folder {
+  color: var(--qimchi-tree-folder-fg);
+}
+
+.qimchi-tree-dataset {
+  color: var(--qimchi-tree-dataset-fg);
+}
+
+/* A trashed row loses its colour and its weight, and keeps only the
+   strike-through as the signal. */
+.qimchi-trashed,
+.qimchi-trashed .qimchi-tree-dataset,
+.qimchi-trashed .qimchi-tree-folder {
+  color: var(--qimchi-trashed-fg);
+}
+
+.qimchi-trashed {
+  opacity: var(--qimchi-trashed-opacity);
+  text-decoration: line-through;
+}
+
+/* Restoring is the one action left on a trashed row, so it alone
+   keeps pointer events -- and it lifts to normal opacity on hover so
+   it is reachable without being loud. */
+.qimchi-trashed-interactive {
+  pointer-events: auto;
+  opacity: 1;
+}
+
 .dark body {
-  background-color: #282c34;
-  color: #abb2bf;
+  /* GitHub's canvas: near-black page, near-white text. The surface
+     ramp above stays Atom One Dark, so panels read as raised. */
+  background-color: #010409;
+  color: #f0f6fc;
 }
 
 .dark .drag-over {
@@ -271,7 +373,7 @@ select {
 }
 
 .dark .modebar {
-  background: rgba(40, 44, 52, 0.85) !important;
+  background: var(--qimchi-modebar-bg) !important;
   border-color: rgba(171, 178, 191, 0.15) !important;
 }
 
@@ -346,7 +448,8 @@ select {
 }
 .dark .text-gray-600,
 .dark .text-slate-600 {
-  color: #abb2bf;
+  color: #ffffff; /* abb2bf */
+  /* color: #abb2bf; */
 }
 .dark .text-gray-700,
 .dark .text-slate-700 {
@@ -380,7 +483,8 @@ select {
 }
 .dark .hover\:text-gray-600:hover,
 .dark .hover\:text-slate-600:hover {
-  color: #abb2bf;
+  /* color: #abb2bf; */
+  color: #ffffff; /* abb2bf */
 }
 .dark .hover\:text-gray-700:hover,
 .dark .hover\:text-slate-700:hover {

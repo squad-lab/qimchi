@@ -143,6 +143,8 @@ export interface PlotTheme {
     background: string;
     paper: string;
     text: string;
+    /** Figure heading. Brighter than body text so the title still leads. */
+    titleText: string;
     grid: string;
     zeroline: string;
   };

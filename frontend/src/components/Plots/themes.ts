@@ -19,6 +19,7 @@ export const lightTheme: PlotTheme = {
     background: "rgba(0,0,0,0)",
     paper: "rgba(0,0,0,0)",
     text: "#374151",
+    titleText: "#111827",
     grid: "#f3f4f6",
     zeroline: "#e5e7eb",
   },
@@ -45,6 +46,7 @@ export const darkTheme: PlotTheme = {
     background: "rgba(0,0,0,0)",
     paper: "rgba(0,0,0,0)",
     text: "#ABB2BF",
+    titleText: "#F0F6FC",
     grid: "#3E4451",
     zeroline: "#5C6370",
   },
@@ -54,10 +56,7 @@ export const darkTheme: PlotTheme = {
   },
 };
 
-export const applyThemeToLayout = (
-  layout: Partial<Layout>,
-  theme: PlotTheme
-): Partial<Layout> => {
+export const applyThemeToLayout = (layout: Partial<Layout>, theme: PlotTheme): Partial<Layout> => {
   return {
     ...layout,
     paper_bgcolor: theme.colors.paper,
@@ -68,6 +67,21 @@ export const applyThemeToLayout = (
       color: theme.colors.text,
       ...layout.font,
     },
+    // The backend bakes a light-mode colour into the title, so the theme has
+    // to win here -- hence `color` after the incoming font spread. Size and
+    // family stay whatever the figure asked for.
+    ...(layout.title
+      ? {
+          title: {
+            ...layout.title,
+            font: {
+              family: theme.font.family,
+              ...layout.title.font,
+              color: theme.colors.titleText,
+            },
+          },
+        }
+      : {}),
     colorway: theme.colors.primary,
     margin: {
       l: 60,

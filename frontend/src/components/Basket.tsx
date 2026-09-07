@@ -26,15 +26,8 @@ import {
 // Local imports
 import Tooltip from "./Tooltip";
 import { useToast } from "../hooks/useToast";
-import {
-  SharedFieldResult,
-  isFieldShared,
-} from "../utils/datasetFieldSelectors";
-import {
-  detectDatasetKind,
-  isDatasetPath,
-  isSqliteContainerPath,
-} from "../utils/datasetPaths";
+import { SharedFieldResult, isFieldShared } from "../utils/datasetFieldSelectors";
+import { detectDatasetKind, isDatasetPath, isSqliteContainerPath } from "../utils/datasetPaths";
 
 interface AttrData {
   measurement_id?: string;
@@ -144,10 +137,7 @@ const FieldItem = ({
             },
           ];
 
-    e.dataTransfer.setData(
-      "application/plot-fields",
-      JSON.stringify(itemsToDrag),
-    );
+    e.dataTransfer.setData("application/plot-fields", JSON.stringify(itemsToDrag));
     e.dataTransfer.effectAllowed = "copy";
   };
 
@@ -177,9 +167,7 @@ const FieldItem = ({
   // Compact styling with better width handling and consistent sizing
   const maxDisplayLength = 8; // Reduced for more compact display
   const displayName =
-    item.length > maxDisplayLength
-      ? `${item.substring(0, maxDisplayLength)}...`
-      : item;
+    item.length > maxDisplayLength ? `${item.substring(0, maxDisplayLength)}...` : item;
   const shouldShowTooltip = item.length > maxDisplayLength;
 
   // Style configuration based on type
@@ -219,9 +207,7 @@ const FieldItem = ({
       onDoubleClick={handleDoubleClick}
     >
       <IconComponent size={15} className={`${config.textColor} shrink-0`} />
-      <span className={`text-xs ${config.textColor} truncate font-medium`}>
-        {displayName}
-      </span>
+      <span className={`text-xs ${config.textColor} truncate font-medium`}>{displayName}</span>
     </div>
   );
 
@@ -266,9 +252,7 @@ const FieldsRow = ({
   const closeTimer = useRef<number | undefined>(undefined);
   const [overflowing, setOverflowing] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [rect, setRect] = useState<
-    { top: number; left: number; width: number } | null
-  >(null);
+  const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
 
   // Detect horizontal overflow (re-checks on resize and when fields change).
   useEffect(() => {
@@ -282,15 +266,14 @@ const FieldsRow = ({
   }, [fields, loading]);
 
   const isIndep = type === "independent";
-  const palette = isIndep
-    ? "bg-blue-50 border-blue-200"
-    : "bg-red-50 border-red-200";
+  const palette = isIndep ? "bg-blue-50 border-blue-200" : "bg-red-50 border-red-200";
   const placeholderBg = isIndep ? "bg-blue-200" : "bg-red-200";
   const emptyText = isIndep ? "text-blue-400" : "text-red-400";
-  // Right-edge fade so the cut-off chips look intentional, plus a soft pill button.
-  const fadeFrom = isIndep
-    ? "from-blue-50 via-blue-50/90"
-    : "from-red-50 via-red-50/90";
+  // Right-edge fade so the cut-off chips look intentional, plus a soft pill
+  // button. The stops come from tokens: `from-blue-50` is not remapped for
+  // dark mode the way `bg-blue-50` is, so a literal left a pale band sitting
+  // over the dark panel.
+  const fadeVar = isIndep ? "--qimchi-basket-fade-indep" : "--qimchi-basket-fade-dep";
 
   const renderChip = (f: string) => (
     <FieldItem
@@ -336,15 +319,9 @@ const FieldsRow = ({
         <div className="flex flex-nowrap gap-1 w-max h-[32px] items-center">
           {loading ? (
             <>
-              <div
-                className={`h-5 w-12 ${placeholderBg} rounded animate-pulse shrink-0`}
-              ></div>
-              <div
-                className={`h-5 w-16 ${placeholderBg} rounded animate-pulse shrink-0`}
-              ></div>
-              <div
-                className={`h-5 w-10 ${placeholderBg} rounded animate-pulse shrink-0`}
-              ></div>
+              <div className={`h-5 w-12 ${placeholderBg} rounded animate-pulse shrink-0`}></div>
+              <div className={`h-5 w-16 ${placeholderBg} rounded animate-pulse shrink-0`}></div>
+              <div className={`h-5 w-10 ${placeholderBg} rounded animate-pulse shrink-0`}></div>
             </>
           ) : fields.length > 0 ? (
             fields.map(renderChip)
@@ -359,7 +336,10 @@ const FieldsRow = ({
       {/* Overflow hint: right-edge opacity fade (hidden once expanded). */}
       {canExpand && !expanded && (
         <div
-          className={`pointer-events-none absolute inset-y-0 right-0 w-10 rounded-r bg-gradient-to-l ${fadeFrom} to-transparent`}
+          className="pointer-events-none absolute inset-y-0 right-0 w-10 rounded-r"
+          style={{
+            backgroundImage: `linear-gradient(to left, var(${fadeVar}), color-mix(in srgb, var(${fadeVar}) 90%, transparent), transparent)`,
+          }}
         />
       )}
 
@@ -423,10 +403,7 @@ const Basket = ({
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text);
         setCopiedItems((prev) => ({ ...prev, [itemId]: type }));
-        setTimeout(
-          () => setCopiedItems((prev) => ({ ...prev, [itemId]: null })),
-          2000,
-        );
+        setTimeout(() => setCopiedItems((prev) => ({ ...prev, [itemId]: null })), 2000);
         return true;
       }
       // Fallback for older browsers
@@ -445,10 +422,7 @@ const Basket = ({
 
         if (success) {
           setCopiedItems((prev) => ({ ...prev, [itemId]: type }));
-          setTimeout(
-            () => setCopiedItems((prev) => ({ ...prev, [itemId]: null })),
-            2000,
-          );
+          setTimeout(() => setCopiedItems((prev) => ({ ...prev, [itemId]: null })), 2000);
         }
         return success;
       }
@@ -480,10 +454,7 @@ const Basket = ({
     });
   };
 
-  const isSharedChipEnabled = (
-    fieldName: string,
-    type: "independent" | "dependent",
-  ) => {
+  const isSharedChipEnabled = (fieldName: string, type: "independent" | "dependent") => {
     if (!enforceSharedGating || selectedDatasetIds.size <= 1) {
       return true;
     }
@@ -533,8 +504,7 @@ const Basket = ({
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 * 1024 * 1024)
-      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
   };
 
@@ -615,9 +585,7 @@ const Basket = ({
       const parsedData = JSON.parse(droppedData);
 
       // Handle both single items and arrays of items
-      const itemsToAdd: BasketItem[] = Array.isArray(parsedData)
-        ? parsedData
-        : [parsedData];
+      const itemsToAdd: BasketItem[] = Array.isArray(parsedData) ? parsedData : [parsedData];
 
       // Process each item
       itemsToAdd.forEach((item: BasketItem) => {
@@ -675,11 +643,7 @@ const Basket = ({
             <ShoppingBasket size={16} className="mr-1.5 align-middle mb-0.5" />{" "}
             <span>
               Basket<span className="ml-[1.5px]">({items.length})</span>
-              {isDragOver && (
-                <span className="ml-2 text-blue-600 text-sm">
-                  Drop items here!
-                </span>
-              )}
+              {isDragOver && <span className="ml-2 text-blue-600 text-sm">Drop items here!</span>}
             </span>
           </h3>
           <div className="flex items-center">
@@ -717,10 +681,7 @@ const Basket = ({
                 </div>
               </>
             )}
-            <Tooltip
-              content={isExpanded ? "Collapse basket" : "Expand basket"}
-              position="left"
-            >
+            <Tooltip content={isExpanded ? "Collapse basket" : "Expand basket"} position="left">
               <button
                 className="p-1 rounded"
                 aria-label={isExpanded ? "Collapse basket" : "Expand basket"}
@@ -753,10 +714,7 @@ const Basket = ({
                     key={item.id}
                     data-basket-item-card="true"
                     onClick={(e) =>
-                      onToggleDatasetSelection(
-                        item.id,
-                        Boolean(e.ctrlKey || e.metaKey),
-                      )
+                      onToggleDatasetSelection(item.id, Boolean(e.ctrlKey || e.metaKey))
                     }
                     className={`flex flex-col rounded p-2 transition-all duration-200 border shrink-0 w-[250px] cursor-pointer ${
                       selectedDatasetIds.has(item.id)
@@ -776,10 +734,7 @@ const Basket = ({
                                 {item.attributes ? (
                                   <Info size={15} className="text-blue-500" />
                                 ) : externalLoadingAttributes.has(item.id) ? (
-                                  <LoaderCircle
-                                    size={15}
-                                    className="text-blue-500 animate-spin"
-                                  />
+                                  <LoaderCircle size={15} className="text-blue-500 animate-spin" />
                                 ) : (
                                   <Info size={15} className="text-gray-400" />
                                 )}
@@ -821,11 +776,7 @@ const Basket = ({
                             <button
                               onClick={async (e) => {
                                 e.stopPropagation();
-                                await copyToClipboard(
-                                  item.name,
-                                  item.id,
-                                  "filename",
-                                );
+                                await copyToClipboard(item.name, item.id, "filename");
                               }}
                               className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                               title="Copy filename"
@@ -849,24 +800,16 @@ const Basket = ({
                                     { paths: [item.path] },
                                     { responseType: "blob" },
                                   );
-                                  const url = window.URL.createObjectURL(
-                                    new Blob([response.data]),
-                                  );
+                                  const url = window.URL.createObjectURL(new Blob([response.data]));
                                   const link = document.createElement("a");
                                   link.href = url;
-                                  link.setAttribute(
-                                    "download",
-                                    `${item.name}.zip`,
-                                  );
+                                  link.setAttribute("download", `${item.name}.zip`);
                                   document.body.appendChild(link);
                                   link.click();
                                   link.remove();
                                   window.URL.revokeObjectURL(url);
                                 } catch (error) {
-                                  console.error(
-                                    "Error downloading item:",
-                                    error,
-                                  );
+                                  console.error("Error downloading item:", error);
                                   showToast("Failed to download item", "error");
                                 }
                               }}
@@ -933,9 +876,7 @@ const Basket = ({
                         selectedItems={selectedItems}
                         onToggleSelect={handleToggleSelect}
                         onAutofillComposerField={onAutofillComposerField}
-                        isChipEnabled={(f) =>
-                          isSharedChipEnabled(f, "independent")
-                        }
+                        isChipEnabled={(f) => isSharedChipEnabled(f, "independent")}
                         highlightedFields={highlightedFields}
                       />
 

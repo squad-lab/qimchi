@@ -1,10 +1,4 @@
-import {
-  Menu,
-  ChevronLeft,
-  FolderTree,
-  NotebookPen,
-  BadgeInfo,
-} from "lucide-react";
+import { Menu, ChevronLeft, FolderTree, NotebookPen, BadgeInfo } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 
 // Local imports
@@ -37,7 +31,7 @@ interface SidebarProps {
 }
 
 const sectionButtonBaseClass =
-  "text-lg font-semibold p-2 transition-colors w-full text-center";
+  "qimchi-panel-title text-lg font-semibold p-2 transition-colors w-full text-center";
 
 const Sidebar = ({
   defaultWidth = 20,
@@ -103,22 +97,14 @@ const Sidebar = ({
       >
         <div className="flex flex-col h-screen">
           <div className="flex-1 overflow-hidden">
-            <PanelGroup
-              direction="vertical"
-              className="h-full"
-              autoSaveId="qimchi-sidebar-layout"
-            >
+            <PanelGroup direction="vertical" className="h-full" autoSaveId="qimchi-sidebar-layout">
               {/* Explorer */}
               <button
                 onClick={() => setExplorerCollapsed(!explorerCollapsed)}
                 className={`${sectionButtonBaseClass} ${
                   themeClasses.accentBg
-                } ${themeClasses.accentHoverBg} ${
-                  explorerCollapsed ? "mb-0" : "mb-0"
-                }`}
-                title={
-                  explorerCollapsed ? "Expand Explorer" : "Collapse Explorer"
-                }
+                } ${themeClasses.accentHoverBg} ${explorerCollapsed ? "mb-0" : "mb-0"}`}
+                title={explorerCollapsed ? "Expand Explorer" : "Collapse Explorer"}
               >
                 <h2 className="flex items-center justify-center gap-2">
                   <FolderTree size={20} /> Explorer
@@ -153,12 +139,8 @@ const Sidebar = ({
                 onClick={() => setMetadataCollapsed(!metadataCollapsed)}
                 className={`${sectionButtonBaseClass} ${
                   themeClasses.accentBg
-                } ${themeClasses.accentHoverBg} ${
-                  metadataCollapsed ? "mb-0" : "mb-0"
-                }`}
-                title={
-                  metadataCollapsed ? "Expand Metadata" : "Collapse Metadata"
-                }
+                } ${themeClasses.accentHoverBg} ${metadataCollapsed ? "mb-0" : "mb-0"}`}
+                title={metadataCollapsed ? "Expand Metadata" : "Collapse Metadata"}
               >
                 <h2 className="flex items-center justify-center gap-2">
                   <BadgeInfo size={21} /> Metadata
@@ -182,9 +164,7 @@ const Sidebar = ({
                 onClick={() => setNotesCollapsed(!notesCollapsed)}
                 className={`${sectionButtonBaseClass} ${
                   themeClasses.accentBg
-                } ${themeClasses.accentHoverBg} ${
-                  notesCollapsed ? "mb-0" : "mb-0"
-                }`}
+                } ${themeClasses.accentHoverBg} ${notesCollapsed ? "mb-0" : "mb-0"}`}
                 title={notesCollapsed ? "Expand Notes" : "Collapse Notes"}
               >
                 <h2 className="flex items-center justify-center gap-2">

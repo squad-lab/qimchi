@@ -11,13 +11,7 @@
 }
 
 .plot-wrapper .react-resizable-handle-se {
-  background: linear-gradient(
-    -45deg,
-    transparent 40%,
-    #cbd5e1 40%,
-    #cbd5e1 60%,
-    transparent 60%
-  );
+  background: linear-gradient(-45deg, transparent 40%, #cbd5e1 40%, #cbd5e1 60%, transparent 60%);
   border-radius: 0 0 8px 0;
   width: 12px !important;
   height: 12px !important;
@@ -38,13 +32,7 @@
 }
 
 .plot-wrapper .react-resizable-handle-e {
-  background: linear-gradient(
-    to right,
-    transparent 40%,
-    #cbd5e1 40%,
-    #cbd5e1 60%,
-    transparent 60%
-  );
+  background: linear-gradient(to right, transparent 40%, #cbd5e1 40%, #cbd5e1 60%, transparent 60%);
   width: 6px !important;
   right: 3px !important;
 }
@@ -53,8 +41,10 @@
 .plot-wrapper {
   /* Keep quick transitions for visual polish, but avoid animating width/height
      because this causes slow resizing when toggling square-mode. */
-  transition: box-shadow 0.1s ease-out, transform 0.12s ease-in-out;
-  border: 1px solid rgba(229, 231, 235, 0.8);
+  transition:
+    box-shadow 0.1s ease-out,
+    transform 0.12s ease-in-out;
+  border: 1px solid var(--qimchi-surface-border);
   transform-origin: center;
 }
 
@@ -72,7 +62,7 @@
 /* Header styling */
 .plot-wrapper .plot-header {
   background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
-  border-bottom: 1px solid rgba(229, 231, 235, 0.8);
+  border-bottom: 1px solid var(--qimchi-surface-border);
 }
 
 /* Button hover effects */
@@ -132,7 +122,10 @@
   height: 100%;
 }
 
-.plot-content .square-mode > div {
+/* Only the plot box is squared. `> div` alone also matches the absolutely
+   positioned Live/Completed badge, which then inherits height:100% and the
+   1:1 ratio and covers the plot as a giant square. */
+.plot-content .square-mode > div:not(.plot-status-badge) {
   /* Prefer the current height to determine the square size. Set height:100% and use aspect-ratio
      so width will be computed from height. Cap by max-width to avoid overflowing narrow containers. */
   height: 100%;
@@ -144,25 +137,19 @@
 }
 
 /* Ensure the PlotComponent root div fills the square box */
-.plot-content .square-mode > div > div {
+.plot-content .square-mode > div:not(.plot-status-badge) > div {
   width: 100% !important;
   height: 100% !important;
 }
 
 /* When maximized, prevent page-level scrollbars from interfering */
-.fixed .plot-content .square-mode > div {
+.fixed .plot-content .square-mode > div:not(.plot-status-badge) {
   max-height: calc(100vh - 120px);
 }
 
 /* Dark mode (Atom One Dark) */
 .dark .plot-wrapper .react-resizable-handle-se {
-  background: linear-gradient(
-    -45deg,
-    transparent 40%,
-    #4b5263 40%,
-    #4b5263 60%,
-    transparent 60%
-  );
+  background: linear-gradient(-45deg, transparent 40%, #4b5263 40%, #4b5263 60%, transparent 60%);
 }
 
 .dark .plot-wrapper .react-resizable-handle-s {
@@ -176,22 +163,16 @@
 }
 
 .dark .plot-wrapper .react-resizable-handle-e {
-  background: linear-gradient(
-    to right,
-    transparent 40%,
-    #4b5263 40%,
-    #4b5263 60%,
-    transparent 60%
-  );
+  background: linear-gradient(to right, transparent 40%, #4b5263 40%, #4b5263 60%, transparent 60%);
 }
 
 .dark .plot-wrapper {
-  border-color: rgba(62, 68, 81, 0.8);
+  border-color: var(--qimchi-surface-border);
 }
 
 .dark .plot-wrapper .plot-header {
   background: linear-gradient(135deg, #282c34 0%, #21252b 100%);
-  border-bottom-color: rgba(62, 68, 81, 0.8);
+  border-bottom-color: var(--qimchi-surface-border);
 }
 
 .dark .plot-wrapper .plot-content {

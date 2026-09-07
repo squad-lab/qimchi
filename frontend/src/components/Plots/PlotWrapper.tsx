@@ -1,11 +1,4 @@
-import React, {
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  useMemo,
-  startTransition,
-} from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo, startTransition } from "react";
 import { flushSync } from "react-dom";
 import axios from "axios";
 import {
@@ -39,10 +32,7 @@ import AppearanceModal from "./AppearanceModal";
 import FiltersModal from "./FiltersModal";
 import type { AppliedFilter } from "../../components/interfaces";
 import type { PlotAppearanceSettings } from "../../components/types";
-import type {
-  PlotConfiguration,
-  SliderConfig,
-} from "../../components/interfaces";
+import type { PlotConfiguration, SliderConfig } from "../../components/interfaces";
 import { useToast } from "../../hooks/useToast";
 import { usePlotStore } from "../../stores/plotStore";
 import type { PlotPersistentState } from "../../components/interfaces";
@@ -182,9 +172,7 @@ const getColorscaleData = (
 
   // First, try to get from our JSON file
   if (key in plotlyColorscales) {
-    return plotlyColorscales[key as keyof typeof plotlyColorscales] as Array<
-      [number, string]
-    >;
+    return plotlyColorscales[key as keyof typeof plotlyColorscales] as Array<[number, string]>;
   }
 
   // Fallback: return capitalized name for built-in Plotly colorscales
@@ -293,22 +281,16 @@ const PlotWrapper: React.FC<Props> = ({
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
   // Squarify state - when true, force the plot container to maintain 1:1 aspect ratio
   const [isSquareMode, setIsSquareMode] = useState<boolean>(false);
-  const [appearanceSettings, setAppearanceSettings] =
-    useState<PlotAppearanceSettings>(() => getInitialSettings(plotType));
-  const [customizedPlotJson, setCustomizedPlotJson] =
-    useState<PlotlyJSON>(plotJson);
-  const [isHoveredOrFocused, setIsHoveredOrFocused] = useState(false);
-  const [relayoutData, setRelayoutData] = useState<Record<
-    string,
-    unknown
-  > | null>(null);
-  const [activePlotRef, setActivePlotRef] = useState<string | undefined>(
-    plotRef,
+  const [appearanceSettings, setAppearanceSettings] = useState<PlotAppearanceSettings>(() =>
+    getInitialSettings(plotType),
   );
+  const [customizedPlotJson, setCustomizedPlotJson] = useState<PlotlyJSON>(plotJson);
+  const [isHoveredOrFocused, setIsHoveredOrFocused] = useState(false);
+  const [relayoutData, setRelayoutData] = useState<Record<string, unknown> | null>(null);
+  const [activePlotRef, setActivePlotRef] = useState<string | undefined>(plotRef);
 
   // Store the original plot JSON (never modified, always the raw data from backend)
-  const [originalPlotJson, setOriginalPlotJson] =
-    useState<PlotlyJSON>(plotJson);
+  const [originalPlotJson, setOriginalPlotJson] = useState<PlotlyJSON>(plotJson);
   // Store the base plot JSON (original or filtered, before appearance modifications)
 
   useEffect(() => {
@@ -364,8 +346,7 @@ const PlotWrapper: React.FC<Props> = ({
         const status = statusResponse.data.status;
 
         if (status === "completed") {
-          const filename =
-            statusResponse.data.zip_filename || "plot_images.zip";
+          const filename = statusResponse.data.zip_filename || "plot_images.zip";
 
           // Desktop mode: the backend already wrote the zip to disk (WebView2
           // can't save browser downloads), so just report where it landed.
@@ -405,9 +386,7 @@ const PlotWrapper: React.FC<Props> = ({
     } catch (error: any) {
       console.error("Export error:", error);
       showToast(
-        error.response?.data?.message ||
-          error.message ||
-          "Failed to export plot images",
+        error.response?.data?.message || error.message || "Failed to export plot images",
         "error",
       );
     }
@@ -461,10 +440,7 @@ const PlotWrapper: React.FC<Props> = ({
           // ignore dispatch errors
         }
       } else {
-        showToast(
-          (data && data.message) || "Failed to send to notes.",
-          "error",
-        );
+        showToast((data && data.message) || "Failed to send to notes.", "error");
       }
     } catch (err) {
       showToast(`Failed to send to notes: ${err}`, "error");
@@ -502,8 +478,7 @@ const PlotWrapper: React.FC<Props> = ({
   // LineCut state
   const [isLineCutActive, setIsLineCutActive] = useState(false);
   const [lineCutAxis, setLineCutAxis] = useState<"x" | "y" | null>(null);
-  const [lineCutPreviewJson, setLineCutPreviewJson] =
-    useState<PlotlyJSON | null>(null);
+  const [lineCutPreviewJson, setLineCutPreviewJson] = useState<PlotlyJSON | null>(null);
   const [hoverData, setHoverData] = useState<{
     x: number;
     y: number;
@@ -547,8 +522,7 @@ const PlotWrapper: React.FC<Props> = ({
     }
   }, [lineCutAxis]);
 
-  const resolvedLineCutAxis =
-    lineCutAxis ?? lastLineCutAxisRef.current ?? ("x" as const);
+  const resolvedLineCutAxis = lineCutAxis ?? lastLineCutAxisRef.current ?? ("x" as const);
 
   // Keyboard listeners for LineCut mode selection (X/Y keys)
   useEffect(() => {
@@ -586,20 +560,14 @@ const PlotWrapper: React.FC<Props> = ({
   }, [isApplyingFilters]);
 
   // Sliders state
-  const [sliderConfig, setSliderConfig] = useState<
-    Record<string, SliderConfig>
-  >({});
+  const [sliderConfig, setSliderConfig] = useState<Record<string, SliderConfig>>({});
   // Track the last applied slider values to avoid unnecessary updates
   const lastAppliedSliders = useRef<Record<string, SliderConfig>>({});
 
   // Dataset update error state
-  const [datasetUpdateError, setDatasetUpdateError] = useState<string | null>(
-    null,
-  );
+  const [datasetUpdateError, setDatasetUpdateError] = useState<string | null>(null);
 
-  const displayStatus: PlotLiveStatus = datasetUpdateError
-    ? "error"
-    : plotStatus;
+  const displayStatus: PlotLiveStatus = datasetUpdateError ? "error" : plotStatus;
 
   const statusLabel: Record<PlotLiveStatus, string> = {
     live: "Live",
@@ -622,13 +590,8 @@ const PlotWrapper: React.FC<Props> = ({
   const [areAxesSwapped, setAreAxesSwapped] = useState(false);
 
   // Persistence hook
-  const {
-    getPlotState,
-    setPlotAppearance,
-    setPlotFilters,
-    setPlotSliders,
-    setPlotAxesSwapped,
-  } = usePlotStore();
+  const { getPlotState, setPlotAppearance, setPlotFilters, setPlotSliders, setPlotAxesSwapped } =
+    usePlotStore();
 
   const isArrayLikeValue = useCallback((value: unknown): boolean => {
     if (value == null) return false;
@@ -721,9 +684,7 @@ const PlotWrapper: React.FC<Props> = ({
 
         const shapeRaw = obj.shape;
 
-        const parseShape = (
-          shape: unknown,
-        ): { rows: number; cols: number } | null => {
+        const parseShape = (shape: unknown): { rows: number; cols: number } | null => {
           if (Array.isArray(shape) && shape.length >= 2) {
             const rows = Number(shape[0]);
             const cols = Number(shape[1]);
@@ -736,7 +697,7 @@ const PlotWrapper: React.FC<Props> = ({
           }
           if (typeof shape === "string") {
             const nums = shape
-              .replace(/[()\[\]\s]/g, "")
+              .replace(/[()[\]\s]/g, "")
               .split(",")
               .map((x) => Number(x))
               .filter((x) => Number.isFinite(x));
@@ -772,9 +733,7 @@ const PlotWrapper: React.FC<Props> = ({
 
       const first = rows[0];
       if (isArrayLikeValue(first)) {
-        return rows
-          .map((row) => toNumericArray(row))
-          .filter((row) => row.length > 0);
+        return rows.map((row) => toNumericArray(row)).filter((row) => row.length > 0);
       }
 
       const flat = toNumericArray(rows);
@@ -819,10 +778,7 @@ const PlotWrapper: React.FC<Props> = ({
         if (Array.isArray(point.pointIndex) && point.pointIndex.length >= 2) {
           fallbackYIndex = Number(point.pointIndex[0]) || 0;
           fallbackXIndex = Number(point.pointIndex[1]) || 0;
-        } else if (
-          Array.isArray(point.pointNumber) &&
-          point.pointNumber.length >= 2
-        ) {
+        } else if (Array.isArray(point.pointNumber) && point.pointNumber.length >= 2) {
           fallbackYIndex = Number(point.pointNumber[0]) || 0;
           fallbackXIndex = Number(point.pointNumber[1]) || 0;
         } else {
@@ -834,10 +790,8 @@ const PlotWrapper: React.FC<Props> = ({
           fallbackYIndex = flatIdx;
         }
 
-        const pointX =
-          typeof point.x === "number" ? point.x : Number(point.x || 0);
-        const pointY =
-          typeof point.y === "number" ? point.y : Number(point.y || 0);
+        const pointX = typeof point.x === "number" ? point.x : Number(point.x || 0);
+        const pointY = typeof point.y === "number" ? point.y : Number(point.y || 0);
 
         // Persist hover lock even if preview generation fails.
         const earlyHoverData = {
@@ -860,8 +814,7 @@ const PlotWrapper: React.FC<Props> = ({
         const activeTrace = hoveredTrace ?? fallbackHeatmapTrace;
 
         const zSource =
-          (activeTrace && activeTrace["z"]) ||
-          (fallbackHeatmapTrace && fallbackHeatmapTrace["z"]);
+          (activeTrace && activeTrace["z"]) || (fallbackHeatmapTrace && fallbackHeatmapTrace["z"]);
 
         if (!zSource) {
           setLineCutPreviewJson(null);
@@ -869,12 +822,10 @@ const PlotWrapper: React.FC<Props> = ({
         }
 
         const xArr = toNumericArray(
-          (activeTrace && activeTrace["x"]) ||
-            customizedPlotJson.layout?.xaxis?.tickvals,
+          (activeTrace && activeTrace["x"]) || customizedPlotJson.layout?.xaxis?.tickvals,
         );
         const yArr = toNumericArray(
-          (activeTrace && activeTrace["y"]) ||
-            customizedPlotJson.layout?.yaxis?.tickvals,
+          (activeTrace && activeTrace["y"]) || customizedPlotJson.layout?.yaxis?.tickvals,
         );
         lastLineCutAxisDomainsRef.current = { x: xArr, y: yArr };
         const zRows = toNumeric2DArray(zSource);
@@ -913,27 +864,18 @@ const PlotWrapper: React.FC<Props> = ({
 
         const getZTitle = () => {
           const coloraxis = (customizedPlotJson.layout as any)?.coloraxis;
-          if (coloraxis?.colorbar?.title?.text)
-            return coloraxis.colorbar.title.text;
+          if (coloraxis?.colorbar?.title?.text) return coloraxis.colorbar.title.text;
           return "Intensity";
         };
 
         if (activeAxis === "x") {
-          previewY = zRows
-            .map((row) => row[xIndex])
-            .filter((v) => Number.isFinite(v));
-          previewX =
-            yArr.length > 0
-              ? yArr.slice(0, previewY.length)
-              : previewY.map((_, i) => i);
+          previewY = zRows.map((row) => row[xIndex]).filter((v) => Number.isFinite(v));
+          previewX = yArr.length > 0 ? yArr.slice(0, previewY.length) : previewY.map((_, i) => i);
           title = `Slice at X = ${typeof point.x === "number" ? point.x.toFixed(4) : String(point.x)}`;
         } else {
           const row = zRows[yIndex] || [];
           previewY = row.filter((v) => Number.isFinite(v));
-          previewX =
-            xArr.length > 0
-              ? xArr.slice(0, previewY.length)
-              : previewY.map((_, i) => i);
+          previewX = xArr.length > 0 ? xArr.slice(0, previewY.length) : previewY.map((_, i) => i);
           title = `Slice at Y = ${typeof point.y === "number" ? point.y.toFixed(4) : String(point.y)}`;
         }
 
@@ -1008,23 +950,14 @@ const PlotWrapper: React.FC<Props> = ({
       } | null = null;
 
       if (clickedPoint) {
-        const pointX =
-          typeof clickedPoint.x === "number"
-            ? clickedPoint.x
-            : Number(clickedPoint.x);
-        const pointY =
-          typeof clickedPoint.y === "number"
-            ? clickedPoint.y
-            : Number(clickedPoint.y);
+        const pointX = typeof clickedPoint.x === "number" ? clickedPoint.x : Number(clickedPoint.x);
+        const pointY = typeof clickedPoint.y === "number" ? clickedPoint.y : Number(clickedPoint.y);
 
         if (Number.isFinite(pointX) && Number.isFinite(pointY)) {
           let fallbackXIndex = 0;
           let fallbackYIndex = 0;
 
-          if (
-            Array.isArray(clickedPoint.pointIndex) &&
-            clickedPoint.pointIndex.length >= 2
-          ) {
+          if (Array.isArray(clickedPoint.pointIndex) && clickedPoint.pointIndex.length >= 2) {
             fallbackYIndex = Number(clickedPoint.pointIndex[0]) || 0;
             fallbackXIndex = Number(clickedPoint.pointIndex[1]) || 0;
           } else if (
@@ -1042,12 +975,10 @@ const PlotWrapper: React.FC<Props> = ({
           const clickedTrace = pointObj.data ?? pointObj.fullData;
 
           const xArr = toNumericArray(
-            (clickedTrace && clickedTrace["x"]) ||
-              customizedPlotJson.layout?.xaxis?.tickvals,
+            (clickedTrace && clickedTrace["x"]) || customizedPlotJson.layout?.xaxis?.tickvals,
           );
           const yArr = toNumericArray(
-            (clickedTrace && clickedTrace["y"]) ||
-              customizedPlotJson.layout?.yaxis?.tickvals,
+            (clickedTrace && clickedTrace["y"]) || customizedPlotJson.layout?.yaxis?.tickvals,
           );
 
           if (xArr.length || yArr.length) {
@@ -1066,21 +997,14 @@ const PlotWrapper: React.FC<Props> = ({
         }
       }
 
-      const activeHoverData =
-        clickSelection ?? hoverData ?? lastHoverDataRef.current;
+      const activeHoverData = clickSelection ?? hoverData ?? lastHoverDataRef.current;
 
       if (!activeAxis) {
-        showToast(
-          "LineCut Axis not detected. Hold X or Y and retry.",
-          "warning",
-        );
+        showToast("LineCut Axis not detected. Hold X or Y and retry.", "warning");
         return;
       }
       if (!activeHoverData) {
-        showToast(
-          "Hover coordinates not locked. Hover over points and retry.",
-          "warning",
-        );
+        showToast("Hover coordinates not locked. Hover over points and retry.", "warning");
         return;
       }
       if (!onAddPlot) {
@@ -1127,14 +1051,10 @@ const PlotWrapper: React.FC<Props> = ({
         const nxVar = normalizeAxisLabel(xVar);
         const nyVar = normalizeAxisLabel(yVar);
 
-        const xMatchesXVar =
-          nxTitle && (nxTitle.includes(nxVar) || nxVar.includes(nxTitle));
-        const xMatchesYVar =
-          nxTitle && (nxTitle.includes(nyVar) || nyVar.includes(nxTitle));
-        const yMatchesXVar =
-          nyTitle && (nyTitle.includes(nxVar) || nxVar.includes(nyTitle));
-        const yMatchesYVar =
-          nyTitle && (nyTitle.includes(nyVar) || nyVar.includes(nyTitle));
+        const xMatchesXVar = nxTitle && (nxTitle.includes(nxVar) || nxVar.includes(nxTitle));
+        const xMatchesYVar = nxTitle && (nxTitle.includes(nyVar) || nyVar.includes(nxTitle));
+        const yMatchesXVar = nyTitle && (nyTitle.includes(nxVar) || nxVar.includes(nyTitle));
+        const yMatchesYVar = nyTitle && (nyTitle.includes(nyVar) || nyVar.includes(nyTitle));
 
         const displayXVar =
           xMatchesXVar && !xMatchesYVar
@@ -1156,8 +1076,7 @@ const PlotWrapper: React.FC<Props> = ({
 
         const cutVar = activeAxis === "x" ? displayXVar : displayYVar;
         const remainVar = activeAxis === "x" ? displayYVar : displayXVar;
-        const cutVal =
-          activeAxis === "x" ? activeHoverData.x : activeHoverData.y;
+        const cutVal = activeAxis === "x" ? activeHoverData.x : activeHoverData.y;
 
         // Keep slider editable in the created LinePlot by preserving range/step.
         const sourceCutSlider =
@@ -1213,10 +1132,7 @@ const PlotWrapper: React.FC<Props> = ({
               min: sourceCutSlider.min,
               max: sourceCutSlider.max,
               step: sourceCutSlider.step > 0 ? sourceCutSlider.step : 1,
-              value: Math.min(
-                sourceCutSlider.max,
-                Math.max(sourceCutSlider.min, cutVal),
-              ),
+              value: Math.min(sourceCutSlider.max, Math.max(sourceCutSlider.min, cutVal)),
             }
           : domainFallbackSlider || {
               // Final fallback if domain metadata is missing.
@@ -1270,10 +1186,7 @@ const PlotWrapper: React.FC<Props> = ({
           filters_opts: filtersOpts,
         });
 
-        showToast(
-          `LinePlot created at ${cutVar}=${cutVal.toFixed(4)}`,
-          "success",
-        );
+        showToast(`LinePlot created at ${cutVar}=${cutVal.toFixed(4)}`, "success");
       } catch (err: any) {
         showToast(`Failed to create linecut: ${err.message}`, "error");
       }
@@ -1285,8 +1198,8 @@ const PlotWrapper: React.FC<Props> = ({
       areAxesSwapped,
       appliedFilters,
       availableSliders,
-      customizedPlotJson.layout?.xaxis?.tickvals,
-      customizedPlotJson.layout?.yaxis?.tickvals,
+      customizedPlotJson.layout?.xaxis,
+      customizedPlotJson.layout?.yaxis,
       getClosestIndex,
       onAddPlot,
       plotConfig,
@@ -1299,9 +1212,7 @@ const PlotWrapper: React.FC<Props> = ({
   // Load persisted state when component mounts or plot config changes
   useEffect(() => {
     if (plotConfig?.id) {
-      const plotState = getPlotState(plotConfig.id) as
-        | PlotPersistentState
-        | undefined;
+      const plotState = getPlotState(plotConfig.id) as PlotPersistentState | undefined;
       if (plotState) {
         if (plotState.appearance_settings) {
           const normalized = mergeAppearanceDefaults(
@@ -1329,12 +1240,10 @@ const PlotWrapper: React.FC<Props> = ({
         // No persisted state, but check if plotConfig has filter or slider settings
         if (plotConfig.filters_order && plotConfig.filters_order.length > 0) {
           // Convert backend filter config to UI filter format
-          const filtersFromConfig = plotConfig.filters_order.map(
-            (filterName) => ({
-              name: filterName,
-              options: plotConfig.filters_opts?.[filterName] || {},
-            }),
-          ) as AppliedFilter[];
+          const filtersFromConfig = plotConfig.filters_order.map((filterName) => ({
+            name: filterName,
+            options: plotConfig.filters_opts?.[filterName] || {},
+          })) as AppliedFilter[];
 
           console.log("Loaded filters from plot config:", filtersFromConfig);
 
@@ -1359,11 +1268,15 @@ const PlotWrapper: React.FC<Props> = ({
       }
     }
   }, [
-    plotConfig?.id,
-    plotConfig?.filters_order,
-    plotConfig?.filters_opts,
     getPlotState,
+    onSwapAxesChange,
+    plotConfig?.filters_opts,
+    plotConfig?.filters_order,
+    plotConfig?.id,
+    plotConfig?.slider,
     plotType,
+    setPlotFilters,
+    setPlotSliders,
   ]); // Don't include originalPlotJson to avoid loops
 
   // Initialize when plotJson prop changes (new plot loaded)
@@ -1382,10 +1295,7 @@ const PlotWrapper: React.FC<Props> = ({
 
   // Function to apply appearance settings to plotly JSON
   const applyAppearanceSettings = useCallback(
-    (
-      originalPlotJson: PlotlyJSON,
-      settings: PlotAppearanceSettings,
-    ): PlotlyJSON => {
+    (originalPlotJson: PlotlyJSON, settings: PlotAppearanceSettings): PlotlyJSON => {
       // Shallow-clone the top level so trace metadata (colorscale, zmin, line…) and
       // layout properties can be updated without mutating the source object, and
       // without deep-cloning the large data arrays.
@@ -1393,16 +1303,13 @@ const PlotWrapper: React.FC<Props> = ({
 
       // Apply to data traces
       if (originalPlotJson.data && originalPlotJson.data.length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         updatedPlotJson.data = originalPlotJson.data.map((trace: any) => {
           const updatedTrace = { ...trace };
 
           // Apply heatmap settings
           if (trace.type === "heatmap" && settings.hmap) {
             // If trace is not using a shared coloraxis, set per-trace fallback
-            updatedTrace.colorscale = getColorscaleData(
-              settings.hmap.colorscale,
-            );
+            updatedTrace.colorscale = getColorscaleData(settings.hmap.colorscale);
             if (settings.hmap.rangecolor) {
               // Convert percentages (0-100) to actual z-values.
               // Try multiple sources for the data bounds in priority order:
@@ -1425,8 +1332,7 @@ const PlotWrapper: React.FC<Props> = ({
                 const zData = trace.z as any;
                 const isNested =
                   Array.isArray(zData[0]) ||
-                  (ArrayBuffer.isView(zData[0]) &&
-                    !(zData[0] instanceof DataView));
+                  (ArrayBuffer.isView(zData[0]) && !(zData[0] instanceof DataView));
 
                 if (isNested) {
                   for (let i = 0; i < zData.length; i++) {
@@ -1452,10 +1358,8 @@ const PlotWrapper: React.FC<Props> = ({
 
               if (zMin !== Infinity && zMax !== -Infinity) {
                 const range = zMax - zMin;
-                updatedTrace.zmin =
-                  zMin + (range * settings.hmap.rangecolor[0]) / 100;
-                updatedTrace.zmax =
-                  zMin + (range * settings.hmap.rangecolor[1]) / 100;
+                updatedTrace.zmin = zMin + (range * settings.hmap.rangecolor[0]) / 100;
+                updatedTrace.zmax = zMin + (range * settings.hmap.rangecolor[1]) / 100;
                 updatedTrace.zauto = false;
               } else {
                 // Could not determine data bounds – let Plotly auto-range.
@@ -1513,9 +1417,7 @@ const PlotWrapper: React.FC<Props> = ({
         }
         // When using heatmaps built by the backend, traces use a shared coloraxis.
         // Update layout.coloraxis so the colorscale actually changes.
-        const hasHeatmap = (updatedPlotJson.data || []).some(
-          (t: Data) => t.type === "heatmap",
-        );
+        const hasHeatmap = (updatedPlotJson.data || []).some((t: Data) => t.type === "heatmap");
         if (hasHeatmap && settings.hmap) {
           type LayoutWithColorAxis = {
             coloraxis?: {
@@ -1525,8 +1427,7 @@ const PlotWrapper: React.FC<Props> = ({
               [k: string]: unknown;
             };
           };
-          const layoutRef = updatedPlotJson.layout as Partial<Layout> &
-            LayoutWithColorAxis;
+          const layoutRef = updatedPlotJson.layout as Partial<Layout> & LayoutWithColorAxis;
           const existing = (layoutRef.coloraxis || {}) as NonNullable<
             LayoutWithColorAxis["coloraxis"]
           >;
@@ -1534,8 +1435,9 @@ const PlotWrapper: React.FC<Props> = ({
             ...existing,
           };
           // Update scale - use the actual colorscale data array from JSON
-          (newColoraxis as { colorscale?: unknown }).colorscale =
-            getColorscaleData(settings.hmap.colorscale);
+          (newColoraxis as { colorscale?: unknown }).colorscale = getColorscaleData(
+            settings.hmap.colorscale,
+          );
           // Update or clear range
           if (settings.hmap.rangecolor) {
             // Map percentages to actual data-space bounds.
@@ -1576,8 +1478,7 @@ const PlotWrapper: React.FC<Props> = ({
                     const zData = trace.z as any;
                     const isNested =
                       Array.isArray(zData[0]) ||
-                      (ArrayBuffer.isView(zData[0]) &&
-                        !(zData[0] instanceof DataView));
+                      (ArrayBuffer.isView(zData[0]) && !(zData[0] instanceof DataView));
 
                     if (isNested) {
                       for (let i = 0; i < zData.length; i++) {
@@ -1590,10 +1491,7 @@ const PlotWrapper: React.FC<Props> = ({
                           }
                         }
                       }
-                    } else if (
-                      Array.isArray(zData) ||
-                      ArrayBuffer.isView(zData)
-                    ) {
+                    } else if (Array.isArray(zData) || ArrayBuffer.isView(zData)) {
                       for (let i = 0; i < (zData as any).length; i++) {
                         const val = +(zData as any)[i];
                         if (!isNaN(val)) {
@@ -1747,9 +1645,7 @@ const PlotWrapper: React.FC<Props> = ({
   }, [plotConfig?.id]);
 
   // Throttled onUpdateConfig to prevent excessive backend calls
-  const throttledUpdateConfig = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
+  const throttledUpdateConfig = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleUpdateConfig = useCallback(
     (config: Partial<PlotConfiguration>) => {
@@ -1789,8 +1685,7 @@ const PlotWrapper: React.FC<Props> = ({
       }
     };
     window.addEventListener("plot-squarify", handler as EventListener);
-    return () =>
-      window.removeEventListener("plot-squarify", handler as EventListener);
+    return () => window.removeEventListener("plot-squarify", handler as EventListener);
   }, []);
 
   // Handle dataset changes by reapplying current filters/sliders with new dataset
@@ -1798,10 +1693,7 @@ const PlotWrapper: React.FC<Props> = ({
 
   // Helper function to compare filters and sliders to prevent unnecessary operations
   const filtersOrSlidersChanged = useCallback(
-    (
-      newFilters: AppliedFilter[],
-      newSliders?: Record<string, SliderConfig>,
-    ): boolean => {
+    (newFilters: AppliedFilter[], newSliders?: Record<string, SliderConfig>): boolean => {
       // Compare filters
       if (newFilters.length !== appliedFilters.length) {
         return true;
@@ -1811,8 +1703,7 @@ const PlotWrapper: React.FC<Props> = ({
         const currentFilter = appliedFilters[index];
         return (
           newFilter.name !== currentFilter?.name ||
-          JSON.stringify(newFilter.options) !==
-            JSON.stringify(currentFilter?.options)
+          JSON.stringify(newFilter.options) !== JSON.stringify(currentFilter?.options)
         );
       });
 
@@ -1855,8 +1746,7 @@ const PlotWrapper: React.FC<Props> = ({
       if (!updateRequest) return;
 
       const { filters, sliders, swapAxesOverride } = updateRequest;
-      const shouldSwapAxes =
-        plotType === "heatmap" && (swapAxesOverride ?? areAxesSwapped);
+      const shouldSwapAxes = plotType === "heatmap" && (swapAxesOverride ?? areAxesSwapped);
 
       // Always use local filter application to avoid plot reload and modal closure
       // This decouples filter application from plot refresh
@@ -1907,21 +1797,16 @@ const PlotWrapper: React.FC<Props> = ({
           });
 
         const shouldUseSliderPath =
-          hasSliderValuesChanged ||
-          (isSliderChange && Object.keys(sliderConfig).length === 0);
+          hasSliderValuesChanged || (isSliderChange && Object.keys(sliderConfig).length === 0);
 
         if (shouldUseSliderPath) {
           // Use new slider API for slider changes with filters
           try {
             if (!plotConfig) {
-              throw new Error(
-                "Plot configuration not available for slider operation",
-              );
+              throw new Error("Plot configuration not available for slider operation");
             }
             if (!activePlotRef) {
-              throw new Error(
-                "Plot reference not available for transform operation",
-              );
+              throw new Error("Plot reference not available for transform operation");
             }
 
             console.log("[PlotWrapper] Starting slider API call");
@@ -1961,9 +1846,7 @@ const PlotWrapper: React.FC<Props> = ({
             // Clear loading overlay after a brief delay to ensure smooth transition
             setTimeout(() => {
               // if (fallbackTimer) clearTimeout(fallbackTimer);
-              console.log(
-                "[PlotWrapper] Clearing isApplyingFilters after successful operation",
-              );
+              console.log("[PlotWrapper] Clearing isApplyingFilters after successful operation");
               setIsApplyingFilters(false);
             }, 100);
             lastAppliedSliders.current = { ...appliedSliderConfig };
@@ -1995,14 +1878,10 @@ const PlotWrapper: React.FC<Props> = ({
               // No filters but have sliders - use slider API to get sliced data without filters
               try {
                 if (!plotConfig) {
-                  throw new Error(
-                    "Plot configuration not available for slider operation",
-                  );
+                  throw new Error("Plot configuration not available for slider operation");
                 }
                 if (!activePlotRef) {
-                  throw new Error(
-                    "Plot reference not available for transform operation",
-                  );
+                  throw new Error("Plot reference not available for transform operation");
                 }
 
                 const result = await PlotAPI.transformPlot({
@@ -2046,14 +1925,8 @@ const PlotWrapper: React.FC<Props> = ({
 
                 showToast("Filters reset, sliders maintained", "success");
               } catch (error) {
-                console.error(
-                  "Error applying sliders after filter reset:",
-                  error,
-                );
-                showToast(
-                  "Failed to apply sliders after filter reset",
-                  "error",
-                );
+                console.error("Error applying sliders after filter reset:", error);
+                showToast("Failed to apply sliders after filter reset", "error");
                 // Clear loading state on error
                 setIsApplyingFilters(false);
               }
@@ -2062,9 +1935,7 @@ const PlotWrapper: React.FC<Props> = ({
               // otherwise reset to the original local payload.
               if (shouldSwapAxes) {
                 if (!activePlotRef) {
-                  throw new Error(
-                    "Plot reference not available for transform operation",
-                  );
+                  throw new Error("Plot reference not available for transform operation");
                 }
 
                 const result = await PlotAPI.transformPlot({
@@ -2129,17 +2000,14 @@ const PlotWrapper: React.FC<Props> = ({
                 handleUpdateConfig({
                   filters_order: [],
                   filters_opts: {},
-                  slider:
-                    sliders && Object.keys(sliders).length > 0 ? sliders : {},
+                  slider: sliders && Object.keys(sliders).length > 0 ? sliders : {},
                 });
               }
             }, 200);
           } else {
             // Filters but no sliders - use filter API
             if (!activePlotRef) {
-              throw new Error(
-                "Plot reference not available for transform operation",
-              );
+              throw new Error("Plot reference not available for transform operation");
             }
 
             console.log("[PlotWrapper] Starting filter API call");
@@ -2204,9 +2072,7 @@ const PlotWrapper: React.FC<Props> = ({
       } catch (error) {
         console.error("Error applying filters:", error);
         showToast(
-          `Failed to apply filters: ${
-            error instanceof Error ? error.message : "Unknown error"
-          }`,
+          `Failed to apply filters: ${error instanceof Error ? error.message : "Unknown error"}`,
           "error",
           5000,
         );
@@ -2235,10 +2101,7 @@ const PlotWrapper: React.FC<Props> = ({
 
   // Simplified filter/slider handler with smart comparison to prevent unnecessary operations
   const handleFiltersApply = useCallback(
-    async (
-      filters: AppliedFilter[],
-      sliders?: Record<string, SliderConfig>,
-    ) => {
+    async (filters: AppliedFilter[], sliders?: Record<string, SliderConfig>) => {
       // Prevent overlapping operations
       if (isApplyingFilters) {
         // console.log("[PlotWrapper] Operation already in progress, skipping");
@@ -2247,15 +2110,11 @@ const PlotWrapper: React.FC<Props> = ({
 
       // Smart comparison to prevent unnecessary operations when values haven't changed
       if (!filtersOrSlidersChanged(filters, sliders)) {
-        console.log(
-          "[PlotWrapper] Filters/sliders unchanged, skipping operation",
-        );
+        console.log("[PlotWrapper] Filters/sliders unchanged, skipping operation");
         return;
       }
 
-      console.log(
-        "[PlotWrapper] Filters/sliders changed, proceeding with operation",
-      );
+      console.log("[PlotWrapper] Filters/sliders changed, proceeding with operation");
 
       // Execute immediately without debouncing to fix refresh loop
       await executeFiltersApply({ filters, sliders });
@@ -2331,9 +2190,7 @@ const PlotWrapper: React.FC<Props> = ({
             try {
               if (isSliderChange) {
                 if (!nextPlotRef) {
-                  throw new Error(
-                    "Plot reference not available for transform operation",
-                  );
+                  throw new Error("Plot reference not available for transform operation");
                 }
 
                 // Use unified transform API to apply both filters and sliders
@@ -2358,9 +2215,7 @@ const PlotWrapper: React.FC<Props> = ({
                 setCustomizedPlotJson(slicedWithAppearance);
               } else if (appliedFilters.length > 0) {
                 if (!nextPlotRef) {
-                  throw new Error(
-                    "Plot reference not available for transform operation",
-                  );
+                  throw new Error("Plot reference not available for transform operation");
                 }
 
                 // Use unified transform API for filters only
@@ -2400,10 +2255,7 @@ const PlotWrapper: React.FC<Props> = ({
                   slider: isSliderChange ? sliderConfig : {},
                 });
 
-                if (
-                  fallbackPlotResponse.success &&
-                  fallbackPlotResponse.plots.length > 0
-                ) {
+                if (fallbackPlotResponse.success && fallbackPlotResponse.plots.length > 0) {
                   const fallbackPlot = fallbackPlotResponse.plots[0];
                   const fallbackPlotJson = fallbackPlot.plotJson as PlotlyJSON;
                   setBasePlotJson(fallbackPlotJson);
@@ -2414,8 +2266,7 @@ const PlotWrapper: React.FC<Props> = ({
                   setCustomizedPlotJson(fallbackWithAppearance);
                 } else {
                   throw new Error(
-                    fallbackPlotResponse.message ||
-                      "Fallback plot request returned no plots",
+                    fallbackPlotResponse.message || "Fallback plot request returned no plots",
                   );
                 }
               } catch (fallbackError) {
@@ -2474,12 +2325,9 @@ const PlotWrapper: React.FC<Props> = ({
           // Check if it's a variable not found error and provide helpful message
           if (
             response.message &&
-            (response.message.includes("not found") ||
-              response.message.includes("KeyError"))
+            (response.message.includes("not found") || response.message.includes("KeyError"))
           ) {
-            const missingVars = plotConfig
-              ? [...plotConfig.indeps, ...plotConfig.deps]
-              : [];
+            const missingVars = plotConfig ? [...plotConfig.indeps, ...plotConfig.deps] : [];
             setDatasetUpdateError(
               `Cannot update to new dataset: Variables [${missingVars.join(
                 ", ",
@@ -2487,28 +2335,18 @@ const PlotWrapper: React.FC<Props> = ({
             );
           } else {
             setDatasetUpdateError(
-              `Failed to update to new dataset: ${
-                response.message || "Unknown error"
-              }`,
+              `Failed to update to new dataset: ${response.message || "Unknown error"}`,
             );
           }
         }
       } catch (error) {
-        console.error(
-          `[PlotWrapper] Error updating data source to ${newFpath}:`,
-          error,
-        );
+        console.error(`[PlotWrapper] Error updating data source to ${newFpath}:`, error);
 
         // Provide user-friendly error message for variable compatibility issues
         let errorMessage = "Failed to update to new dataset";
         if (error instanceof Error) {
-          if (
-            error.message.includes("not found") ||
-            error.message.includes("KeyError")
-          ) {
-            const missingVars = plotConfig
-              ? [...plotConfig.indeps, ...plotConfig.deps]
-              : [];
+          if (error.message.includes("not found") || error.message.includes("KeyError")) {
+            const missingVars = plotConfig ? [...plotConfig.indeps, ...plotConfig.deps] : [];
             errorMessage = `Cannot update to new dataset: Variables [${missingVars.join(
               ", ",
             )}] not found in the selected dataset. Please select a dataset that contains these variables or create a new plot.`;
@@ -2538,24 +2376,16 @@ const PlotWrapper: React.FC<Props> = ({
 
     // Skip updates if filters are currently being applied to prevent race conditions
     if (isApplyingFilters) {
-      console.log(
-        `[PlotWrapper] Skipping dataset update while filters are being applied`,
-      );
+      console.log(`[PlotWrapper] Skipping dataset update while filters are being applied`);
       return;
     }
 
     // Only trigger updateDataSource if this is a dataset cycle (not initial plot creation)
-    if (
-      currentFpath &&
-      prevFpathRef.current &&
-      currentFpath !== prevFpathRef.current
-    ) {
+    if (currentFpath && prevFpathRef.current && currentFpath !== prevFpathRef.current) {
       console.log(
         `[PlotWrapper] Dataset path changed from ${prevFpathRef.current} to ${currentFpath}`,
       );
-      console.log(
-        `[PlotWrapper] Updating data source to new dataset while preserving UI state`,
-      );
+      console.log(`[PlotWrapper] Updating data source to new dataset while preserving UI state`);
 
       // Update the data source by fetching fresh plot data from the new dataset
       // This preserves all UI state (filters, sliders, modals) while changing the underlying data
@@ -2639,17 +2469,8 @@ const PlotWrapper: React.FC<Props> = ({
       lineCutForcedWidthRef.current = true;
     }
 
-    showToast(
-      "LineCut active. Default mode: Vertical (X). Press X/Y to switch.",
-      "info",
-    );
-  }, [
-    isHeatmapPlot,
-    isApplyingFilters,
-    isMaximized,
-    dispatchPlotWidthPreset,
-    showToast,
-  ]);
+    showToast("LineCut active. Default mode: Vertical (X). Press X/Y to switch.", "info");
+  }, [isHeatmapPlot, isApplyingFilters, isMaximized, dispatchPlotWidthPreset, showToast]);
 
   const toggleLineCutMode = useCallback(() => {
     if (isLineCutActive) {
@@ -2698,19 +2519,13 @@ const PlotWrapper: React.FC<Props> = ({
           setOriginalPlotJson(newPlot.plotJson);
           setBasePlotJson(newPlot.plotJson);
 
-          const resetPlotJson = applyAppearanceSettings(
-            newPlot.plotJson,
-            defaultSettings,
-          );
+          const resetPlotJson = applyAppearanceSettings(newPlot.plotJson, defaultSettings);
           setCustomizedPlotJson(resetPlotJson);
           showToast("Plot successfully reset to original state", "success");
         } else {
           // Fallback to local reset if API fails
           setBasePlotJson(originalPlotJson);
-          const resetPlotJson = applyAppearanceSettings(
-            originalPlotJson,
-            defaultSettings,
-          );
+          const resetPlotJson = applyAppearanceSettings(originalPlotJson, defaultSettings);
           setCustomizedPlotJson(resetPlotJson);
           showToast("Reset locally (backend refresh failed)", "warning");
         }
@@ -2784,6 +2599,7 @@ const PlotWrapper: React.FC<Props> = ({
   };
 
   // Per-plot keyboard shortcut actions dispatched from Viewer.
+  /* eslint-disable react-hooks/exhaustive-deps -- existing inline handler dependencies rebind this listener every render */
   useEffect(() => {
     const handler = (e: Event) => {
       const ce = e as CustomEvent<{
@@ -2827,11 +2643,7 @@ const PlotWrapper: React.FC<Props> = ({
     };
 
     window.addEventListener("plot-shortcut-action", handler as EventListener);
-    return () =>
-      window.removeEventListener(
-        "plot-shortcut-action",
-        handler as EventListener,
-      );
+    return () => window.removeEventListener("plot-shortcut-action", handler as EventListener);
   }, [
     plotConfig?.id,
     enterLineCutMode,
@@ -2841,6 +2653,7 @@ const PlotWrapper: React.FC<Props> = ({
     handleAppearanceSettingsOpen,
     handleMaximize,
   ]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const applyBGCorrNow = useCallback(
     async (points: any[]) => {
@@ -2875,13 +2688,7 @@ const PlotWrapper: React.FC<Props> = ({
       // setIsBGCorrActive(false);
       setBgCorrPoints([]);
     },
-    [
-      appliedFilters,
-      executeFiltersApply,
-      sliderConfig,
-      bgCorrMode,
-      isHeatmapPlot,
-    ],
+    [appliedFilters, executeFiltersApply, sliderConfig, bgCorrMode, isHeatmapPlot],
   );
 
   // Visual feedback for BG Corr points
@@ -2934,9 +2741,7 @@ const PlotWrapper: React.FC<Props> = ({
       type: isHeatmapPlot && is3DMode ? "scatter3d" : "scatter",
       mode: "markers",
       marker: {
-        color: bgCorrPoints.map((_, i) =>
-          i === bgCorrPoints.length - 1 ? "red" : "#888",
-        ),
+        color: bgCorrPoints.map((_, i) => (i === bgCorrPoints.length - 1 ? "red" : "#888")),
         size: isHeatmapPlot && is3DMode ? 10 : 10,
         symbol: isHeatmapPlot && is3DMode ? "circle" : "cross",
         line: { color: "white", width: 2 },
@@ -3035,14 +2840,7 @@ const PlotWrapper: React.FC<Props> = ({
       ...basePlot,
       data: traces,
     };
-  }, [
-    customizedPlotJson,
-    bgCorrPoints,
-    isBGCorrActive,
-    isHeatmapPlot,
-    is3DMode,
-    bgCorrMode,
-  ]);
+  }, [customizedPlotJson, bgCorrPoints, isBGCorrActive, isHeatmapPlot, is3DMode, bgCorrMode]);
 
   const plotWithLineCutGuide = useMemo(() => {
     const basePlot = isBGCorrActive ? plotWithBGMarkers : customizedPlotJson;
@@ -3107,10 +2905,7 @@ const PlotWrapper: React.FC<Props> = ({
       ...basePlot,
       layout: {
         ...basePlot.layout,
-        shapes: [
-          ...(((basePlot.layout as any)?.shapes as any[]) ?? []),
-          ...normalizedGuideShapes,
-        ],
+        shapes: [...(((basePlot.layout as any)?.shapes as any[]) ?? []), ...normalizedGuideShapes],
       },
       // Prevent Plotly's shape-edit cursor/handles from stealing LineCut clicks.
       config: {
@@ -3134,10 +2929,7 @@ const PlotWrapper: React.FC<Props> = ({
     const point = event.points[0];
 
     // Ignore clicks on existing BG markers
-    if (
-      point.data.name === "BG Corr Points" ||
-      point.data.name === "BG Corr Line"
-    ) {
+    if (point.data.name === "BG Corr Points" || point.data.name === "BG Corr Line") {
       return;
     }
 
@@ -3147,12 +2939,8 @@ const PlotWrapper: React.FC<Props> = ({
     // Plotly heatmap click events expose indices via pointIndex = [row, col].
     // The .row / .col properties do not exist on 2-D heatmap points.
     const rawPointIdx = (point as any).pointIndex;
-    const rowIdx = Array.isArray(rawPointIdx)
-      ? rawPointIdx[0]
-      : (point as any).row;
-    const colIdx = Array.isArray(rawPointIdx)
-      ? rawPointIdx[1]
-      : (point as any).col;
+    const rowIdx = Array.isArray(rawPointIdx) ? rawPointIdx[0] : (point as any).row;
+    const colIdx = Array.isArray(rawPointIdx) ? rawPointIdx[1] : (point as any).col;
 
     if (isNaN(x) || isNaN(y)) {
       showToast("Invalid point data", "error");
@@ -3210,27 +2998,14 @@ const PlotWrapper: React.FC<Props> = ({
   const startThemePaintFromThis = useCallback(() => {
     if (!plotConfig?.id) return;
     activateTheme(plotConfig.id, plotType, appearanceSettings);
-    showToast(
-      "Theme selected — hold Shift and click target plots to apply",
-      "info",
-    );
+    showToast("Theme selected — hold Shift and click target plots to apply", "info");
   }, [activateTheme, plotConfig?.id, plotType, appearanceSettings, showToast]);
 
   const startFilterPaintFromThis = useCallback(() => {
     if (!plotConfig?.id) return;
     activateFilter(plotConfig.id, plotType, appliedFilters, sliderConfig);
-    showToast(
-      "Filter selection made — hold Shift and click target plots to apply",
-      "info",
-    );
-  }, [
-    activateFilter,
-    plotConfig?.id,
-    plotType,
-    appliedFilters,
-    sliderConfig,
-    showToast,
-  ]);
+    showToast("Filter selection made — hold Shift and click target plots to apply", "info");
+  }, [activateFilter, plotConfig?.id, plotType, appliedFilters, sliderConfig, showToast]);
 
   const handlePaintTargetClick = useCallback(() => {
     const mode = usePainterStore.getState().mode;
@@ -3252,12 +3027,9 @@ const PlotWrapper: React.FC<Props> = ({
         showToast("Theme applied", "success");
       }
     } else if (mode === "filter") {
-      const filters = usePainterStore.getState().sourceFilters as
-        | AppliedFilter[]
-        | undefined;
+      const filters = usePainterStore.getState().sourceFilters as AppliedFilter[] | undefined;
       const sliders = usePainterStore.getState().sourceSliders as
-        | Record<string, SliderConfig>
-        | undefined;
+        Record<string, SliderConfig> | undefined;
       if (filters) {
         handleFiltersApply(filters, sliders);
         if (plotConfig?.id) {
@@ -3312,18 +3084,14 @@ const PlotWrapper: React.FC<Props> = ({
                   <button
                     onClick={handleSwapAxes}
                     className={`relative p-1.5 rounded transition-colors duration-150 ${
-                      areAxesSwapped
-                        ? "bg-blue-100 text-blue-600"
-                        : "hover:bg-gray-200"
+                      areAxesSwapped ? "bg-blue-100 text-blue-600" : "hover:bg-gray-200"
                     }`}
                     title="Swap X & Y Axes"
                     disabled={isApplyingFilters}
                   >
                     <ArrowLeftRight
                       size={16}
-                      className={
-                        areAxesSwapped ? "text-blue-600" : "text-gray-600"
-                      }
+                      className={areAxesSwapped ? "text-blue-600" : "text-gray-600"}
                     />
                   </button>
                 </Tooltip>
@@ -3344,9 +3112,7 @@ const PlotWrapper: React.FC<Props> = ({
                   >
                     <Split
                       size={16}
-                      className={
-                        isLineCutActive ? "text-blue-600" : "text-gray-600"
-                      }
+                      className={isLineCutActive ? "text-blue-600" : "text-gray-600"}
                     />
                   </button>
                 </Tooltip>
@@ -3366,9 +3132,7 @@ const PlotWrapper: React.FC<Props> = ({
                 >
                   <Crosshair
                     size={16}
-                    className={
-                      isBGCorrActive ? "text-blue-600" : "text-gray-600"
-                    }
+                    className={isBGCorrActive ? "text-blue-600" : "text-gray-600"}
                   />
                 </button>
               </Tooltip>
@@ -3389,16 +3153,14 @@ const PlotWrapper: React.FC<Props> = ({
           <div className="plot-content" style={{ height: "calc(100% - 52px)" }}>
             <div className="flex h-full w-full relative">
               <div
-                className={`p-2 pb-0 h-full relative ${
-                  isSquareMode ? "square-mode" : ""
-                }`}
+                className={`p-2 pb-0 h-full relative ${isSquareMode ? "square-mode" : ""}`}
                 style={{
                   width: isLineCutActive ? "50%" : "100%",
                   transition: "width 0.3s ease-in-out",
                 }}
               >
                 <div
-                  className="absolute top-3 left-3 z-20 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-2.5 py-1 shadow-sm"
+                  className="plot-status-badge absolute top-3 left-3 z-20 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-2.5 py-1 shadow-sm"
                   aria-label={`Status: ${statusLabel[displayStatus]}`}
                 >
                   <span
@@ -3435,8 +3197,7 @@ const PlotWrapper: React.FC<Props> = ({
                         </span>
                       </div>
                       <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
-                        {bgCorrPoints.length}{" "}
-                        {bgCorrPoints.length === 1 ? "point" : "points"}
+                        {bgCorrPoints.length} {bgCorrPoints.length === 1 ? "point" : "points"}
                       </span>
                     </div>
 
@@ -3481,9 +3242,7 @@ const PlotWrapper: React.FC<Props> = ({
                             >
                               <span className="inline-flex items-center gap-1 justify-center w-full">
                                 {m.label}
-                                {m.disabled && (
-                                  <span className="text-[9px]">WIP</span>
-                                )}
+                                {m.disabled && <span className="text-[9px]">WIP</span>}
                               </span>
                             </button>
                           ))}
@@ -3500,9 +3259,7 @@ const PlotWrapper: React.FC<Props> = ({
                         onClick={() => applyBGCorrNow(bgCorrPoints)}
                         disabled={
                           bgCorrPoints.length === 0 ||
-                          (isHeatmapPlot &&
-                            bgCorrMode === "plane" &&
-                            bgCorrPoints.length < 3)
+                          (isHeatmapPlot && bgCorrMode === "plane" && bgCorrPoints.length < 3)
                         }
                         className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold py-2 rounded-full transition-all shadow-md active:scale-[0.98]"
                       >
@@ -3540,9 +3297,7 @@ const PlotWrapper: React.FC<Props> = ({
                       <div className="text-red-600 font-semibold text-lg mb-2">
                         Dataset Update Failed
                       </div>
-                      <div className="text-gray-700 text-sm mb-4">
-                        {datasetUpdateError}
-                      </div>
+                      <div className="text-gray-700 text-sm mb-4">{datasetUpdateError}</div>
                       <button
                         onClick={() => setDatasetUpdateError(null)}
                         className="px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
@@ -3566,10 +3321,7 @@ const PlotWrapper: React.FC<Props> = ({
                         LineCut Preview
                       </div>
                       <span className="text-[11px] font-bold text-gray-600 uppercase">
-                        Mode:{" "}
-                        {resolvedLineCutAxis === "x"
-                          ? "Vertical"
-                          : "Horizontal"}
+                        Mode: {resolvedLineCutAxis === "x" ? "Vertical" : "Horizontal"}
                       </span>
                       <span className="text-[10px] font-bold text-gray-500 uppercase ml-2 border-l border-gray-200 pl-2">
                         State:{" "}
@@ -3600,9 +3352,7 @@ const PlotWrapper: React.FC<Props> = ({
                           <Scissors size={24} className="text-blue-400" />
                         </div>
                         <div>
-                          <p className="text-xs font-bold text-gray-600">
-                            Ready for LineCut
-                          </p>
+                          <p className="text-xs font-bold text-gray-600">Ready for LineCut</p>
                           <p className="text-[10px] text-gray-400 mt-1 max-w-[150px]">
                             Press{" "}
                             <kbd className="font-sans border px-1 rounded bg-white shadow-sm">
@@ -3655,11 +3405,9 @@ const PlotWrapper: React.FC<Props> = ({
       >
         {/* Plot content */}
         <div className="plot-content">
-          <div
-            className={`p-2 pb-0 relative ${isSquareMode ? "square-mode" : ""}`}
-          >
+          <div className={`p-2 pb-0 relative ${isSquareMode ? "square-mode" : ""}`}>
             <div
-              className="absolute top-3 left-3 z-20 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-2.5 py-1 shadow-sm"
+              className="plot-status-badge absolute top-3 left-3 z-20 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-2.5 py-1 shadow-sm"
               aria-label={`Status: ${statusLabel[displayStatus]}`}
             >
               <span
@@ -3676,11 +3424,7 @@ const PlotWrapper: React.FC<Props> = ({
               onRelayout={handleRelayout}
               onHover={handlePlotHover}
               onClick={
-                isLineCutActive
-                  ? handleLineCutClick
-                  : isBGCorrActive
-                    ? handlePlotClick
-                    : undefined
+                isLineCutActive ? handleLineCutClick : isBGCorrActive ? handlePlotClick : undefined
               }
             />
 
@@ -3691,9 +3435,7 @@ const PlotWrapper: React.FC<Props> = ({
                 <span className="text-[10px] font-bold text-blue-600 px-1 uppercase tracking-wider">
                   {bgCorrPoints.length === 0
                     ? "Pick Points"
-                    : `${bgCorrPoints.length} Pt${
-                        bgCorrPoints.length > 1 ? "s" : ""
-                      }`}
+                    : `${bgCorrPoints.length} Pt${bgCorrPoints.length > 1 ? "s" : ""}`}
                 </span>
 
                 <div className="flex items-center gap-1">
@@ -3721,9 +3463,7 @@ const PlotWrapper: React.FC<Props> = ({
                   <div className="text-red-600 font-semibold text-lg mb-2">
                     Dataset Update Failed
                   </div>
-                  <div className="text-gray-700 text-sm mb-4">
-                    {datasetUpdateError}
-                  </div>
+                  <div className="text-gray-700 text-sm mb-4">{datasetUpdateError}</div>
                   <button
                     onClick={() => setDatasetUpdateError(null)}
                     className="px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
@@ -3785,18 +3525,13 @@ const PlotWrapper: React.FC<Props> = ({
                   <button
                     onClick={() => onTogglePinned(!plotConfig?.pinned)}
                     className={`p-1.5 rounded transition-colors ${
-                      plotConfig?.pinned
-                        ? "bg-amber-100 hover:bg-amber-200"
-                        : "hover:bg-gray-300"
+                      plotConfig?.pinned ? "bg-amber-100 hover:bg-amber-200" : "hover:bg-gray-300"
                     }`}
                     title={plotConfig?.pinned ? "Unpin" : "Pin to measurement"}
                     aria-pressed={Boolean(plotConfig?.pinned)}
                   >
                     {plotConfig?.pinned ? (
-                      <Pin
-                        size={16}
-                        className="text-amber-600 fill-amber-500"
-                      />
+                      <Pin size={16} className="text-amber-600 fill-amber-500" />
                     ) : (
                       <PinOff size={16} className="text-gray-500" />
                     )}
@@ -3844,11 +3579,7 @@ const PlotWrapper: React.FC<Props> = ({
 
               {/* Appearance Settings */}
               <Tooltip
-                content={
-                  shiftHeld && hoverAppearanceBtn
-                    ? "Paint Appearance"
-                    : "Edit Appearance"
-                }
+                content={shiftHeld && hoverAppearanceBtn ? "Paint Appearance" : "Edit Appearance"}
                 position="left"
               >
                 <button
@@ -3863,17 +3594,11 @@ const PlotWrapper: React.FC<Props> = ({
                   onMouseEnter={() => setHoverAppearanceBtn(true)}
                   onMouseLeave={() => setHoverAppearanceBtn(false)}
                   className="relative p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
-                  title={
-                    shiftHeld && hoverAppearanceBtn
-                      ? "Paint Appearance"
-                      : "Edit Appearance"
-                  }
+                  title={shiftHeld && hoverAppearanceBtn ? "Paint Appearance" : "Edit Appearance"}
                 >
                   <Palette
                     size={16}
-                    className={`text-${
-                      shiftHeld && hoverAppearanceBtn ? "blue-600" : "gray-600"
-                    }`}
+                    className={`text-${shiftHeld && hoverAppearanceBtn ? "blue-600" : "gray-600"}`}
                   />
                   {shiftHeld && hoverAppearanceBtn && (
                     <span className="absolute -top-1 -left-1">
@@ -3888,7 +3613,11 @@ const PlotWrapper: React.FC<Props> = ({
                 content={
                   shiftHeld && hoverFiltersBtn
                     ? "Paint Filters"
-                    : "Apply Filters & Sliders"
+                    : appliedFilters.length > 0
+                      ? // Names only, in the order they are applied -- the full
+                        // filter strings live in the modal.
+                        `Filters: ${appliedFilters.map((f) => f.name).join(" → ")}`
+                      : "Apply Filters & Sliders"
                 }
                 position="left"
               >
@@ -3906,15 +3635,15 @@ const PlotWrapper: React.FC<Props> = ({
                   title={
                     shiftHeld && hoverFiltersBtn
                       ? "Paint Filters"
-                      : "Apply Filters & Sliders"
+                      : appliedFilters.length > 0
+                        ? `Filters: ${appliedFilters.map((f) => f.name).join(" → ")}`
+                        : "Apply Filters & Sliders"
                   }
                   disabled={isApplyingFilters}
                 >
                   <Filter
                     size={16}
-                    className={`text-${
-                      shiftHeld && hoverFiltersBtn ? "blue-600" : "gray-600"
-                    }`}
+                    className={`text-${shiftHeld && hoverFiltersBtn ? "blue-600" : "gray-600"}`}
                   />
                   {appliedFilters.length > 0 && (
                     <span className="absolute -top-1 -right-1 flex items-center gap-1">
@@ -3942,18 +3671,14 @@ const PlotWrapper: React.FC<Props> = ({
                   <button
                     onClick={handleSwapAxes}
                     className={`relative p-1.5 rounded transition-colors duration-150 ${
-                      areAxesSwapped
-                        ? "bg-blue-100 text-blue-600"
-                        : "hover:bg-gray-200"
+                      areAxesSwapped ? "bg-blue-100 text-blue-600" : "hover:bg-gray-200"
                     }`}
                     title="Swap X & Y Axes"
                     disabled={isApplyingFilters}
                   >
                     <ArrowLeftRight
                       size={16}
-                      className={
-                        areAxesSwapped ? "text-blue-600" : "text-gray-600"
-                      }
+                      className={areAxesSwapped ? "text-blue-600" : "text-gray-600"}
                     />
                   </button>
                 </Tooltip>
@@ -3974,9 +3699,7 @@ const PlotWrapper: React.FC<Props> = ({
                   >
                     <Split
                       size={16}
-                      className={
-                        isLineCutActive ? "text-blue-600" : "text-gray-600"
-                      }
+                      className={isLineCutActive ? "text-blue-600" : "text-gray-600"}
                     />
                     {isLineCutActive && (
                       <span className="absolute -top-1 -right-1 flex h-2 w-2">
@@ -4002,9 +3725,7 @@ const PlotWrapper: React.FC<Props> = ({
                 >
                   <Crosshair
                     size={16}
-                    className={
-                      isBGCorrActive ? "text-blue-600" : "text-gray-600"
-                    }
+                    className={isBGCorrActive ? "text-blue-600" : "text-gray-600"}
                   />
                   {isBGCorrActive && (
                     <span className="absolute -top-1 -right-1 flex h-2 w-2">
