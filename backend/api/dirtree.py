@@ -7,19 +7,17 @@ import asyncio
 import hashlib
 import os
 import subprocess  # Windows compat
-import xarray as xr
-
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
-from datetime import datetime, timezone
+
+import xarray as xr
 from fastapi import APIRouter, HTTPException
+
 
 # Local tool execs
 from .config import FD_EXEC, MAX_DEPTH  #  DU_EXEC, XARGS_EXEC | Windows compat
-
-# Local imports
-from .models import PathData
-from .logger import logger
+from . import live_measurements
 from .data_loader import (
     MEMORY_PROTOCOL,
     extract_measurement_id,
@@ -33,8 +31,10 @@ from .data_loader import (
     resolve_to_disk_path,
 )
 from .json_utils import sanitize_for_json
-from . import live_measurements
+from .logger import logger
 
+# Local imports
+from .models import PathData
 
 router = APIRouter()
 
@@ -526,34 +526,29 @@ def _memory_dataset_node(
         f"disk_path={disk_path}, ws_url={ws_url}, ended_at={ended_at}"
     )
 
-    if not disk_path:
-        logger.warning(
-            "Live dataset %s is registered without a disk path",
-            measurement_id,
-        )
-        return None
-
     timestamp_iso: Optional[str] = None
     last_modified: Optional[float] = None
 
     # Try to read metadata from disk path
-    try:
-        dataset = load_dataset_sync(str(disk_path))
-        raw_ts = dataset.attrs.get("Timestamp")
-        if isinstance(raw_ts, str):
-            try:
-                dt = datetime.fromisoformat(raw_ts)
-            except ValueError:
-                dt = datetime.utcnow()
-            timestamp_iso = dt.isoformat()
-            last_modified = dt.timestamp()
-        elif raw_ts is not None:
-            timestamp_iso = str(raw_ts)
-        dataset.close()
-    except Exception as exc:
-        logger.debug(
-            f"Could not read metadata for live dataset {measurement_id} from disk: {exc}"
-        )
+    if disk_path:
+        try:
+            dataset = load_dataset_sync(str(disk_path))
+            raw_ts = dataset.attrs.get("Timestamp")
+            if isinstance(raw_ts, str):
+                try:
+                    dt = datetime.fromisoformat(raw_ts)
+                except ValueError:
+                    dt = datetime.utcnow()
+                timestamp_iso = dt.isoformat()
+                last_modified = dt.timestamp()
+            elif raw_ts is not None:
+                timestamp_iso = str(raw_ts)
+            dataset.close()
+        except Exception as exc:
+            logger.debug(
+                f"Could not read metadata for live dataset {measurement_id} "
+                f"from disk: {exc}"
+            )
 
     # Fallback to started_at from database
     if timestamp_iso is None and started_at:
@@ -579,17 +574,19 @@ def _memory_dataset_node(
         f"(disk_path: {disk_path})"
     )
 
+    suffix = Path(str(disk_path)).suffix.lower() if disk_path else ""
+    display_name = f"{measurement_id}.zarr" if suffix == ".zarr" else measurement_id
+    tags = ["live" if ended_at is None else "ended"]
+    if suffix == ".zarr":
+        tags.insert(0, "zarr")
     node = {
         "id": f"file-memory-{measurement_id}",
-        "name": f"{measurement_id}.zarr",
+        "name": display_name,
         "path": path_value,
         "type": "file",
         "timestamp": timestamp_iso,
         "lastModified": last_modified,
-        "tags": [
-            "zarr",
-            "live" if ended_at is None else "ended",
-        ],
+        "tags": tags,
     }
 
     if disk_path:
@@ -1053,7 +1050,9 @@ def build_attrs_payload(data: xr.Dataset) -> Dict:
     for key in ATTR_KEYS:
         value = metadata.get(key, "N/A")
         attr_json[key] = (
-            value if isinstance(value, (str, int, float, bool, list, dict)) else str(value)
+            value
+            if isinstance(value, (str, int, float, bool, list, dict))
+            else str(value)
         )
 
     attr_json["independents"] = indeps

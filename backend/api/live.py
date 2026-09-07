@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Dict, List
 
 from fastapi import APIRouter, HTTPException
@@ -15,7 +16,9 @@ router = APIRouter(prefix="/live", tags=["live"])
 @router.get("/measurements")
 async def list_live_measurements() -> Dict[str, object]:
     """Return all active live measurements from SQLite DB."""
-    measurements = live_measurements.get_live_measurements()
+    # Reconciliation opens a real socket per producer, so it cannot run on
+    # the event loop the SPA polls once a second.
+    measurements = await asyncio.to_thread(live_measurements.get_live_measurements)
 
     results: List[Dict[str, object]] = []
     for m in measurements:

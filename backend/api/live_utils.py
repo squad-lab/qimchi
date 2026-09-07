@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any
+from typing import Any, Dict
 
+from qimchi_connect import registry as live_db
 
 # Local imports
-from .shared import live_db
 from .logger import logger
 
 
