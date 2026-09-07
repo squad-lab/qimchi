@@ -2,8 +2,8 @@ import os
 import asyncio
 import atexit
 import logging
-import plotly.io as pio
-from plotly import graph_objects as go
+import threading
+import time
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 
@@ -35,9 +35,11 @@ _export_timing_log = os.environ.get("EXPORT_TIMING_LOG", "false").lower() in (
     "yes",
 )
 
-# Feature flag: enable Kaleido warm-up on startup. Default: off.
-# Set ENABLE_KALEIDO_WARMUP=1/true/yes to enable.
-_enable_kaleido_warmup = os.environ.get("ENABLE_KALEIDO_WARMUP", "false").lower() in (
+# Warm the export workers on startup so the first exported image does not pay
+# for a worker process spawning and its Chrome booting. It runs off the event
+# loop and its failures are logged, so set ENABLE_KALEIDO_WARMUP=0 only to opt
+# out (a container with no usable Chrome, say).
+_enable_kaleido_warmup = os.environ.get("ENABLE_KALEIDO_WARMUP", "true").lower() in (
     "1",
     "true",
     "yes",
@@ -79,6 +81,44 @@ def _stop_kaleido_sync_server(context: str) -> None:
         logging.info("Kaleido sync server stopped for %s", context)
     except Exception:
         logging.exception("Failed to stop Kaleido sync server for %s", context)
+
+
+def _warm_export_pool(pool: ProcessPoolExecutor, workers: int) -> None:
+    """
+    Warm every export worker, off the event loop.
+
+    One task per worker, submitted together: the first render in a process
+    takes long enough that the pool keeps spawning rather than reusing the one
+    that is busy, so the tasks spread across the workers. Each renders an
+    empty plot into a temp directory through the real export path
+    (:func:`api.export.warm_export_worker`).
+
+    Args:
+        pool (ProcessPoolExecutor): The export pool to warm.
+        workers (int): How many workers it was created with.
+
+    """
+    try:
+        started = time.perf_counter()
+        futures = [pool.submit(export.warm_export_worker) for _ in range(workers)]
+        warmed = 0
+        slowest = 0.0
+        for future in futures:
+            try:
+                slowest = max(slowest, float(future.result(timeout=120) or 0.0))
+                warmed += 1
+            except Exception:
+                logging.exception("Kaleido warm-up task failed")
+        logging.info(
+            "Kaleido warm-up finished: %d/%d export workers in %.1fs "
+            "(slowest render %.1fs -- the wait the first export no longer pays)",
+            warmed,
+            workers,
+            time.perf_counter() - started,
+            slowest,
+        )
+    except Exception:
+        logging.exception("Kaleido warm-up could not run")
 
 
 def _init_export_worker() -> None:
@@ -140,18 +180,19 @@ async def lifespan(app: FastAPI):
             initializer=_init_export_worker,
         )
 
-        # Optionally warm up kaleido on startup to reduce first-request latency.
-        # Controlled by the ENABLE_KALEIDO_WARMUP environment variable; default
-        # is off to avoid extra startup cost and platform issues in containers.
+        # Warm the pool in the background. Warming this process instead would
+        # do nothing for exports: they run in the workers, which ProcessPool
+        # only spawns once work arrives.
         if _enable_kaleido_warmup:
-            try:
-                tiny = go.Figure({"data": [{"x": [0, 1], "y": [0, 1]}]})
-                pio.to_image(tiny, format="png")
-                logging.info("Kaleido warm-up successful (enabled)")
-            except Exception:
-                logging.exception("Kaleido warm-up failed (enabled)")
+            threading.Thread(
+                target=_warm_export_pool,
+                args=(app.state.export_pool, max_workers),
+                name="kaleido-warmup",
+                daemon=True,
+            ).start()
+            logging.info("Kaleido warm-up started for %d export worker(s)", max_workers)
         else:
-            logging.info("Kaleido warm-up skipped (ENABLE_KALEIDO_WARMUP not set)")
+            logging.info("Kaleido warm-up skipped (ENABLE_KALEIDO_WARMUP=0)")
     except Exception:
         logging.exception("Failed to create export ProcessPoolExecutor")
 

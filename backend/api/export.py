@@ -14,7 +14,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict
 
 import plotly.io as pio
 from fastapi import APIRouter, Request
@@ -254,6 +254,11 @@ def _export_plot_images_sync(
     # Create a zip archive
     tmp_zip = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
     tmp_zip.close()
+    export_meta = _library_metadata(dataset_path, dataset_uuid)
+    for p in saved_paths.values():
+        if str(p).lower().endswith(".png"):
+            _embed_png_metadata(p, export_meta)
+
     with zipfile.ZipFile(tmp_zip.name, "w", zipfile.ZIP_DEFLATED) as zf:
         for p in saved_paths.values():
             zf.write(p, arcname=Path(p).name)
@@ -262,6 +267,12 @@ def _export_plot_images_sync(
             zf.writestr("timings.json", timings_bytes)
         except Exception as e:
             logger.error(f"Failed to write timings.json into zip: {e}")
+        try:
+            # The same metadata the PNGs carry in their chunks, as a file --
+            # greppable, and it survives anything that re-encodes the image.
+            zf.writestr("metadata.json", json.dumps(export_meta, indent=2))
+        except Exception as e:
+            logger.error(f"Failed to write metadata.json into zip: {e}")
 
     return {
         "zip_path": tmp_zip.name,
@@ -371,6 +382,97 @@ def _resolve_fpath_to_disk(fpath: str) -> str:
 
 
 # NOTE: Worker function must be module-level (picklable) for ProcessPoolExecutor on Windows
+def _library_metadata(dataset_path: Path, dataset_uuid: str) -> Dict[str, Any]:
+    """
+    Collect what the library knows about the measurement being exported.
+
+    An exported image otherwise leaves the annotations behind: which tags it
+    carried, whether it was hearted. The library database is optional, so a
+    failure here degrades to the identifiers alone rather than failing the
+    export.
+
+    Args:
+        dataset_path (Path): Dataset the plots were made from.
+        dataset_uuid (Path): Identifier used to name the export files.
+
+    Returns:
+        Dict[str, Any]: Metadata for the sidecar file and the PNG chunks.
+
+    """
+    meta: Dict[str, Any] = {
+        "dataset_uuid": dataset_uuid,
+        "dataset_path": str(dataset_path),
+        "exported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "exported_by": "Qimchi",
+    }
+    try:
+        from sqlmodel import select
+
+        from .db_models import (
+            LOCAL_USER_ID,
+            Measurement,
+            MeasurementState,
+            MeasurementTag,
+            Tag,
+        )
+        from .shared.db import session_scope
+
+        with session_scope() as session:
+            measurement = session.exec(
+                select(Measurement).where(Measurement.abs_path == str(dataset_path))
+            ).first()
+            if measurement is None:
+                return meta
+            meta["measurement_uuid"] = measurement.uuid
+            meta["uuid_origin"] = measurement.uuid_origin
+            state = session.get(MeasurementState, (measurement.uuid, LOCAL_USER_ID))
+            meta["hearted"] = bool(state.hearted) if state else False
+            meta["trashed"] = bool(state.trashed) if state else False
+            meta["tags"] = sorted(
+                name
+                for (name,) in session.exec(
+                    select(Tag.name)
+                    .join(MeasurementTag, MeasurementTag.tag_id == Tag.id)
+                    .where(MeasurementTag.uuid == measurement.uuid)
+                ).all()
+            )
+    except Exception as exc:
+        logger.info("Export metadata unavailable for %s: %s", dataset_uuid, exc)
+    return meta
+
+
+def _embed_png_metadata(path: str, meta: Dict[str, Any]) -> None:
+    """
+    Write the export metadata into a PNG's text chunks.
+
+    PNG carries text rather than EXIF, and the keys land where any reader
+    looks: ImageDescription for a human, plus one JSON blob so the tags come
+    back out intact.
+
+    Args:
+        path (str): PNG file to annotate in place.
+        meta (Dict[str, Any]): Metadata to embed.
+
+    """
+    try:
+        from PIL import Image, PngImagePlugin
+
+        info = PngImagePlugin.PngInfo()
+        tags = ", ".join(meta.get("tags", []))
+        info.add_text("Software", "Qimchi")
+        info.add_text(
+            "ImageDescription",
+            f"Qimchi export of {meta.get('dataset_uuid', '')}"
+            + (f" [tags: {tags}]" if tags else ""),
+        )
+        info.add_text("Qimchi", json.dumps(meta))
+        with Image.open(path) as image:
+            image.load()
+            image.save(path, pnginfo=info)
+    except Exception as exc:
+        logger.info("Could not embed PNG metadata into %s: %s", path, exc)
+
+
 def _write_image_worker(fig_dict: Dict, path_str: str) -> tuple[str, float]:
     """
     Reconstruct a figure from a dict and write image to path_str.
@@ -404,6 +506,27 @@ def _write_image_worker(fig_dict: Dict, path_str: str) -> tuple[str, float]:
     )
     return path_str, time.perf_counter() - start
 
+
+
+def warm_export_worker() -> float:
+    """
+    Render a throwaway PNG through the real export path.
+
+    Called in an export worker at startup: the first real export otherwise
+    pays for the worker process spawning, Kaleido's sync server starting and
+    Chrome booting, which is seconds of staring at a button. It writes an
+    empty figure to a temporary directory through :func:`_write_image_worker`
+    rather than rendering to bytes, so what gets warmed is exactly the path an
+    export takes -- and the file goes away with the directory.
+
+    Returns:
+        float: Seconds the throwaway render took.
+
+    """
+    figure = go.Figure({"data": [{"x": [0, 1], "y": [0, 1]}]})
+    with tempfile.TemporaryDirectory(prefix="qimchi-warmup-") as tmp:
+        _, elapsed = _write_image_worker(figure.to_dict(), str(Path(tmp) / "warmup.png"))
+    return elapsed
 
 def _save_light_dark_pngs(
     plot_json: Dict,
