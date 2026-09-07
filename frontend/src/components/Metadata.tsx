@@ -8,6 +8,7 @@ import { useSidebarStore } from "../stores/sidebarStore";
 import { useThemeStore } from "../stores/themeStore";
 import Tooltip from "./Tooltip";
 import { useToast } from "../hooks/useToast";
+import { parseMetadataValue } from "../utils/parseMetadataValue";
 
 // Type definitions for metadata
 interface Metadata {
@@ -222,11 +223,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
       const parsedMetadata: Record<string, unknown> = {};
 
       for (const [sectionKey, sectionValue] of Object.entries(metadata)) {
-        try {
-          parsedMetadata[sectionKey] = JSON.parse(sectionValue as string);
-        } catch {
-          parsedMetadata[sectionKey] = sectionValue;
-        }
+        parsedMetadata[sectionKey] = parseMetadataValue(sectionValue);
       }
 
       parsed.set(itemId, parsedMetadata);
@@ -689,20 +686,6 @@ const Metadata = ({ basketItems }: MetadataProps) => {
   );
 };
 
-// Inside MetadataCard file, above the component:
-const parseMetadataValue = (value: unknown) => {
-  if (typeof value === "string") {
-    try {
-      return JSON.parse(value);
-    } catch {
-      // Not valid JSON string, just return as-is
-      return value;
-    }
-  }
-
-  // Already an object/array/number/etc
-  return value;
-};
 // Memoized metadata card component for better performance
 const MetadataCard = memo(
   ({
