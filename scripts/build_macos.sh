@@ -20,13 +20,18 @@ cd "$REPO_ROOT"
 
 VERSION=$(grep 'version[[:space:]]*=' backend/pyproject.toml \
           | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
-echo "Building Qimchi v$VERSION for macOS..."
+FRONTEND_VERSION="${QIMCHI_VERSION:-${CI_COMMIT_TAG:-}}"
+if [ -z "$FRONTEND_VERSION" ]; then
+    FRONTEND_VERSION=$(git tag --points-at HEAD --list 'v*' | head -1)
+fi
+FRONTEND_VERSION="${FRONTEND_VERSION:-$VERSION}"
+echo "Building Qimchi v$VERSION for macOS (footer version: $FRONTEND_VERSION)..."
 
 # ── 1. Frontend ───────────────────────────────────────────────────────────────
 echo "Building React frontend..."
 cd frontend
 npm install
-npm run build
+QIMCHI_VERSION="$FRONTEND_VERSION" npm run build
 cd ..
 
 # ── 2. Staging area ───────────────────────────────────────────────────────────

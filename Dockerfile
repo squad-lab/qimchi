@@ -2,6 +2,9 @@ FROM node:22.12.0-slim AS frontend-builder
 
 WORKDIR /frontend
 
+ARG QIMCHI_VERSION
+ENV QIMCHI_VERSION=$QIMCHI_VERSION
+
 COPY frontend/package*.json ./
 COPY frontend/tsconfig*.json ./
 COPY frontend/vite.config.ts ./

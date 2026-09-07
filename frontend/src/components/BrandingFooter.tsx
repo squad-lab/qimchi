@@ -1,7 +1,21 @@
+import { useEffect, useState } from "react";
+import axios from "axios";
 import { Gitlab, Link, ScrollText, History, Sun, Moon } from "lucide-react";
 import { useSidebarStore } from "../stores/sidebarStore";
 import { useThemeStore } from "../stores/themeStore";
 import { useToast } from "../hooks/useToast";
+import { PROD_BACKEND_URL } from "../config";
+
+const changelogUrl = "https://gitlab.com/squad-lab/qimchi/-/blob/main/CHANGELOG.md";
+
+type BackendConnection = "checking" | "connected" | "disconnected";
+
+const backendConnectionAppearance: Record<BackendConnection, { dotClass: string; label: string }> =
+  {
+    checking: { dotClass: "bg-amber-400 animate-pulse", label: "Checking backend connection" },
+    connected: { dotClass: "bg-emerald-500 animate-pulse", label: "Backend connected" },
+    disconnected: { dotClass: "bg-red-500 animate-pulse", label: "Backend disconnected" },
+  };
 
 const brandingLinks = [
   {
@@ -34,6 +48,42 @@ const BrandingFooter = () => {
   const { theme, toggleTheme } = useThemeStore();
   const isDark = theme === "dark";
   const { openLogModal } = useToast();
+  const [backendConnection, setBackendConnection] = useState<BackendConnection>("checking");
+  const connectionAppearance = backendConnectionAppearance[backendConnection];
+
+  useEffect(() => {
+    let active = true;
+
+    const checkBackendConnection = async () => {
+      try {
+        const { data } = await axios.get<{ ok?: boolean }>(`${PROD_BACKEND_URL}/health`, {
+          timeout: 3000,
+        });
+        if (active) {
+          setBackendConnection(data.ok === true ? "connected" : "disconnected");
+        }
+      } catch {
+        if (active) {
+          setBackendConnection("disconnected");
+        }
+      }
+    };
+
+    const handleOnline = () => void checkBackendConnection();
+    const handleOffline = () => setBackendConnection("disconnected");
+
+    void checkBackendConnection();
+    const interval = window.setInterval(() => void checkBackendConnection(), 5000);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
 
   return (
     <>
@@ -74,12 +124,24 @@ const BrandingFooter = () => {
                 </a>
               </div>
               <div className="flex items-center justify-between gap-4">
-                <div className="qimchi-footer-badge flex items-center gap-2 px-3 py-1.5 bg-linear-to-r from-slate-100 to-slate-50 rounded-full border border-slate-200 shadow-sm">
-                  <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                <a
+                  href={changelogUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  aria-label={`View the Qimchi v${__QIMCHI_VERSION__} changelog`}
+                  title={`${connectionAppearance.label}. Qimchi v${__QIMCHI_VERSION__} — open changelog`}
+                  className="qimchi-footer-badge flex items-center gap-2 px-3 py-1.5 bg-linear-to-r from-slate-100 to-slate-50 rounded-full border border-slate-200 shadow-sm transition-shadow hover:shadow-md"
+                >
+                  <span
+                    role="status"
+                    aria-label={connectionAppearance.label}
+                    title={connectionAppearance.label}
+                    className={`w-2 h-2 rounded-full ${connectionAppearance.dotClass}`}
+                  />
                   <span className="font-bold text-sm text-slate-800 tracking-tight">
-                    Qimchi v0.7.0
+                    Qimchi v{__QIMCHI_VERSION__}
                   </span>
-                </div>
+                </a>
                 <div className="flex items-center gap-2">
                   {brandingLinks.map(({ href, label, Icon }) => (
                     <a

@@ -36,15 +36,35 @@ if ($runningQimchi) {
 
 # Extract version from pyproject.toml for use in the installer filename/metadata.
 $VERSION = (Select-String -Path "backend/pyproject.toml" -Pattern 'version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
-Write-Host "Building Qimchi v$VERSION..."
+$frontendVersion = $env:QIMCHI_VERSION
+if ([string]::IsNullOrWhiteSpace($frontendVersion)) {
+    $frontendVersion = $env:CI_COMMIT_TAG
+}
+if ([string]::IsNullOrWhiteSpace($frontendVersion)) {
+    $frontendVersion = git tag --points-at HEAD --list "v*" | Select-Object -First 1
+}
+if ([string]::IsNullOrWhiteSpace($frontendVersion)) {
+    $frontendVersion = $VERSION
+}
+Write-Host "Building Qimchi v$VERSION (footer version: $frontendVersion)..."
 
 # ── 1. Frontend ───────────────────────────────────────────────────────────────
 Write-Host "Building React frontend..."
 Set-Location frontend
 npm install
 Assert-LastExit "npm install"
+$originalQimchiVersion = $env:QIMCHI_VERSION
+$env:QIMCHI_VERSION = $frontendVersion
 npm run build
-Assert-LastExit "npm run build (tsc/vite)"
+$frontendBuildExit = $LASTEXITCODE
+if ($null -eq $originalQimchiVersion) {
+    Remove-Item Env:QIMCHI_VERSION
+} else {
+    $env:QIMCHI_VERSION = $originalQimchiVersion
+}
+if ($frontendBuildExit -ne 0) {
+    throw "npm run build (tsc/vite) failed (exit code $frontendBuildExit)"
+}
 Set-Location ..
 if (!(Test-Path "frontend/dist/index.html")) {
     throw "Frontend build produced no dist/index.html"

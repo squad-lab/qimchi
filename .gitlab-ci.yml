@@ -198,7 +198,8 @@ docker:
         *)      TAG_ARGS="$TAG_ARGS -t $CI_REGISTRY/squad-lab/qimchi:latest" ;;
       esac
       echo "Image tags: $TAG_ARGS"
-      docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull $TAG_ARGS --push .
+      docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull \
+        --build-arg QIMCHI_VERSION="$CI_COMMIT_TAG" $TAG_ARGS --push .
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
       when: on_success
