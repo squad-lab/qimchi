@@ -1,4 +1,12 @@
-image: "python:3.13"
+# Every job runs on the largest hosted Linux runner unless it names its own
+# tag; the Windows and macOS build jobs do, and keep theirs. Note the minute
+# multiplier: a 2xlarge burns CI minutes far faster than the default small
+# runner, which is cheap here only because the jobs are short.
+default:
+  image: "python:3.13"
+  tags:
+    - saas-linux-2xlarge-amd64
+
 variables:
   DOCKER_HOST: "tcp://docker:2375"
   DOCKER_DRIVER: "overlay2"
@@ -171,8 +179,6 @@ tag_preview:
 docker:
   image: jonoh/docker-buildx-qemu
   stage: build
-  tags:
-    - saas-linux-2xlarge-amd64
   services:
     - docker:28-dind
   before_script:
@@ -352,8 +358,6 @@ build-macos:
 # tag needed.
 build-linux:
   stage: build
-  tags:
-    - saas-linux-2xlarge-amd64
   image: ubuntu:22.04
   before_script:
     - |
