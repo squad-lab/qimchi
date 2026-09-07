@@ -64,6 +64,9 @@ set "PATH=%ProgramFiles%\nodejs;%PATH%"
 echo PATH refreshed successfully
 goto :eof
 
+:: The name stays qcutils: this removes the directory older installers cloned,
+:: which is what exists on an already-installed machine. The package itself is
+:: now called qanary and is installed separately.
 :remove_qcutils
 echo Checking for qcutils directory at %QIMCHI_DIR%...
 if exist "%QIMCHI_DIR%\qcutils" (

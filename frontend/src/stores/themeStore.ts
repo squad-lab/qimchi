@@ -10,8 +10,7 @@ interface ThemeState {
 }
 
 const getSystemTheme = (): AppTheme =>
-  typeof window !== "undefined" &&
-  window.matchMedia?.("(prefers-color-scheme: dark)").matches
+  typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches
     ? "dark"
     : "light";
 
@@ -22,12 +21,11 @@ export const useThemeStore = create<ThemeState>()(
 
       setTheme: (theme) => set({ theme }),
 
-      toggleTheme: () =>
-        set({ theme: get().theme === "dark" ? "light" : "dark" }),
+      toggleTheme: () => set({ theme: get().theme === "dark" ? "light" : "dark" }),
     }),
     {
       name: "theme-store",
       version: 1,
-    }
-  )
+    },
+  ),
 );

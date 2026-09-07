@@ -1,14 +1,6 @@
 import { useState, useEffect, useMemo, memo } from "react";
 import { PROD_BACKEND_URL } from "../config";
-import {
-  Eye,
-  EyeOff,
-  Expand,
-  Minimize,
-  Search,
-  X,
-  BadgeInfo,
-} from "lucide-react";
+import { Eye, EyeOff, Expand, Minimize, Search, X, BadgeInfo } from "lucide-react";
 import axios from "axios";
 import JsonView from "@uiw/react-json-view";
 import { BasketItem } from "./Basket";
@@ -125,9 +117,7 @@ const retryRequest = async function <T>(
 
       if (attempt < maxRetries) {
         // Wait before retrying with exponential backoff
-        await new Promise((resolve) =>
-          setTimeout(resolve, delay * Math.pow(2, attempt)),
-        );
+        await new Promise((resolve) => setTimeout(resolve, delay * Math.pow(2, attempt)));
       }
     }
   }
@@ -189,21 +179,13 @@ const Metadata = ({ basketItems }: MetadataProps) => {
   const { showToast } = useToast();
 
   // State for metadata - now stores metadata for each basket item
-  const [metadataMap, setMetadataMap] = useState<Map<string, Metadata>>(
-    new Map(),
-  );
-  const [loadingMetadata, setLoadingMetadata] = useState<Set<string>>(
-    new Set(),
-  );
-  const [metadataErrors, setMetadataErrors] = useState<Map<string, string>>(
-    new Map(),
-  );
+  const [metadataMap, setMetadataMap] = useState<Map<string, Metadata>>(new Map());
+  const [loadingMetadata, setLoadingMetadata] = useState<Set<string>>(new Set());
+  const [metadataErrors, setMetadataErrors] = useState<Map<string, string>>(new Map());
   const [collapsedCards, setCollapsedCards] = useState<Set<string>>(new Set());
 
   // Track ongoing requests to prevent duplicates
-  const [ongoingRequests, setOngoingRequests] = useState<
-    Map<string, Promise<unknown>>
-  >(new Map());
+  const [ongoingRequests, setOngoingRequests] = useState<Map<string, Promise<unknown>>>(new Map());
 
   // Debounce search input
   useEffect(() => {
@@ -272,8 +254,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
       const item = basketItems.find((item) => item.id === itemId);
       if (!item) continue;
 
-      const allMatches: Array<{ key: string; value: string; path: string[] }> =
-        [];
+      const allMatches: Array<{ key: string; value: string; path: string[] }> = [];
 
       // Search through each metadata section
       for (const [sectionKey, sectionValue] of Object.entries(parsedMetadata)) {
@@ -337,9 +318,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
       }
 
       // Set loading state for all new items at once
-      setLoadingMetadata(
-        (prev) => new Set([...prev, ...newItems.map((item) => item.id)]),
-      );
+      setLoadingMetadata((prev) => new Set([...prev, ...newItems.map((item) => item.id)]));
 
       // Clear any previous errors for these items
       setMetadataErrors((prev) => {
@@ -371,15 +350,11 @@ const Metadata = ({ basketItems }: MetadataProps) => {
           // Create and track the request promise
           const requestPromise = (async () => {
             try {
-              const requestFn = () =>
-                axiosInstance.post("/load-meta/", { path: item.path });
+              const requestFn = () => axiosInstance.post("/load-meta/", { path: item.path });
               const response = await retryRequest(requestFn, 2, 500);
 
               // Update metadata map for successful response
-              setMetadataMap(
-                (prev) =>
-                  new Map([...prev, [item.id, response.data as Metadata]]),
-              );
+              setMetadataMap((prev) => new Map([...prev, [item.id, response.data as Metadata]]));
               // console.log("Metadata loaded for item:", item.id);
 
               return { success: true, itemId: item.id };
@@ -406,9 +381,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
           })();
 
           // Track the ongoing request
-          setOngoingRequests(
-            (prev) => new Map([...prev, [item.id, requestPromise]]),
-          );
+          setOngoingRequests((prev) => new Map([...prev, [item.id, requestPromise]]));
 
           return requestPromise;
         });
@@ -419,7 +392,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
     };
 
     fetchMetadata();
-  }, [basketItems, metadataMap, loadingMetadata, ongoingRequests]);
+  }, [basketItems, metadataMap, loadingMetadata, ongoingRequests, showToast]);
 
   // Effect to clean up metadata when basket items are removed
   useEffect(() => {
@@ -500,14 +473,9 @@ const Metadata = ({ basketItems }: MetadataProps) => {
                 </div>
                 <ProgressBar
                   progress={
-                    basketItems.filter(
-                      (item) =>
-                        item.type === "file" && metadataMap.has(item.id),
-                    ).length /
-                    Math.max(
-                      1,
-                      basketItems.filter((item) => item.type === "file").length,
-                    )
+                    basketItems.filter((item) => item.type === "file" && metadataMap.has(item.id))
+                      .length /
+                    Math.max(1, basketItems.filter((item) => item.type === "file").length)
                   }
                 />
               </div>
@@ -524,9 +492,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
                   type="text"
                   placeholder="Search metadata..."
                   value={searchInput}
-                  onChange={(e) =>
-                    updateMetadataState({ searchInput: e.target.value })
-                  }
+                  onChange={(e) => updateMetadataState({ searchInput: e.target.value })}
                   className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
                 {searchInput && (
@@ -555,22 +521,14 @@ const Metadata = ({ basketItems }: MetadataProps) => {
                     )}
                   </span>
                 )}
-                {!searchQuery && searchInput && (
-                  <span className="text-gray-400">Searching...</span>
-                )}
+                {!searchQuery && searchInput && <span className="text-gray-400">Searching...</span>}
                 {!searchQuery && !searchInput && (
                   <span>
-                    {basketItems.filter((item) => item.type === "file").length}{" "}
-                    file
-                    {basketItems.filter((item) => item.type === "file")
-                      .length !== 1
-                      ? "s"
-                      : ""}{" "}
-                    in basket
+                    {basketItems.filter((item) => item.type === "file").length} file
+                    {basketItems.filter((item) => item.type === "file").length !== 1 ? "s" : ""} in
+                    basket
                     {metadataMap.size > 0 && (
-                      <span className="ml-1 text-green-600">
-                        ({metadataMap.size} loaded)
-                      </span>
+                      <span className="ml-1 text-green-600">({metadataMap.size} loaded)</span>
                     )}
                   </span>
                 )}
@@ -581,29 +539,19 @@ const Metadata = ({ basketItems }: MetadataProps) => {
                 title="Toggle all metadata cards"
               >
                 {(() => {
-                  const fileItems = basketItems.filter(
-                    (item) => item.type === "file",
-                  );
+                  const fileItems = basketItems.filter((item) => item.type === "file");
                   const fileItemIds = fileItems.map((item) => item.id);
-                  const allCollapsed = fileItemIds.every((id) =>
-                    collapsedCards.has(id),
-                  );
+                  const allCollapsed = fileItemIds.every((id) => collapsedCards.has(id));
 
                   return allCollapsed ? (
                     <Tooltip content="Expand all">
-                      <span
-                        className="flex items-center p-1"
-                        title="Expand all"
-                      >
+                      <span className="flex items-center p-1" title="Expand all">
                         <Expand size={16} />
                       </span>
                     </Tooltip>
                   ) : (
                     <Tooltip content="Collapse all">
-                      <span
-                        className="flex items-center p-1"
-                        title="Collapse all"
-                      >
+                      <span className="flex items-center p-1" title="Collapse all">
                         <Minimize size={16} />
                       </span>
                     </Tooltip>
@@ -653,10 +601,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
                       onClick={() => toggleCardCollapse(itemId)}
                     >
                       <div className="flex-1 min-w-0">
-                        <h3
-                          className="text-sm font-semibold truncate"
-                          title={item.path}
-                        >
+                        <h3 className="text-sm font-semibold truncate" title={item.path}>
                           {result.itemName}
                         </h3>
                         <p className="text-xs text-gray-600 mt-1">
@@ -697,9 +642,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
                                   {match.path.join(" → ")}
                                 </div>
                                 <div className="text-gray-700">
-                                  <span className="font-semibold">
-                                    {match.key}:
-                                  </span>{" "}
+                                  <span className="font-semibold">{match.key}:</span>{" "}
                                   <span className="bg-yellow-200 px-1 rounded">
                                     {match.value.length > 100
                                       ? match.value.substring(0, 100) + "..."
@@ -778,66 +721,60 @@ const MetadataCard = memo(
     onToggle: () => void;
   }) => {
     const jsonTheme =
-      useThemeStore((state) => state.theme) === "dark"
-        ? metadataDarkTheme
-        : metadataCustomTheme;
+      useThemeStore((state) => state.theme) === "dark" ? metadataDarkTheme : metadataCustomTheme;
     return (
-    <div className="mb-4 border border-gray-300 rounded-lg overflow-hidden">
-      {/* Card Header */}
-      <div
-        className="bg-gray-200 p-3 cursor-pointer hover:bg-gray-300 transition-colors flex items-center justify-between"
-        onClick={onToggle}
-      >
-        <div className="flex-1 min-w-0">
-          <h3 className="text-sm font-semibold truncate" title={item.path}>
-            {item.name}
-          </h3>
+      <div className="mb-4 border border-gray-300 rounded-lg overflow-hidden">
+        {/* Card Header */}
+        <div
+          className="bg-gray-200 p-3 cursor-pointer hover:bg-gray-300 transition-colors flex items-center justify-between"
+          onClick={onToggle}
+        >
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-semibold truncate" title={item.path}>
+              {item.name}
+            </h3>
+          </div>
+          <div className="ml-2 text-gray-500">
+            {isCardCollapsed ? (
+              <EyeOff size={16} className="text-red-600" />
+            ) : (
+              <Eye size={16} className="text-green-600" />
+            )}
+          </div>
         </div>
-        <div className="ml-2 text-gray-500">
-          {isCardCollapsed ? (
-            <EyeOff size={16} className="text-red-600" />
-          ) : (
-            <Eye size={16} className="text-green-600" />
-          )}
-        </div>
+
+        {/* Card Content */}
+        {!isCardCollapsed && (
+          <div className="p-3 bg-white">
+            {isLoading && <div className="text-center text-gray-500 p-4">Loading metadata...</div>}
+            {error && <div className="text-center text-red-500 p-4">{error}</div>}
+            {!isLoading && !error && !metadata && (
+              <div className="text-center text-gray-500 p-4">
+                No metadata available for this file.
+              </div>
+            )}
+            {metadata &&
+              Object.entries(metadata).map(([key, value]) => {
+                const parsedValue = parseMetadataValue(value);
+
+                return (
+                  <div key={key} className="mb-3">
+                    <strong className="text-sm">{key}:</strong>
+                    <JsonView
+                      value={parsedValue as object}
+                      style={jsonTheme as React.CSSProperties}
+                      indentWidth={10}
+                      displayDataTypes={false}
+                      enableClipboard={true}
+                      displayObjectSize={true}
+                      collapsed={key === "Instruments Snapshot" ? 0 : 2}
+                    />
+                  </div>
+                );
+              })}
+          </div>
+        )}
       </div>
-
-      {/* Card Content */}
-      {!isCardCollapsed && (
-        <div className="p-3 bg-white">
-          {isLoading && (
-            <div className="text-center text-gray-500 p-4">
-              Loading metadata...
-            </div>
-          )}
-          {error && <div className="text-center text-red-500 p-4">{error}</div>}
-          {!isLoading && !error && !metadata && (
-            <div className="text-center text-gray-500 p-4">
-              No metadata available for this file.
-            </div>
-          )}
-          {metadata &&
-            Object.entries(metadata).map(([key, value]) => {
-              const parsedValue = parseMetadataValue(value);
-
-              return (
-                <div key={key} className="mb-3">
-                  <strong className="text-sm">{key}:</strong>
-                  <JsonView
-                    value={parsedValue as object}
-                    style={jsonTheme as React.CSSProperties}
-                    indentWidth={10}
-                    displayDataTypes={false}
-                    enableClipboard={true}
-                    displayObjectSize={true}
-                    collapsed={key === "Instruments Snapshot" ? 0 : 2}
-                  />
-                </div>
-              );
-            })}
-        </div>
-      )}
-    </div>
     );
   },
 );

@@ -67,10 +67,7 @@ interface ShortcutConfig {
 }
 
 // Single-file mapping for all global shortcuts
-export const KEYBOARD_SHORTCUTS: Record<
-  string,
-  ShortcutConfig | ShortcutConfig[]
-> = {
+export const KEYBOARD_SHORTCUTS: Record<string, ShortcutConfig | ShortcutConfig[]> = {
   escape: { action: "escape" },
   esc: { action: "escape" },
   p: { action: "plot" },
@@ -92,29 +89,17 @@ export const KEYBOARD_SHORTCUTS: Record<
   "7": { action: "select-plot-7" },
   "8": { action: "select-plot-8" },
   "9": { action: "select-plot-9" },
-  m: [
-    { action: "selected-toggle-maximize" },
-    { action: "toggle-metadata", shift: true },
-  ],
-  e: [
-    { action: "selected-export-images" },
-    { action: "toggle-sidebar", shift: true },
-  ],
-  n: [
-    { action: "selected-send-to-notes" },
-    { action: "toggle-notes", shift: true },
-  ],
-  r: [
-    { action: "selected-reset-plot" },
-    { action: "refresh-dir", shift: true },
-  ],
+  m: [{ action: "selected-toggle-maximize" }, { action: "toggle-metadata", shift: true }],
+  e: [{ action: "selected-export-images" }, { action: "toggle-sidebar", shift: true }],
+  n: [{ action: "selected-send-to-notes" }, { action: "toggle-notes", shift: true }],
+  r: [{ action: "selected-reset-plot" }, { action: "refresh-dir", shift: true }],
   c: { action: "clear-composer", alt: true, shift: true }, // Alt+Shift+C
-  v: { action: "clear-viewer", alt: true, shift: true },   // Alt+Shift+V
+  v: { action: "clear-viewer", alt: true, shift: true }, // Alt+Shift+V
   h: [
     { action: "heatmap" },
-    { action: "toggle-help", shift: true },                 // Shift+H
+    { action: "toggle-help", shift: true }, // Shift+H
   ],
-  "delete": { action: "selected-remove-plot" },
+  delete: { action: "selected-remove-plot" },
 };
 
 export const useGlobalShortcutsInit = () => {
@@ -140,9 +125,7 @@ export const useGlobalShortcutsInit = () => {
 
             if (e.altKey === requiresAlt && e.shiftKey === requiresShift) {
               e.preventDefault();
-              window.dispatchEvent(
-                new CustomEvent(`qimchi:shortcut:${config.action}`)
-              );
+              window.dispatchEvent(new CustomEvent(`qimchi:shortcut:${config.action}`));
               return;
             }
           }

@@ -19,23 +19,13 @@ const DATASET_EXTENSIONS = [
   ".dat",
 ] as const;
 const DATASET_TAGS = ["zarr", "netcdf", "hdf5", "qcodes", "sqlite", "csv"] as const;
-export type DatasetKind =
-  | "zarr"
-  | "netcdf"
-  | "hdf5"
-  | "qcodes"
-  | "sqlite"
-  | "csv"
-  | "unknown";
+export type DatasetKind = "zarr" | "netcdf" | "hdf5" | "qcodes" | "sqlite" | "csv" | "unknown";
 
-const normalizeDatasetPath = (path: string): string =>
-  path.split("#", 1)[0].toLowerCase();
+const normalizeDatasetPath = (path: string): string => path.split("#", 1)[0].toLowerCase();
 
-export const isMemoryPath = (path: string): boolean =>
-  path.startsWith("memory://");
+export const isMemoryPath = (path: string): boolean => path.startsWith("memory://");
 
-export const isZarrPath = (path: string): boolean =>
-  path.toLowerCase().endsWith(".zarr");
+export const isZarrPath = (path: string): boolean => path.toLowerCase().endsWith(".zarr");
 
 export const isDatasetPath = (path: string): boolean => {
   if (isMemoryPath(path)) return true;
@@ -49,11 +39,7 @@ export const isDatasetTag = (tag: string): boolean =>
 export const hasDatasetTag = (tags?: string[]): boolean =>
   Array.isArray(tags) && tags.some(isDatasetTag);
 
-export const isDatasetNode = (node: {
-  type?: string;
-  path?: string;
-  tags?: string[];
-}): boolean =>
+export const isDatasetNode = (node: { type?: string; path?: string; tags?: string[] }): boolean =>
   node.type === "file" &&
   typeof node.path === "string" &&
   (isDatasetPath(node.path) || hasDatasetTag(node.tags));
@@ -63,10 +49,7 @@ export const isSqliteContainerPath = (path: string): boolean => {
   return (lower.endsWith(".db") || lower.endsWith(".sqlite")) && !path.includes("#");
 };
 
-export const detectDatasetKind = (
-  path: string,
-  tags?: string[],
-): DatasetKind => {
+export const detectDatasetKind = (path: string, tags?: string[]): DatasetKind => {
   if (Array.isArray(tags)) {
     if (tags.includes("zarr")) return "zarr";
     if (tags.includes("netcdf")) return "netcdf";

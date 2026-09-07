@@ -50,9 +50,7 @@ const BrandingFooter = () => {
                   className="transition-all duration-200"
                 >
                   <img
-                    src={
-                      isDark ? "/SQUAD-logo-light.png" : "/SQUAD-logo-dark.webp"
-                    }
+                    src={isDark ? "/SQUAD-logo-light.png" : "/SQUAD-logo-dark.webp"}
                     alt="SQUAD Lab logo"
                     className="h-9 sm:h-11 w-auto object-contain filter drop-shadow-sm hover:drop-shadow-md"
                     loading="lazy"
@@ -97,12 +95,8 @@ const BrandingFooter = () => {
                   ))}
                   <button
                     onClick={toggleTheme}
-                    aria-label={
-                      isDark ? "Switch to light theme" : "Switch to dark theme"
-                    }
-                    title={
-                      isDark ? "Switch to light theme" : "Switch to dark theme"
-                    }
+                    aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+                    title={isDark ? "Switch to light theme" : "Switch to dark theme"}
                     className={iconButtonClass}
                   >
                     {isDark ? (

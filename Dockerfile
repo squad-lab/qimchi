@@ -1,4 +1,4 @@
-FROM node:20-slim AS frontend-builder
+FROM node:22.12.0-slim AS frontend-builder
 
 WORKDIR /frontend
 
@@ -25,15 +25,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor \
     && rm -rf /var/lib/apt/lists/*
 
-COPY backend/pyproject.toml /app/
+COPY backend/pyproject.toml backend/uv.lock /app/
 
 RUN python -m pip install --no-cache-dir -U pip setuptools wheel \
     && pip install --no-cache-dir uv \
-    && (uv sync --no-dev || pip install --no-cache-dir .) \
-    && echo "y" | uv run plotly_get_chrome
+    && uv sync --locked --no-dev --extra datasets --no-install-project \
+    && echo "y" | uv run --no-sync plotly_get_chrome
 
 COPY backend/api/ /app/api/
 COPY backend/main.py /app/
+COPY backend/migrations/ /app/migrations/
+
+# Install the local project after its sources are present. Dependencies were
+# cached in the preceding layer; --locked keeps the image reproducible.
+RUN uv sync --locked --no-dev --extra datasets
 
 COPY --from=frontend-builder /frontend/dist/ /app/frontend/dist/
 

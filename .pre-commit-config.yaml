@@ -1,0 +1,38 @@
+# Run `uv run pre-commit install` from backend/ once per clone (after
+# `uv sync --extra dev` there). The config lives at the repository root because
+# hooks must see both backend/ and frontend/.
+#
+# Ruff rules live in backend/pyproject.toml ([tool.ruff]).
+#
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.2
+    hooks:
+      # Import sorting is part of `ruff check` via the "I" rules; the formatter
+      # does not do it.
+      - id: ruff-check
+        args: [--fix]
+        files: ^backend/
+      - id: ruff-format
+        files: ^backend/
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    hooks:
+      - id: check-added-large-files
+        # Measurement data and build output must not end up in the repository.
+        args: [--maxkb=512]
+        exclude: ^(frontend/dist/|packaging/build/)
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: check-json
+        # tsconfig files are JSONC -- comments are valid there.
+        exclude: ^frontend/tsconfig.*\.json$
+      - id: end-of-file-fixer
+        exclude: ^(frontend/dist/|vendor/)
+      - id: trailing-whitespace
+        # Two trailing spaces are a hard line break in Markdown; stripping them
+        # silently reflows the README and the docs.
+        args: [--markdown-linebreak-ext=md]
+        exclude: ^(frontend/dist/|vendor/)
+    rev: v6.0.0

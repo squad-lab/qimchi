@@ -1,20 +1,5 @@
-import {
-  forwardRef,
-  useState,
-  useEffect,
-  useImperativeHandle,
-  useCallback,
-} from "react";
-import {
-  X,
-  Play,
-  Eye,
-  EyeOff,
-  ChevronDown,
-  Grid,
-  ChartLine,
-  ListMusic,
-} from "lucide-react";
+import { forwardRef, useState, useEffect, useImperativeHandle, useCallback } from "react";
+import { X, Play, Eye, EyeOff, ChevronDown, Grid, ChartLine, ListMusic } from "lucide-react";
 
 // Local imports
 import Tooltip from "./Tooltip";
@@ -68,16 +53,12 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
     const [zFields, setZFields] = useState<PlotField[]>([]);
     const [plotType, setPlotType] = useState<PlotType>("LinePlot");
     const [isPlotTypeDropdownOpen, setIsPlotTypeDropdownOpen] = useState(false);
-    const [dragOverField, setDragOverField] = useState<"x" | "y" | "z" | null>(
+    const [dragOverField, setDragOverField] = useState<"x" | "y" | "z" | null>(null);
+    const [isExpanded, setIsExpanded] = useState(true);
+    const [draggedFieldType, setDraggedFieldType] = useState<"independent" | "dependent" | null>(
       null,
     );
-    const [isExpanded, setIsExpanded] = useState(true);
-    const [draggedFieldType, setDraggedFieldType] = useState<
-      "independent" | "dependent" | null
-    >(null);
-    const [invalidDropField, setInvalidDropField] = useState<
-      "x" | "y" | "z" | null
-    >(null);
+    const [invalidDropField, setInvalidDropField] = useState<"x" | "y" | "z" | null>(null);
 
     const { showToast } = useToast();
 
@@ -136,9 +117,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
         let fieldType: "independent" | "dependent" | null = null;
 
         try {
-          const multipleData = e.dataTransfer.getData(
-            "application/plot-fields",
-          );
+          const multipleData = e.dataTransfer.getData("application/plot-fields");
           const singleData = e.dataTransfer.getData("application/plot-field");
 
           if (multipleData) {
@@ -170,10 +149,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
     };
 
     const getDropValidationError = useCallback(
-      (
-        fieldType: "independent" | "dependent" | null,
-        field: "x" | "y" | "z",
-      ): string | null => {
+      (fieldType: "independent" | "dependent" | null, field: "x" | "y" | "z"): string | null => {
         if (!fieldType) return null;
 
         // Universal restrictions:
@@ -297,17 +273,13 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
             break;
           case "y":
             setYFields((prev) => {
-              const filtered = prev.filter(
-                (f) => !plotFields.some((pf) => pf.id === f.id),
-              );
+              const filtered = prev.filter((f) => !plotFields.some((pf) => pf.id === f.id));
               return [...filtered, ...plotFields];
             });
             break;
           case "z":
             setZFields((prev) => {
-              const filtered = prev.filter(
-                (f) => !plotFields.some((pf) => pf.id === f.id),
-              );
+              const filtered = prev.filter((f) => !plotFields.some((pf) => pf.id === f.id));
               // Z-axis is only enabled for HeatMap (multiple fields allowed)
               return [...filtered, ...plotFields];
             });
@@ -392,52 +364,41 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
           });
         }
 
-        showToast(
-          `Added ${plotField.name} to ${target.toUpperCase()}-axis`,
-          "success",
-          2500,
-        );
+        showToast(`Added ${plotField.name} to ${target.toUpperCase()}-axis`, "success", 2500);
       },
       [getDropValidationError, getNextAutofillTarget, showToast],
     );
 
-    const getComposerSelectionNames =
-      useCallback((): ComposerSelectionSnapshot => {
-        const allFields = [...xFields, ...yFields, ...zFields];
-        const fieldSources = Array.from(
-          new Set(allFields.map((field) => field.source)),
-        );
+    const getComposerSelectionNames = useCallback((): ComposerSelectionSnapshot => {
+      const allFields = [...xFields, ...yFields, ...zFields];
+      const fieldSources = Array.from(new Set(allFields.map((field) => field.source)));
 
-        const indeps =
-          plotType === "HeatMap"
-            ? [...xFields, ...yFields].map((field) => field.name)
-            : xFields.map((field) => field.name);
+      const indeps =
+        plotType === "HeatMap"
+          ? [...xFields, ...yFields].map((field) => field.name)
+          : xFields.map((field) => field.name);
 
-        const deps =
-          plotType === "HeatMap"
-            ? zFields.map((field) => field.name)
-            : yFields.map((field) => field.name);
+      const deps =
+        plotType === "HeatMap"
+          ? zFields.map((field) => field.name)
+          : yFields.map((field) => field.name);
 
-        return {
-          plotType,
-          indeps,
-          deps,
-          hasRequiredAxes: xFields.length > 0 && yFields.length > 0,
-          hasAnySelections: allFields.length > 0,
-          fieldSources,
-        };
-      }, [plotType, xFields, yFields, zFields]);
+      return {
+        plotType,
+        indeps,
+        deps,
+        hasRequiredAxes: xFields.length > 0 && yFields.length > 0,
+        hasAnySelections: allFields.length > 0,
+        fieldSources,
+      };
+    }, [plotType, xFields, yFields, zFields]);
 
     // Handle plot creation by delegating eligibility to Viewer.
     const handleCreatePlot = useCallback(() => {
       const snapshot = getComposerSelectionNames();
 
       if (!snapshot.hasRequiredAxes) {
-        showToast(
-          "Select required X and Y fields before plotting.",
-          "warning",
-          3000,
-        );
+        showToast("Select required X and Y fields before plotting.", "warning", 3000);
         return;
       }
 
@@ -451,8 +412,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
         createPlotFromComposer: () => handleCreatePlot(),
         clearComposer: () => clearAllFields(),
         autofillFromField: (field: PlotField) => handleAutofillField(field),
-        hasComposerSelections: () =>
-          xFields.length > 0 || yFields.length > 0 || zFields.length > 0,
+        hasComposerSelections: () => xFields.length > 0 || yFields.length > 0 || zFields.length > 0,
         getComposerSelectionNames,
       }),
       [
@@ -560,9 +520,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
                 <span className="font-semibold text-gray-400">{label}:</span>
               </div>
               <div className="text-sm text-gray-400 text-center">
-                {plotType === "LinePlot"
-                  ? "Only available for HeatMap"
-                  : "Disabled"}
+                {plotType === "LinePlot" ? "Only available for HeatMap" : "Disabled"}
               </div>
             </div>
           ) : isInvalid && invalidMessage ? (
@@ -579,9 +537,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
                 onDrop={(e) => e.preventDefault()}
               >
                 <div className="flex items-center justify-between mb-2">
-                  <span className={`font-semibold ${colorClasses.text}`}>
-                    {label}:
-                  </span>
+                  <span className={`font-semibold ${colorClasses.text}`}>{label}:</span>
                   {fields.length > 0 && (
                     <button
                       onClick={() => clearFields(field)}
@@ -594,9 +550,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
                 </div>
 
                 {fields.length === 0 ? (
-                  <div
-                    className={`text-sm ${colorClasses.textMuted} text-center`}
-                  >
+                  <div className={`text-sm ${colorClasses.textMuted} text-center`}>
                     {field === "x"
                       ? "Drag any field here (max 1)"
                       : field === "y"
@@ -609,10 +563,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
                   <div className="flex flex-wrap gap-2">
                     {fields.map((plotField) => {
                       // Extract the source ID from the plotField ID (format: basketItemId-fieldName)
-                      const sourceId = plotField.id.substring(
-                        0,
-                        plotField.id.lastIndexOf("-"),
-                      );
+                      const sourceId = plotField.id.substring(0, plotField.id.lastIndexOf("-"));
 
                       return (
                         <div
@@ -626,13 +577,8 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
                           }
                         `}
                         >
-                          <Tooltip
-                            content={`Source: ${sourceId}`}
-                            position="top"
-                          >
-                            <span className="truncate max-w-32">
-                              {plotField.name}
-                            </span>
+                          <Tooltip content={`Source: ${sourceId}`} position="top">
+                            <span className="truncate max-w-32">{plotField.name}</span>
                           </Tooltip>
                           <Tooltip content="Remove field" position="top">
                             <button
@@ -662,9 +608,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
               onDrop={(e) => handleDrop(e, field)}
             >
               <div className="flex items-center justify-between mb-2">
-                <span className={`font-semibold ${colorClasses.text}`}>
-                  {label}:
-                </span>
+                <span className={`font-semibold ${colorClasses.text}`}>{label}:</span>
                 {fields.length > 0 && (
                   <button
                     onClick={() => clearFields(field)}
@@ -677,9 +621,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
               </div>
 
               {fields.length === 0 ? (
-                <div
-                  className={`text-sm ${colorClasses.textMuted} text-center`}
-                >
+                <div className={`text-sm ${colorClasses.textMuted} text-center`}>
                   {field === "x"
                     ? "Drag any field here (max 1)"
                     : field === "y"
@@ -692,10 +634,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
                 <div className="flex flex-wrap gap-2">
                   {fields.map((plotField) => {
                     // Extract the source ID from the plotField ID (format: basketItemId-fieldName)
-                    const sourceId = plotField.id.substring(
-                      0,
-                      plotField.id.lastIndexOf("-"),
-                    );
+                    const sourceId = plotField.id.substring(0, plotField.id.lastIndexOf("-"));
 
                     return (
                       <div
@@ -710,9 +649,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
                       `}
                       >
                         <Tooltip content={`Source: ${sourceId}`} position="top">
-                          <span className="truncate max-w-32">
-                            {plotField.name}
-                          </span>
+                          <span className="truncate max-w-32">{plotField.name}</span>
                         </Tooltip>
                         <Tooltip content="Remove field" position="top">
                           <button
@@ -756,9 +693,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
 
             <div className="flex items-center">
               {/* Clear All button */}
-              {(xFields.length > 0 ||
-                yFields.length > 0 ||
-                zFields.length > 0) && (
+              {(xFields.length > 0 || yFields.length > 0 || zFields.length > 0) && (
                 <div className="mr-2">
                   <button
                     onClick={(e) => {
@@ -785,9 +720,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
                   <span>{plotType}</span>
                   <ChevronDown
                     size={16}
-                    className={`transition-transform ${
-                      isPlotTypeDropdownOpen ? "rotate-180" : ""
-                    }`}
+                    className={`transition-transform ${isPlotTypeDropdownOpen ? "rotate-180" : ""}`}
                   />
                 </button>
 
@@ -846,9 +779,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
                 >
                   <button
                     className="p-1 rounded"
-                    aria-label={
-                      isExpanded ? "Collapse composer" : "Expand composer"
-                    }
+                    aria-label={isExpanded ? "Collapse composer" : "Expand composer"}
                   >
                     {isExpanded ? (
                       <EyeOff size={16} className="text-red-600" />

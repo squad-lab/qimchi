@@ -44,7 +44,7 @@ export default function RadialDial({
       const t = (v - min) / (max - min || 1);
       return ARC_START + t * ARC_SWEEP;
     },
-    [min, max, ARC_START, ARC_SWEEP]
+    [min, max, ARC_START, ARC_SWEEP],
   );
 
   const angleToValue = useCallback(
@@ -52,7 +52,7 @@ export default function RadialDial({
       const t = (angle - ARC_START) / ARC_SWEEP;
       return min + t * (max - min || 1);
     },
-    [min, max, ARC_START, ARC_SWEEP]
+    [min, max, ARC_START, ARC_SWEEP],
   );
 
   useEffect(() => {
@@ -83,7 +83,7 @@ export default function RadialDial({
       if (onChange) onChange(v);
       if (controlledValue == null) setUncontrolled(v);
     },
-    [onChange, controlledValue, min, max, step, disabled, sticky]
+    [onChange, controlledValue, min, max, step, disabled, sticky],
   );
 
   // pointer handlers
@@ -124,11 +124,7 @@ export default function RadialDial({
     // if the pointerdown started on an interactive control (input/button/etc),
     // ignore it so controls inside the dial can be used without starting a drag.
     const target = e.target as HTMLElement | null;
-    if (
-      target &&
-      target.closest &&
-      target.closest("input,button,select,textarea,label")
-    ) {
+    if (target && target.closest && target.closest("input,button,select,textarea,label")) {
       return;
     }
     draggingRef.current = true;
@@ -176,11 +172,7 @@ export default function RadialDial({
   if (showTicks) {
     const stepDeg = 15;
     const outerR = size / 2 - 12;
-    for (
-      let deg = Math.ceil(min / stepDeg) * stepDeg;
-      deg <= max;
-      deg += stepDeg
-    ) {
+    for (let deg = Math.ceil(min / stepDeg) * stepDeg; deg <= max; deg += stepDeg) {
       const ang = valueToAngle(deg); // map value degree to arc angle
       const isMajor = deg % SNAP_DEG === 0;
       const len = isMajor ? 15 : 9;
@@ -196,7 +188,7 @@ export default function RadialDial({
           stroke="#9CA3AF"
           strokeWidth={isMajor ? 2 : 1}
           strokeLinecap="round"
-        />
+        />,
       );
     }
   }
@@ -218,10 +210,7 @@ export default function RadialDial({
         {/* ticks (SVG lines for precise alignment) - rendered inside the SVG below */}
 
         {/* semicircular background arc */}
-        <svg
-          className="absolute inset-0 w-full h-full"
-          viewBox={`0 0 ${size} ${size}`}
-        >
+        <svg className="absolute inset-0 w-full h-full" viewBox={`0 0 ${size} ${size}`}>
           <defs>
             <linearGradient id={`dial-gradient-${size}`} x1="0" x2="1">
               <stop offset="0%" stopColor="#e5e7eb" />
@@ -232,13 +221,7 @@ export default function RadialDial({
           <g>{tickLines}</g>
           {/* outer arc track */}
           <path
-            d={describeArc(
-              size / 2,
-              size / 2,
-              size / 2 - 12,
-              ARC_START,
-              ARC_END
-            )}
+            d={describeArc(size / 2, size / 2, size / 2 - 12, ARC_START, ARC_END)}
             fill="none"
             stroke="#e5e7eb"
             strokeWidth={8}
@@ -246,13 +229,7 @@ export default function RadialDial({
           />
           {/* active arc showing current position */}
           <path
-            d={describeArc(
-              size / 2,
-              size / 2,
-              size / 2 - 12,
-              ARC_START,
-              rotation
-            )}
+            d={describeArc(size / 2, size / 2, size / 2 - 12, ARC_START, rotation)}
             fill="none"
             stroke="#3b82f6"
             strokeWidth={8}
@@ -261,18 +238,8 @@ export default function RadialDial({
 
           {/* start and end markers */}
           {(() => {
-            const startPt = polarToCartesian(
-              size / 2,
-              size / 2,
-              size / 2 - 12,
-              ARC_START
-            );
-            const endPt = polarToCartesian(
-              size / 2,
-              size / 2,
-              size / 2 - 12,
-              ARC_END
-            );
+            const startPt = polarToCartesian(size / 2, size / 2, size / 2 - 12, ARC_START);
+            const endPt = polarToCartesian(size / 2, size / 2, size / 2 - 12, ARC_END);
             return (
               <g>
                 <circle cx={startPt.x} cy={startPt.y} r={4} fill="#111827" />
@@ -298,9 +265,7 @@ export default function RadialDial({
         {/* center value display (inside the relative container so it centers correctly) */}
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
           <div className="w-12 h-12 rounded-full bg-white border border-gray-300 shadow-sm flex items-center justify-center">
-            <span className="text-xs font-medium text-gray-700">
-              {roundedValue}°
-            </span>
+            <span className="text-xs font-medium text-gray-700">{roundedValue}°</span>
           </div>
         </div>
 
@@ -340,28 +305,14 @@ function clamp(v: number, a: number, b: number) {
 }
 
 // describeArc from center (cx, cy) with radius r from startAngle to endAngle (degrees)
-function describeArc(
-  cx: number,
-  cy: number,
-  r: number,
-  startAngle: number,
-  endAngle: number
-) {
+function describeArc(cx: number, cy: number, r: number, startAngle: number, endAngle: number) {
   const start = polarToCartesian(cx, cy, r, endAngle);
   const end = polarToCartesian(cx, cy, r, startAngle);
   const largeArcFlag = endAngle - startAngle <= 180 ? "0" : "1";
-  return [
-    `M ${start.x} ${start.y}`,
-    `A ${r} ${r} 0 ${largeArcFlag} 0 ${end.x} ${end.y}`,
-  ].join(" ");
+  return [`M ${start.x} ${start.y}`, `A ${r} ${r} 0 ${largeArcFlag} 0 ${end.x} ${end.y}`].join(" ");
 }
 
-function polarToCartesian(
-  cx: number,
-  cy: number,
-  r: number,
-  angleInDegrees: number
-) {
+function polarToCartesian(cx: number, cy: number, r: number, angleInDegrees: number) {
   // convert our dial's angle (up=0) to standard polar coordinates
   const angleInRadians = ((angleInDegrees - 0) * Math.PI) / 180.0;
   const x = cx + Math.sin(angleInRadians) * r;

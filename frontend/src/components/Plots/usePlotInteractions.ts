@@ -6,7 +6,7 @@ import type { PlotPosition, PlotSize, PlotState } from "../interfaces";
 export const usePlotInteractions = (
   plotId: string,
   initialPosition?: PlotPosition,
-  initialSize?: PlotSize
+  initialSize?: PlotSize,
 ) => {
   const [plotState, setPlotState] = useState<PlotState>({
     id: plotId,
@@ -35,16 +35,13 @@ export const usePlotInteractions = (
     bringToFront();
   }, [bringToFront]);
 
-  const handleDragStop = useCallback(
-    (_e: unknown, data: { x: number; y: number }) => {
-      setPlotState((prev) => ({
-        ...prev,
-        isDragging: false,
-        position: { x: data.x, y: data.y },
-      }));
-    },
-    []
-  );
+  const handleDragStop = useCallback((_e: unknown, data: { x: number; y: number }) => {
+    setPlotState((prev) => ({
+      ...prev,
+      isDragging: false,
+      position: { x: data.x, y: data.y },
+    }));
+  }, []);
 
   // Handle resize events
   const handleResizeStop = useCallback(
@@ -53,7 +50,7 @@ export const usePlotInteractions = (
       _direction: unknown,
       ref: HTMLElement,
       _delta: unknown,
-      position: { x: number; y: number }
+      position: { x: number; y: number },
     ) => {
       setPlotState((prev) => ({
         ...prev,
@@ -64,7 +61,7 @@ export const usePlotInteractions = (
         position,
       }));
     },
-    []
+    [],
   );
 
   // Handle maximize/minimize

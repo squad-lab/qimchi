@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { PROD_BACKEND_URL } from "./config";
 
@@ -20,15 +20,10 @@ import { isDatasetPath, detectDatasetKind } from "./utils/datasetPaths";
 const App: React.FC = () => {
   const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
-  const [loadingAttributes, setLoadingAttributes] = useState<Set<string>>(
-    new Set(),
-  );
-  const [notesSelectedItemId, setNotesSelectedItemId] = useState<string | null>(
-    null,
-  );
+  const [loadingAttributes, setLoadingAttributes] = useState<Set<string>>(new Set());
+  const [notesSelectedItemId, setNotesSelectedItemId] = useState<string | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
-  const { setSidebarCollapsed, setNotesCollapsed, updateExplorerState } =
-    useSidebarStore();
+  const { setSidebarCollapsed, setNotesCollapsed, updateExplorerState } = useSidebarStore();
   const theme = useThemeStore((state) => state.theme);
 
   useEffect(() => {
@@ -50,11 +45,14 @@ const App: React.FC = () => {
     [basketItems],
   );
 
-  const openNotesPanel = (openPanel: boolean) => {
-    if (!openPanel) return;
-    setSidebarCollapsed(false);
-    setNotesCollapsed(false);
-  };
+  const openNotesPanel = useCallback(
+    (openPanel: boolean) => {
+      if (!openPanel) return;
+      setSidebarCollapsed(false);
+      setNotesCollapsed(false);
+    },
+    [setNotesCollapsed, setSidebarCollapsed],
+  );
 
   const handleSelectNode = (node: TreeNode) => {
     // console.log("Selected node:", node);
@@ -179,12 +177,9 @@ const App: React.FC = () => {
 
     window.addEventListener("notes:open", handleNotesOpen as EventListener);
     return () => {
-      window.removeEventListener(
-        "notes:open",
-        handleNotesOpen as EventListener,
-      );
+      window.removeEventListener("notes:open", handleNotesOpen as EventListener);
     };
-  }, [datasetKeys]);
+  }, [datasetKeys, openNotesPanel]);
 
   const handleRemoveBasketItem = (id: string) => {
     setBasketItems((prev) => prev.filter((item) => item.id !== id));
@@ -194,10 +189,7 @@ const App: React.FC = () => {
     setBasketItems([]);
   };
 
-  const handleUpdateBasketItemAttributes = (
-    itemId: string,
-    attributes: AttrData,
-  ) => {
+  const handleUpdateBasketItemAttributes = (itemId: string, attributes: AttrData) => {
     setBasketItems((prev) =>
       prev.map((item) => (item.id === itemId ? { ...item, attributes } : item)),
     );
@@ -246,8 +238,7 @@ const App: React.FC = () => {
 
     if (datasetParam && isDatasetPath(datasetParam)) {
       const name =
-        datasetParam.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop() ||
-        datasetParam;
+        datasetParam.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop() || datasetParam;
       const item: BasketItem = {
         id: datasetParam,
         name,
@@ -259,9 +250,7 @@ const App: React.FC = () => {
       handleStartLoadingAttributes(item.id);
       axios
         .post(`${PROD_BACKEND_URL}/load-attrs/`, { path: datasetParam })
-        .then((response) =>
-          handleUpdateBasketItemAttributes(item.id, response.data),
-        )
+        .then((response) => handleUpdateBasketItemAttributes(item.id, response.data))
         .catch((error) => {
           console.error("Deep-link attribute load failed:", error);
           setLoadingAttributes((prev) => {

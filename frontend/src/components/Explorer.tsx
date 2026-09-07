@@ -46,15 +46,13 @@ const Explorer = ({
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
 
   const canGoBack = historyIndex > 0;
-  const canGoForward =
-    historyIndex >= 0 && historyIndex < historyRef.current.length - 1;
+  const canGoForward = historyIndex >= 0 && historyIndex < historyRef.current.length - 1;
 
   const pushHistory = (rawPath: string) => {
     const nextPath = rawPath.trim();
     if (!nextPath) return;
 
-    const currentPath =
-      historyIndex >= 0 ? historyRef.current[historyIndex] : undefined;
+    const currentPath = historyIndex >= 0 ? historyRef.current[historyIndex] : undefined;
     if (currentPath === nextPath) return;
 
     const truncated =

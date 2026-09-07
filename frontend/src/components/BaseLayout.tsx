@@ -9,11 +9,7 @@ interface BaseLayoutProps {
 
 const BaseLayout = ({ sidebar, viewer }: BaseLayoutProps) => {
   return (
-    <PanelGroup
-      direction="horizontal"
-      className="h-screen"
-      autoSaveId="qimchi-main-layout"
-    >
+    <PanelGroup direction="horizontal" className="h-screen" autoSaveId="qimchi-main-layout">
       {/* Sidebar */}
       {sidebar && <>{sidebar}</>}
 

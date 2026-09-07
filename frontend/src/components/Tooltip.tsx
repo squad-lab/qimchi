@@ -82,10 +82,7 @@ const Tooltip: React.FC<TooltipProps> = ({
   // When tooltip mounts, set aria-hidden appropriately
   useEffect(() => {
     if (!tooltipRef.current) return;
-    tooltipRef.current.setAttribute(
-      "aria-hidden",
-      isVisible ? "false" : "true"
-    );
+    tooltipRef.current.setAttribute("aria-hidden", isVisible ? "false" : "true");
   }, [isVisible]);
 
   // Use pointer events and short timers to avoid flicker / race conditions when quickly moving pointer
@@ -180,10 +177,8 @@ const Tooltip: React.FC<TooltipProps> = ({
         if (tooltipEl && path.includes(tooltipEl)) clickedInside = true;
       } else {
         const target = e.target as Node | null;
-        if (triggerEl && target && triggerEl.contains(target))
-          clickedInside = true;
-        if (tooltipEl && target && tooltipEl.contains(target))
-          clickedInside = true;
+        if (triggerEl && target && triggerEl.contains(target)) clickedInside = true;
+        if (tooltipEl && target && tooltipEl.contains(target)) clickedInside = true;
       }
 
       if (!clickedInside) hideTooltipImmediate();
@@ -231,16 +226,16 @@ const Tooltip: React.FC<TooltipProps> = ({
                   position === "top"
                     ? "bottom-[-4px] left-1/2 -translate-x-1/2"
                     : position === "bottom"
-                    ? "top-[-4px] left-1/2 -translate-x-1/2"
-                    : position === "left"
-                    ? "right-[-4px] top-1/2 -translate-y-1/2"
-                    : position === "center"
-                    ? "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
-                    : "left-[-4px] top-1/2 -translate-y-1/2"
+                      ? "top-[-4px] left-1/2 -translate-x-1/2"
+                      : position === "left"
+                        ? "right-[-4px] top-1/2 -translate-y-1/2"
+                        : position === "center"
+                          ? "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+                          : "left-[-4px] top-1/2 -translate-y-1/2"
                 }`}
               />
             </div>,
-            portalRef.current
+            portalRef.current,
           )
         : null}
     </>

@@ -75,16 +75,10 @@ const NotificationLogEntry: React.FC<{
         <div className="shrink-0">{getIcon(log.type)}</div>
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2">
-            <p className="text-sm font-medium wrap-break-word leading-tight">
-              {log.message}
-            </p>
+            <p className="text-sm font-medium wrap-break-word leading-tight">{log.message}</p>
             {hasMetadata && (
               <div className="text-slate-400 mt-0.5">
-                {isExpanded ? (
-                  <ChevronUp size={14} />
-                ) : (
-                  <ChevronDown size={14} />
-                )}
+                {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </div>
             )}
           </div>
@@ -94,14 +88,10 @@ const NotificationLogEntry: React.FC<{
                 {log.source}
               </span>
             )}
-            <span className="text-[10px] uppercase tracking-wider font-semibold">
-              {log.type}
-            </span>
+            <span className="text-[10px] uppercase tracking-wider font-semibold">{log.type}</span>
             <span className="w-1 h-1 rounded-full bg-current opacity-40"></span>
             <span className="text-xs">{formatTime(log.timestamp)}</span>
-            <span className="text-[10px] ml-auto">
-              {formatDate(log.timestamp)}
-            </span>
+            <span className="text-[10px] ml-auto">{formatDate(log.timestamp)}</span>
           </div>
         </div>
       </div>
@@ -111,9 +101,7 @@ const NotificationLogEntry: React.FC<{
           className="mt-2 p-2 bg-white bg-opacity-50 rounded border border-black border-opacity-5 overflow-hidden text-xs"
           onClick={(e) => e.stopPropagation()}
         >
-          <p className="text-[10px] font-bold uppercase text-slate-500 mb-1">
-            Technical Details
-          </p>
+          <p className="text-[10px] font-bold uppercase text-slate-500 mb-1">Technical Details</p>
           {typeof log.metadata === "object" ? (
             <JsonView
               value={log.metadata}
@@ -127,14 +115,11 @@ const NotificationLogEntry: React.FC<{
                   backgroundColor: "transparent",
                   "--w-rjv-background-color": "transparent",
                   "--w-rjv-line-color": "rgba(0,0,0,0.05)",
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 } as any
               }
             />
           ) : (
-            <pre className="whitespace-pre-wrap font-mono text-[11px]">
-              {String(log.metadata)}
-            </pre>
+            <pre className="whitespace-pre-wrap font-mono text-[11px]">{String(log.metadata)}</pre>
           )}
         </div>
       )}
@@ -172,8 +157,7 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
       const typeMatch = log.type.toLowerCase().includes(lowerQuery);
       const sourceMatch = log.source?.toLowerCase().includes(lowerQuery);
       const metaMatch =
-        log.metadata &&
-        JSON.stringify(log.metadata).toLowerCase().includes(lowerQuery);
+        log.metadata && JSON.stringify(log.metadata).toLowerCase().includes(lowerQuery);
       return msgMatch || typeMatch || sourceMatch || metaMatch;
     });
   }, [logs, searchQuery]);
@@ -198,8 +182,7 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
 
   // Desktop-only: the launcher exposes a way to tail ~/.qimchi/qimchi_debug.log
   // in a real terminal. Hidden in the browser/Docker build (no window.pywebview).
-  const canOpenLog =
-    typeof window !== "undefined" && !!window.pywebview?.api?.open_log_terminal;
+  const canOpenLog = typeof window !== "undefined" && !!window.pywebview?.api?.open_log_terminal;
 
   const openDebugLog = async () => {
     try {

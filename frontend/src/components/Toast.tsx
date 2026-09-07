@@ -19,9 +19,7 @@ interface ToastItem {
   duration: number;
 }
 
-export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => {
+export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
@@ -34,8 +32,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
       source?: string,
       metadata?: any,
     ) => {
-      const id =
-        Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      const id = Date.now().toString() + Math.random().toString(36).substr(2, 9);
       const newToast: ToastItem = { id, message, type, duration };
 
       setToasts((prev) => [...prev, newToast]);
@@ -71,10 +68,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
     setIsLogModalOpen(false);
   });
 
-  const contextValue = useMemo(
-    () => ({ showToast, openLogModal }),
-    [showToast, openLogModal],
-  );
+  const contextValue = useMemo(() => ({ showToast, openLogModal }), [showToast, openLogModal]);
 
   return (
     <ToastContext.Provider value={contextValue}>
@@ -175,9 +169,7 @@ const Toast: React.FC<ToastProps> = ({
         flex items-center space-x-3 p-4 rounded-lg border shadow-lg transition-all duration-200
         ${styles.bg} ${styles.border} ${styles.text}
         ${
-          isExiting
-            ? "opacity-0 transform translate-x-full"
-            : "opacity-100 transform translate-x-0"
+          isExiting ? "opacity-0 transform translate-x-full" : "opacity-100 transform translate-x-0"
         }
         ${className}
       `}

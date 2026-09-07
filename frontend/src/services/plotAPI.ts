@@ -79,7 +79,7 @@ export class PlotAPI {
       return resp.data as PlotResponse;
     } catch (error) {
       // Handle abort errors gracefully
-      if (axios.isCancel(error) || (error as any).name === 'AbortError') {
+      if (axios.isCancel(error) || (error as any).name === "AbortError") {
         console.log("[PlotAPI] Request cancelled");
         throw error; // Re-throw to let caller handle
       }
@@ -87,15 +87,12 @@ export class PlotAPI {
       return {
         plots: [],
         success: false,
-        message:
-          error instanceof Error ? error.message : "Unknown error occurred",
+        message: error instanceof Error ? error.message : "Unknown error occurred",
       };
     }
   }
 
-  static async transformPlot(
-    request: TransformPlotRequest,
-  ): Promise<TransformPlotResponse> {
+  static async transformPlot(request: TransformPlotRequest): Promise<TransformPlotResponse> {
     try {
       const resp = await axios.post(`${API_BASE_URL}/transform-plot`, request, {
         headers: { "Content-Type": "application/json" },

@@ -1,0 +1,44 @@
+# Line-ending normalisation.
+#
+# Text files are stored LF in the repository and checked out LF everywhere,
+# including Windows. Without this the working tree depends on each clone's
+# core.autocrlf setting, so the same file differs between machines and a
+# formatter that enforces LF fights the checkout on every commit.
+#
+# Every tracked text file in this repository is already stored LF, so this
+# changes the working tree only -- there is nothing to renormalise.
+* text=auto eol=lf
+
+# cmd.exe requires CRLF in batch files.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Build and install scripts must stay LF or they fail on Linux and macOS with
+# ^M errors. This includes the AppImage and DMG builders.
+*.sh text eol=lf
+
+# Inno Setup and macOS bundle metadata are text.
+*.iss text
+*.plist text
+
+# Binary assets: never convert, never diff as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.webp binary
+*.pdf binary
+*.zip binary
+*.exe binary
+*.dll binary
+*.dmg binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+
+# Collapse generated lockfiles in GitLab merge request diffs.
+backend/uv.lock -diff linguist-generated=true gitlab-generated=true
+frontend/package-lock.json -diff linguist-generated=true gitlab-generated=true

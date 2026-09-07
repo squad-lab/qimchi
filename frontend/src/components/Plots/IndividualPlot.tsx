@@ -1,17 +1,8 @@
-import React, {
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  useMemo,
-} from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Data, Layout, Config } from "plotly.js";
 import PlotWrapper from "./PlotWrapper";
 import { PlotAPI, PlotRequest } from "../../services/plotAPI";
-import type {
-  SliderConfig,
-  PlotConfiguration,
-} from "../../components/interfaces";
+import type { SliderConfig, PlotConfiguration } from "../../components/interfaces";
 import { useToast } from "../../hooks/useToast";
 import { usePlotStore } from "../../stores/plotStore";
 
@@ -55,9 +46,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [currentConfig, setCurrentConfig] = useState<PlotConfiguration>(config);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
-  const [availableSliders, setAvailableSliders] = useState<
-    Record<string, SliderConfig>
-  >({});
+  const [availableSliders, setAvailableSliders] = useState<Record<string, SliderConfig>>({});
   const currentConfigRef = useRef(currentConfig);
   const getPlotState = usePlotStore((state) => state.getPlotState);
 
@@ -98,10 +87,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
   }, [currentConfig]);
 
   const createPlot = useCallback(
-    async (
-      configToUse?: PlotConfiguration,
-      options: CreatePlotOptions = {},
-    ) => {
+    async (configToUse?: PlotConfiguration, options: CreatePlotOptions = {}) => {
       if (options.skipIfPending && fetchInFlight.current) {
         return;
       }
@@ -114,9 +100,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
 
       try {
         const plotConfig = configToUse || currentConfigRef.current;
-        console.log(
-          `[IndividualPlot] Creating plot with dataset: ${plotConfig.fpath}`,
-        );
+        console.log(`[IndividualPlot] Creating plot with dataset: ${plotConfig.fpath}`);
         const request: PlotRequest = {
           fpaths: [plotConfig.fpath], // Convert single path to array for backend compatibility
           indeps: plotConfig.indeps,
@@ -160,8 +144,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
             consecutiveNonLiveCount.current >= CONSECUTIVE_NON_LIVE_THRESHOLD
           ) {
             const resolvedPath =
-              typeof plot.resolved_fpath === "string" &&
-              plot.resolved_fpath.length > 0
+              typeof plot.resolved_fpath === "string" && plot.resolved_fpath.length > 0
                 ? plot.resolved_fpath
                 : currentConfigRef.current.fpath;
             console.log(
@@ -240,18 +223,12 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
           const errorMsg = response.message || "No plots created";
           setError(errorMsg);
           if (!options.silent) {
-            showToast(
-              `Failed to create plot: ${errorMsg}`,
-              "error",
-              5000,
-              "Plotter",
-              {
-                dataset: plotConfig.fpath,
-                type: plotConfig.plotType,
-                vars: { indeps: plotConfig.indeps, deps: plotConfig.deps },
-                backend_error: errorMsg,
-              },
-            );
+            showToast(`Failed to create plot: ${errorMsg}`, "error", 5000, "Plotter", {
+              dataset: plotConfig.fpath,
+              type: plotConfig.plotType,
+              vars: { indeps: plotConfig.indeps, deps: plotConfig.deps },
+              backend_error: errorMsg,
+            });
           }
         }
       } catch (err) {
@@ -261,25 +238,14 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
           errorMessage = err.message;
 
           // Provide more specific error messages for common issues
-          if (
-            errorMessage.includes("not found") ||
-            errorMessage.includes("KeyError")
-          ) {
+          if (errorMessage.includes("not found") || errorMessage.includes("KeyError")) {
             const config = currentConfigRef.current;
             errorMessage = `Variable not found in dataset. The plot uses variables [${config.indeps.join(
               ", ",
-            )}] → [${config.deps.join(
-              ", ",
-            )}] which may not exist in this dataset.`;
-          } else if (
-            errorMessage.includes("dimension") ||
-            errorMessage.includes("shape")
-          ) {
+            )}] → [${config.deps.join(", ")}] which may not exist in this dataset.`;
+          } else if (errorMessage.includes("dimension") || errorMessage.includes("shape")) {
             errorMessage = `Data shape mismatch. The selected variables may have incompatible dimensions in this dataset.`;
-          } else if (
-            errorMessage.includes("path") ||
-            errorMessage.includes("file")
-          ) {
+          } else if (errorMessage.includes("path") || errorMessage.includes("file")) {
             errorMessage = `Dataset file not accessible: ${currentConfigRef.current.fpath}`;
           }
         }
@@ -296,72 +262,59 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
     [showToast],
   ); // No dependency on currentConfig, use ref instead
 
-  const handleConfigUpdate = useCallback(
-    (updates: Partial<PlotConfiguration>) => {
-      console.log("[IndividualPlot] handleConfigUpdate invoked with", updates);
-      setCurrentConfig((prev) => {
-        // For filters, completely replace them instead of merging to avoid duplication
-        const newConfig = { ...prev };
+  const handleConfigUpdate = useCallback((updates: Partial<PlotConfiguration>) => {
+    console.log("[IndividualPlot] handleConfigUpdate invoked with", updates);
+    setCurrentConfig((prev) => {
+      // For filters, completely replace them instead of merging to avoid duplication
+      const newConfig = { ...prev };
 
-        // Handle filters specially to avoid duplication
-        if ("filters_order" in updates || "filters_opts" in updates) {
-          newConfig.filters_order = updates.filters_order || [];
-          newConfig.filters_opts = updates.filters_opts || {};
+      // Handle filters specially to avoid duplication
+      if ("filters_order" in updates || "filters_opts" in updates) {
+        newConfig.filters_order = updates.filters_order || [];
+        newConfig.filters_opts = updates.filters_opts || {};
+      }
+
+      // Handle other updates normally
+      Object.keys(updates).forEach((key) => {
+        if (
+          key === "filters_order" ||
+          key === "filters_opts" ||
+          key === "fpath" ||
+          key === "source"
+        ) {
+          return;
         }
 
-        // Handle other updates normally
-        Object.keys(updates).forEach((key) => {
-          if (
-            key === "filters_order" ||
-            key === "filters_opts" ||
-            key === "fpath" ||
-            key === "source"
-          ) {
-            return;
-          }
-
-          const typedKey = key as keyof PlotConfiguration;
-          const typedNewConfig = newConfig as Record<
-            keyof PlotConfiguration,
-            unknown
-          >;
-          const typedUpdates = updates as Record<
-            keyof PlotConfiguration,
-            unknown
-          >;
-          typedNewConfig[typedKey] = typedUpdates[typedKey];
-        });
-
-        if (typeof updates.fpath === "string") {
-          newConfig.fpath = updates.fpath;
-          const shouldDeriveSource =
-            !("source" in updates) || updates.source === undefined;
-          if (shouldDeriveSource) {
-            const inferred = inferSourceFromPath(updates.fpath);
-            console.log(
-              `[IndividualPlot] handleConfigUpdate inferred source ${inferred} for ${updates.fpath}`,
-            );
-            newConfig.source = inferred;
-          }
-        }
-
-        if (typeof updates.source === "string") {
-          console.log(
-            `[IndividualPlot] handleConfigUpdate received explicit source ${updates.source}`,
-          );
-          newConfig.source = updates.source;
-        }
-
-        console.log(
-          "[IndividualPlot] handleConfigUpdate next config",
-          newConfig,
-        );
-        return newConfig;
+        const typedKey = key as keyof PlotConfiguration;
+        const typedNewConfig = newConfig as Record<keyof PlotConfiguration, unknown>;
+        const typedUpdates = updates as Record<keyof PlotConfiguration, unknown>;
+        typedNewConfig[typedKey] = typedUpdates[typedKey];
       });
-      // Don't automatically refresh - let the PlotWrapper handle refresh via onRefresh
-    },
-    [],
-  );
+
+      if (typeof updates.fpath === "string") {
+        newConfig.fpath = updates.fpath;
+        const shouldDeriveSource = !("source" in updates) || updates.source === undefined;
+        if (shouldDeriveSource) {
+          const inferred = inferSourceFromPath(updates.fpath);
+          console.log(
+            `[IndividualPlot] handleConfigUpdate inferred source ${inferred} for ${updates.fpath}`,
+          );
+          newConfig.source = inferred;
+        }
+      }
+
+      if (typeof updates.source === "string") {
+        console.log(
+          `[IndividualPlot] handleConfigUpdate received explicit source ${updates.source}`,
+        );
+        newConfig.source = updates.source;
+      }
+
+      console.log("[IndividualPlot] handleConfigUpdate next config", newConfig);
+      return newConfig;
+    });
+    // Don't automatically refresh - let the PlotWrapper handle refresh via onRefresh
+  }, []);
 
   const handleRetryClick = useCallback(() => {
     createPlot();
@@ -412,9 +365,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
     }
 
     const intervalId = window.setInterval(() => {
-      console.log(
-        "[IndividualPlot] auto-refresh interval firing for memory dataset",
-      );
+      console.log("[IndividualPlot] auto-refresh interval firing for memory dataset");
       createPlot(undefined, { silent: true, skipIfPending: true });
     }, MEMORY_REFRESH_INTERVAL_MS);
     console.log(
@@ -423,20 +374,13 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
     autoRefreshTimer.current = intervalId;
 
     return () => {
-      console.log(
-        "[IndividualPlot] auto-refresh effect cleanup running, clearing interval",
-      );
+      console.log("[IndividualPlot] auto-refresh effect cleanup running, clearing interval");
       if (autoRefreshTimer.current !== null) {
         window.clearInterval(autoRefreshTimer.current);
         autoRefreshTimer.current = null;
       }
     };
-  }, [
-    currentConfig.fpath,
-    currentConfig.source,
-    createPlot,
-    isFiltersModalOpen,
-  ]);
+  }, [currentConfig.fpath, currentConfig.source, createPlot, isFiltersModalOpen]);
 
   // Only create plot on initial mount - prevent double execution
   useEffect(() => {
@@ -474,8 +418,8 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
               <strong>Dataset:</strong> {currentConfig.fpath.split("/").pop()}
             </div>
             <div>
-              <strong>Variables:</strong> [{currentConfig.indeps.join(", ")}] →
-              [{currentConfig.deps.join(", ")}]
+              <strong>Variables:</strong> [{currentConfig.indeps.join(", ")}] → [
+              {currentConfig.deps.join(", ")}]
             </div>
             <div>
               <strong>Plot Type:</strong> {currentConfig.plotType}
@@ -519,9 +463,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         plotRef={plotRef}
         plotStatus={plotStatus}
         onClose={handleClose}
-        onTogglePinned={
-          onSetPinned ? (pinned) => onSetPinned(config.id, pinned) : undefined
-        }
+        onTogglePinned={onSetPinned ? (pinned) => onSetPinned(config.id, pinned) : undefined}
         plotConfig={currentConfig}
         onUpdateConfig={handleConfigUpdate}
         onFiltersModalOpenChange={setIsFiltersModalOpen}

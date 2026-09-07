@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- plot helpers intentionally share this component module */
 import { ChartLine, Grid, Check } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 
@@ -8,7 +9,7 @@ type OptionWithIconType = {
   icon?: React.ComponentType<{ size?: number; className?: string }> | string;
 };
 
-// Helper function to format title: shows UUID for qcutils datasets, truncated title otherwise
+// Helper function to format title: shows UUID for qanary datasets, truncated title otherwise
 const formatTitleWithUUID = (title: string, maxLength = 15) => {
   if (!title) return "Plot";
 
@@ -21,7 +22,7 @@ const formatTitleWithUUID = (title: string, maxLength = 15) => {
     return `${uuid.substring(0, maxLength - 3)}...`;
   }
 
-  // No UUID (non-qcutils dataset): show the title itself, truncated
+  // No UUID (non-qanary dataset): show the title itself, truncated
   if (title.length <= maxLength) {
     return title;
   }
@@ -42,8 +43,7 @@ const getPlotTypeIcon = (plotType: string) => {
 
 // Helper function to extract UUID from plot title
 const extractUUID = (title: string): string | null => {
-  const uuidRegex =
-    /[0-9]\d*-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const uuidRegex = /[0-9]\d*-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const match = title.match(uuidRegex);
   return match ? match[0] : null;
 };
@@ -107,16 +107,10 @@ const ApplyButton: React.FC<ApplyButtonProps> = ({
       <div
         className={`
           w-4 h-4 rounded border-2 flex items-center justify-center transition-all duration-200
-          ${
-            isEnabled
-              ? "bg-white border-white"
-              : "bg-transparent border-gray-400"
-          }
+          ${isEnabled ? "bg-white border-white" : "bg-transparent border-gray-400"}
         `}
       >
-        {isEnabled && (
-          <Check size={12} className="text-blue-600" strokeWidth={3} />
-        )}
+        {isEnabled && <Check size={12} className="text-blue-600" strokeWidth={3} />}
       </div>
     </button>
   );
@@ -130,14 +124,7 @@ const IconDropdown: React.FC<{
   className?: string;
   title?: string;
   "aria-label"?: string;
-}> = ({
-  value,
-  onChange,
-  options,
-  className,
-  title,
-  "aria-label": ariaLabel,
-}) => {
+}> = ({ value, onChange, options, className, title, "aria-label": ariaLabel }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const selectedOption = options.find((opt) => opt.value === value);
@@ -145,10 +132,7 @@ const IconDropdown: React.FC<{
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target as Node)
-      ) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsOpen(false);
       }
     };
@@ -166,9 +150,7 @@ const IconDropdown: React.FC<{
     const IconComponent = option.icon;
 
     return (
-      <div
-        className={`flex items-center gap-2 ${isSelected ? "font-medium" : ""}`}
-      >
+      <div className={`flex items-center gap-2 ${isSelected ? "font-medium" : ""}`}>
         {typeof option.icon === "string" ? (
           <span className="text-xs font-mono text-gray-500 min-w-[60px] text-center">
             {option.icon}
@@ -191,9 +173,7 @@ const IconDropdown: React.FC<{
         className={`${className} flex items-center justify-between`}
         title={title}
         aria-label={ariaLabel}
-        {...(isOpen
-          ? { "aria-expanded": "true" }
-          : { "aria-expanded": "false" })}
+        {...(isOpen ? { "aria-expanded": "true" } : { "aria-expanded": "false" })}
         aria-haspopup="listbox"
       >
         {selectedOption ? renderOption(selectedOption, true) : value}
@@ -203,12 +183,7 @@ const IconDropdown: React.FC<{
           stroke="currentColor"
           viewBox="0 0 24 24"
         >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M19 9l-7 7-7-7"
-          />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </button>
 
@@ -223,9 +198,7 @@ const IconDropdown: React.FC<{
                 setIsOpen(false);
               }}
               className={`w-full px-3 py-2 text-left hover:bg-gray-100 ${
-                option.value === value
-                  ? "bg-blue-50 text-blue-700"
-                  : "text-gray-900"
+                option.value === value ? "bg-blue-50 text-blue-700" : "text-gray-900"
               }`}
             >
               {renderOption(option, option.value === value)}

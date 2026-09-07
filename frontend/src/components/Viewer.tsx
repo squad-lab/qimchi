@@ -24,10 +24,7 @@ import {
   replicateCustomPlots,
   type ReplicationSource,
 } from "../utils/autoPlot";
-import {
-  useGlobalShortcutsInit,
-  useShortcut,
-} from "../hooks/useGlobalShortcuts";
+import { useGlobalShortcutsInit, useShortcut } from "../hooks/useGlobalShortcuts";
 import {
   computeSharedFields,
   getEligibleDatasetsForComposer,
@@ -82,18 +79,12 @@ const Viewer = ({
   const { showToast } = useToast();
   // Global default percent and per-plot overrides
   const [plotWidthPercent, setPlotWidthPercent] = useState<number>(50);
-  const [perPlotWidthMap, setPerPlotWidthMap] = useState<
-    Record<string, number>
-  >({});
+  const [perPlotWidthMap, setPerPlotWidthMap] = useState<Record<string, number>>({});
   // Global squarify toggle affecting all plots
   const [isSquareModeGlobal, setIsSquareModeGlobal] = useState<boolean>(false);
-  const [selectedDatasetIds, setSelectedDatasetIds] = useState<Set<string>>(
-    new Set(),
-  );
+  const [selectedDatasetIds, setSelectedDatasetIds] = useState<Set<string>>(new Set());
   const [selectedPlotId, setSelectedPlotId] = useState<string | null>(null);
-  const [viewerHeight, setViewerHeight] = useState<string>(
-    "calc(100vh - 200px)",
-  );
+  const [viewerHeight, setViewerHeight] = useState<string>("calc(100vh - 200px)");
 
   const basketRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
@@ -113,10 +104,7 @@ const Viewer = ({
     );
 
     const buildMemoryPath = (item: BasketItem): string | null => {
-      const baseName = item.name?.replace(
-        /\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i,
-        "",
-      );
+      const baseName = item.name?.replace(/\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i, "");
       if (!baseName) {
         return null;
       }
@@ -148,11 +136,7 @@ const Viewer = ({
         if (sameDataset && prevIsMemory) {
           // Preserve the memory path we were already using for the same dataset
           preferredPath = prevItem.path;
-        } else if (
-          isDatasetPath(newItem.path) &&
-          isLiveDataset &&
-          !isDiskFallback
-        ) {
+        } else if (isDatasetPath(newItem.path) && isLiveDataset && !isDiskFallback) {
           // Prefer the memory URI when the basket item represents a live dataset with an in-memory store
           const memoryPath = buildMemoryPath(newItem);
           if (memoryPath) {
@@ -161,8 +145,7 @@ const Viewer = ({
         }
       }
 
-      const preferMemory =
-        isMemoryPath(preferredPath) || isMemoryPath(prevItem.path);
+      const preferMemory = isMemoryPath(preferredPath) || isMemoryPath(prevItem.path);
 
       updatePlotDataSource(preferredPath, {
         preferMemory,
@@ -170,9 +153,7 @@ const Viewer = ({
         // live in plotStore, keyed by plot id, so they cannot be cloned).
         getFilters: (plotId) => getPlotState(plotId)?.applied_filters,
       });
-      console.log(
-        `Updated ${plotConfigs.length} plots with new dataset: ${preferredPath}`,
-      );
+      console.log(`Updated ${plotConfigs.length} plots with new dataset: ${preferredPath}`);
 
       // Keep the "previous" snapshot aligned with the path we actually applied to avoid flip-flop churn
       nextPreviousItems = basketItems.map((item) =>
@@ -182,7 +163,7 @@ const Viewer = ({
 
     // Update the reference for next comparison
     previousBasketItems.current = nextPreviousItems;
-  }, [basketItems, plotConfigs.length, updatePlotDataSource]);
+  }, [basketItems, getPlotState, plotConfigs.length, updatePlotDataSource]);
 
   // Auto-create default plots when new items with attributes are added to basket
   useEffect(() => {
@@ -200,20 +181,12 @@ const Viewer = ({
       // Skip auto-plotting if there are existing plots AND this specific item already has plots
       // Check if any existing plot uses this item's path (either directly or via memory://)
       if (plotConfigs.length > 0) {
-        const itemBaseName = item.name?.replace(
-          /\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i,
-          "",
-        );
+        const itemBaseName = item.name?.replace(/\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i, "");
         const itemMemoryPath =
-          isDatasetPath(item.path) && itemBaseName
-            ? `memory://${itemBaseName}`
-            : null;
+          isDatasetPath(item.path) && itemBaseName ? `memory://${itemBaseName}` : null;
 
         const hasExistingPlots = plotConfigs.some((config) => {
-          return (
-            config.fpath === item.path ||
-            (itemMemoryPath && config.fpath === itemMemoryPath)
-          );
+          return config.fpath === item.path || (itemMemoryPath && config.fpath === itemMemoryPath);
         });
 
         if (hasExistingPlots) {
@@ -237,11 +210,7 @@ const Viewer = ({
         processedAutoPlotItems.current.add(item.id);
 
         // Generate auto-plot configs with copied filters
-        const result = generateAutoPlotConfigs(
-          item,
-          heatmapFilters,
-          lineplotFilters,
-        );
+        const result = generateAutoPlotConfigs(item, heatmapFilters, lineplotFilters);
 
         // Mirror the user's custom plots onto the new measurement, so a
         // hand-built view isn't recreated by hand for every dataset.
@@ -270,16 +239,12 @@ const Viewer = ({
 
         const replicated = replicateCustomPlots(item, replicationSources);
 
-        if (
-          result.success &&
-          result.plotConfigs.length + replicated.plotConfigs.length > 0
-        ) {
+        if (result.success && result.plotConfigs.length + replicated.plotConfigs.length > 0) {
           // Batch: one group, prepended together so the defaults keep their
           // own order while still landing ahead of older plots.
           addPlots([...result.plotConfigs, ...replicated.plotConfigs]);
           const filterMsg =
-            (heatmapFilters?.length ?? 0) > 0 ||
-            (lineplotFilters?.length ?? 0) > 0
+            (heatmapFilters?.length ?? 0) > 0 || (lineplotFilters?.length ?? 0) > 0
               ? " with copied filters"
               : "";
           const customMsg = replicated.plotConfigs.length
@@ -288,10 +253,7 @@ const Viewer = ({
           const skipMsg = replicated.skipped.length
             ? ` (skipped ${replicated.skipped.join("; ")})`
             : "";
-          showToast(
-            result.message + filterMsg + customMsg + skipMsg,
-            "success",
-          );
+          showToast(result.message + filterMsg + customMsg + skipMsg, "success");
         } else {
           // Only show error if there were actual issues (not just non-qualifying items)
           if (
@@ -323,14 +285,7 @@ const Viewer = ({
         }
       }
     });
-  }, [
-    basketItems,
-    loadingAttributes,
-    addPlots,
-    showToast,
-    plotConfigs,
-    getPlotState,
-  ]);
+  }, [basketItems, loadingAttributes, addPlots, showToast, plotConfigs, getPlotState]);
 
   // Calculate dynamic height based on actual rendered heights
   const updateViewerHeight = () => {
@@ -339,8 +294,7 @@ const Viewer = ({
       const composerHeight = composerRef.current.offsetHeight;
       const containerPadding = 16; // p-2 = 8px top + 8px bottom = 16px
       const gap = 16; // gap-2 = 8px * 2 = 16px (two gaps: basket-composer, composer-viewer)
-      const totalUsedHeight =
-        basketHeight + composerHeight + containerPadding + gap;
+      const totalUsedHeight = basketHeight + composerHeight + containerPadding + gap;
 
       setViewerHeight(`calc(100vh - ${totalUsedHeight}px)`);
     }
@@ -389,8 +343,7 @@ const Viewer = ({
       }
     };
     window.addEventListener("plot-size-preset", handler as EventListener);
-    return () =>
-      window.removeEventListener("plot-size-preset", handler as EventListener);
+    return () => window.removeEventListener("plot-size-preset", handler as EventListener);
   }, []);
 
   // Keep processedAutoPlotItems in sync: remove IDs for items no longer in the basket
@@ -407,9 +360,7 @@ const Viewer = ({
   // Keep selected dataset IDs valid as basket contents change.
   const effectiveSelectedDatasetIds = useMemo(() => {
     const existingIds = new Set(basketItems.map((item) => item.id));
-    const next = new Set(
-      Array.from(selectedDatasetIds).filter((id) => existingIds.has(id)),
-    );
+    const next = new Set(Array.from(selectedDatasetIds).filter((id) => existingIds.has(id)));
 
     if (next.size === 0 && basketItems.length === 1) {
       next.add(basketItems[0].id);
@@ -457,10 +408,7 @@ const Viewer = ({
     [effectiveSelectedPlotId],
   );
 
-  const selectedDatasets = getSelectedDatasets(
-    basketItems,
-    effectiveSelectedDatasetIds,
-  );
+  const selectedDatasets = getSelectedDatasets(basketItems, effectiveSelectedDatasetIds);
   const sharedFields = computeSharedFields(selectedDatasets);
   const enforceSharedGating =
     effectiveSelectedDatasetIds.size > 1 &&
@@ -475,81 +423,35 @@ const Viewer = ({
 
   useGlobalShortcutsInit();
 
-  useShortcut("heatmap", () =>
-    composerActionRef.current?.setComposerPlotType("HeatMap"),
-  );
-  useShortcut("lineplot", () =>
-    composerActionRef.current?.setComposerPlotType("LinePlot"),
-  );
-  useShortcut("plot", () =>
-    composerActionRef.current?.createPlotFromComposer(),
-  );
+  useShortcut("heatmap", () => composerActionRef.current?.setComposerPlotType("HeatMap"));
+  useShortcut("lineplot", () => composerActionRef.current?.setComposerPlotType("LinePlot"));
+  useShortcut("plot", () => composerActionRef.current?.createPlotFromComposer());
   useShortcut("toggle-sidebar", () => setSidebarCollapsed(!sidebarCollapsed));
-  useShortcut("toggle-metadata", () =>
-    setMetadataCollapsed(!metadataCollapsed),
-  );
+  useShortcut("toggle-metadata", () => setMetadataCollapsed(!metadataCollapsed));
   useShortcut("toggle-notes", () => setNotesCollapsed(!notesCollapsed));
-  useShortcut("clear-composer", () =>
-    composerActionRef.current?.clearComposer(),
-  );
+  useShortcut("clear-composer", () => composerActionRef.current?.clearComposer());
   useShortcut("clear-basket", () => onClearBasket());
   useShortcut("clear-viewer", () => clearPlots());
 
-  useShortcut("select-plot-1", () =>
-    setSelectedPlotId(plotConfigs[0]?.id ?? null),
-  );
-  useShortcut("select-plot-2", () =>
-    setSelectedPlotId(plotConfigs[1]?.id ?? null),
-  );
-  useShortcut("select-plot-3", () =>
-    setSelectedPlotId(plotConfigs[2]?.id ?? null),
-  );
-  useShortcut("select-plot-4", () =>
-    setSelectedPlotId(plotConfigs[3]?.id ?? null),
-  );
-  useShortcut("select-plot-5", () =>
-    setSelectedPlotId(plotConfigs[4]?.id ?? null),
-  );
-  useShortcut("select-plot-6", () =>
-    setSelectedPlotId(plotConfigs[5]?.id ?? null),
-  );
-  useShortcut("select-plot-7", () =>
-    setSelectedPlotId(plotConfigs[6]?.id ?? null),
-  );
-  useShortcut("select-plot-8", () =>
-    setSelectedPlotId(plotConfigs[7]?.id ?? null),
-  );
-  useShortcut("select-plot-9", () =>
-    setSelectedPlotId(plotConfigs[8]?.id ?? null),
-  );
+  useShortcut("select-plot-1", () => setSelectedPlotId(plotConfigs[0]?.id ?? null));
+  useShortcut("select-plot-2", () => setSelectedPlotId(plotConfigs[1]?.id ?? null));
+  useShortcut("select-plot-3", () => setSelectedPlotId(plotConfigs[2]?.id ?? null));
+  useShortcut("select-plot-4", () => setSelectedPlotId(plotConfigs[3]?.id ?? null));
+  useShortcut("select-plot-5", () => setSelectedPlotId(plotConfigs[4]?.id ?? null));
+  useShortcut("select-plot-6", () => setSelectedPlotId(plotConfigs[5]?.id ?? null));
+  useShortcut("select-plot-7", () => setSelectedPlotId(plotConfigs[6]?.id ?? null));
+  useShortcut("select-plot-8", () => setSelectedPlotId(plotConfigs[7]?.id ?? null));
+  useShortcut("select-plot-9", () => setSelectedPlotId(plotConfigs[8]?.id ?? null));
 
-  useShortcut("selected-enter-linecut", () =>
-    dispatchSelectedPlotShortcut("enter-linecut"),
-  );
-  useShortcut("selected-open-filters", () =>
-    dispatchSelectedPlotShortcut("open-filters"),
-  );
-  useShortcut("selected-open-appearance", () =>
-    dispatchSelectedPlotShortcut("open-appearance"),
-  );
-  useShortcut("selected-toggle-maximize", () =>
-    dispatchSelectedPlotShortcut("toggle-maximize"),
-  );
-  useShortcut("selected-toggle-bgcorr", () =>
-    dispatchSelectedPlotShortcut("toggle-bgcorr"),
-  );
-  useShortcut("selected-swap-axes", () =>
-    dispatchSelectedPlotShortcut("swap-axes"),
-  );
-  useShortcut("selected-reset-plot", () =>
-    dispatchSelectedPlotShortcut("reset-plot"),
-  );
-  useShortcut("selected-send-to-notes", () =>
-    dispatchSelectedPlotShortcut("send-to-notes"),
-  );
-  useShortcut("selected-export-images", () =>
-    dispatchSelectedPlotShortcut("export-images"),
-  );
+  useShortcut("selected-enter-linecut", () => dispatchSelectedPlotShortcut("enter-linecut"));
+  useShortcut("selected-open-filters", () => dispatchSelectedPlotShortcut("open-filters"));
+  useShortcut("selected-open-appearance", () => dispatchSelectedPlotShortcut("open-appearance"));
+  useShortcut("selected-toggle-maximize", () => dispatchSelectedPlotShortcut("toggle-maximize"));
+  useShortcut("selected-toggle-bgcorr", () => dispatchSelectedPlotShortcut("toggle-bgcorr"));
+  useShortcut("selected-swap-axes", () => dispatchSelectedPlotShortcut("swap-axes"));
+  useShortcut("selected-reset-plot", () => dispatchSelectedPlotShortcut("reset-plot"));
+  useShortcut("selected-send-to-notes", () => dispatchSelectedPlotShortcut("send-to-notes"));
+  useShortcut("selected-export-images", () => dispatchSelectedPlotShortcut("export-images"));
   useShortcut("selected-remove-plot", () => {
     if (effectiveSelectedPlotId) {
       removePlot(effectiveSelectedPlotId);
@@ -571,10 +473,7 @@ const Viewer = ({
     return `Selected: ${effectiveSelectedDatasetIds.size} datasets`;
   };
 
-  const handleToggleDatasetSelection = (
-    datasetId: string,
-    multiSelect: boolean,
-  ) => {
+  const handleToggleDatasetSelection = (datasetId: string, multiSelect: boolean) => {
     setSelectedDatasetIds((prev) => {
       const next = new Set(prev);
 
@@ -612,17 +511,11 @@ const Viewer = ({
     }
 
     if (effectiveSelectedDatasetIds.size === 0) {
-      showToast(
-        "Select at least one dataset in Basket before plotting.",
-        "warning",
-      );
+      showToast("Select at least one dataset in Basket before plotting.", "warning");
       return;
     }
 
-    const currentlySelected = getSelectedDatasets(
-      basketItems,
-      effectiveSelectedDatasetIds,
-    );
+    const currentlySelected = getSelectedDatasets(basketItems, effectiveSelectedDatasetIds);
     if (currentlySelected.length === 0) {
       showToast("No selected datasets are available for plotting.", "error");
       return;
@@ -634,17 +527,12 @@ const Viewer = ({
     });
 
     if (eligibility.eligible.length === 0) {
-      showToast(
-        "No selected datasets can be plotted with the current composer settings.",
-        "error",
-      );
+      showToast("No selected datasets can be plotted with the current composer settings.", "error");
       return;
     }
 
     eligibility.eligible.forEach((dataset) => {
-      const sourceByPath: "memory" | "disk" = isMemoryPath(dataset.path)
-        ? "memory"
-        : "disk";
+      const sourceByPath: "memory" | "disk" = isMemoryPath(dataset.path) ? "memory" : "disk";
 
       addPlot({
         // Composer-built: mark custom so it is replicated onto measurements
@@ -669,15 +557,11 @@ const Viewer = ({
 
   useEffect(() => {
     if (effectiveSelectedDatasetIds.size !== 1) {
-      previousSelectionKeyRef.current = Array.from(effectiveSelectedDatasetIds)
-        .sort()
-        .join("|");
+      previousSelectionKeyRef.current = Array.from(effectiveSelectedDatasetIds).sort().join("|");
       return;
     }
 
-    const selectionKey = Array.from(effectiveSelectedDatasetIds)
-      .sort()
-      .join("|");
+    const selectionKey = Array.from(effectiveSelectedDatasetIds).sort().join("|");
     if (selectionKey === previousSelectionKeyRef.current) {
       return;
     }
@@ -704,11 +588,7 @@ const Viewer = ({
     );
 
     if (compatibility === false) {
-      showToast(
-        "Selected dataset does not match current composer fields.",
-        "warning",
-        3000,
-      );
+      showToast("Selected dataset does not match current composer fields.", "warning", 3000);
       composer.clearComposer();
     }
   }, [effectiveSelectedDatasetIds, selectedDatasets, showToast]);
@@ -718,9 +598,7 @@ const Viewer = ({
       // console.log("Downloading items:", items);
 
       // Filter only dataset files
-      const datasetItems = items.filter(
-        (item) => item.type === "file" && isDatasetPath(item.path),
-      );
+      const datasetItems = items.filter((item) => item.type === "file" && isDatasetPath(item.path));
 
       if (datasetItems.length === 0) {
         showToast("No dataset files to download", "warning");
@@ -732,20 +610,15 @@ const Viewer = ({
       const paths = datasetItems.map((item) => ({ path: item.path }));
 
       // Call the backend download-selected endpoint
-      const response = await axios.post(
-        `${PROD_BACKEND_URL}/download-selected/`,
-        paths,
-        { responseType: "blob" },
-      );
+      const response = await axios.post(`${PROD_BACKEND_URL}/download-selected/`, paths, {
+        responseType: "blob",
+      });
 
       // Create a download link
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
-      link.setAttribute(
-        "download",
-        `selected_datasets_${datasetItems.length}_files.zip`,
-      );
+      link.setAttribute("download", `selected_datasets_${datasetItems.length}_files.zip`);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -812,10 +685,7 @@ const Viewer = ({
           </div>
 
           {/* Plot Composer */}
-          <div
-            ref={composerRef}
-            className="shrink-0 border border-gray-200 rounded-lg"
-          >
+          <div ref={composerRef} className="shrink-0 border border-gray-200 rounded-lg">
             <PlotComposer
               ref={composerActionRef}
               onCreatePlot={handleCreatePlot}
@@ -830,26 +700,17 @@ const Viewer = ({
           >
             <div className="flex items-center justify-between shrink-0 bg-gray-50 border-b border-gray-200 rounded-t-lg p-2">
               <h3 className="font-semibold text-gray-900 flex items-center">
-                <ChartScatter
-                  size={16}
-                  className="mr-1.5 align-middle mb-0.5"
-                />{" "}
-                Viewer<span className="ml-[1.5px]">({plotConfigs.length})</span>
+                <ChartScatter size={16} className="mr-1.5 align-middle mb-0.5" /> Viewer
+                <span className="ml-[1.5px]">({plotConfigs.length})</span>
               </h3>
               <div className="flex items-center space-x-2">
                 {/* Squarify toggle - applies to all plots */}
                 <Tooltip
-                  content={
-                    isSquareModeGlobal
-                      ? "Unsquarify all plots"
-                      : "Squarify all plots"
-                  }
+                  content={isSquareModeGlobal ? "Unsquarify all plots" : "Squarify all plots"}
                   position="left"
                 >
                   <button
-                    title={
-                      isSquareModeGlobal ? "Unsquarify all" : "Squarify all"
-                    }
+                    title={isSquareModeGlobal ? "Unsquarify all" : "Squarify all"}
                     onClick={() => {
                       // Toggle local state and broadcast
                       const next = !isSquareModeGlobal;
@@ -879,22 +740,8 @@ const Viewer = ({
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     >
-                      <rect
-                        x="3"
-                        y="3"
-                        width="18"
-                        height="18"
-                        rx="2"
-                        ry="2"
-                      ></rect>
-                      <rect
-                        x="8"
-                        y="8"
-                        width="8"
-                        height="8"
-                        rx="1"
-                        ry="1"
-                      ></rect>
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                      <rect x="8" y="8" width="8" height="8" rx="1" ry="1"></rect>
                     </svg>
                   </button>
                 </Tooltip>
@@ -902,11 +749,7 @@ const Viewer = ({
                 {/* Size preset ButtonGroup - affects all plots by default */}
                 <div className="inline-flex items-center bg-white border border-gray-200 rounded">
                   {[33, 50, 66, 100].map((pct, idx) => (
-                    <Tooltip
-                      key={pct}
-                      content={`${pct}% width (all plots)`}
-                      position="left"
-                    >
+                    <Tooltip key={pct} content={`${pct}% width (all plots)`} position="left">
                       <button
                         onClick={() => {
                           // When applying globally, clear per-plot overrides
@@ -924,9 +767,7 @@ const Viewer = ({
                         }}
                         title={`${pct}% width`}
                         className={`px-2 py-1 text-xs font-medium ${
-                          plotWidthPercent === pct
-                            ? "bg-gray-100"
-                            : "hover:bg-gray-50"
+                          plotWidthPercent === pct ? "bg-gray-100" : "hover:bg-gray-50"
                         } ${idx > 0 ? "-ml-px" : ""}`}
                       >
                         {pct}
@@ -935,10 +776,7 @@ const Viewer = ({
                   ))}
                 </div>
 
-                <Tooltip
-                  content="Remove all plots from the viewer"
-                  position="left"
-                >
+                <Tooltip content="Remove all plots from the viewer" position="left">
                   <button
                     onClick={clearPlots}
                     className="px-3 py-1 text-sm text-red-600 hover:bg-gray-300 rounded transition-colors"
@@ -965,14 +803,9 @@ const Viewer = ({
               ) : (
                 <div className="h-full flex items-center justify-center text-gray-500 p-4">
                   <div className="text-center">
-                    <ChartScatter
-                      size={48}
-                      className="mx-auto mb-2 opacity-50"
-                    />
+                    <ChartScatter size={48} className="mx-auto mb-2 opacity-50" />
                     <p>No plots to display</p>
-                    <p className="text-sm mt-1">
-                      Create a plot using the composer above
-                    </p>
+                    <p className="text-sm mt-1">Create a plot using the composer above</p>
                   </div>
                 </div>
               )}

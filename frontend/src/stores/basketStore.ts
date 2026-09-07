@@ -20,9 +20,7 @@ export const useBasketStore = create<BasketState>()(
       addItem: (item: BasketItem) => {
         set((state) => {
           // Check if item already exists
-          const existingIndex = state.items.findIndex(
-            (existing) => existing.id === item.id
-          );
+          const existingIndex = state.items.findIndex((existing) => existing.id === item.id);
 
           if (existingIndex >= 0) {
             // Update existing item
@@ -51,9 +49,7 @@ export const useBasketStore = create<BasketState>()(
 
       updateItem: (id: string, updates: Partial<BasketItem>) => {
         set((state) => ({
-          items: state.items.map((item) =>
-            item.id === id ? { ...item, ...updates } : item
-          ),
+          items: state.items.map((item) => (item.id === id ? { ...item, ...updates } : item)),
         }));
       },
 
@@ -62,6 +58,6 @@ export const useBasketStore = create<BasketState>()(
     {
       name: "basket-storage",
       version: 1,
-    }
-  )
+    },
+  ),
 );

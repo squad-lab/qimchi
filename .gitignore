@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv/
 
+# Runtime config: machine-specific, and it carries deployment settings
+.env
+
 # Node/React-generated files
 node_modules/
 build/
@@ -18,5 +21,11 @@ dist/
 .vscode/
 md/
 data/
-qcutils/
+qanary/
 .__qimchi.lock
+
+# Test artefacts
+.uv-cache/
+coverage.xml
+report.xml
+.coverage

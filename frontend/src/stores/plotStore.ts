@@ -3,20 +3,13 @@ import { persist } from "zustand/middleware";
 
 // Local imports
 import type { PlotAppearanceSettings } from "../components/types";
-import type {
-  AppliedFilter,
-  SliderConfig,
-  PlotPersistentState,
-} from "../components/interfaces";
+import type { AppliedFilter, SliderConfig, PlotPersistentState } from "../components/interfaces";
 
 interface PlotStoreState {
   plotStates: Record<string, PlotPersistentState>;
   setPlotAppearance: (plotId: string, settings: PlotAppearanceSettings) => void;
   setPlotFilters: (plotId: string, filters: AppliedFilter[]) => void;
-  setPlotSliders: (
-    plotId: string,
-    sliders: Record<string, SliderConfig>
-  ) => void;
+  setPlotSliders: (plotId: string, sliders: Record<string, SliderConfig>) => void;
   setPlotAxesSwapped: (plotId: string, swapped: boolean) => void;
   getPlotState: (plotId: string) => PlotPersistentState | undefined;
   removePlotState: (plotId: string) => void;
@@ -54,10 +47,7 @@ export const usePlotStore = create<PlotStoreState>()(
         }));
       },
 
-      setPlotSliders: (
-        plotId: string,
-        sliders: Record<string, SliderConfig>
-      ) => {
+      setPlotSliders: (plotId: string, sliders: Record<string, SliderConfig>) => {
         set((state) => ({
           plotStates: {
             ...state.plotStates,
@@ -102,6 +92,6 @@ export const usePlotStore = create<PlotStoreState>()(
     {
       name: "plot-states-storage",
       version: 1,
-    }
-  )
+    },
+  ),
 );

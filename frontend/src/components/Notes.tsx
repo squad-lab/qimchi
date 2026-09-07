@@ -1,19 +1,6 @@
-import React, {
-  useMemo,
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-} from "react";
+import React, { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import axios from "axios";
-import {
-  Save,
-  AlertCircle,
-  Check,
-  Clock,
-  Loader2,
-  NotebookPen,
-} from "lucide-react";
+import { Save, AlertCircle, Check, Clock, Loader2, NotebookPen } from "lucide-react";
 
 // Local imports
 import MarkdownEditor from "./MarkdownEditor";
@@ -62,12 +49,8 @@ export default function Notes({
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
-  const [internalSelectedItemId, setInternalSelectedItemId] = useState<
-    string | null
-  >(null);
-  const [selectedSampleKey, setSelectedSampleKey] = useState<string | null>(
-    null,
-  );
+  const [internalSelectedItemId, setInternalSelectedItemId] = useState<string | null>(null);
+  const [selectedSampleKey, setSelectedSampleKey] = useState<string | null>(null);
   const [selectedScope, setSelectedScope] = useState<NoteScope>("measurement");
   const [isDragOver, setIsDragOver] = useState(false);
   const [isSwitchingSelection, setIsSwitchingSelection] = useState(false);
@@ -79,17 +62,10 @@ export default function Notes({
   // Auto-save delay in milliseconds
   const AUTO_SAVE_DELAY = 2000;
 
-  const normalizePath = useCallback(
-    (path: string) => path.replace(/\\/g, "/"),
-    [],
-  );
+  const normalizePath = useCallback((path: string) => path.replace(/\\/g, "/"), []);
 
   const getAttrValue = useCallback(
-    (
-      item: BasketItem,
-      snakeKey: string,
-      titleKey: string,
-    ): string | undefined => {
+    (item: BasketItem, snakeKey: string, titleKey: string): string | undefined => {
       const attrs = (item.attributes || {}) as Record<string, unknown>;
       const snake = attrs[snakeKey];
       if (typeof snake === "string" && snake.trim()) return snake.trim();
@@ -123,14 +99,7 @@ export default function Notes({
     const m = ts.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/);
     if (m) {
       const [, y, mo, d, hh, mm, ss] = m;
-      return new Date(
-        Number(y),
-        Number(mo) - 1,
-        Number(d),
-        Number(hh),
-        Number(mm),
-        Number(ss),
-      );
+      return new Date(Number(y), Number(mo) - 1, Number(d), Number(hh), Number(mm), Number(ss));
     }
 
     return null;
@@ -148,9 +117,7 @@ export default function Notes({
 
   // Use external selectedItemId if provided, otherwise use internal state
   const selectedItemId =
-    externalSelectedItemId !== undefined
-      ? externalSelectedItemId
-      : internalSelectedItemId;
+    externalSelectedItemId !== undefined ? externalSelectedItemId : internalSelectedItemId;
 
   const datasetItems = useMemo(
     () =>
@@ -172,8 +139,7 @@ export default function Notes({
         samplePathParts[samplePathParts.length - 1] ||
         "sample";
 
-      const cryostatName =
-        getAttrValue(item, "cryostat", "Cryostat") || "cryostat";
+      const cryostatName = getAttrValue(item, "cryostat", "Cryostat") || "cryostat";
 
       const pooledFilename = `${cryostatName}_${sampleName}.md`;
       const key = samplePath.toLowerCase();
@@ -194,14 +160,10 @@ export default function Notes({
       });
     });
 
-    return Array.from(groups.values()).sort((a, b) =>
-      a.sampleName.localeCompare(b.sampleName),
-    );
+    return Array.from(groups.values()).sort((a, b) => a.sampleName.localeCompare(b.sampleName));
   }, [datasetItems, getAttrValue, inferSamplePath]);
 
-  const selectedSample = sampleGroups.find(
-    (group) => group.key === selectedSampleKey,
-  );
+  const selectedSample = sampleGroups.find((group) => group.key === selectedSampleKey);
 
   const selectedMeasurement =
     selectedScope === "measurement"
@@ -270,8 +232,7 @@ export default function Notes({
     }
 
     const hasCurrentSample =
-      selectedSampleKey &&
-      sampleGroups.some((group) => group.key === selectedSampleKey);
+      selectedSampleKey && sampleGroups.some((group) => group.key === selectedSampleKey);
 
     if (!hasCurrentSample) {
       setSelectedSampleKey(sampleGroups[0].key);
@@ -317,15 +278,9 @@ export default function Notes({
       handleSelectionChange(null);
     };
 
-    window.addEventListener(
-      "notes:select-sample",
-      handleSelectSample as EventListener,
-    );
+    window.addEventListener("notes:select-sample", handleSelectSample as EventListener);
     return () => {
-      window.removeEventListener(
-        "notes:select-sample",
-        handleSelectSample as EventListener,
-      );
+      window.removeEventListener("notes:select-sample", handleSelectSample as EventListener);
     };
   }, [sampleGroups, handleSelectionChange, normalizePath]);
 
@@ -366,9 +321,7 @@ export default function Notes({
 
         setNotes(response.data.notes || "");
         setHasUnsavedChanges(false);
-        setLastSavedAt(
-          parseBackendTimestamp(response.data?.last_saved) || null,
-        );
+        setLastSavedAt(parseBackendTimestamp(response.data?.last_saved) || null);
 
         if (response.data.error) {
           setError(response.data.error);
@@ -403,9 +356,7 @@ export default function Notes({
       if (hasUnsavedChanges) return;
 
       const incomingSamplePath = inferSamplePath(datasetPath).toLowerCase();
-      const selectedSamplePath = (
-        selectedTarget.samplePath || ""
-      ).toLowerCase();
+      const selectedSamplePath = (selectedTarget.samplePath || "").toLowerCase();
 
       const shouldRefreshMeasurement =
         selectedTarget.scope === "measurement" &&
@@ -442,18 +393,9 @@ export default function Notes({
 
     window.addEventListener("notes:refresh", handleRefresh as EventListener);
     return () => {
-      window.removeEventListener(
-        "notes:refresh",
-        handleRefresh as EventListener,
-      );
+      window.removeEventListener("notes:refresh", handleRefresh as EventListener);
     };
-  }, [
-    selectedTarget,
-    hasUnsavedChanges,
-    inferSamplePath,
-    normalizePath,
-    loadNotes,
-  ]);
+  }, [selectedTarget, hasUnsavedChanges, inferSamplePath, normalizePath, loadNotes]);
 
   const saveNotes = useCallback(async (): Promise<boolean> => {
     if (!selectedTarget) {
@@ -728,9 +670,7 @@ export default function Notes({
           {/* Row 1: Sample + Measurement selectors */}
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="block text-[11px] text-gray-600 mb-1">
-                Sample
-              </label>
+              <label className="block text-[11px] text-gray-600 mb-1">Sample</label>
               <select
                 value={selectedSampleKey || ""}
                 aria-label="Select sample notes"
@@ -758,15 +698,9 @@ export default function Notes({
             </div>
 
             <div>
-              <label className="block text-[11px] text-gray-600 mb-1">
-                Measurement
-              </label>
+              <label className="block text-[11px] text-gray-600 mb-1">Measurement</label>
               <select
-                value={
-                  selectedScope === "sample"
-                    ? "__sample__"
-                    : selectedItemId || ""
-                }
+                value={selectedScope === "sample" ? "__sample__" : selectedItemId || ""}
                 aria-label="Select measurement notes"
                 onChange={(e) => {
                   const value = e.target.value;
@@ -813,12 +747,8 @@ export default function Notes({
               <div className="text-xs text-gray-600">
                 {lastSavedAt ? (
                   <span>
-                    <span className="font-medium text-gray-700 mr-2">
-                      Last Saved:
-                    </span>
-                    <span className="text-gray-500">
-                      {formatLastSaved(lastSavedAt)}
-                    </span>
+                    <span className="font-medium text-gray-700 mr-2">Last Saved:</span>
+                    <span className="text-gray-500">{formatLastSaved(lastSavedAt)}</span>
                   </span>
                 ) : (
                   <span className="text-gray-500">Last Saved: -</span>
@@ -841,9 +771,7 @@ export default function Notes({
                     })()}
                   </div>
                   {isSwitchingSelection && (
-                    <span className="text-[10px] text-gray-500">
-                      saving before switch...
-                    </span>
+                    <span className="text-[10px] text-gray-500">saving before switch...</span>
                   )}
                 </div>
               )}
@@ -867,9 +795,7 @@ export default function Notes({
         {loading && !hasUnsavedChanges ? (
           <div className="flex items-center justify-center p-8">
             <div className="text-center">
-              <Loader2
-                className={`w-6 h-6 animate-spin ${themeClasses.accentIcon} mx-auto mb-2`}
-              />
+              <Loader2 className={`w-6 h-6 animate-spin ${themeClasses.accentIcon} mx-auto mb-2`} />
               <p className="text-gray-600">Loading notes...</p>
             </div>
           </div>
@@ -886,13 +812,9 @@ export default function Notes({
                 className={`absolute inset-0 flex items-center justify-center ${themeClasses.accentOverlay} rounded-lg pointer-events-none z-10`}
               >
                 <div className={`text-center ${themeClasses.accentText}`}>
-                  <NotebookPen
-                    className={`w-8 h-8 mx-auto mb-2 ${themeClasses.accentIcon}`}
-                  />
+                  <NotebookPen className={`w-8 h-8 mx-auto mb-2 ${themeClasses.accentIcon}`} />
                   <p className="text-sm font-medium">Drop datasets here</p>
-                  <p className="text-xs">
-                    Their paths will be added to your notes
-                  </p>
+                  <p className="text-xs">Their paths will be added to your notes</p>
                 </div>
               </div>
             )}

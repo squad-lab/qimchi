@@ -14,7 +14,7 @@ export default defineConfig({
       stream: "stream-browserify",
     },
   },
-  
+
   build: {
     // Allow a larger single bundle without warnings.
     chunkSizeWarningLimit: 8000,

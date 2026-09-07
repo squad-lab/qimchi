@@ -1,10 +1,7 @@
 import { useState, useCallback } from "react";
 
 // Local imports
-import type {
-  AppliedFilter,
-  PlotConfiguration,
-} from "../components/interfaces";
+import type { AppliedFilter, PlotConfiguration } from "../components/interfaces";
 import { isMemoryPath, isDatasetPath } from "../utils/datasetPaths";
 
 export interface UsePlotCollectionReturn {
@@ -31,7 +28,7 @@ export interface UsePlotCollectionReturn {
     options?: {
       preferMemory?: boolean;
       getFilters?: (plotId: string) => AppliedFilter[] | undefined;
-    }
+    },
   ) => void;
 }
 
@@ -76,24 +73,22 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
         isMemoryPath(config.fpath);
 
       const normalizedFpath = prefersMemory
-        ? toMemoryPath(config.fpath) ?? config.fpath
+        ? (toMemoryPath(config.fpath) ?? config.fpath)
         : config.fpath;
 
-      const resolvedSource =
-        config.source ?? inferSourceFromPath(normalizedFpath);
+      const resolvedSource = config.source ?? inferSourceFromPath(normalizedFpath);
 
       return {
         ...config,
         fpath: normalizedFpath,
         source: resolvedSource,
-        preferredSource:
-          config.preferredSource ?? (prefersMemory ? "memory" : resolvedSource),
+        preferredSource: config.preferredSource ?? (prefersMemory ? "memory" : resolvedSource),
         // seq keeps ids unique within a single batch (Date.now() alone is not
         // granular enough when several plots are created in the same tick).
         id: `plot_${Date.now()}_${seq}_${Math.random().toString(36).slice(2, 11)}`,
       };
     },
-    [inferSourceFromPath, toMemoryPath]
+    [inferSourceFromPath, toMemoryPath],
   );
 
   const addPlots = useCallback(
@@ -103,7 +98,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
       // Newest group first, original order preserved inside the group.
       setPlotConfigs((prev) => [...built, ...prev]);
     },
-    [buildPlot]
+    [buildPlot],
   );
 
   const addPlot = useCallback(
@@ -111,7 +106,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
       // Newest first, matching the Basket's newest-on-the-left ordering.
       setPlotConfigs((prev) => [buildPlot(config, 0), ...prev]);
     },
-    [buildPlot]
+    [buildPlot],
   );
 
   const removePlot = useCallback((id: string) => {
@@ -119,9 +114,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
   }, []);
 
   const setPlotPinned = useCallback((id: string, pinned: boolean) => {
-    setPlotConfigs((prev) =>
-      prev.map((plot) => (plot.id === id ? { ...plot, pinned } : plot))
-    );
+    setPlotConfigs((prev) => prev.map((plot) => (plot.id === id ? { ...plot, pinned } : plot)));
   }, []);
 
   const clearPlots = useCallback(() => {
@@ -131,12 +124,8 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
   /** Identity of a plot for comparison purposes: type + variables. */
   const plotShape = useCallback(
     (plot: Pick<PlotConfiguration, "plotType" | "indeps" | "deps">): string =>
-      [
-        plot.plotType,
-        [...plot.indeps].sort().join(","),
-        [...plot.deps].sort().join(","),
-      ].join("|"),
-    []
+      [plot.plotType, [...plot.indeps].sort().join(","), [...plot.deps].sort().join(",")].join("|"),
+    [],
   );
 
   const updatePlotDataSource = useCallback(
@@ -145,15 +134,13 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
       options?: {
         preferMemory?: boolean;
         getFilters?: (plotId: string) => AppliedFilter[] | undefined;
-      }
+      },
     ) => {
       const preferMemoryExplicit = Boolean(options?.preferMemory);
 
       const resolvePath = (plot: PlotConfiguration): string => {
         const preferMemoryImplicit =
-          plot.preferredSource === "memory" ||
-          plot.source === "memory" ||
-          isMemoryPath(plot.fpath);
+          plot.preferredSource === "memory" || plot.source === "memory" || isMemoryPath(plot.fpath);
         const shouldPreferMemory = preferMemoryExplicit || preferMemoryImplicit;
         const memoryCandidate = toMemoryPath(newFpath);
         return shouldPreferMemory && memoryCandidate ? memoryCandidate : newFpath;
@@ -172,9 +159,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
             source: inferSourceFromPath(preferredPath),
             preferredSource:
               plot.preferredSource ??
-              (isMemoryPath(preferredPath)
-                ? "memory"
-                : inferSourceFromPath(preferredPath)),
+              (isMemoryPath(preferredPath) ? "memory" : inferSourceFromPath(preferredPath)),
           };
         });
 
@@ -185,9 +170,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
         //
         // Only create one when no unpinned plot of the same shape already
         // exists, or each Next/Prev press would clone the pinned plot again.
-        const liveShapes = new Set(
-          repointed.filter((plot) => !plot.pinned).map(plotShape)
-        );
+        const liveShapes = new Set(repointed.filter((plot) => !plot.pinned).map(plotShape));
 
         const replacements = repointed
           .filter((plot) => plot.pinned && !liveShapes.has(plotShape(plot)))
@@ -199,13 +182,10 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
             const carried = filters?.length
               ? {
                   filters_order: filters.map((f) => f.name),
-                  filters_opts: filters.reduce<Record<string, unknown>>(
-                    (acc, f) => {
-                      acc[f.name] = f.options;
-                      return acc;
-                    },
-                    {}
-                  ),
+                  filters_opts: filters.reduce<Record<string, unknown>>((acc, f) => {
+                    acc[f.name] = f.options;
+                    return acc;
+                  }, {}),
                 }
               : {
                   filters_order: plot.filters_order,
@@ -223,7 +203,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
                   ? "memory"
                   : inferSourceFromPath(preferredPath),
               },
-              index
+              index,
             );
           });
 
@@ -231,7 +211,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
         return [...replacements, ...repointed];
       });
     },
-    [buildPlot, inferSourceFromPath, plotShape, toMemoryPath]
+    [buildPlot, inferSourceFromPath, plotShape, toMemoryPath],
   );
 
   return {

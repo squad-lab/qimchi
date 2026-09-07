@@ -28,12 +28,7 @@ import plotlyColorscales from "./plotly_colorscales_plotlyjs.json";
 // Local imports
 import { useToast } from "../../hooks/useToast";
 import type { PlotAppearanceSettings } from "../../components/types";
-import {
-  formatTitleWithUUID,
-  getPlotTypeIcon,
-  IconDropdown,
-  LogChartIcon,
-} from "./UtilComponents";
+import { formatTitleWithUUID, getPlotTypeIcon, IconDropdown, LogChartIcon } from "./UtilComponents";
 import DualThumbSlider from "./DualThumbSlider";
 import Tooltip from "../Tooltip";
 
@@ -118,11 +113,7 @@ const DiamondFilled = () => (
 );
 
 const DiamondTallOpen = () => (
-  <Diamond
-    size={14}
-    className="text-gray-500 min-w-[14px]"
-    style={{ transform: "scaleX(0.6)" }}
-  />
+  <Diamond size={14} className="text-gray-500 min-w-[14px]" style={{ transform: "scaleX(0.6)" }} />
 );
 
 const DiamondFilledWide = () => (
@@ -134,11 +125,7 @@ const DiamondFilledWide = () => (
 );
 
 const DiamondWideOpen = () => (
-  <Diamond
-    size={14}
-    className="text-gray-500 min-w-[14px]"
-    style={{ transform: "scaleY(0.6)" }}
-  />
+  <Diamond size={14} className="text-gray-500 min-w-[14px]" style={{ transform: "scaleY(0.6)" }} />
 );
 
 const HourglassFilled = () => (
@@ -413,11 +400,10 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
   plotTitle,
   plotJson,
 }) => {
-  const [localSettings, setLocalSettings] =
-    useState<PlotAppearanceSettings>(settings);
-  const [activeTab, setActiveTab] = useState<
-    "style" | "x-axis" | "y-axis" | "heatmap"
-  >(plotType === "heatmap" ? "heatmap" : "style");
+  const [localSettings, setLocalSettings] = useState<PlotAppearanceSettings>(settings);
+  const [activeTab, setActiveTab] = useState<"style" | "x-axis" | "y-axis" | "heatmap">(
+    plotType === "heatmap" ? "heatmap" : "style",
+  );
   // const [history, setHistory] = useState<PlotAppearanceSettings[]>([settings]);
   // const [historyIndex, setHistoryIndex] = useState(0);
   // const [isUndoRedoAction, setIsUndoRedoAction] = useState(false);
@@ -574,12 +560,10 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
     };
 
     const dataStr = JSON.stringify(exportData, null, 2);
-    const dataUri =
-      "data:application/json;charset=utf-8," + encodeURIComponent(dataStr);
+    const dataUri = "data:application/json;charset=utf-8," + encodeURIComponent(dataStr);
 
     // Use full title or UUID for filename
-    const sanitizeFilename = (str: string) =>
-      str.replace(/[^a-z0-9-_]/gi, "_").substring(0, 50);
+    const sanitizeFilename = (str: string) => str.replace(/[^a-z0-9-_]/gi, "_").substring(0, 50);
 
     const titleForFilename = plotTitle ? sanitizeFilename(plotTitle) : "plot";
     const exportFileDefaultName = `${
@@ -622,13 +606,10 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
     setZIndexLocal(next);
   };
 
-  const mergeWithDefaults = (
-    imported: Partial<PlotAppearanceSettings>,
-  ): PlotAppearanceSettings => {
+  const mergeWithDefaults = (imported: Partial<PlotAppearanceSettings>): PlotAppearanceSettings => {
     return {
       hmap: {
-        colorscale:
-          imported.hmap?.colorscale || DEFAULT_SETTINGS.hmap!.colorscale,
+        colorscale: imported.hmap?.colorscale || DEFAULT_SETTINGS.hmap!.colorscale,
         rangecolor:
           imported.hmap?.rangecolor !== undefined
             ? imported.hmap.rangecolor
@@ -680,16 +661,11 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
         const mergedSettings = mergeWithDefaults(importedData.settings);
         updateSettingsWithHistory(mergedSettings);
 
-        const sourcePlot = importedData.plotTitle
-          ? ` from "${importedData.plotTitle}"`
-          : "";
+        const sourcePlot = importedData.plotTitle ? ` from "${importedData.plotTitle}"` : "";
         showToast(`Theme imported successfully${sourcePlot}`, "success");
       } catch (error) {
         console.error("Error importing theme:", error);
-        showToast(
-          "Error parsing theme file. Please check the file format.",
-          "error",
-        );
+        showToast("Error parsing theme file. Please check the file format.", "error");
       }
     };
     reader.readAsText(file);
@@ -752,7 +728,6 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
   const updateSetting = (path: string[], value: unknown) => {
     setLocalSettings((prev) => {
       const newSettings = { ...prev };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let current: any = newSettings;
 
       for (let i = 0; i < path.length - 1; i++) {
@@ -895,9 +870,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                   <button
                     key={tab.key}
                     onClick={() =>
-                      setActiveTab(
-                        tab.key as "style" | "x-axis" | "y-axis" | "heatmap",
-                      )
+                      setActiveTab(tab.key as "style" | "x-axis" | "y-axis" | "heatmap")
                     }
                     className={`px-4 py-2 text-sm font-medium transition-colors ${
                       activeTab === tab.key
@@ -917,9 +890,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                   <button
                     key={tab.key}
                     onClick={() =>
-                      setActiveTab(
-                        tab.key as "style" | "x-axis" | "y-axis" | "heatmap",
-                      )
+                      setActiveTab(tab.key as "style" | "x-axis" | "y-axis" | "heatmap")
                     }
                     className={`px-4 py-2 text-sm font-medium transition-colors ${
                       activeTab === tab.key
@@ -937,9 +908,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
             {activeTab === "style" && (
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    Mode
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Mode</label>
                   <IconDropdown
                     value={localSettings.line.mode}
                     onChange={(value) => updateSetting(["line", "mode"], value)}
@@ -955,9 +924,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                   localSettings.line.mode === "lines+markers") && (
                   <>
                     <div className="border-t border-gray-200 pt-4">
-                      <h4 className="text-md font-medium text-gray-800 mb-3">
-                        Line Settings
-                      </h4>
+                      <h4 className="text-md font-medium text-gray-800 mb-3">Line Settings</h4>
                     </div>
 
                     <div>
@@ -968,9 +935,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         <input
                           type="color"
                           value={localSettings.line.color}
-                          onChange={(e) =>
-                            updateSetting(["line", "color"], e.target.value)
-                          }
+                          onChange={(e) => updateSetting(["line", "color"], e.target.value)}
                           className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
                           title="Line color"
                           aria-label="Line color"
@@ -979,9 +944,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                           {LINE_COLOR_OPTS.map((color) => (
                             <button
                               key={color}
-                              onClick={() =>
-                                updateSetting(["line", "color"], color)
-                              }
+                              onClick={() => updateSetting(["line", "color"], color)}
                               className="w-6 h-6 rounded border border-gray-300 hover:scale-110 transition-transform"
                               style={{ backgroundColor: color }}
                               title={`Select color ${color}`}
@@ -995,9 +958,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                     <div>
                       <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                         Width
-                        <span className="text-xs text-gray-500">
-                          {localSettings.line.width}px
-                        </span>
+                        <span className="text-xs text-gray-500">{localSettings.line.width}px</span>
                       </label>
                       <input
                         type="range"
@@ -1006,10 +967,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         step="0.5"
                         value={localSettings.line.width}
                         onChange={(e) =>
-                          updateSetting(
-                            ["line", "width"],
-                            parseFloat(e.target.value),
-                          )
+                          updateSetting(["line", "width"], parseFloat(e.target.value))
                         }
                         className="w-full"
                         title="Line width"
@@ -1020,9 +978,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                     <div>
                       <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                         Opacity
-                        <span className="text-xs text-gray-500">
-                          {localSettings.line.opacity}
-                        </span>
+                        <span className="text-xs text-gray-500">{localSettings.line.opacity}</span>
                       </label>
                       <input
                         type="range"
@@ -1031,10 +987,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         step="0.1"
                         value={localSettings.line.opacity}
                         onChange={(e) =>
-                          updateSetting(
-                            ["line", "opacity"],
-                            parseFloat(e.target.value),
-                          )
+                          updateSetting(["line", "opacity"], parseFloat(e.target.value))
                         }
                         className="w-full"
                         title="Line opacity"
@@ -1048,9 +1001,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                       </label>
                       <IconDropdown
                         value={localSettings.line.dash}
-                        onChange={(value: string) =>
-                          updateSetting(["line", "dash"], value)
-                        }
+                        onChange={(value: string) => updateSetting(["line", "dash"], value)}
                         options={LINE_DASH_OPTS}
                         className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         title="Line dash style"
@@ -1064,9 +1015,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                       </label>
                       <IconDropdown
                         value={localSettings.line.shape}
-                        onChange={(value: string) =>
-                          updateSetting(["line", "shape"], value)
-                        }
+                        onChange={(value: string) => updateSetting(["line", "shape"], value)}
                         options={LINE_SHAPE_OPTS}
                         className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         title="Line shape"
@@ -1088,10 +1037,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         step="0.1"
                         value={localSettings.line.smoothing}
                         onChange={(e) =>
-                          updateSetting(
-                            ["line", "smoothing"],
-                            parseFloat(e.target.value),
-                          )
+                          updateSetting(["line", "smoothing"], parseFloat(e.target.value))
                         }
                         className="w-full"
                         title="Line smoothing (for spline shapes)"
@@ -1106,9 +1052,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                   localSettings.line.mode === "lines+markers") && (
                   <>
                     <div className="border-t border-gray-200 pt-4">
-                      <h4 className="text-md font-medium text-gray-800 mb-3">
-                        Marker Settings
-                      </h4>
+                      <h4 className="text-md font-medium text-gray-800 mb-3">Marker Settings</h4>
                     </div>
 
                     <div>
@@ -1117,9 +1061,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                       </label>
                       <IconDropdown
                         value={localSettings.marker.symbol}
-                        onChange={(value: string) =>
-                          updateSetting(["marker", "symbol"], value)
-                        }
+                        onChange={(value: string) => updateSetting(["marker", "symbol"], value)}
                         options={MARKER_SYMBOL_OPTS}
                         className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         title="Marker symbol"
@@ -1135,9 +1077,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         <input
                           type="color"
                           value={localSettings.marker.color}
-                          onChange={(e) =>
-                            updateSetting(["marker", "color"], e.target.value)
-                          }
+                          onChange={(e) => updateSetting(["marker", "color"], e.target.value)}
                           className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
                           title="Marker color"
                           aria-label="Marker color"
@@ -1146,9 +1086,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                           {LINE_COLOR_OPTS.map((color) => (
                             <button
                               key={color}
-                              onClick={() =>
-                                updateSetting(["marker", "color"], color)
-                              }
+                              onClick={() => updateSetting(["marker", "color"], color)}
                               className="w-6 h-6 rounded border border-gray-300 hover:scale-110 transition-transform"
                               style={{ backgroundColor: color }}
                               title={`Select marker color ${color}`}
@@ -1162,9 +1100,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                     <div>
                       <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                         Size
-                        <span className="text-xs text-gray-500">
-                          {localSettings.marker.size}px
-                        </span>
+                        <span className="text-xs text-gray-500">{localSettings.marker.size}px</span>
                       </label>
                       <input
                         type="range"
@@ -1173,10 +1109,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         step="1"
                         value={localSettings.marker.size}
                         onChange={(e) =>
-                          updateSetting(
-                            ["marker", "size"],
-                            parseInt(e.target.value),
-                          )
+                          updateSetting(["marker", "size"], parseInt(e.target.value))
                         }
                         className="w-full"
                         title="Marker size"
@@ -1198,10 +1131,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         step="0.1"
                         value={localSettings.marker.opacity}
                         onChange={(e) =>
-                          updateSetting(
-                            ["marker", "opacity"],
-                            parseFloat(e.target.value),
-                          )
+                          updateSetting(["marker", "opacity"], parseFloat(e.target.value))
                         }
                         className="w-full"
                         title="Marker opacity"
@@ -1221,9 +1151,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                   </label>
                   <select
                     value={localSettings.hmap?.colorscale || "viridis"}
-                    onChange={(e) =>
-                      updateSetting(["hmap", "colorscale"], e.target.value)
-                    }
+                    onChange={(e) => updateSetting(["hmap", "colorscale"], e.target.value)}
                     className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     title="Heatmap colorscale"
                     aria-label="Heatmap colorscale"
@@ -1233,10 +1161,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         {category.options.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.warning ? (
-                              <AlertTriangle
-                                size={14}
-                                className="shrink-0 mt-0.5"
-                              />
+                              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
                             ) : (
                               ""
                             )}
@@ -1248,39 +1173,33 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                     ))}
                   </select>
                   {localSettings.hmap?.colorscale &&
-                    CYCLICAL_COLORSCALES.includes(
-                      localSettings.hmap.colorscale,
-                    ) && (
+                    CYCLICAL_COLORSCALES.includes(localSettings.hmap.colorscale) && (
                       <div className="mt-2 flex items-start gap-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
                         <AlertTriangle size={14} className="shrink-0 mt-0.5" />
                         <span>
-                          <strong>Warning:</strong> This is a cyclical colormap
-                          designed for phase or periodic data. Because it wraps
-                          around, it may be misleading for continuous heatmaps.
+                          <strong>Warning:</strong> This is a cyclical colormap designed for phase
+                          or periodic data. Because it wraps around, it may be misleading for
+                          continuous heatmaps.
                         </span>
                       </div>
                     )}
                 </div>
 
                 <div className="text-xs text-gray-500 italic mb-3">
-                  Tip: Sequential colormaps (Viridis, Plasma, etc.) are
-                  recommended for continuous data.
+                  Tip: Sequential colormaps (Viridis, Plasma, etc.) are recommended for continuous
+                  data.
                 </div>
 
                 <div>
                   <div className="flex items-center justify-between mb-1.5 h-7">
-                    <label className="block text-sm font-medium text-gray-700">
-                      Color Range
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700">Color Range</label>
                     <div className="flex items-center gap-1">
                       {localSettings.hmap?.rangecolor &&
                         (localSettings.hmap.rangecolor[0] !== 0 ||
                           localSettings.hmap.rangecolor[1] !== 100) && (
                           <Tooltip content="Reset to automatic range">
                             <button
-                              onClick={() =>
-                                updateSetting(["hmap", "rangecolor"], null)
-                              }
+                              onClick={() => updateSetting(["hmap", "rangecolor"], null)}
                               className="p-1 rounded text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                               aria-label="Reset color range"
                             >
@@ -1324,8 +1243,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                                 const zData = trace.z as any;
                                 const isNested =
                                   Array.isArray(zData[0]) ||
-                                  (ArrayBuffer.isView(zData[0]) &&
-                                    !(zData[0] instanceof DataView));
+                                  (ArrayBuffer.isView(zData[0]) && !(zData[0] instanceof DataView));
                                 if (isNested) {
                                   for (let i = 0; i < zData.length; i++) {
                                     for (let j = 0; j < zData[i].length; j++) {
@@ -1336,15 +1254,8 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                                       }
                                     }
                                   }
-                                } else if (
-                                  Array.isArray(zData) ||
-                                  ArrayBuffer.isView(zData)
-                                ) {
-                                  for (
-                                    let i = 0;
-                                    i < (zData as any).length;
-                                    i++
-                                  ) {
+                                } else if (Array.isArray(zData) || ArrayBuffer.isView(zData)) {
+                                  for (let i = 0; i < (zData as any).length; i++) {
                                     const val = +(zData as any)[i];
                                     if (!isNaN(val)) {
                                       if (val < zMin) zMin = val;
@@ -1358,8 +1269,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         }
                       }
 
-                      const hasValidBounds =
-                        zMin !== Infinity && zMax !== -Infinity;
+                      const hasValidBounds = zMin !== Infinity && zMax !== -Infinity;
                       const range = hasValidBounds ? zMax - zMin : 0;
 
                       const pctMin = localSettings.hmap?.rangecolor?.[0] ?? 0;
@@ -1404,25 +1314,18 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
               <div className="space-y-6">
                 {/* Major Grid & Ticks */}
                 <div>
-                  <h3 className="text-lg font-medium text-gray-800 mb-4">
-                    Major Grid & Ticks
-                  </h3>
+                  <h3 className="text-lg font-medium text-gray-800 mb-4">Major Grid & Ticks</h3>
 
                   {/* Show Major Grid Toggle */}
                   <div className="mb-4">
                     <div className="flex items-center justify-between">
-                      <label className="text-sm font-medium text-gray-700">
-                        Show Major Grid
-                      </label>
+                      <label className="text-sm font-medium text-gray-700">Show Major Grid</label>
                       <label className="relative inline-flex items-center cursor-pointer">
                         <input
                           type="checkbox"
                           checked={localSettings.x.maj.showgrid}
                           onChange={(e) =>
-                            updateSetting(
-                              ["x", "maj", "showgrid"],
-                              e.target.checked,
-                            )
+                            updateSetting(["x", "maj", "showgrid"], e.target.checked)
                           }
                           className="sr-only peer"
                           title="Show X-axis major grid"
@@ -1440,9 +1343,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                       </label>
                       <IconDropdown
                         value={localSettings.x.maj.type}
-                        onChange={(value: string) =>
-                          updateSetting(["x", "maj", "type"], value)
-                        }
+                        onChange={(value: string) => updateSetting(["x", "maj", "type"], value)}
                         options={AXIS_TYPE_OPTS}
                         className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         title="X-axis type"
@@ -1461,10 +1362,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                             type="color"
                             value={localSettings.x.maj.gridcolor}
                             onChange={(e) =>
-                              updateSetting(
-                                ["x", "maj", "gridcolor"],
-                                e.target.value,
-                              )
+                              updateSetting(["x", "maj", "gridcolor"], e.target.value)
                             }
                             className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
                             title="X-axis major grid color"
@@ -1503,10 +1401,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                               step="0.5"
                               value={localSettings.x.maj.gridwidth}
                               onChange={(e) =>
-                                updateSetting(
-                                  ["x", "maj", "gridwidth"],
-                                  parseFloat(e.target.value),
-                                )
+                                updateSetting(["x", "maj", "gridwidth"], parseFloat(e.target.value))
                               }
                               className="w-full"
                               title="X-axis major grid width"
@@ -1527,10 +1422,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         max="20"
                         value={localSettings.x.maj.nticks}
                         onChange={(e) =>
-                          updateSetting(
-                            ["x", "maj", "nticks"],
-                            parseInt(e.target.value),
-                          )
+                          updateSetting(["x", "maj", "nticks"], parseInt(e.target.value))
                         }
                         className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         title="Number of X-axis major ticks"
@@ -1545,12 +1437,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                       <input
                         type="color"
                         value={localSettings.x.maj.tickcolor}
-                        onChange={(e) =>
-                          updateSetting(
-                            ["x", "maj", "tickcolor"],
-                            e.target.value,
-                          )
-                        }
+                        onChange={(e) => updateSetting(["x", "maj", "tickcolor"], e.target.value)}
                         className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
                         title="X-axis major tick color"
                         aria-label="X-axis major tick color"
@@ -1571,10 +1458,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         step="0.5"
                         value={localSettings.x.maj.tickwidth}
                         onChange={(e) =>
-                          updateSetting(
-                            ["x", "maj", "tickwidth"],
-                            parseFloat(e.target.value),
-                          )
+                          updateSetting(["x", "maj", "tickwidth"], parseFloat(e.target.value))
                         }
                         className="w-full"
                         title="X-axis major tick width"
@@ -1596,10 +1480,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         step="1"
                         value={localSettings.x.maj.ticklen}
                         onChange={(e) =>
-                          updateSetting(
-                            ["x", "maj", "ticklen"],
-                            parseInt(e.target.value),
-                          )
+                          updateSetting(["x", "maj", "ticklen"], parseInt(e.target.value))
                         }
                         className="w-full"
                         title="X-axis major tick length"
@@ -1621,10 +1502,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         step="15"
                         value={localSettings.x.maj.tickangle}
                         onChange={(e) =>
-                          updateSetting(
-                            ["x", "maj", "tickangle"],
-                            parseInt(e.target.value),
-                          )
+                          updateSetting(["x", "maj", "tickangle"], parseInt(e.target.value))
                         }
                         className="w-full"
                         title="X-axis major tick angle"
@@ -1639,25 +1517,18 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
 
                 {/* Minor Grid & Ticks */}
                 <div>
-                  <h3 className="text-lg font-medium text-gray-800 mb-4">
-                    Minor Grid & Ticks
-                  </h3>
+                  <h3 className="text-lg font-medium text-gray-800 mb-4">Minor Grid & Ticks</h3>
 
                   {/* Show Minor Grid Toggle */}
                   <div className="mb-4">
                     <div className="flex items-center justify-between">
-                      <label className="text-sm font-medium text-gray-700">
-                        Show Minor Grid
-                      </label>
+                      <label className="text-sm font-medium text-gray-700">Show Minor Grid</label>
                       <label className="relative inline-flex items-center cursor-pointer">
                         <input
                           type="checkbox"
                           checked={localSettings.x.min.showgrid}
                           onChange={(e) =>
-                            updateSetting(
-                              ["x", "min", "showgrid"],
-                              e.target.checked,
-                            )
+                            updateSetting(["x", "min", "showgrid"], e.target.checked)
                           }
                           className="sr-only peer"
                           title="Show X-axis minor grid"
@@ -1680,10 +1551,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                             type="color"
                             value={localSettings.x.min.gridcolor}
                             onChange={(e) =>
-                              updateSetting(
-                                ["x", "min", "gridcolor"],
-                                e.target.value,
-                              )
+                              updateSetting(["x", "min", "gridcolor"], e.target.value)
                             }
                             className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
                             title="X-axis minor grid color"
@@ -1722,10 +1590,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                               step="0.5"
                               value={localSettings.x.min.gridwidth}
                               onChange={(e) =>
-                                updateSetting(
-                                  ["x", "min", "gridwidth"],
-                                  parseFloat(e.target.value),
-                                )
+                                updateSetting(["x", "min", "gridwidth"], parseFloat(e.target.value))
                               }
                               className="w-full"
                               title="X-axis minor grid width"
@@ -1746,10 +1611,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         max="20"
                         value={localSettings.x.min.nticks}
                         onChange={(e) =>
-                          updateSetting(
-                            ["x", "min", "nticks"],
-                            parseInt(e.target.value),
-                          )
+                          updateSetting(["x", "min", "nticks"], parseInt(e.target.value))
                         }
                         className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         title="Number of X-axis minor ticks"
@@ -1764,12 +1626,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                       <input
                         type="color"
                         value={localSettings.x.min.tickcolor}
-                        onChange={(e) =>
-                          updateSetting(
-                            ["x", "min", "tickcolor"],
-                            e.target.value,
-                          )
-                        }
+                        onChange={(e) => updateSetting(["x", "min", "tickcolor"], e.target.value)}
                         className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
                         title="X-axis minor tick color"
                         aria-label="X-axis minor tick color"
@@ -1790,10 +1647,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         step="0.5"
                         value={localSettings.x.min.tickwidth}
                         onChange={(e) =>
-                          updateSetting(
-                            ["x", "min", "tickwidth"],
-                            parseFloat(e.target.value),
-                          )
+                          updateSetting(["x", "min", "tickwidth"], parseFloat(e.target.value))
                         }
                         className="w-full"
                         title="X-axis minor tick width"
@@ -1815,10 +1669,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         step="1"
                         value={localSettings.x.min.ticklen}
                         onChange={(e) =>
-                          updateSetting(
-                            ["x", "min", "ticklen"],
-                            parseInt(e.target.value),
-                          )
+                          updateSetting(["x", "min", "ticklen"], parseInt(e.target.value))
                         }
                         className="w-full"
                         title="X-axis minor tick length"
@@ -1834,25 +1685,18 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
               <div className="space-y-6">
                 {/* Major Grid & Ticks */}
                 <div>
-                  <h3 className="text-lg font-medium text-gray-800 mb-4">
-                    Major Grid & Ticks
-                  </h3>
+                  <h3 className="text-lg font-medium text-gray-800 mb-4">Major Grid & Ticks</h3>
 
                   {/* Show Major Grid Toggle */}
                   <div className="mb-4">
                     <div className="flex items-center justify-between">
-                      <label className="text-sm font-medium text-gray-700">
-                        Show Major Grid
-                      </label>
+                      <label className="text-sm font-medium text-gray-700">Show Major Grid</label>
                       <label className="relative inline-flex items-center cursor-pointer">
                         <input
                           type="checkbox"
                           checked={localSettings.y.maj.showgrid}
                           onChange={(e) =>
-                            updateSetting(
-                              ["y", "maj", "showgrid"],
-                              e.target.checked,
-                            )
+                            updateSetting(["y", "maj", "showgrid"], e.target.checked)
                           }
                           className="sr-only peer"
                           title="Show Y-axis major grid"
@@ -1870,9 +1714,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                       </label>
                       <IconDropdown
                         value={localSettings.y.maj.type}
-                        onChange={(value: string) =>
-                          updateSetting(["y", "maj", "type"], value)
-                        }
+                        onChange={(value: string) => updateSetting(["y", "maj", "type"], value)}
                         options={AXIS_TYPE_OPTS}
                         className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         title="Y-axis type"
@@ -1891,10 +1733,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                             type="color"
                             value={localSettings.y.maj.gridcolor}
                             onChange={(e) =>
-                              updateSetting(
-                                ["y", "maj", "gridcolor"],
-                                e.target.value,
-                              )
+                              updateSetting(["y", "maj", "gridcolor"], e.target.value)
                             }
                             className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
                             title="Y-axis major grid color"
@@ -1933,10 +1772,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                               step="0.5"
                               value={localSettings.y.maj.gridwidth}
                               onChange={(e) =>
-                                updateSetting(
-                                  ["y", "maj", "gridwidth"],
-                                  parseFloat(e.target.value),
-                                )
+                                updateSetting(["y", "maj", "gridwidth"], parseFloat(e.target.value))
                               }
                               className="w-full"
                               title="Y-axis major grid width"
@@ -1957,10 +1793,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         max="20"
                         value={localSettings.y.maj.nticks}
                         onChange={(e) =>
-                          updateSetting(
-                            ["y", "maj", "nticks"],
-                            parseInt(e.target.value),
-                          )
+                          updateSetting(["y", "maj", "nticks"], parseInt(e.target.value))
                         }
                         className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         title="Number of Y-axis major ticks"
@@ -1975,12 +1808,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                       <input
                         type="color"
                         value={localSettings.y.maj.tickcolor}
-                        onChange={(e) =>
-                          updateSetting(
-                            ["y", "maj", "tickcolor"],
-                            e.target.value,
-                          )
-                        }
+                        onChange={(e) => updateSetting(["y", "maj", "tickcolor"], e.target.value)}
                         className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
                         title="Y-axis major tick color"
                         aria-label="Y-axis major tick color"
@@ -2001,10 +1829,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         step="0.5"
                         value={localSettings.y.maj.tickwidth}
                         onChange={(e) =>
-                          updateSetting(
-                            ["y", "maj", "tickwidth"],
-                            parseFloat(e.target.value),
-                          )
+                          updateSetting(["y", "maj", "tickwidth"], parseFloat(e.target.value))
                         }
                         className="w-full"
                         title="Y-axis major tick width"
@@ -2026,10 +1851,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         step="1"
                         value={localSettings.y.maj.ticklen}
                         onChange={(e) =>
-                          updateSetting(
-                            ["y", "maj", "ticklen"],
-                            parseInt(e.target.value),
-                          )
+                          updateSetting(["y", "maj", "ticklen"], parseInt(e.target.value))
                         }
                         className="w-full"
                         title="Y-axis major tick length"
@@ -2051,10 +1873,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         step="15"
                         value={localSettings.y.maj.tickangle}
                         onChange={(e) =>
-                          updateSetting(
-                            ["y", "maj", "tickangle"],
-                            parseInt(e.target.value),
-                          )
+                          updateSetting(["y", "maj", "tickangle"], parseInt(e.target.value))
                         }
                         className="w-full"
                         title="Y-axis major tick angle"
@@ -2069,25 +1888,18 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
 
                 {/* Minor Grid & Ticks */}
                 <div>
-                  <h3 className="text-lg font-medium text-gray-800 mb-4">
-                    Minor Grid & Ticks
-                  </h3>
+                  <h3 className="text-lg font-medium text-gray-800 mb-4">Minor Grid & Ticks</h3>
 
                   {/* Show Minor Grid Toggle */}
                   <div className="mb-4">
                     <div className="flex items-center justify-between">
-                      <label className="text-sm font-medium text-gray-700">
-                        Show Minor Grid
-                      </label>
+                      <label className="text-sm font-medium text-gray-700">Show Minor Grid</label>
                       <label className="relative inline-flex items-center cursor-pointer">
                         <input
                           type="checkbox"
                           checked={localSettings.y.min.showgrid}
                           onChange={(e) =>
-                            updateSetting(
-                              ["y", "min", "showgrid"],
-                              e.target.checked,
-                            )
+                            updateSetting(["y", "min", "showgrid"], e.target.checked)
                           }
                           className="sr-only peer"
                           title="Show Y-axis minor grid"
@@ -2110,10 +1922,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                             type="color"
                             value={localSettings.y.min.gridcolor}
                             onChange={(e) =>
-                              updateSetting(
-                                ["y", "min", "gridcolor"],
-                                e.target.value,
-                              )
+                              updateSetting(["y", "min", "gridcolor"], e.target.value)
                             }
                             className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
                             title="Y-axis minor grid color"
@@ -2152,10 +1961,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                               step="0.5"
                               value={localSettings.y.min.gridwidth}
                               onChange={(e) =>
-                                updateSetting(
-                                  ["y", "min", "gridwidth"],
-                                  parseFloat(e.target.value),
-                                )
+                                updateSetting(["y", "min", "gridwidth"], parseFloat(e.target.value))
                               }
                               className="w-full"
                               title="Y-axis minor grid width"
@@ -2176,10 +1982,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         max="20"
                         value={localSettings.y.min.nticks}
                         onChange={(e) =>
-                          updateSetting(
-                            ["y", "min", "nticks"],
-                            parseInt(e.target.value),
-                          )
+                          updateSetting(["y", "min", "nticks"], parseInt(e.target.value))
                         }
                         className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         title="Number of Y-axis minor ticks"
@@ -2194,12 +1997,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                       <input
                         type="color"
                         value={localSettings.y.min.tickcolor}
-                        onChange={(e) =>
-                          updateSetting(
-                            ["y", "min", "tickcolor"],
-                            e.target.value,
-                          )
-                        }
+                        onChange={(e) => updateSetting(["y", "min", "tickcolor"], e.target.value)}
                         className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
                         title="Y-axis minor tick color"
                         aria-label="Y-axis minor tick color"
@@ -2220,10 +2018,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         step="0.5"
                         value={localSettings.y.min.tickwidth}
                         onChange={(e) =>
-                          updateSetting(
-                            ["y", "min", "tickwidth"],
-                            parseFloat(e.target.value),
-                          )
+                          updateSetting(["y", "min", "tickwidth"], parseFloat(e.target.value))
                         }
                         className="w-full"
                         title="Y-axis minor tick width"
@@ -2245,10 +2040,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                         step="1"
                         value={localSettings.y.min.ticklen}
                         onChange={(e) =>
-                          updateSetting(
-                            ["y", "min", "ticklen"],
-                            parseInt(e.target.value),
-                          )
+                          updateSetting(["y", "min", "ticklen"], parseInt(e.target.value))
                         }
                         className="w-full"
                         title="Y-axis minor tick length"
@@ -2266,9 +2058,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
             <div className="absolute inset-0 bg-blue-100 bg-opacity-90 flex items-center justify-center z-10 border-2 border-dashed border-blue-500 rounded-lg">
               <div className="text-center">
                 <Upload size={48} className="mx-auto text-blue-600 mb-2" />
-                <p className="text-blue-800 font-medium">
-                  Drop theme file here
-                </p>
+                <p className="text-blue-800 font-medium">Drop theme file here</p>
                 <p className="text-blue-600 text-sm">JSON files only</p>
               </div>
             </div>

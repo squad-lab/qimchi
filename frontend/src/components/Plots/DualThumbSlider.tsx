@@ -79,9 +79,7 @@ const DualThumbSlider: React.FC<DualThumbSliderProps> = ({
           setMinVal(value);
           onChange([value, maxVal]);
         }}
-        className={`dual-thumb-slider-input z-30 ${
-          minVal > max - 100 ? "z-50" : ""
-        }`}
+        className={`dual-thumb-slider-input z-30 ${minVal > max - 100 ? "z-50" : ""}`}
       />
       <input
         type="range"

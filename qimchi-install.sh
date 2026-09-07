@@ -107,6 +107,9 @@ install_uv() {
     fi
 }
 
+# The name stays qcutils: this removes the directory older installers cloned,
+# which is what exists on an already-installed machine. The package itself is
+# now called qanary and is installed separately.
 remove_qcutils() {
     if [ -d "$QCUTILS_DIR" ]; then
         echo "qcutils found at $QCUTILS_DIR. Removing..."
@@ -206,8 +209,6 @@ source "$VENV_DIR/bin/activate"
 
 cd "$QIMCHI_DIR/qimchi/backend"
 uv pip install .
-
-# Note: QCUtils is optional and is not installed by this script.
 
 # ----------------------------------------
 # Setup frontend

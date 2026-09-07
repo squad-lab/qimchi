@@ -137,10 +137,7 @@ export const getEligibleDatasetsForComposer = <T extends DatasetLike>(
   const unknown: T[] = [];
 
   selectedDatasets.forEach((dataset) => {
-    const compatibility = isComposerCompatibleWithDataset(
-      composerSelection,
-      dataset.attributes,
-    );
+    const compatibility = isComposerCompatibleWithDataset(composerSelection, dataset.attributes);
 
     if (compatibility === "unknown") {
       unknown.push(dataset);

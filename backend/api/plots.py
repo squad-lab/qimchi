@@ -5,21 +5,22 @@ FastAPI endpoints for creating and managing plots based on xarray datasets.
 
 import hashlib
 import json
-import numpy as np
-import xarray as xr
 from pathlib import Path
 from typing import Dict, List
+
+import numpy as np
+import xarray as xr
 from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
 
-# Local imports
-from .figures import Line, HeatMap, DEFAULT_THEME
-from .filters import apply_filters
-from .models import PlotRequest, PlotResponse
-from .logger import logger
 from .data_loader import MEMORY_PROTOCOL, load_dataset_async, resolve_to_disk_path
-from .json_utils import sanitize_for_json
 
+# Local imports
+from .figures import DEFAULT_THEME, HeatMap, Line
+from .filters import apply_filters
+from .json_utils import sanitize_for_json
+from .logger import logger
+from .models import PlotRequest, PlotResponse
 
 # FastAPI router for plot endpoints
 router = APIRouter()
@@ -123,7 +124,6 @@ def _validate_plot_type(plot_type: str) -> bool:
     supported_types = ["LinePlot", "HeatMap"]
 
     return plot_type in supported_types
-
 
 
 def _apply_filters_sync(
@@ -280,7 +280,9 @@ def apply_data_slicing(
             # Use xarray's sel method with nearest neighbor to select specific slices
             return dataset.sel(**slider_vals, method="nearest")
         except Exception as e:
-            logger.warning(f"sel(method='nearest') failed: {e}. Falling back to manual isel.")
+            logger.warning(
+                f"sel(method='nearest') failed: {e}. Falling back to manual isel."
+            )
             # Fallback for duplicate coordinate values ("reindexing only valid for uniquely valued Index objects")
             isel_dict = {}
             for dim, val in slider_vals.items():
@@ -292,11 +294,15 @@ def apply_data_slicing(
                         idx = int(np.nanargmin(np.abs(arr - float(val))))
                         isel_dict[dim] = idx
                     except Exception as fallback_err:
-                        logger.error(f"Fallback indexing failed for dimension {dim}: {fallback_err}")
+                        logger.error(
+                            f"Fallback indexing failed for dimension {dim}: {fallback_err}"
+                        )
                         pass
                 else:
-                    logger.debug(f"Dimension {dim} not in coords, skipping manual isel for this dim.")
-            
+                    logger.debug(
+                        f"Dimension {dim} not in coords, skipping manual isel for this dim."
+                    )
+
             if isel_dict:
                 return dataset.isel(**isel_dict)
             return dataset
@@ -338,13 +344,13 @@ def create_line_plots(
 
             # Always generate accurate slider configuration from the dataset dimensions
             auto_slider_config = gen_slider_config(dataset, indeps)
-            
+
             # If a slider config is provided (e.g. from frontend LineCut), update the values
             if slider:
                 for dim, config in slider.items():
                     if dim in auto_slider_config and "value" in config:
                         auto_slider_config[dim]["value"] = config["value"]
-                        
+
             slider_for_slicing = auto_slider_config
 
             # Apply data slicing if slider is provided
@@ -462,13 +468,13 @@ def create_heat_maps(
 
             # Always generate accurate slider configuration from the dataset dimensions
             auto_slider_config = gen_slider_config(dataset, indeps)
-            
+
             # If a slider config is provided (e.g. from frontend LineCut), update the values
             if slider:
                 for dim, config in slider.items():
                     if dim in auto_slider_config and "value" in config:
                         auto_slider_config[dim]["value"] = config["value"]
-                        
+
             slider_for_slicing = auto_slider_config
 
             # Apply data slicing if slider is provided
@@ -644,7 +650,7 @@ async def create_plots(request: PlotRequest) -> PlotResponse:
         validation = validate_variables(datasets, effective_indeps, request.deps)
         if not validation["valid"]:
             # For live (memory://) datasets, this can be a transient read race:
-            # open_live_dataset() fetches metadata and data in two separate WebSocket
+            # open_live_measurement() fetches metadata and data in two separate WebSocket
             # round-trips. Under load, the server may return a partial/empty data_dict,
             # causing variables to be silently dropped from the assembled Dataset.
             # The dataset loads without error but contains no variables, failing validation.
@@ -675,19 +681,30 @@ async def create_plots(request: PlotRequest) -> PlotResponse:
         if request.plotType == "LinePlot":
             plots = await run_in_threadpool(
                 create_line_plots,
-                datasets, request.fpaths, effective_indeps, request.deps, request.slider,
+                datasets,
+                request.fpaths,
+                effective_indeps,
+                request.deps,
+                request.slider,
             )
         elif request.plotType == "HeatMap":
             plots = await run_in_threadpool(
                 create_heat_maps,
-                datasets, request.fpaths, effective_indeps, request.deps, request.slider, request.swap_xy
+                datasets,
+                request.fpaths,
+                effective_indeps,
+                request.deps,
+                request.slider,
+                request.swap_xy,
             )
 
         # Apply filters if requested — also CPU-bound, run in a thread.
         if request.filters_order:
             plots = await run_in_threadpool(
                 _apply_filters_sync,
-                plots, request.filters_order, request.filters_opts,
+                plots,
+                request.filters_order,
+                request.filters_opts,
             )
 
         logger.info(f"Successfully created {len(plots)} plots")

@@ -108,13 +108,10 @@ export const useSidebarStore = create<SidebarState>()(
 
       // Panel state actions
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
-      setExplorerCollapsed: (collapsed) =>
-        set({ explorerCollapsed: collapsed }),
-      setMetadataCollapsed: (collapsed) =>
-        set({ metadataCollapsed: collapsed }),
+      setExplorerCollapsed: (collapsed) => set({ explorerCollapsed: collapsed }),
+      setMetadataCollapsed: (collapsed) => set({ metadataCollapsed: collapsed }),
       setNotesCollapsed: (collapsed) => set({ notesCollapsed: collapsed }),
-      setBrandingCollapsed: (collapsed) =>
-        set({ brandingCollapsed: collapsed }),
+      setBrandingCollapsed: (collapsed) => set({ brandingCollapsed: collapsed }),
 
       // Component state actions
       updateExplorerState: (newState) =>
@@ -149,12 +146,11 @@ export const useSidebarStore = create<SidebarState>()(
           },
         })),
 
-      resetComponentStates: () =>
-        set({ componentStates: initialComponentStates }),
+      resetComponentStates: () => set({ componentStates: initialComponentStates }),
     }),
     {
       name: "sidebar-store",
       version: 7, // Reset persisted sidebar/dirTree state to clear stale expansion behavior
-    }
-  )
+    },
+  ),
 );

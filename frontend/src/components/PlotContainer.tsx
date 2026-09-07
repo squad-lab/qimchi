@@ -52,14 +52,10 @@ const PlotContainer: React.FC<PlotContainerProps> = ({
   }, [setShiftHeld]);
   if (plotConfigs.length === 0) {
     return (
-      <div
-        className={`flex items-center justify-center h-64 bg-gray-50 rounded-lg ${className}`}
-      >
+      <div className={`flex items-center justify-center h-64 bg-gray-50 rounded-lg ${className}`}>
         <div className="text-center text-gray-500">
           <p className="text-lg font-medium">No plots to display</p>
-          <p className="text-sm">
-            Use the Plot Composer to create visualizations
-          </p>
+          <p className="text-sm">Use the Plot Composer to create visualizations</p>
         </div>
       </div>
     );

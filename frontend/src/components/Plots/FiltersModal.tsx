@@ -24,17 +24,8 @@ import { Rnd } from "react-rnd";
 // Local imports
 import "./FiltersModal.css";
 import { useToast } from "../../hooks/useToast";
-import type {
-  FilterSettings,
-  AppliedFilter,
-  SliderConfig,
-} from "../../components/interfaces";
-import {
-  ApplyButton,
-  formatTitleWithUUID,
-  getPlotTypeIcon,
-  LogChartIcon,
-} from "./UtilComponents";
+import type { FilterSettings, AppliedFilter, SliderConfig } from "../../components/interfaces";
+import { ApplyButton, formatTitleWithUUID, getPlotTypeIcon, LogChartIcon } from "./UtilComponents";
 import Tooltip from "../Tooltip";
 import RadialDial from "./RadialDial";
 
@@ -49,10 +40,7 @@ type BGCorrPoint = {
 interface FiltersModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onApplyFilters: (
-    filters: AppliedFilter[],
-    sliders?: Record<string, SliderConfig>,
-  ) => void;
+  onApplyFilters: (filters: AppliedFilter[], sliders?: Record<string, SliderConfig>) => void;
   plotType?: string;
   plotTitle?: string;
   currentFilters: AppliedFilter[];
@@ -158,8 +146,7 @@ const FILTER_DEFINITIONS = {
   rotate: {
     name: "Rotate Heatmap",
     icon: Rotate3D,
-    description:
-      "Rotate heatmap by specified angle. Use mouse/arrow keys to adjust angle.",
+    description: "Rotate heatmap by specified angle. Use mouse/arrow keys to adjust angle.",
   },
   flip: {
     name: "Flip Heatmap",
@@ -292,13 +279,11 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   availableSliders = {},
   onRequestBGCorr,
 }) => {
-  const [localFilterSettings, setLocalFilterSettings] =
-    useState<FilterSettings>({});
+  const [localFilterSettings, setLocalFilterSettings] = useState<FilterSettings>({});
   const [filterOrder, setFilterOrder] = useState<string[]>([]);
 
   // Slider state
-  const [localSliders, setLocalSliders] =
-    useState<Record<string, SliderConfig>>(currentSliders);
+  const [localSliders, setLocalSliders] = useState<Record<string, SliderConfig>>(currentSliders);
 
   // Sync localSliders with currentSliders when they change from parent
   useEffect(() => {
@@ -328,9 +313,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   // Debounce ref to prevent excessive API calls
   const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Separate debounce ref for sliders (shorter delay for better responsiveness)
-  const sliderDebounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
+  const sliderDebounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { showToast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -364,9 +347,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   useEffect(() => {
     // Skip if we're in the middle of applying local filter changes
     if (isApplyingLocalFilters.current) {
-      console.log(
-        "FiltersModal: Skipping currentFilters sync - applying local filters",
-      );
+      console.log("FiltersModal: Skipping currentFilters sync - applying local filters");
       return;
     }
 
@@ -388,9 +369,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
         if (typeof filter.options === "object" && filter.options !== null) {
           const existingSetting = settings[filter.name as keyof FilterSettings];
           const existingOptions =
-            existingSetting &&
-            typeof existingSetting === "object" &&
-            "enabled" in existingSetting
+            existingSetting && typeof existingSetting === "object" && "enabled" in existingSetting
               ? (existingSetting as Record<string, unknown>)
               : {};
 
@@ -428,26 +407,18 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
     }
   }, [isOpen, currentSliders, availableSliders]);
 
-  const updateFilterSetting = (
-    filterKey: string,
-    setting: string,
-    value: unknown,
-  ) => {
+  const updateFilterSetting = (filterKey: string, setting: string, value: unknown) => {
     setLocalFilterSettings((prev) => {
       const newSettings = { ...prev };
       if (!newSettings[filterKey as keyof FilterSettings]) {
         const defaultOptions =
-          DEFAULT_FILTER_OPTIONS[
-            filterKey as keyof typeof DEFAULT_FILTER_OPTIONS
-          ];
+          DEFAULT_FILTER_OPTIONS[filterKey as keyof typeof DEFAULT_FILTER_OPTIONS];
         (newSettings as Record<string, unknown>)[filterKey] = {
           ...defaultOptions,
           enabled: false, // Start disabled when creating new config
         };
       }
-      const filterConfig = (
-        newSettings as Record<string, Record<string, unknown>>
-      )[filterKey];
+      const filterConfig = (newSettings as Record<string, Record<string, unknown>>)[filterKey];
       if (filterConfig && typeof filterConfig === "object") {
         filterConfig[setting] = value;
       }
@@ -489,9 +460,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
     let newOrder: string[];
     if (!wasEnabled) {
       // Filter is being enabled - add to end if not already in order
-      newOrder = filterOrder.includes(filterKey)
-        ? filterOrder
-        : [...filterOrder, filterKey];
+      newOrder = filterOrder.includes(filterKey) ? filterOrder : [...filterOrder, filterKey];
     } else {
       // Filter is being disabled - remove from order
       newOrder = filterOrder.filter((key) => key !== filterKey);
@@ -501,8 +470,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
     newOrder.forEach((fKey) => {
       // For the filter being toggled, we know its new state
       // For other filters, check their current state
-      const shouldInclude =
-        fKey === filterKey ? !wasEnabled : isFilterEnabled(fKey);
+      const shouldInclude = fKey === filterKey ? !wasEnabled : isFilterEnabled(fKey);
 
       if (shouldInclude) {
         const filterConfig = localFilterSettings[fKey as keyof FilterSettings];
@@ -512,16 +480,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
             name: fKey,
             options: {},
           });
-        } else if (
-          filterConfig &&
-          typeof filterConfig === "object" &&
-          "enabled" in filterConfig
-        ) {
+        } else if (filterConfig && typeof filterConfig === "object" && "enabled" in filterConfig) {
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const { enabled, ...options } = filterConfig as Record<
-            string,
-            unknown
-          >;
+          const { enabled, ...options } = filterConfig as Record<string, unknown>;
           appliedFilters.push({
             name: fKey,
             options,
@@ -529,19 +490,11 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
         } else if (fKey === filterKey && !wasEnabled) {
           // Handle the case where we're enabling a filter that wasn't configured yet
           // First check if we have existing settings for this filter (even if disabled)
-          const existingConfig =
-            localFilterSettings[fKey as keyof FilterSettings];
-          if (
-            existingConfig &&
-            typeof existingConfig === "object" &&
-            "enabled" in existingConfig
-          ) {
+          const existingConfig = localFilterSettings[fKey as keyof FilterSettings];
+          if (existingConfig && typeof existingConfig === "object" && "enabled" in existingConfig) {
             // Use existing configuration, just re-enabling it
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            const { enabled, ...options } = existingConfig as Record<
-              string,
-              unknown
-            >;
+            const { enabled, ...options } = existingConfig as Record<string, unknown>;
             appliedFilters.push({
               name: fKey,
               options,
@@ -549,9 +502,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
           } else {
             // No existing config, use defaults
             const defaultOptions =
-              DEFAULT_FILTER_OPTIONS[
-                fKey as keyof typeof DEFAULT_FILTER_OPTIONS
-              ];
+              DEFAULT_FILTER_OPTIONS[fKey as keyof typeof DEFAULT_FILTER_OPTIONS];
             if (defaultOptions) {
               // eslint-disable-next-line @typescript-eslint/no-unused-vars
               const { enabled, ...options } = defaultOptions;
@@ -584,11 +535,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
       const newSettings = { ...prev };
       const filterConfig = newSettings[filterKey as keyof FilterSettings];
 
-      if (
-        filterConfig &&
-        typeof filterConfig === "object" &&
-        "enabled" in filterConfig
-      ) {
+      if (filterConfig && typeof filterConfig === "object" && "enabled" in filterConfig) {
         // Create a new object instead of mutating the existing one
         (newSettings as Record<string, unknown>)[filterKey] = {
           ...(filterConfig as Record<string, unknown>),
@@ -599,9 +546,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
       } else {
         // Initialize with default but preserve any existing settings
         const defaultOptions =
-          DEFAULT_FILTER_OPTIONS[
-            filterKey as keyof typeof DEFAULT_FILTER_OPTIONS
-          ];
+          DEFAULT_FILTER_OPTIONS[filterKey as keyof typeof DEFAULT_FILTER_OPTIONS];
         (newSettings as Record<string, unknown>)[filterKey] = {
           ...defaultOptions,
           enabled: !wasEnabled,
@@ -648,9 +593,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
         const filterEnabled =
           typeof filterConfig === "boolean"
             ? filterConfig
-            : filterConfig &&
-                typeof filterConfig === "object" &&
-                "enabled" in filterConfig
+            : filterConfig && typeof filterConfig === "object" && "enabled" in filterConfig
               ? Boolean((filterConfig as Record<string, unknown>).enabled)
               : false;
 
@@ -666,10 +609,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
             "enabled" in filterConfig
           ) {
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            const { enabled, ...options } = filterConfig as Record<
-              string,
-              unknown
-            >;
+            const { enabled, ...options } = filterConfig as Record<string, unknown>;
             appliedFilters.push({
               name: fKey,
               options,
@@ -768,9 +708,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
       const filterEnabled =
         typeof filterConfig === "boolean"
           ? filterConfig
-          : filterConfig &&
-              typeof filterConfig === "object" &&
-              "enabled" in filterConfig
+          : filterConfig && typeof filterConfig === "object" && "enabled" in filterConfig
             ? Boolean((filterConfig as Record<string, unknown>).enabled)
             : false;
 
@@ -780,19 +718,12 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
             name: fKey,
             options: {},
           });
-        } else if (
-          filterConfig &&
-          typeof filterConfig === "object" &&
-          "enabled" in filterConfig
-        ) {
+        } else if (filterConfig && typeof filterConfig === "object" && "enabled" in filterConfig) {
           const options = Object.fromEntries(
             Object.entries(filterConfig as Record<string, unknown>).filter(
               ([key]) => key !== "enabled",
             ),
-          ) as Record<
-            string,
-            string | number | boolean | Record<string, unknown>
-          >;
+          ) as Record<string, string | number | boolean | Record<string, unknown>>;
           appliedFilters.push({
             name: fKey,
             options,
@@ -814,11 +745,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
     };
 
     const dataStr = JSON.stringify(exportData, null, 2);
-    const dataUri =
-      "data:application/json;charset=utf-8," + encodeURIComponent(dataStr);
+    const dataUri = "data:application/json;charset=utf-8," + encodeURIComponent(dataStr);
 
-    const sanitizeFilename = (str: string) =>
-      str.replace(/[^a-z0-9-_]/gi, "_").substring(0, 50);
+    const sanitizeFilename = (str: string) => str.replace(/[^a-z0-9-_]/gi, "_").substring(0, 50);
     const titleForFilename = plotTitle ? sanitizeFilename(plotTitle) : "plot";
     const exportFileDefaultName = `${
       new Date().toISOString().split("T")[0]
@@ -876,10 +805,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
             "enabled" in filterConfig
           ) {
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            const { enabled, ...options } = filterConfig as Record<
-              string,
-              unknown
-            >;
+            const { enabled, ...options } = filterConfig as Record<string, unknown>;
             appliedFilters.push({
               name: filterKey,
               options,
@@ -888,16 +814,11 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
         });
         onApplyFilters(appliedFilters, localSliders);
 
-        const sourcePlot = importedData.plotTitle
-          ? ` from "${importedData.plotTitle}"`
-          : "";
+        const sourcePlot = importedData.plotTitle ? ` from "${importedData.plotTitle}"` : "";
         showToast(`Filters imported successfully${sourcePlot}`, "success");
       } catch (error) {
         console.error("Error importing filters:", error);
-        showToast(
-          "Error parsing filter file. Please check the file format.",
-          "error",
-        );
+        showToast("Error parsing filter file. Please check the file format.", "error");
       }
     };
     reader.readAsText(file);
@@ -1040,8 +961,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                 {allTabs.map((key) => {
                   if (key === "sliders") {
                     // Special handling for sliders tab
-                    const hasActiveSliders =
-                      Object.keys(localSliders).length > 0;
+                    const hasActiveSliders = Object.keys(localSliders).length > 0;
                     return (
                       <button
                         key={key}
@@ -1056,15 +976,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                       >
                         <MoveHorizontal
                           size={18}
-                          className={
-                            hasActiveSliders
-                              ? "text-purple-600"
-                              : "text-purple-400"
-                          }
+                          className={hasActiveSliders ? "text-purple-600" : "text-purple-400"}
                         />
-                        <span className="text-left flex-1 font-semibold">
-                          Sliders
-                        </span>
+                        <span className="text-left flex-1 font-semibold">Sliders</span>
                         {hasActiveSliders && (
                           <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
                         )}
@@ -1073,8 +987,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                   }
 
                   // Regular filter tabs
-                  const filterDef =
-                    FILTER_DEFINITIONS[key as keyof typeof FILTER_DEFINITIONS];
+                  const filterDef = FILTER_DEFINITIONS[key as keyof typeof FILTER_DEFINITIONS];
                   const IconComponent = filterDef.icon;
                   const isEnabled = isFilterEnabled(key);
                   return (
@@ -1091,14 +1004,10 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                     >
                       <IconComponent
                         size={18}
-                        className={
-                          isEnabled ? "text-green-600" : "text-gray-400"
-                        }
+                        className={isEnabled ? "text-green-600" : "text-gray-400"}
                       />
                       <span className="text-left flex-1">{filterDef.name}</span>
-                      {isEnabled && (
-                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                      )}
+                      {isEnabled && <div className="w-2 h-2 bg-green-500 rounded-full"></div>}
                     </button>
                   );
                 })}
@@ -1123,17 +1032,12 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                         <div className="flex items-center gap-2 mb-3">
                           <MoveHorizontal size={22} className="text-gray-600" />
                           <div className="flex justify-between items-center w-full">
-                            <h3 className="text-lg font-semibold text-gray-800">
-                              Data Sliders
-                            </h3>
+                            <h3 className="text-lg font-semibold text-gray-800">Data Sliders</h3>
                             <Tooltip
                               content="Drag to navigate through extra data dimensions."
                               position="left"
                             >
-                              <Info
-                                size={16}
-                                className="text-gray-400 cursor-help"
-                              />
+                              <Info size={16} className="text-gray-400 cursor-help" />
                             </Tooltip>
                           </div>
                         </div>
@@ -1155,16 +1059,13 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                       <div className="flex-1 overflow-y-auto">
                         {sliderKeys.length === 0 ? (
                           <div className="text-center py-8">
-                            <SlidersHorizontal
-                              size={48}
-                              className="text-gray-300 mx-auto mb-4"
-                            />
+                            <SlidersHorizontal size={48} className="text-gray-300 mx-auto mb-4" />
                             <p className="text-gray-500">
                               No data sliders available for this plot.
                             </p>
                             <p className="text-sm text-gray-400 mt-1">
-                              Sliders appear when your data has extra dimensions
-                              not used in the plot axes.
+                              Sliders appear when your data has extra dimensions not used in the
+                              plot axes.
                             </p>
                           </div>
                         ) : (
@@ -1174,10 +1075,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               const available = availableSliders[key] || slider;
 
                               return (
-                                <div
-                                  key={key}
-                                  className="bg-gray-50 p-3 rounded-lg space-y-3"
-                                >
+                                <div key={key} className="bg-gray-50 p-3 rounded-lg space-y-3">
                                   <div className="flex items-center justify-between">
                                     <label className="text-sm font-medium text-gray-700">
                                       {key}
@@ -1199,18 +1097,13 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                   <div className="space-y-2">
                                     <input
                                       type="range"
-                                      title={`${key} slider value: ${slider.value.toFixed(
-                                        6,
-                                      )}`}
+                                      title={`${key} slider value: ${slider.value.toFixed(6)}`}
                                       min={available.min}
                                       max={available.max}
                                       step={available.step}
                                       value={slider.value}
                                       onChange={(e) =>
-                                        updateSliderValue(
-                                          key,
-                                          parseFloat(e.target.value),
-                                        )
+                                        updateSliderValue(key, parseFloat(e.target.value))
                                       }
                                       className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
                                       style={{
@@ -1243,18 +1136,16 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
 
                 // Regular filter handling
                 const isEnabled = isFilterEnabled(activeTab);
-                const storedFilterConfig =
-                  localFilterSettings[activeTab as keyof FilterSettings];
+                const storedFilterConfig = localFilterSettings[activeTab as keyof FilterSettings];
 
                 // Ensure we always have a configuration object for rendering options
                 const filterConfig =
                   storedFilterConfig && typeof storedFilterConfig === "object"
                     ? storedFilterConfig
-                    : DEFAULT_FILTER_OPTIONS[
-                        activeTab as keyof typeof DEFAULT_FILTER_OPTIONS
-                      ] || { enabled: false };
-                const selectedPoints =
-                  (filterConfig as { points?: BGCorrPoint[] }).points ?? [];
+                    : DEFAULT_FILTER_OPTIONS[activeTab as keyof typeof DEFAULT_FILTER_OPTIONS] || {
+                        enabled: false,
+                      };
+                const selectedPoints = (filterConfig as { points?: BGCorrPoint[] }).points ?? [];
 
                 return (
                   <div className="h-full flex flex-col">
@@ -1263,34 +1154,22 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                       <div className="flex items-center gap-2 mb-3">
                         {(() => {
                           const filterDef =
-                            FILTER_DEFINITIONS[
-                              activeTab as keyof typeof FILTER_DEFINITIONS
-                            ];
+                            FILTER_DEFINITIONS[activeTab as keyof typeof FILTER_DEFINITIONS];
                           const IconComponent = filterDef.icon;
-                          return (
-                            <IconComponent
-                              size={22}
-                              className="text-gray-600"
-                            />
-                          );
+                          return <IconComponent size={22} className="text-gray-600" />;
                         })()}
 
                         {/* Tooltip with description */}
                         <div className="flex justify-between items-center w-full">
                           <h3 className="text-lg font-semibold text-gray-800">
-                            {
-                              FILTER_DEFINITIONS[
-                                activeTab as keyof typeof FILTER_DEFINITIONS
-                              ].name
-                            }
+                            {FILTER_DEFINITIONS[activeTab as keyof typeof FILTER_DEFINITIONS].name}
                           </h3>
                           <Tooltip
                             // TODOLATER: Looks a bit weird covering the title
                             position="left"
                             content={
-                              FILTER_DEFINITIONS[
-                                activeTab as keyof typeof FILTER_DEFINITIONS
-                              ].description
+                              FILTER_DEFINITIONS[activeTab as keyof typeof FILTER_DEFINITIONS]
+                                .description
                             }
                           >
                             <Info
@@ -1300,10 +1179,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                           </Tooltip>
                         </div>
                       </div>
-                      <ApplyButton
-                        isEnabled={isEnabled}
-                        onToggle={() => toggleFilter(activeTab)}
-                      />
+                      <ApplyButton isEnabled={isEnabled} onToggle={() => toggleFilter(activeTab)} />
                     </div>
 
                     {/* Filter options */}
@@ -1316,10 +1192,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Window Size
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .window,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).window)}
                               </span>
                             </label>
                             <input
@@ -1327,16 +1200,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               min="3"
                               max="21"
                               step="2"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .window as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).window as number}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "window",
-                                  parseInt(e.target.value),
-                                )
+                                updateFilterSetting(activeTab, "window", parseInt(e.target.value))
                               }
                               className="w-full"
                               aria-label="Savitzky-Golay window size"
@@ -1347,20 +1213,14 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Polynomial Order
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .polyorder,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).polyorder)}
                               </span>
                             </label>
                             <input
                               type="range"
                               min="1"
                               max="5"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .polyorder as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).polyorder as number}
                               onChange={(e) =>
                                 updateFilterSetting(
                                   activeTab,
@@ -1379,16 +1239,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                 Axis
                               </label>
                               <select
-                                value={
-                                  (filterConfig as Record<string, unknown>)
-                                    .axis as number
-                                }
+                                value={(filterConfig as Record<string, unknown>).axis as number}
                                 onChange={(e) =>
-                                  updateFilterSetting(
-                                    activeTab,
-                                    "axis",
-                                    parseInt(e.target.value),
-                                  )
+                                  updateFilterSetting(activeTab, "axis", parseInt(e.target.value))
                                 }
                                 className="w-full p-2 border border-gray-300 rounded"
                                 aria-label="Savitzky-Golay axis"
@@ -1404,26 +1257,16 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Derivative Order
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .deriv,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).deriv)}
                               </span>
                             </label>
                             <input
                               type="range"
                               min="0"
                               max="3"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .deriv as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).deriv as number}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "deriv",
-                                  parseInt(e.target.value),
-                                )
+                                updateFilterSetting(activeTab, "deriv", parseInt(e.target.value))
                               }
                               className="w-full"
                               aria-label="Savitzky-Golay derivative order"
@@ -1434,10 +1277,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Delta
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .delta,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).delta)}
                               </span>
                             </label>
                             <input
@@ -1445,16 +1285,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               min="0.1"
                               max="5.0"
                               step="0.1"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .delta as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).delta as number}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "delta",
-                                  parseFloat(e.target.value),
-                                )
+                                updateFilterSetting(activeTab, "delta", parseFloat(e.target.value))
                               }
                               className="w-full"
                               aria-label="Savitzky-Golay delta spacing"
@@ -1466,16 +1299,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               Mode
                             </label>
                             <select
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .mode as string
-                              }
+                              value={(filterConfig as Record<string, unknown>).mode as string}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "mode",
-                                  e.target.value,
-                                )
+                                updateFilterSetting(activeTab, "mode", e.target.value)
                               }
                               className="w-full p-2 border border-gray-300 rounded"
                               aria-label="Savitzky-Golay boundary mode"
@@ -1492,10 +1318,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Constant Value (cval)
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .cval,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).cval)}
                               </span>
                             </label>
                             <input
@@ -1503,16 +1326,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               min="-10"
                               max="10"
                               step="0.1"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .cval as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).cval as number}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "cval",
-                                  parseFloat(e.target.value),
-                                )
+                                updateFilterSetting(activeTab, "cval", parseFloat(e.target.value))
                               }
                               className="w-full"
                               aria-label="Savitzky-Golay constant value"
@@ -1527,26 +1343,16 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                           <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                             Window Size
                             <span className="text-xs text-gray-500">
-                              {String(
-                                (filterConfig as Record<string, unknown>)
-                                  .window,
-                              )}
+                              {String((filterConfig as Record<string, unknown>).window)}
                             </span>
                           </label>
                           <input
                             type="range"
                             min="2"
                             max="20"
-                            value={
-                              (filterConfig as Record<string, unknown>)
-                                .window as number
-                            }
+                            value={(filterConfig as Record<string, unknown>).window as number}
                             onChange={(e) =>
-                              updateFilterSetting(
-                                activeTab,
-                                "window",
-                                parseInt(e.target.value),
-                              )
+                              updateFilterSetting(activeTab, "window", parseInt(e.target.value))
                             }
                             className="w-full"
                             aria-label="Simple moving average window size"
@@ -1561,8 +1367,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                 className="text-yellow-600 mt-0.5 shrink-0"
                               />
                               <div className="text-xs text-yellow-800">
-                                <strong>WARNING:</strong> Output length is same
-                                as the input length because of{" "}
+                                <strong>WARNING:</strong> Output length is same as the input length
+                                because of{" "}
                                 <code className="bg-yellow-100 px-1 rounded text-xs">
                                   mode='same'
                                 </code>{" "}
@@ -1583,17 +1389,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             Normalize Axis
                           </label>
                           <select
-                            value={
-                              (filterConfig as Record<string, unknown>)
-                                .axis as string
-                            }
-                            onChange={(e) =>
-                              updateFilterSetting(
-                                activeTab,
-                                "axis",
-                                e.target.value,
-                              )
-                            }
+                            value={(filterConfig as Record<string, unknown>).axis as string}
+                            onChange={(e) => updateFilterSetting(activeTab, "axis", e.target.value)}
                             className="w-full p-2 border border-gray-300 rounded"
                             aria-label="Normalize axis"
                             title="Normalize axis"
@@ -1611,10 +1408,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Gamma
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .gamma,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).gamma)}
                               </span>
                             </label>
                             <input
@@ -1622,16 +1416,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               min="0.1"
                               max="5"
                               step="0.1"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .gamma as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).gamma as number}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "gamma",
-                                  parseFloat(e.target.value),
-                                )
+                                updateFilterSetting(activeTab, "gamma", parseFloat(e.target.value))
                               }
                               className="w-full"
                               aria-label="Gamma correction gamma value"
@@ -1642,10 +1429,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Gain
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .gain,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).gain)}
                               </span>
                             </label>
                             <input
@@ -1653,16 +1437,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               min="0.1"
                               max="10"
                               step="0.1"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .gain as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).gain as number}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "gain",
-                                  parseFloat(e.target.value),
-                                )
+                                updateFilterSetting(activeTab, "gain", parseFloat(e.target.value))
                               }
                               className="w-full"
                               aria-label="Gamma correction gain value"
@@ -1678,10 +1455,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Gain
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .gain,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).gain)}
                               </span>
                             </label>
                             <input
@@ -1689,16 +1463,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               min="0.1"
                               max="10"
                               step="0.1"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .gain as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).gain as number}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "gain",
-                                  parseFloat(e.target.value),
-                                )
+                                updateFilterSetting(activeTab, "gain", parseFloat(e.target.value))
                               }
                               className="w-full"
                               aria-label="Log correction gain value"
@@ -1708,23 +1475,14 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                           <div className="flex items-center">
                             <input
                               type="checkbox"
-                              checked={
-                                (filterConfig as Record<string, unknown>)
-                                  .inv as boolean
-                              }
+                              checked={(filterConfig as Record<string, unknown>).inv as boolean}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "inv",
-                                  e.target.checked,
-                                )
+                                updateFilterSetting(activeTab, "inv", e.target.checked)
                               }
                               className="mr-2"
                               aria-label="Log correction invert"
                             />
-                            <label className="text-sm text-gray-700">
-                              Invert
-                            </label>
+                            <label className="text-sm text-gray-700">Invert</label>
                           </div>
                         </>
                       )}
@@ -1735,10 +1493,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Cutoff
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .cutoff,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).cutoff)}
                               </span>
                             </label>
                             <input
@@ -1746,16 +1501,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               min="0.1"
                               max="1"
                               step="0.05"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .cutoff as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).cutoff as number}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "cutoff",
-                                  parseFloat(e.target.value),
-                                )
+                                updateFilterSetting(activeTab, "cutoff", parseFloat(e.target.value))
                               }
                               className="w-full"
                               aria-label="Sigmoid correction cutoff value"
@@ -1766,10 +1514,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Gain
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .gain,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).gain)}
                               </span>
                             </label>
                             <input
@@ -1777,16 +1522,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               min="1"
                               max="20"
                               step="0.5"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .gain as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).gain as number}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "gain",
-                                  parseFloat(e.target.value),
-                                )
+                                updateFilterSetting(activeTab, "gain", parseFloat(e.target.value))
                               }
                               className="w-full"
                               aria-label="Sigmoid correction gain value"
@@ -1802,25 +1540,16 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                           <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                             Polynomial Degree
                             <span className="text-xs text-gray-500">
-                              {String(
-                                (filterConfig as Record<string, unknown>).deg,
-                              )}
+                              {String((filterConfig as Record<string, unknown>).deg)}
                             </span>
                           </label>
                           <input
                             type="range"
                             min="1"
                             max="10"
-                            value={
-                              (filterConfig as Record<string, unknown>)
-                                .deg as number
-                            }
+                            value={(filterConfig as Record<string, unknown>).deg as number}
                             onChange={(e) =>
-                              updateFilterSetting(
-                                activeTab,
-                                "deg",
-                                parseInt(e.target.value),
-                              )
+                              updateFilterSetting(activeTab, "deg", parseInt(e.target.value))
                             }
                             className="w-full"
                             aria-label="Polynomial fit degree"
@@ -1834,21 +1563,13 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                           <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                             Angle
                             <span className="text-xs text-gray-500">
-                              {String(
-                                (filterConfig as Record<string, unknown>).angle,
-                              )}
-                              °
+                              {String((filterConfig as Record<string, unknown>).angle)}°
                             </span>
                           </label>
                           <div className="flex justify-center m-2">
                             <RadialDial
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .angle as number
-                              }
-                              onChange={(value) =>
-                                updateFilterSetting(activeTab, "angle", value)
-                              }
+                              value={(filterConfig as Record<string, unknown>).angle as number}
+                              onChange={(value) => updateFilterSetting(activeTab, "angle", value)}
                               min={-180}
                               max={180}
                               step={1}
@@ -1864,11 +1585,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                       {activeTab.startsWith("bg_corr_") && (
                         <div className="space-y-4">
                           <button
-                            onClick={() =>
-                              onRequestBGCorr?.(
-                                activeTab.replace("bg_corr_", ""),
-                              )
-                            }
+                            onClick={() => onRequestBGCorr?.(activeTab.replace("bg_corr_", ""))}
                             className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-2.5 py-2 rounded-md border border-blue-600 shadow-sm transition-colors inline-flex items-center justify-center gap-2"
                           >
                             <Crosshair size={14} />
@@ -1898,14 +1615,10 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                     className="text-xs font-mono bg-white border border-gray-200 p-2 rounded flex justify-between items-center shadow-sm"
                                   >
                                     <div className="flex items-center gap-2">
-                                      <span className="font-bold text-gray-500">
-                                        P{i + 1}:
-                                      </span>
+                                      <span className="font-bold text-gray-500">P{i + 1}:</span>
                                       <span className="text-blue-700">
                                         ({p.x.toFixed(2)}, {p.y.toFixed(2)}
-                                        {p.z !== undefined &&
-                                          `, Z:${p.z.toFixed(2)}`}
-                                        )
+                                        {p.z !== undefined && `, Z:${p.z.toFixed(2)}`})
                                       </span>
                                     </div>
                                     {p.row_idx !== undefined && (
@@ -1932,9 +1645,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
             <div className="absolute inset-0 bg-blue-100 bg-opacity-90 flex items-center justify-center z-10 border-2 border-dashed border-blue-500 rounded-lg">
               <div className="text-center">
                 <Upload size={48} className="mx-auto text-blue-600 mb-2" />
-                <p className="text-blue-800 font-medium">
-                  Drop filter file here
-                </p>
+                <p className="text-blue-800 font-medium">Drop filter file here</p>
                 <p className="text-blue-600 text-sm">JSON files only</p>
               </div>
             </div>

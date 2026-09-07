@@ -23,7 +23,7 @@ interface AutoPlotResult {
 export function generateAutoPlotConfigs(
   item: BasketItem,
   sourceHeatmapFilters?: AppliedFilter[],
-  sourceLineplotFilters?: AppliedFilter[]
+  sourceLineplotFilters?: AppliedFilter[],
 ): AutoPlotResult {
   try {
     // Only process supported dataset files (disk) or memory:// paths (live) with attributes
@@ -50,7 +50,7 @@ export function generateAutoPlotConfigs(
     // Use the path as-is for fpath
     const fpath = item.path;
     const plotConfigs: Omit<PlotConfiguration, "id">[] = [];
-    
+
     // Determine source based on path type
     const source = isMemoryPath(fpath) ? "memory" : "disk";
     const preferredSource = source;
@@ -158,7 +158,7 @@ export interface ReplicationResult {
  */
 export function replicateCustomPlots(
   item: BasketItem,
-  sources: ReplicationSource[]
+  sources: ReplicationSource[],
 ): ReplicationResult {
   const result: ReplicationResult = { plotConfigs: [], skipped: [] };
 
@@ -179,7 +179,7 @@ export function replicateCustomPlots(
 
     if (missing.length > 0) {
       result.skipped.push(
-        `${config.plotType} (${[...new Set(missing)].join(", ")} not in this measurement)`
+        `${config.plotType} (${[...new Set(missing)].join(", ")} not in this measurement)`,
       );
       continue;
     }

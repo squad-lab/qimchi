@@ -19,14 +19,7 @@ interface Props {
   onClose: () => void;
 }
 
-const TagFilterMenu = ({
-  anchorEl,
-  tags,
-  selectedTagIds,
-  onToggle,
-  onClear,
-  onClose,
-}: Props) => {
+const TagFilterMenu = ({ anchorEl, tags, selectedTagIds, onToggle, onClear, onClose }: Props) => {
   const ref = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
 
@@ -60,9 +53,7 @@ const TagFilterMenu = ({
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const matching = q
-      ? tags.filter((t) => t.name.toLowerCase().includes(q))
-      : tags;
+    const matching = q ? tags.filter((t) => t.name.toLowerCase().includes(q)) : tags;
     // Selected tags float to the top so the active filter stays visible even
     // once the list is long enough to scroll.
     return [...matching].sort((a, b) => {
