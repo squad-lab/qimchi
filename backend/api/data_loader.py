@@ -14,18 +14,18 @@ for the rest of the application.
 
 from __future__ import annotations
 
+import re
+import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional, Protocol
 
-import sqlite3
 import numpy as np
 import xarray as xr
-
+from qimchi_connect import client as live_client
+from qimchi_connect import registry as live_db
 
 # Local imports
-from . import live_client
-from .shared import live_db
 from .logger import logger
 
 MEMORY_PROTOCOL = "memory://"
@@ -153,6 +153,21 @@ def get_live_dataset_entries() -> Dict[str, Dict[str, Any]]:
         return {}
 
     try:
+        maintenance = live_db.maintain_registry(
+            retention_days=7,
+            # Long enough to outlast a refused connection to a closed
+            # localhost port (~2s on Windows), which is what tells a dead
+            # producer apart from a busy one.
+            timeout=2.0,
+            retries=2,
+        )
+        if maintenance.stale_measurement_ids or maintenance.deleted_count:
+            logger.info(
+                "Live registry maintenance marked %d stale and deleted %d old "
+                "dataset record(s)",
+                len(maintenance.stale_measurement_ids),
+                maintenance.deleted_count,
+            )
         live_db.init_database()
         measurements = live_db.get_live_measurements()
         entries: Dict[str, Dict[str, Any]] = {}
@@ -281,6 +296,33 @@ def _annotate_dataset(
     if measurement_ended_at is not None:
         dataset.attrs["measurement_ended_at"] = measurement_ended_at
 
+    _normalize_cf_label_attrs(dataset)
+
+
+def _normalize_cf_label_attrs(dataset: xr.Dataset) -> None:
+    """
+    Mirror CF-convention `long_name`/`units` attrs into Qimchi's own
+    `label`/`unit` attrs on every coordinate and data variable, in place.
+
+    figures.py only ever reads `label`/`unit` (qanary' own convention) when
+    deriving axis titles; sources that follow the more common CF convention
+    instead -- QCoDeS's native `to_xarray_dataset()` output and Quantify
+    datasets both do -- would otherwise silently fall back to bare variable
+    names. Existing `label`/`unit` attrs are left untouched.
+
+    Args:
+        dataset (xr.Dataset): The dataset to normalize, mutated in place.
+
+    Returns:
+        None
+
+    """
+    for var in (*dataset.coords.values(), *dataset.data_vars.values()):
+        if "long_name" in var.attrs:
+            var.attrs.setdefault("label", var.attrs["long_name"])
+        if "units" in var.attrs:
+            var.attrs.setdefault("unit", var.attrs["units"])
+
 
 def _load_xarray_dataset(path: Path, fmt: str) -> xr.Dataset:
     """
@@ -364,6 +406,94 @@ def load_xarray_dataset(path: str | Path, fmt: str) -> xr.Dataset:
 
     """
     return _load_xarray_dataset(Path(path), fmt)
+
+
+_QUANTIFY_SETTABLE_COORD_RE = re.compile(r"x(\d+)$")
+
+
+def _grid_quantify_settables(dataset: xr.Dataset) -> xr.Dataset:
+    """
+    Reshape a Quantify sparse dataset's flat settables into real dimensions.
+
+    Quantify (quantify-core and its successor `quantify` package) stores
+    multi-settable sweeps as flat `x0`, `x1`, ... coordinate arrays along a
+    single `dim_0`, and tags a genuinely rectangular sweep with the dataset
+    attr `grid_2d=True` -- reshaping is only ever applied when that attr is
+    set, matching Quantify's own `to_gridded_dataset()` (which uses the same
+    signal and is likewise never set for more than two settables). A single
+    settable is already directly plottable via its `dim_0` coordinate and is
+    left untouched.
+
+    This mirrors `to_gridded_dataset()`'s pandas-MultiIndex-based reshape
+    without depending on the `quantify`/`quantify-core` package -- verified
+    against real quantify-core output, including for a partially-completed
+    (mid-run) sweep, where the untouched settables still cover the full grid
+    and only the measured variable is short, leaving NaNs in the gaps.
+
+    Args:
+        dataset (xr.Dataset): The dataset to reshape.
+
+    Returns:
+        xr.Dataset: The gridded dataset, or the original dataset unchanged
+            if it is not a rectangular multi-settable Quantify sweep.
+
+    """
+    if not dataset.attrs.get("grid_2d"):
+        return dataset
+
+    settable_coords = sorted(
+        (
+            name
+            for name in dataset.coords
+            if _QUANTIFY_SETTABLE_COORD_RE.fullmatch(name)
+        ),
+        key=lambda name: int(_QUANTIFY_SETTABLE_COORD_RE.fullmatch(name).group(1)),
+    )
+    if len(settable_coords) < 2:
+        return dataset
+
+    flat_dims = {dataset[name].dims for name in settable_coords}
+    if len(flat_dims) != 1:
+        return dataset
+    (only_dims,) = flat_dims
+    if len(only_dims) != 1:
+        return dataset
+    (flat_dim,) = only_dims
+
+    try:
+        gridded = dataset.set_index({flat_dim: settable_coords}).unstack(flat_dim)
+    except Exception as exc:
+        logger.warning(
+            "Failed to grid Quantify dataset '%s': %s",
+            dataset.attrs.get("tuid", "<unknown>"),
+            exc,
+        )
+        return dataset
+
+    gridded.attrs["grid_2d"] = False
+    gridded.attrs["qimchi_quantify_gridded"] = True
+    return gridded
+
+
+def _prepare_quantify_dataset(dataset: xr.Dataset, fmt: str) -> tuple[xr.Dataset, str]:
+    """
+    Grid and tag a dataset if it is a Quantify dataset, otherwise pass through.
+
+    Detection relies on Quantify's `tuid` attribute, which every Quantify
+    dataset carries and which no other format in Qimchi's loader sets.
+
+    Args:
+        dataset (xr.Dataset): The loaded dataset to inspect.
+        fmt (str): The format detected so far (e.g. "hdf5", "netcdf", "live").
+
+    Returns:
+        tuple[xr.Dataset, str]: The (possibly gridded) dataset, and "quantify"
+            in place of `fmt` if it was a Quantify dataset.
+
+    """
+    if not dataset.attrs.get("tuid"):
+        return dataset, fmt
+    return _grid_quantify_settables(dataset), "quantify"
 
 
 def _detect_filesystem_format(path: Path) -> str:
@@ -827,6 +957,191 @@ def _load_qcodes_xarray_dataset(db_path: Path, run_id: int) -> xr.Dataset:
     return dataset
 
 
+# Measurements whose live server answered that it does not host them, keyed to
+# the registration they were disowned under. That answer is authoritative, so
+# re-asking once per plot refresh only costs a connection -- which is what
+# happens when a run ends and a later producer inherits its port. Keying on
+# ``started_at`` means a re-registration under the same id is tried afresh.
+_WS_DISOWNED: Dict[str, Any] = {}
+
+
+def _ws_worth_trying(measurement_id: str, info: Dict[str, Any]) -> bool:
+    """
+    Return whether a live snapshot is worth requesting over the WebSocket.
+
+    A finished measurement whose data is on disk is read from there: its
+    producer has normally exited, so dialling the endpoint on every refresh
+    only delays the plot behind a connection that cannot succeed. One without
+    a disk path is still tried, because there is nothing to fall back to.
+
+    Args:
+        measurement_id (str): Measurement the reference points at.
+        info (Dict[str, Any]): Registry row for that measurement.
+
+    Returns:
+        bool: True when the WebSocket should be tried.
+
+    """
+    if not info.get("ws_url"):
+        return False
+    if measurement_id in _WS_DISOWNED and _WS_DISOWNED[measurement_id] == info.get(
+        "started_at"
+    ):
+        return False
+    return not (info.get("ended_at") and info.get("disk_path"))
+
+
+def _note_ws_failure(measurement_id: str, info: Dict[str, Any], exc: Exception) -> None:
+    """
+    Record an authoritative "no such measurement" answer from a live server.
+
+    Only the server denying the measurement is conclusive. A refused or timed
+    out connection can mean a producer that is merely starting up or busy, and
+    that is worth asking again.
+
+    Args:
+        measurement_id (str): Measurement the request was for.
+        info (Dict[str, Any]): Registry row the request was built from.
+        exc (Exception): Failure raised while fetching the snapshot.
+
+    """
+    if isinstance(exc, RuntimeError) and "not found" in str(exc):
+        _WS_DISOWNED[measurement_id] = info.get("started_at")
+
+
+# Live measurements accumulated row by row, keyed by measurement id: the grid
+# received so far and how many of its rows are trusted. A poll then asks only
+# for the rows past that point, so following a long sweep costs what was
+# measured since the last refresh rather than the whole run every time.
+# Bounded, because each entry holds a complete measurement in memory.
+_LIVE_ACCUM: Dict[str, Dict[str, Any]] = {}
+_LIVE_ACCUM_MAX = 2
+
+
+def forget_live_rows(measurement_id: str) -> None:
+    """
+    Drop an accumulated measurement, releasing its arrays.
+
+    Args:
+        measurement_id (str): Measurement to forget.
+
+    """
+    _LIVE_ACCUM.pop(measurement_id, None)
+
+
+def _remember_live_rows(
+    measurement_id: str, info: Dict[str, Any], dataset: xr.Dataset
+) -> xr.Dataset:
+    """
+    Keep a whole snapshot as the base that later rows are folded into.
+
+    A producer that cannot describe its rows -- no shared leading dimension,
+    or a server too old to answer row requests -- is not accumulated at all,
+    and every poll fetches it whole as before.
+
+    Args:
+        measurement_id (str): Measurement the snapshot belongs to.
+        info (Dict[str, Any]): Registry row it was fetched under.
+        dataset (xr.Dataset): The snapshot.
+
+    Returns:
+        xr.Dataset: The same dataset, for use as an expression.
+
+    """
+    rows = dataset.encoding.get("qimchi_connect_rows") or {}
+    if not rows.get("append_dim"):
+        forget_live_rows(measurement_id)
+        return dataset
+
+    while len(_LIVE_ACCUM) >= _LIVE_ACCUM_MAX and measurement_id not in _LIVE_ACCUM:
+        _LIVE_ACCUM.pop(next(iter(_LIVE_ACCUM)))
+    _LIVE_ACCUM[measurement_id] = {
+        "dataset": dataset,
+        "dim": rows["append_dim"],
+        "rows": int(rows.get("rows_written", 0)),
+        "started_at": info.get("started_at"),
+    }
+    return dataset
+
+
+def _merge_live_rows(
+    measurement_id: str,
+    info: Dict[str, Any],
+    dataset: xr.Dataset,
+    cached: Optional[Dict[str, Any]],
+) -> Optional[xr.Dataset]:
+    """
+    Fold newly fetched rows into the measurement accumulated so far.
+
+    The rows are written into the existing arrays rather than concatenated,
+    which keeps the cost proportional to what was measured since the last
+    poll. A refresh running concurrently may therefore read a row while it is
+    being filled -- the same half-written row a live plot shows anyway.
+
+    Args:
+        measurement_id (str): Measurement being followed.
+        info (Dict[str, Any]): Registry row the fetch was made under.
+        dataset (xr.Dataset): Rows returned by the producer.
+        cached (Optional[Dict[str, Any]]): Accumulator entry, if any.
+
+    Returns:
+        Optional[xr.Dataset]: The accumulated measurement, or None when the
+            two cannot be reconciled -- another run, a resized grid, or a
+            variable that was not there before -- and the caller should fetch
+            the whole measurement instead.
+
+    """
+    rows = dataset.encoding.get("qimchi_connect_rows") or {}
+    start = int(rows.get("rows_from", 0))
+    if not start or cached is None:
+        return None
+    if cached.get("started_at") != info.get("started_at"):
+        return None
+
+    dim = rows.get("append_dim")
+    base = cached["dataset"]
+    if dim != cached.get("dim") or dim not in base.sizes:
+        return None
+    if int(rows.get("rows_total", -1)) != int(base.sizes[dim]):
+        return None
+
+    stop = int(rows.get("rows_written", start))
+    for name, var in dataset.data_vars.items():
+        if name not in base.data_vars:
+            return None
+        if stop > start:
+            base[name].values[start:stop] = var.transpose(*base[name].dims).values
+
+    cached["rows"] = stop
+    base.encoding["qimchi_connect_rows"] = rows
+    logger.debug(
+        "[live] %s: folded rows %d:%d of %s",
+        measurement_id,
+        start,
+        stop,
+        rows.get("rows_total"),
+    )
+    return base
+
+
+def _live_since_rows(measurement_id: str, info: Dict[str, Any]) -> Optional[int]:
+    """
+    Return how many rows of this measurement are already held, if any.
+
+    Args:
+        measurement_id (str): Measurement about to be fetched.
+        info (Dict[str, Any]): Registry row for it.
+
+    Returns:
+        Optional[int]: Rows to ask from, or None to fetch the whole thing.
+
+    """
+    cached = _LIVE_ACCUM.get(measurement_id)
+    if cached is None or cached.get("started_at") != info.get("started_at"):
+        return None
+    return cached["rows"] or None
+
+
 class LiveMemoryProvider:
     """
     Provider for live datasets loaded through memory/WebSocket.
@@ -882,6 +1197,11 @@ class LiveMemoryProvider:
     def _load_from_disk(
         self, ref: str, measurement_id: str, info: Dict[str, Any]
     ) -> LoadedData:
+        if info.get("ended_at"):
+            # The run is over and its data is on disk, so the rows held for
+            # incremental polling are dead weight.
+            forget_live_rows(measurement_id)
+
         disk_path = self.resolve_disk_path(ref)
         path = Path(disk_path)
         if not path.exists():
@@ -890,6 +1210,7 @@ class LiveMemoryProvider:
             )
         fmt = _detect_filesystem_format(path)
         dataset = _load_xarray_dataset(path, fmt)
+        dataset, fmt = _prepare_quantify_dataset(dataset, fmt)
         _annotate_dataset(
             dataset,
             source_ref=ref,
@@ -928,11 +1249,34 @@ class LiveMemoryProvider:
         info = resolve_live_dataset(measurement_id)
         ws_url = info.get("ws_url")
 
-        if ws_url:
+        if _ws_worth_trying(measurement_id, info):
             try:
-                dataset = live_client.open_live_dataset_sync(
-                    measurement_id, ws_url=ws_url
+                since_rows = _live_since_rows(measurement_id, info)
+                # Only sent when rows are actually held, which never happens
+                # against a producer whose qimchi-connect cannot describe
+                # them -- so an older one is asked exactly as it was before.
+                extra = {"since_rows": since_rows} if since_rows else {}
+                dataset = live_client.open_live_measurement_sync(
+                    measurement_id, ws_url=ws_url, **extra
                 )
+                merged = _merge_live_rows(
+                    measurement_id, info, dataset, _LIVE_ACCUM.get(measurement_id)
+                )
+                if merged is not None:
+                    dataset = merged
+                else:
+                    if since_rows and (
+                        dataset.encoding.get("qimchi_connect_rows") or {}
+                    ).get("rows_from"):
+                        # Rows that cannot be folded into what is held: start
+                        # again from a whole snapshot rather than plot a gap.
+                        dataset = live_client.open_live_measurement_sync(
+                            measurement_id, ws_url=ws_url
+                        )
+                    dataset = _remember_live_rows(measurement_id, info, dataset)
+                source = dataset.encoding.get("qimchi_connect_source", {})
+                fmt = source.get("source_format", "live")
+                dataset, fmt = _prepare_quantify_dataset(dataset, fmt)
                 _annotate_dataset(
                     dataset,
                     source_ref=normalized,
@@ -947,16 +1291,18 @@ class LiveMemoryProvider:
                     obj=dataset,
                     source_ref=normalized,
                     actual_path=info.get("disk_path"),
-                    format="zarr",
+                    format=fmt,
                     loaded_from="memory",
                     metadata={
                         "measurement_id": measurement_id,
                         "ws_url": ws_url,
                         "live_status": info.get("live_status"),
                         "ended_at": info.get("ended_at"),
+                        "source": source,
                     },
                 )
             except Exception as exc:
+                _note_ws_failure(measurement_id, info, exc)
                 logger.info(
                     "WebSocket unavailable for '%s': %s. Falling back to disk.",
                     measurement_id,
@@ -979,11 +1325,32 @@ class LiveMemoryProvider:
         info = resolve_live_dataset(measurement_id)
         ws_url = info.get("ws_url")
 
-        if ws_url:
+        if _ws_worth_trying(measurement_id, info):
             try:
-                dataset = await live_client.open_live_dataset(
-                    measurement_id, ws_url=ws_url
+                since_rows = _live_since_rows(measurement_id, info)
+                # See the note in load_sync: not sent unless rows are held.
+                extra = {"since_rows": since_rows} if since_rows else {}
+                dataset = await live_client.open_live_measurement(
+                    measurement_id, ws_url=ws_url, **extra
                 )
+                merged = _merge_live_rows(
+                    measurement_id, info, dataset, _LIVE_ACCUM.get(measurement_id)
+                )
+                if merged is not None:
+                    dataset = merged
+                else:
+                    if since_rows and (
+                        dataset.encoding.get("qimchi_connect_rows") or {}
+                    ).get("rows_from"):
+                        # Rows that cannot be folded into what is held: start
+                        # again from a whole snapshot rather than plot a gap.
+                        dataset = await live_client.open_live_measurement(
+                            measurement_id, ws_url=ws_url
+                        )
+                    dataset = _remember_live_rows(measurement_id, info, dataset)
+                source = dataset.encoding.get("qimchi_connect_source", {})
+                fmt = source.get("source_format", "live")
+                dataset, fmt = _prepare_quantify_dataset(dataset, fmt)
                 _annotate_dataset(
                     dataset,
                     source_ref=normalized,
@@ -998,16 +1365,18 @@ class LiveMemoryProvider:
                     obj=dataset,
                     source_ref=normalized,
                     actual_path=info.get("disk_path"),
-                    format="zarr",
+                    format=fmt,
                     loaded_from="memory",
                     metadata={
                         "measurement_id": measurement_id,
                         "ws_url": ws_url,
                         "live_status": info.get("live_status"),
                         "ended_at": info.get("ended_at"),
+                        "source": source,
                     },
                 )
             except Exception as exc:
+                _note_ws_failure(measurement_id, info, exc)
                 logger.info(
                     "WebSocket unavailable for '%s': %s. Falling back to disk.",
                     measurement_id,
@@ -1049,6 +1418,7 @@ class NetcdfHdf5Provider:
 
         fmt = _detect_filesystem_format(path)
         dataset = _load_xarray_dataset(path, fmt)
+        dataset, fmt = _prepare_quantify_dataset(dataset, fmt)
         _annotate_dataset(
             dataset,
             source_ref=ref,
@@ -1169,6 +1539,7 @@ class FilesystemXarrayProvider:
             )
 
         dataset = _load_xarray_dataset(path, fmt)
+        dataset, fmt = _prepare_quantify_dataset(dataset, fmt)
         _annotate_dataset(
             dataset,
             source_ref=ref,

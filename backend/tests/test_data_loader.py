@@ -1,7 +1,9 @@
+import sqlite3
+from pathlib import Path
+
+import numpy as np
 import pytest
 import xarray as xr
-from pathlib import Path
-import sqlite3
 
 from api import data_loader
 
@@ -169,7 +171,7 @@ def test_memory_reference_falls_back_to_disk(tmp_path, monkeypatch):
     def _fail_ws(*_args, **_kwargs):
         raise RuntimeError("ws unavailable")
 
-    monkeypatch.setattr(data_loader.live_client, "open_live_dataset_sync", _fail_ws)
+    monkeypatch.setattr(data_loader.live_client, "open_live_measurement_sync", _fail_ws)
 
     loaded = data_loader.load_data_sync("memory://m-001")
     assert loaded.kind == "dataset"
@@ -205,8 +207,8 @@ async def test_sync_async_parity_for_memory_ws(monkeypatch):
     async def _async_ws(*_args, **_kwargs):
         return base.copy(deep=True)
 
-    monkeypatch.setattr(data_loader.live_client, "open_live_dataset_sync", _sync_ws)
-    monkeypatch.setattr(data_loader.live_client, "open_live_dataset", _async_ws)
+    monkeypatch.setattr(data_loader.live_client, "open_live_measurement_sync", _sync_ws)
+    monkeypatch.setattr(data_loader.live_client, "open_live_measurement", _async_ws)
 
     sync_loaded = data_loader.load_data_sync("memory://m-002")
     async_loaded = await data_loader.load_data_async("memory://m-002")
@@ -215,6 +217,269 @@ async def test_sync_async_parity_for_memory_ws(monkeypatch):
     assert async_loaded.loaded_from == "memory"
     assert sync_loaded.obj.attrs["measurement_id"] == "m-002"
     assert async_loaded.obj.attrs["measurement_id"] == "m-002"
+
+
+def _live_row(**overrides):
+    """A registry row for a running measurement, with fields overridden."""
+    row = {
+        "disk_path": None,
+        "ws_url": "ws://localhost:9999",
+        "ws_port": 9999,
+        "live_status": True,
+        "started_at": "2026-01-01T00:00:00",
+        "ended_at": None,
+    }
+    row.update(overrides)
+    return row
+
+
+def _counting_ws(monkeypatch, result):
+    """
+    Install a WebSocket loader that counts its calls.
+
+    Args:
+        monkeypatch: Pytest fixture used to install the fake.
+        result: Dataset to return, or an exception instance to raise.
+
+    Returns:
+        list: One-element call counter, so a test can assert on attempts.
+
+    """
+    calls = []
+
+    def _ws(*_args, **_kwargs):
+        calls.append(1)
+        if isinstance(result, Exception):
+            raise result
+        return result.copy(deep=True)
+
+    monkeypatch.setattr(data_loader.live_client, "open_live_measurement_sync", _ws)
+    monkeypatch.setattr(data_loader, "_WS_DISOWNED", {})
+    return calls
+
+
+def _disk_backed(tmp_path, monkeypatch):
+    """Give the loader a readable disk artefact and return its path."""
+    zarr_path = tmp_path / "ended.zarr"
+    zarr_path.mkdir(parents=True)
+    ds = xr.Dataset(
+        data_vars={"signal": (("x",), [1.0, 2.0])},
+        coords={"x": [0, 1]},
+    )
+    monkeypatch.setattr(data_loader, "_load_xarray_dataset", lambda *_args: ds)
+    return zarr_path
+
+
+def test_a_finished_measurement_is_read_from_disk_without_dialling_the_socket(
+    tmp_path, monkeypatch
+):
+    """
+    A producer that has ended has also exited, so its endpoint cannot answer.
+    Dialling it once per plot refresh only delays the plot.
+
+    """
+    zarr_path = _disk_backed(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        data_loader,
+        "resolve_live_dataset",
+        lambda _m: _live_row(
+            disk_path=str(zarr_path),
+            live_status=False,
+            ended_at="2026-01-01T00:01:00",
+        ),
+    )
+    calls = _counting_ws(monkeypatch, RuntimeError("should not be called"))
+
+    loaded = data_loader.load_data_sync("memory://m-ended")
+
+    assert calls == []
+    assert loaded.loaded_from == "disk"
+    loaded.obj.close()
+
+
+def test_a_finished_measurement_with_no_disk_path_still_tries_the_socket(monkeypatch):
+    """With nothing on disk to fall back to, the socket is the only source."""
+    base = xr.Dataset(data_vars={"value": (("x",), [1.0])}, coords={"x": [0]})
+    monkeypatch.setattr(
+        data_loader,
+        "resolve_live_dataset",
+        lambda _m: _live_row(live_status=False, ended_at="2026-01-01T00:01:00"),
+    )
+    calls = _counting_ws(monkeypatch, base)
+
+    loaded = data_loader.load_data_sync("memory://m-no-disk")
+
+    assert len(calls) == 1
+    assert loaded.loaded_from == "memory"
+
+
+def test_a_server_that_disowns_a_measurement_is_not_asked_again(tmp_path, monkeypatch):
+    """
+    "Measurement not found" comes from a live server that answered, so it is
+    conclusive -- it is what a later producer inheriting the port reports.
+
+    """
+    zarr_path = _disk_backed(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        data_loader,
+        "resolve_live_dataset",
+        lambda _m: _live_row(disk_path=str(zarr_path)),
+    )
+    calls = _counting_ws(
+        monkeypatch,
+        RuntimeError("Failed to get snapshot for m-gone: Measurement m-gone not found"),
+    )
+
+    first = data_loader.load_data_sync("memory://m-gone")
+    second = data_loader.load_data_sync("memory://m-gone")
+
+    assert len(calls) == 1, "the denial should be remembered, not re-asked"
+    assert first.loaded_from == "disk"
+    assert second.loaded_from == "disk"
+    first.obj.close()
+    second.obj.close()
+
+
+def test_a_refused_connection_is_tried_again(tmp_path, monkeypatch):
+    """A producer can be slow to bind or restarting; that is not conclusive."""
+    zarr_path = _disk_backed(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        data_loader,
+        "resolve_live_dataset",
+        lambda _m: _live_row(disk_path=str(zarr_path)),
+    )
+    calls = _counting_ws(monkeypatch, OSError("[WinError 1225] refused"))
+
+    data_loader.load_data_sync("memory://m-refused").obj.close()
+    data_loader.load_data_sync("memory://m-refused").obj.close()
+
+    assert len(calls) == 2
+
+
+class TestLiveRowAccumulation:
+    """
+    Following a live sweep by asking only for the rows measured since the last
+    poll. A producer preallocates its grid, so re-fetching the whole thing
+    every second moves the same bytes over and over; these pin the folding,
+    the cases that must fall back to a whole snapshot, and the bookkeeping
+    that keeps memory bounded.
+
+    """
+
+    ROWS, COLS = 6, 3
+
+    def _grid(self, written: int, *, offset: float = 0.0):
+        """A grid whose first ``written`` rows hold values."""
+        values = np.full((self.ROWS, self.COLS), np.nan)
+        values[:written] = offset + np.arange(written * self.COLS, dtype=float).reshape(
+            written, self.COLS
+        )
+        return xr.Dataset(
+            {"signal": (("y", "x"), values)},
+            coords={"y": np.arange(self.ROWS), "x": np.arange(self.COLS)},
+        )
+
+    def _rows(self, ds, *, rows_from, rows_written, rows_total=None):
+        ds.encoding["qimchi_connect_rows"] = {
+            "append_dim": "y",
+            "rows_from": rows_from,
+            "rows_written": rows_written,
+            "rows_total": self.ROWS if rows_total is None else rows_total,
+        }
+        return ds
+
+    def _serve(self, monkeypatch, responses):
+        """Serve the given datasets in order, recording each since_rows."""
+        asked = []
+
+        def _ws(_measurement_id, ws_url=None, since_rows=None, **_kwargs):
+            asked.append(since_rows)
+            return responses[min(len(asked) - 1, len(responses) - 1)]
+
+        monkeypatch.setattr(data_loader, "_LIVE_ACCUM", {})
+        monkeypatch.setattr(data_loader.live_client, "open_live_measurement_sync", _ws)
+        monkeypatch.setattr(data_loader, "resolve_live_dataset", lambda _m: _live_row())
+        return asked
+
+    def test_the_first_poll_fetches_everything_and_records_the_frontier(
+        self, monkeypatch
+    ):
+        whole = self._rows(self._grid(2), rows_from=0, rows_written=2)
+        asked = self._serve(monkeypatch, [whole])
+
+        data_loader.load_data_sync("memory://m-acc")
+
+        assert asked == [None], "nothing is held yet, so nothing to ask from"
+        assert data_loader._LIVE_ACCUM["m-acc"]["rows"] == 2
+
+    def test_the_next_poll_asks_only_for_what_it_is_missing(self, monkeypatch):
+        whole = self._rows(self._grid(2), rows_from=0, rows_written=2)
+        later = self._rows(
+            self._grid(4).isel(y=slice(2, 4)), rows_from=2, rows_written=4
+        )
+        asked = self._serve(monkeypatch, [whole, later])
+
+        data_loader.load_data_sync("memory://m-acc")
+        loaded = data_loader.load_data_sync("memory://m-acc")
+
+        assert asked == [None, 2]
+        assert loaded.obj.sizes["y"] == self.ROWS, "the full grid is still plotted"
+        assert data_loader._LIVE_ACCUM["m-acc"]["rows"] == 4
+
+    def test_the_fetched_rows_land_where_they_belong(self, monkeypatch):
+        whole = self._rows(self._grid(2), rows_from=0, rows_written=2)
+        fresh = self._grid(4, offset=100.0)
+        later = self._rows(fresh.isel(y=slice(2, 4)), rows_from=2, rows_written=4)
+        self._serve(monkeypatch, [whole, later])
+
+        data_loader.load_data_sync("memory://m-acc")
+        loaded = data_loader.load_data_sync("memory://m-acc")
+
+        values = loaded.obj["signal"].values
+        assert np.array_equal(values[:2], whole["signal"].values[:2]), "kept"
+        assert np.array_equal(values[2:4], fresh["signal"].values[2:4]), "folded in"
+        assert np.isnan(values[4:]).all(), "the unmeasured tail stays empty"
+
+    def test_rows_from_a_differently_shaped_run_force_a_whole_refetch(
+        self, monkeypatch
+    ):
+        whole = self._rows(self._grid(2), rows_from=0, rows_written=2)
+        mismatched = self._rows(
+            self._grid(4).isel(y=slice(2, 4)),
+            rows_from=2,
+            rows_written=4,
+            rows_total=self.ROWS + 10,
+        )
+        asked = self._serve(monkeypatch, [whole, mismatched, whole])
+
+        data_loader.load_data_sync("memory://m-acc")
+        loaded = data_loader.load_data_sync("memory://m-acc")
+
+        assert asked == [None, 2, None], "the unfoldable answer is refetched whole"
+        assert loaded.obj.sizes["y"] == self.ROWS
+
+    def test_a_producer_that_cannot_describe_rows_is_never_accumulated(
+        self, monkeypatch
+    ):
+        """An older qimchi-connect sends no row fields, so nothing is held."""
+        plain = self._grid(2)
+        asked = self._serve(monkeypatch, [plain])
+
+        data_loader.load_data_sync("memory://m-old")
+        data_loader.load_data_sync("memory://m-old")
+
+        assert asked == [None, None]
+        assert data_loader._LIVE_ACCUM == {}
+
+    def test_only_a_bounded_number_of_measurements_is_held(self, monkeypatch):
+        """Each entry is a whole measurement in memory, so the map is capped."""
+        whole = self._rows(self._grid(2), rows_from=0, rows_written=2)
+        self._serve(monkeypatch, [whole])
+
+        for i in range(data_loader._LIVE_ACCUM_MAX + 2):
+            data_loader.load_data_sync(f"memory://m-{i}")
+
+        assert len(data_loader._LIVE_ACCUM) == data_loader._LIVE_ACCUM_MAX
 
 
 def test_custom_provider_registration_smoke():
@@ -364,4 +629,148 @@ def test_datatree_reference_loads_selected_node_dataset(tmp_path, monkeypatch):
     assert loaded.format == "zarr"
     assert loaded.metadata["dt_path"] == "/group/run_1"
     assert loaded.obj.attrs["path"] == ref
+    loaded.obj.close()
+
+
+# --- Quantify support ---
+#
+# Fixture datasets below mirror the exact on-disk structure of real
+# quantify-core-generated files (dim_0-indexed flat x0/x1 coordinates,
+# grid_2d/xlen/ylen attrs, long_name/units on every coord and data var),
+# verified against actual `quantify_core.data.handling.to_gridded_dataset()`
+# output rather than assumed from documentation.
+
+
+def _quantify_1d_dataset() -> xr.Dataset:
+    x_vals = np.linspace(-1, 1, 21)
+    ds = xr.Dataset(
+        {"y0": ("dim_0", np.sin(x_vals))},
+        coords={"x0": ("dim_0", x_vals)},
+        attrs={
+            "tuid": "20260902-172313-694-c1732f",
+            "name": "qimchi_test_1d",
+            "grid_2d": False,
+            "grid_2d_uniformly_spaced": False,
+        },
+    )
+    ds["x0"].attrs.update({"name": "x", "long_name": "X Voltage", "units": "V"})
+    ds["y0"].attrs.update({"name": "y", "long_name": "Signal", "units": "A"})
+    return ds
+
+
+def _quantify_2d_dataset(*, measured_points: int | None = None) -> xr.Dataset:
+    x_vals = np.linspace(-1, 1, 5)
+    y_vals = np.linspace(0, 2, 4)
+    xx, yy = np.meshgrid(x_vals, y_vals, indexing="ij")
+    x0_full = xx.flatten()
+    x1_full = yy.flatten()
+    y0_full = np.sin(x0_full) + np.cos(x1_full)
+    if measured_points is not None:
+        y0_full = y0_full.copy()
+        y0_full[measured_points:] = np.nan
+
+    ds = xr.Dataset(
+        {"y0": ("dim_0", y0_full)},
+        coords={"x0": ("dim_0", x0_full), "x1": ("dim_0", x1_full)},
+        attrs={
+            "tuid": "20260902-172330-257-5069c6",
+            "name": "qimchi_test_2d",
+            "grid_2d": True,
+            "grid_2d_uniformly_spaced": True,
+            "xlen": 5,
+            "ylen": 4,
+        },
+    )
+    ds["x0"].attrs.update({"name": "x", "long_name": "X Voltage", "units": "V"})
+    ds["x1"].attrs.update({"name": "y", "long_name": "Y Voltage", "units": "V"})
+    ds["y0"].attrs.update({"name": "z", "long_name": "Signal", "units": "A"})
+    return ds
+
+
+def test_quantify_1d_dataset_is_tagged_but_left_ungridded(tmp_path, monkeypatch):
+    h5_path = tmp_path / "dataset.hdf5"
+    h5_path.write_text("placeholder")
+    ds = _quantify_1d_dataset()
+    monkeypatch.setattr(data_loader, "_load_xarray_dataset", lambda *_args: ds)
+
+    loaded = data_loader.load_data_sync(str(h5_path))
+    assert loaded.format == "quantify"
+    assert loaded.obj.sizes == {"dim_0": 21}
+    # A single settable is already directly plottable via its dim_0 coord.
+    assert loaded.obj["x0"].attrs["label"] == "X Voltage"
+    assert loaded.obj["x0"].attrs["unit"] == "V"
+    assert loaded.obj["y0"].attrs["label"] == "Signal"
+    assert loaded.obj["y0"].attrs["unit"] == "A"
+    loaded.obj.close()
+
+
+def test_quantify_2d_dataset_is_gridded(tmp_path, monkeypatch):
+    h5_path = tmp_path / "dataset.hdf5"
+    h5_path.write_text("placeholder")
+    ds = _quantify_2d_dataset()
+    monkeypatch.setattr(data_loader, "_load_xarray_dataset", lambda *_args: ds)
+
+    loaded = data_loader.load_data_sync(str(h5_path))
+    gridded = loaded.obj
+    assert loaded.format == "quantify"
+    assert gridded.sizes == {"x0": 5, "x1": 4}
+    np.testing.assert_allclose(gridded["x0"].values, np.linspace(-1, 1, 5))
+    np.testing.assert_allclose(gridded["x1"].values, np.linspace(0, 2, 4))
+    np.testing.assert_allclose(
+        gridded["y0"].values,
+        np.sin(gridded["x0"].values)[:, None] + np.cos(gridded["x1"].values)[None, :],
+    )
+    assert gridded.attrs["grid_2d"] is False
+    assert gridded.attrs["qimchi_quantify_gridded"] is True
+    # CF long_name/units survive the reshape and get mirrored to label/unit.
+    assert gridded["x1"].attrs["label"] == "Y Voltage"
+    assert gridded["x1"].attrs["unit"] == "V"
+    assert gridded["y0"].attrs["label"] == "Signal"
+    loaded.obj.close()
+
+
+def test_quantify_2d_mid_run_dataset_grids_with_nan_gaps(tmp_path, monkeypatch):
+    h5_path = tmp_path / "dataset.hdf5"
+    h5_path.write_text("placeholder")
+    ds = _quantify_2d_dataset(measured_points=11)
+    monkeypatch.setattr(data_loader, "_load_xarray_dataset", lambda *_args: ds)
+
+    loaded = data_loader.load_data_sync(str(h5_path))
+    gridded = loaded.obj
+    assert gridded.sizes == {"x0": 5, "x1": 4}
+    assert int(gridded["y0"].isnull().sum()) == 20 - 11
+    loaded.obj.close()
+
+
+def test_quantify_dataset_without_grid_2d_left_sparse(tmp_path, monkeypatch):
+    # A 3+ settable sweep: quantify-core itself never sets grid_2d for this
+    # case, so Qimchi does not attempt to grid it either.
+    h5_path = tmp_path / "dataset.hdf5"
+    h5_path.write_text("placeholder")
+    ds = xr.Dataset(
+        {"y0": ("dim_0", [1.0, 2.0])},
+        coords={
+            "x0": ("dim_0", [0.0, 1.0]),
+            "x1": ("dim_0", [0.0, 0.0]),
+            "x2": ("dim_0", [0.0, 0.0]),
+        },
+        attrs={"tuid": "fake-3d", "name": "n", "grid_2d": False},
+    )
+    monkeypatch.setattr(data_loader, "_load_xarray_dataset", lambda *_args: ds)
+
+    loaded = data_loader.load_data_sync(str(h5_path))
+    assert loaded.format == "quantify"
+    assert loaded.obj.sizes == {"dim_0": 2}
+    loaded.obj.close()
+
+
+def test_non_quantify_hdf5_dataset_is_unaffected(tmp_path, monkeypatch):
+    h5_path = tmp_path / "demo.h5"
+    h5_path.write_text("placeholder")
+    ds = xr.Dataset(data_vars={"signal": (("x",), [1.0, 2.0])}, coords={"x": [0, 1]})
+    monkeypatch.setattr(data_loader, "_load_xarray_dataset", lambda *_args: ds)
+
+    loaded = data_loader.load_data_sync(str(h5_path))
+    assert loaded.format == "hdf5"
+    assert "qimchi_quantify_gridded" not in loaded.obj.attrs
     loaded.obj.close()
