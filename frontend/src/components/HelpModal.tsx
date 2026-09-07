@@ -52,8 +52,8 @@ const ExplorerHelp = memo(() => (
         Explorer
       </h3>
       <p className="text-gray-600 mb-4">
-        Browse and navigate your file system to find datasets. The following
-        formats are supported and highlighted with specific icons in the tree:
+        Browse and navigate your file system to find datasets. The following formats are supported
+        and highlighted with specific icons in the tree:
       </p>
 
       <div className="grid grid-cols-2 gap-2 mb-4">
@@ -112,9 +112,8 @@ const ExplorerHelp = memo(() => (
         Hearts, Trash &amp; Tags
       </h4>
       <p className="text-gray-600">
-        Mark measurements so you can find them again. These are saved to your
-        Qimchi library and follow a measurement even if you rename or move its
-        file.
+        Mark measurements so you can find them again. These are saved to your Qimchi library and
+        follow a measurement even if you rename or move its file.
       </p>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
@@ -131,8 +130,8 @@ const ExplorerHelp = memo(() => (
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Select several with Ctrl/Shift+Click, then use the heart, trash or tag
-          buttons in the toolbar to apply to all of them at once
+          Select several with Ctrl/Shift+Click, then use the heart, trash or tag buttons in the
+          toolbar to apply to all of them at once
         </li>
       </ul>
 
@@ -150,17 +149,16 @@ const ExplorerHelp = memo(() => (
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <span>
-            The <span className="font-semibold">Tags</span> dropdown is searchable;
-            picking several matches measurements carrying{" "}
-            <span className="italic">any</span> of them
+            The <span className="font-semibold">Tags</span> dropdown is searchable; picking several
+            matches measurements carrying <span className="italic">any</span> of them
           </span>
         </li>
       </ul>
 
       <h4 className="font-medium text-gray-800 pt-2">Searching by tag</h4>
       <p className="text-gray-600">
-        You can also filter by tag straight from the search box, combined with
-        an ordinary name search:
+        You can also filter by tag straight from the search box, combined with an ordinary name
+        search:
       </p>
       <div className="space-y-1.5 rounded-lg border border-gray-200 bg-gray-50 p-2.5 font-mono text-xs text-gray-700">
         <div>
@@ -183,9 +181,8 @@ const ExplorerHelp = memo(() => (
         </div>
       </div>
       <p className="text-xs text-gray-500">
-        A tag name that doesn&apos;t exist matches nothing, so check the
-        spelling if results disappear. Tags typed here combine with any picked
-        in the Tags dropdown.
+        A tag name that doesn&apos;t exist matches nothing, so check the spelling if results
+        disappear. Tags typed here combine with any picked in the Tags dropdown.
       </p>
     </div>
 
@@ -207,10 +204,8 @@ const ExplorerHelp = memo(() => (
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <span>
-            Use the <span className="font-mono bg-gray-100 px-1 rounded">
-              +
-            </span>{" "}
-            button in item context menus
+            Use the <span className="font-mono bg-gray-100 px-1 rounded">+</span> button in item
+            context menus
           </span>
         </li>
       </ul>
@@ -239,8 +234,8 @@ const ExplorerHelp = memo(() => (
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          When exactly one dataset is in the Basket, use the ↑/↓ arrow buttons
-          to cycle through datasets in the current view
+          When exactly one dataset is in the Basket, use the ↑/↓ arrow buttons to cycle through
+          datasets in the current view
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
@@ -254,8 +249,8 @@ const ExplorerHelp = memo(() => (
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Toggle the Live button (Radio icon) to see only active live
-          measurements, auto-refreshed every second
+          Toggle the Live button (Radio icon) to see only active live measurements, auto-refreshed
+          every second
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
@@ -269,8 +264,8 @@ const ExplorerHelp = memo(() => (
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Drag datasets from Explorer directly to the Notes panel to insert
-          their paths into the current note
+          Drag datasets from Explorer directly to the Notes panel to insert their paths into the
+          current note
         </li>
       </ul>
     </div>
@@ -285,8 +280,8 @@ const BasketHelp = memo(() => (
         Basket
       </h3>
       <p className="text-gray-600 mb-3">
-        The Basket holds the datasets you're currently working with. Select
-        dataset cards to define the plotting scope for the Composer.
+        The Basket holds the datasets you're currently working with. Select dataset cards to define
+        the plotting scope for the Composer.
       </p>
     </div>
 
@@ -332,8 +327,7 @@ const BasketHelp = memo(() => (
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Gray chips are not shared across selected datasets and cannot be added
-          to the Composer
+          Gray chips are not shared across selected datasets and cannot be added to the Composer
         </li>
       </ul>
     </div>
@@ -366,9 +360,8 @@ const MetadataHelp = memo(() => (
         Metadata
       </h3>
       <p className="text-gray-600 mb-3">
-        View and search detailed technical parameters for any dataset in your
-        Basket. Metadata is automatically fetched from the backend when a file
-        is added.
+        View and search detailed technical parameters for any dataset in your Basket. Metadata is
+        automatically fetched from the backend when a file is added.
       </p>
 
       <div className="space-y-3">
@@ -378,9 +371,8 @@ const MetadataHelp = memo(() => (
             Automatic Loading
           </h4>
           <p className="text-xs leading-relaxed">
-            Metadata cards appear automatically for file items in your basket. A
-            blue progress bar tracks loading status for multiple concurrent
-            requests.
+            Metadata cards appear automatically for file items in your basket. A blue progress bar
+            tracks loading status for multiple concurrent requests.
           </p>
         </div>
 
@@ -390,9 +382,8 @@ const MetadataHelp = memo(() => (
             Global Search
           </h4>
           <p className="text-xs leading-relaxed">
-            Use the search bar to find specific values across all loaded
-            metadata. Results highlight the exact key-value match and the
-            navigation path (e.g., Sweeps → ...).
+            Use the search bar to find specific values across all loaded metadata. Results highlight
+            the exact key-value match and the navigation path (e.g., Sweeps → ...).
           </p>
         </div>
 
@@ -402,9 +393,8 @@ const MetadataHelp = memo(() => (
             Interactive JSON View
           </h4>
           <p className="text-xs leading-relaxed">
-            Deeply nested parameters are displayed in an interactive tree. You
-            can expand/collapse sections and copy values directly to your
-            clipboard.
+            Deeply nested parameters are displayed in an interactive tree. You can expand/collapse
+            sections and copy values directly to your clipboard.
           </p>
         </div>
 
@@ -414,9 +404,8 @@ const MetadataHelp = memo(() => (
             Performance Note
           </h4>
           <p className="text-xs leading-relaxed">
-            When searching, cards are automatically minimized to keep the view
-            clean and responsive. Use the toggle buttons to peek into specific
-            re-collapsed results.
+            When searching, cards are automatically minimized to keep the view clean and responsive.
+            Use the toggle buttons to peek into specific re-collapsed results.
           </p>
         </div>
       </div>
@@ -432,8 +421,7 @@ const ComposerHelp = memo(() => (
         Plot Composer
       </h3>
       <p className="text-gray-600 mb-3">
-        The Composer maps dataset variables to plot axes to generate LinePlots
-        or HeatMaps.
+        The Composer maps dataset variables to plot axes to generate LinePlots or HeatMaps.
       </p>
     </div>
 
@@ -442,13 +430,11 @@ const ComposerHelp = memo(() => (
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>LinePlot:</strong> X (any field, max 1) + Y (dependents,
-          multiple OK)
+          <strong>LinePlot:</strong> X (any field, max 1) + Y (dependents, multiple OK)
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>HeatMap:</strong> X (any, max 1) + Y (any, multiple) + Z
-          (dependents, multiple)
+          <strong>HeatMap:</strong> X (any, max 1) + Y (any, multiple) + Z (dependents, multiple)
         </li>
       </ul>
     </div>
@@ -517,8 +503,8 @@ const ViewerHelp = memo(() => (
         Viewer
       </h3>
       <p className="text-gray-600 mb-3">
-        The Viewer displays your plots. Each plot is interactive and has its own
-        controls for filtering, appearance, and export.
+        The Viewer displays your plots. Each plot is interactive and has its own controls for
+        filtering, appearance, and export.
       </p>
     </div>
 
@@ -527,13 +513,11 @@ const ViewerHelp = memo(() => (
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Click a plot to select it (highlighted border); use 1–9 keys to select
-          by index
+          Click a plot to select it (highlighted border); use 1–9 keys to select by index
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>Filters (F):</strong> Apply signal processing (diff,
-          smoothing, BG corr…)
+          <strong>Filters (F):</strong> Apply signal processing (diff, smoothing, BG corr…)
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
@@ -557,8 +541,8 @@ const ViewerHelp = memo(() => (
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>Reset (R):</strong> Reset plot to original state, removing
-          filters and customizations
+          <strong>Reset (R):</strong> Reset plot to original state, removing filters and
+          customizations
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
@@ -621,9 +605,8 @@ const NotesHelp = memo(() => (
         Notes
       </h3>
       <p className="text-gray-600 mb-3">
-        A markdown-based note-taking panel linked to your datasets. Notes are
-        saved as <span className="font-mono bg-gray-100 px-1 rounded">.md</span>{" "}
-        files alongside the dataset.
+        A markdown-based note-taking panel linked to your datasets. Notes are saved as{" "}
+        <span className="font-mono bg-gray-100 px-1 rounded">.md</span> files alongside the dataset.
       </p>
     </div>
 
@@ -632,18 +615,15 @@ const NotesHelp = memo(() => (
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Open a note for a dataset via the NotebookPen icon in the Basket or
-          Explorer
+          Open a note for a dataset via the NotebookPen icon in the Basket or Explorer
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Drag dataset paths from the Explorer directly into the Notes panel to
-          insert them as links
+          Drag dataset paths from the Explorer directly into the Notes panel to insert them as links
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Send plot images from the Viewer to Notes via the "Send to Notes" (N)
-          button
+          Send plot images from the Viewer to Notes via the "Send to Notes" (N) button
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
@@ -657,13 +637,11 @@ const NotesHelp = memo(() => (
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Notes support standard Markdown: headers, bold, italic, lists, code
-          blocks, tables
+          Notes support standard Markdown: headers, bold, italic, lists, code blocks, tables
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Images sent from the Viewer are saved in a subfolder and linked in the
-          note
+          Images sent from the Viewer are saved in a subfolder and linked in the note
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
@@ -682,10 +660,9 @@ const DesktopHelp = memo(() => (
         Desktop App
       </h3>
       <p className="text-gray-600 mb-3">
-        The Qimchi desktop app is a single self-contained executable — it runs a
-        local server inside a native window, with no separate Python/Node
-        install. The features below are unique to it and don't apply when Qimchi
-        is opened in a normal web browser.
+        The Qimchi desktop app is a single self-contained executable — it runs a local server inside
+        a native window, with no separate Python/Node install. The features below are unique to it
+        and don't apply when Qimchi is opened in a normal web browser.
       </p>
       <div className="p-3 rounded-lg border shadow-sm text-amber-800 bg-amber-50/50 border-amber-100">
         <h4 className="font-semibold mb-1 flex items-center gap-1.5">
@@ -693,8 +670,8 @@ const DesktopHelp = memo(() => (
           Alpha
         </h4>
         <p className="text-xs leading-relaxed">
-          The desktop build is an early/alpha release. If something looks off,
-          the debug log (see below) is the first place to check.
+          The desktop build is an early/alpha release. If something looks off, the debug log (see
+          below) is the first place to check.
         </p>
       </div>
     </div>
@@ -708,17 +685,14 @@ const DesktopHelp = memo(() => (
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <span>
-            Click the green <span className="font-mono bg-gray-100 px-1 rounded">
-              Load folder
-            </span>{" "}
-            button in the Explorer to open your operating system's folder picker
-            and browse to a data directory
+            Click the green <span className="font-mono bg-gray-100 px-1 rounded">Load folder</span>{" "}
+            button in the Explorer to open your operating system's folder picker and browse to a
+            data directory
           </span>
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          You can still type a path into the bar and press Enter, as in the
-          browser version
+          You can still type a path into the bar and press Enter, as in the browser version
         </li>
       </ul>
     </div>
@@ -732,11 +706,10 @@ const DesktopHelp = memo(() => (
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <span>
-            Exporting plot images (<span className="font-mono bg-gray-100 px-1 rounded">
-              E
-            </span>) saves a ZIP straight to your{" "}
-            <span className="font-mono bg-gray-100 px-1 rounded">Downloads</span>{" "}
-            folder — the success toast shows the exact path
+            Exporting plot images (<span className="font-mono bg-gray-100 px-1 rounded">E</span>)
+            saves a ZIP straight to your{" "}
+            <span className="font-mono bg-gray-100 px-1 rounded">Downloads</span> folder — the
+            success toast shows the exact path
           </span>
         </li>
         <li className="flex gap-2">
@@ -745,8 +718,8 @@ const DesktopHelp = memo(() => (
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          On the first export, a one-time copy of Chrome may be downloaded if no
-          system Chrome/Chromium is found — it's required by the image renderer
+          On the first export, a one-time copy of Chrome may be downloaded if no system
+          Chrome/Chromium is found — it's required by the image renderer
         </li>
       </ul>
     </div>
@@ -764,40 +737,34 @@ const DesktopHelp = memo(() => (
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800 flex items-center gap-1.5">
         <HardDrive size={15} className="text-indigo-600" />
-        App data — <span className="font-mono bg-gray-100 px-1 rounded">
-          ~/.qimchi
-        </span>
+        App data — <span className="font-mono bg-gray-100 px-1 rounded">~/.qimchi</span>
       </h4>
       <p className="text-gray-600 mb-1 text-xs">
         Everything the desktop app stores lives under{" "}
-        <span className="font-mono bg-gray-100 px-1 rounded">~/.qimchi</span>{" "}
-        (i.e. <span className="font-mono bg-gray-100 px-1 rounded">
-          %USERPROFILE%\.qimchi
-        </span>{" "}
-        on Windows):
+        <span className="font-mono bg-gray-100 px-1 rounded">~/.qimchi</span> (i.e.{" "}
+        <span className="font-mono bg-gray-100 px-1 rounded">%USERPROFILE%\.qimchi</span> on
+        Windows):
       </p>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <span>
-            <span className="font-mono bg-gray-100 px-1 rounded">webview/</span> —
-            saved settings &amp; layout
+            <span className="font-mono bg-gray-100 px-1 rounded">webview/</span> — saved settings
+            &amp; layout
           </span>
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <span>
-            <span className="font-mono bg-gray-100 px-1 rounded">
-              qimchi_debug.log
-            </span>{" "}
-            — startup &amp; runtime log for troubleshooting
+            <span className="font-mono bg-gray-100 px-1 rounded">qimchi_debug.log</span> — startup
+            &amp; runtime log for troubleshooting
           </span>
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <span>
-            <span className="font-mono bg-gray-100 px-1 rounded">chrome/</span> —
-            the downloaded browser used for image export
+            <span className="font-mono bg-gray-100 px-1 rounded">chrome/</span> — the downloaded
+            browser used for image export
           </span>
         </li>
       </ul>
@@ -813,8 +780,7 @@ const KeyboardHelp = memo(() => (
         Keyboard Shortcuts
       </h3>
       <p className="text-gray-600 mb-3">
-        All shortcuts are global unless noted. Esc closes any open modal or
-        mode.
+        All shortcuts are global unless noted. Esc closes any open modal or mode.
       </p>
     </div>
 
@@ -830,6 +796,8 @@ const KeyboardHelp = memo(() => (
           ["Alt+Shift+C", "Clear Composer"],
           ["Alt+Shift+B", "Clear Basket"],
           ["Alt+Shift+V", "Clear Viewer (all plots)"],
+          ["Alt+Shift+H", "Heart selected datasets (Explorer)"],
+          ["Alt+Shift+T", "Trash selected datasets (Explorer)"],
           ["Shift+E", "Toggle Side Panel"],
           ["Shift+M", "Toggle Metadata Panel"],
           ["Shift+N", "Toggle Notes Panel"],
@@ -850,9 +818,7 @@ const KeyboardHelp = memo(() => (
     <div>
       <h4 className="font-medium text-gray-800 mb-2">
         Selected Plot{" "}
-        <span className="font-normal text-gray-500 text-xs">
-          (requires a plot to be selected)
-        </span>
+        <span className="font-normal text-gray-500 text-xs">(requires a plot to be selected)</span>
       </h4>
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
         {[
@@ -941,9 +907,7 @@ interface HelpModalProps {
 }
 
 const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
-  const [activeSection, setActiveSection] = useState(
-    initialSection ?? HELP_SECTIONS[0].id,
-  );
+  const [activeSection, setActiveSection] = useState(initialSection ?? HELP_SECTIONS[0].id);
 
   const zRef = useRef<number | undefined>(undefined);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -1008,15 +972,10 @@ const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
           <div className="flex items-center justify-between px-4 py-2 bg-amber-200 border-b border-amber-300 drag-handle cursor-move shrink-0">
             <div className="flex items-center gap-2">
               <div className="bg-amber-100 p-1.5 rounded-lg border border-amber-200 shadow-sm">
-                <Lightbulb
-                  size={18}
-                  className="text-amber-600 fill-amber-500/10"
-                />
+                <Lightbulb size={18} className="text-amber-600 fill-amber-500/10" />
               </div>
               <div className="flex items-center gap-2">
-                <h2 className="text-sm font-bold text-gray-800 tracking-tight">
-                  Help &amp; Tips
-                </h2>
+                <h2 className="text-sm font-bold text-gray-800 tracking-tight">Help &amp; Tips</h2>
                 <span className="text-[12px] font-mono font-bold text-amber-700 bg-amber-50 px-1 py-0.5 rounded border border-amber-300/50 opacity-90">
                   Shift+H
                 </span>
@@ -1046,11 +1005,7 @@ const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
                   }`}
                 >
                   <span
-                    className={
-                      activeSection === section.id
-                        ? "text-amber-600"
-                        : "text-gray-400"
-                    }
+                    className={activeSection === section.id ? "text-amber-600" : "text-gray-400"}
                   >
                     {section.icon}
                   </span>

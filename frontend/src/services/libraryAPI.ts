@@ -1,6 +1,6 @@
 // API service for the Qimchi library (per-measurement heart/trash/tag state).
 // Backed by the /library/* endpoints (see backend/api/library.py). Keyed on a
-// measurement UUID resolved by the backend (qcutils "Measurement ID", QCoDeS
+// measurement UUID resolved by the backend (qanary "Measurement ID", QCoDeS
 // run guid, or a content signature); only datasets it cannot identify return a
 // null uuid. Endpoints return 503 when the library DB failed to start.
 import axios from "axios";
@@ -26,6 +26,8 @@ export interface MeasurementStateOut {
 export interface Tag {
   id: number;
   name: string;
+  /** Measurements currently carrying the tag; drives the delete confirmation. */
+  count?: number;
 }
 
 export interface DbStatus {
@@ -53,40 +55,32 @@ export async function registerMeasurement(
   path: string,
   attrs?: Record<string, unknown>,
 ): Promise<LibraryState> {
-  const { data } = await axios.post<LibraryState>(
-    `${API_BASE_URL}/library/register`,
-    { path, attrs },
-  );
+  const { data } = await axios.post<LibraryState>(`${API_BASE_URL}/library/register`, {
+    path,
+    attrs,
+  });
   return data;
 }
 
-export async function setHeart(
-  uuid: string,
-  hearted: boolean,
-): Promise<LibraryState> {
-  const { data } = await axios.post<LibraryState>(
-    `${API_BASE_URL}/library/heart`,
-    { uuid, hearted },
-  );
+export async function setHeart(uuid: string, hearted: boolean): Promise<LibraryState> {
+  const { data } = await axios.post<LibraryState>(`${API_BASE_URL}/library/heart`, {
+    uuid,
+    hearted,
+  });
   return data;
 }
 
-export async function setTrash(
-  uuid: string,
-  trashed: boolean,
-): Promise<LibraryState> {
-  const { data } = await axios.post<LibraryState>(
-    `${API_BASE_URL}/library/trash`,
-    { uuid, trashed },
-  );
+export async function setTrash(uuid: string, trashed: boolean): Promise<LibraryState> {
+  const { data } = await axios.post<LibraryState>(`${API_BASE_URL}/library/trash`, {
+    uuid,
+    trashed,
+  });
   return data;
 }
 
 /** All hearted/trashed/tagged measurements for the current user (DirTree filters). */
 export async function getLibraryStates(): Promise<MeasurementStateOut[]> {
-  const { data } = await axios.get<MeasurementStateOut[]>(
-    `${API_BASE_URL}/library/states`,
-  );
+  const { data } = await axios.get<MeasurementStateOut[]>(`${API_BASE_URL}/library/states`);
   return data;
 }
 
@@ -102,16 +96,20 @@ export async function createTag(name: string): Promise<Tag> {
   return data;
 }
 
+/** Rename a tag in place; every measurement carrying it keeps it. */
+export async function renameTag(id: number, name: string): Promise<Tag> {
+  const { data } = await axios.patch<Tag>(`${API_BASE_URL}/library/tags/${id}`, {
+    name,
+  });
+  return data;
+}
+
 export async function deleteTag(id: number): Promise<void> {
   await axios.delete(`${API_BASE_URL}/library/tags/${id}`);
 }
 
 /** Add/remove a tag on a measurement; returns the measurement's tag ids. */
-export async function tagMeasurement(
-  uuid: string,
-  tagId: number,
-  add: boolean,
-): Promise<number[]> {
+export async function tagMeasurement(uuid: string, tagId: number, add: boolean): Promise<number[]> {
   const { data } = await axios.post<number[]>(`${API_BASE_URL}/library/tag`, {
     uuid,
     tag_id: tagId,

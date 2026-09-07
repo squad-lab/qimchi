@@ -3,7 +3,7 @@ Library endpoints: per-measurement state (hearts/trash) backed by the Qimchi DB.
 
 Register a measurement when it is opened and toggle heart/trash/tags, so the
 DirTree can filter on them. Keyed on the measurement UUID resolved by
-``shared/identity.py``: the qcutils ``Measurement ID``, else a QCoDeS run
+``shared/identity.py``: the qanary ``Measurement ID``, else a QCoDeS run
 ``guid``, else a content-signature uuid5. ``measurements.uuid_origin`` records
 which tier answered. Only datasets that fail every tier (unreadable) stay
 unpersisted -- those calls return ``uuid=None`` and are no-ops.
@@ -18,6 +18,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from .db_models import (
@@ -86,9 +87,16 @@ class MeasurementStateOut(BaseModel):
 class TagOut(BaseModel):
     id: int
     name: str
+    # Measurements currently carrying this tag. The delete confirmation needs
+    # it, and it comes free from the query that lists the tags.
+    count: int = 0
 
 
 class CreateTagRequest(BaseModel):
+    name: str
+
+
+class RenameTagRequest(BaseModel):
     name: str
 
 
@@ -181,7 +189,7 @@ async def _resolve(
     """
     Resolve ``(uuid, origin, attrs)`` for a dataset.
 
-    Native ids (qcutils / QCoDeS) are answered straight from ``attrs`` when the
+    Native ids (qanary / QCoDeS) are answered straight from ``attrs`` when the
     caller already has them, so the common path costs no dataset load. Only the
     content-signature tier needs the dataset opened.
 
@@ -196,7 +204,9 @@ async def _resolve(
     try:
         ds = await _load_dataset_for_metadata(path)
     except Exception:
-        logger.debug("library: could not load %s to resolve identity", path, exc_info=True)
+        logger.debug(
+            "library: could not load %s to resolve identity", path, exc_info=True
+        )
         return None, None, attrs
 
     if attrs is None:
@@ -438,7 +448,57 @@ def _list_tags() -> list[TagOut]:
         rows = session.exec(
             select(Tag).where(Tag.user_id == LOCAL_USER_ID).order_by(Tag.name)
         ).all()
-        return [TagOut(id=t.id, name=t.name) for t in rows]
+        counts: dict[int, int] = {}
+        for tag_id, count in session.exec(
+            select(MeasurementTag.tag_id, func.count()).group_by(MeasurementTag.tag_id)
+        ).all():
+            counts[tag_id] = int(count)
+        return [TagOut(id=t.id, name=t.name, count=counts.get(t.id, 0)) for t in rows]
+
+
+def _rename_tag(tag_id: int, name: str) -> TagOut:
+    """
+    Rename a tag in place, keeping every measurement that carries it.
+
+    Args:
+        tag_id (int): Tag to rename.
+        name (str): New name.
+
+    Returns:
+        TagOut: The renamed tag.
+
+    Raises:
+        HTTPException: 404 for an unknown tag, 400 for an empty name, 409 when
+            another tag already has the name -- renaming onto it would need a
+            merge, which is a different decision than a rename.
+
+    """
+    name = name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Tag name cannot be empty")
+    with session_scope() as session:
+        tag = session.get(Tag, tag_id)
+        if tag is None or tag.user_id != LOCAL_USER_ID:
+            raise HTTPException(status_code=404, detail="Unknown tag")
+        clash = session.exec(
+            select(Tag).where(
+                Tag.user_id == LOCAL_USER_ID,
+                Tag.name == name,
+                Tag.id != tag_id,
+            )
+        ).first()
+        if clash is not None:
+            raise HTTPException(
+                status_code=409, detail=f"A tag named {name!r} already exists"
+            )
+        tag.name = name
+        session.add(tag)
+        count = len(
+            session.exec(
+                select(MeasurementTag).where(MeasurementTag.tag_id == tag_id)
+            ).all()
+        )
+        return TagOut(id=tag.id, name=tag.name, count=count)
 
 
 def _create_tag(name: str) -> TagOut:
@@ -533,6 +593,11 @@ async def create_tag(req: CreateTagRequest) -> TagOut:
     return await asyncio.to_thread(_create_tag, req.name)
 
 
+@router.patch("/tags/{tag_id}", response_model=TagOut)
+async def rename_tag(tag_id: int, req: RenameTagRequest) -> TagOut:
+    return await asyncio.to_thread(_rename_tag, tag_id, req.name)
+
+
 @router.delete("/tags/{tag_id}")
 async def delete_tag(tag_id: int) -> dict:
     await asyncio.to_thread(_delete_tag, tag_id)
@@ -542,6 +607,4 @@ async def delete_tag(tag_id: int) -> dict:
 @router.post("/tag", response_model=list[int])
 async def tag_measurement(req: TagMeasurementRequest) -> list[int]:
     """Add/remove a tag on a measurement; returns the measurement's tag ids."""
-    return await asyncio.to_thread(
-        _set_measurement_tag, req.uuid, req.tag_id, req.add
-    )
+    return await asyncio.to_thread(_set_measurement_tag, req.uuid, req.tag_id, req.add)

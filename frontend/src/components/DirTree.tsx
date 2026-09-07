@@ -163,6 +163,8 @@ const DirTree = ({
   const applyTrashMany = useLibraryStore((s) => s.applyTrashMany);
   const applyTagMany = useLibraryStore((s) => s.applyTagMany);
   const createLibraryTag = useLibraryStore((s) => s.createTag);
+  const renameLibraryTag = useLibraryStore((s) => s.renameTag);
+  const deleteLibraryTag = useLibraryStore((s) => s.deleteTag);
   const [bulkTagAnchor, setBulkTagAnchor] = useState<HTMLElement | null>(null);
   const clearSelectedTags = useLibraryStore((s) => s.clearSelectedTags);
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
@@ -191,9 +193,7 @@ const DirTree = ({
       wanted.push((match[1] ?? match[2]).toLowerCase());
     }
     const rest = raw.replace(tagPattern, " ").split(/\s+/).filter(Boolean);
-    const byName = new Map(
-      libraryTags.map((t) => [t.name.toLowerCase(), t.id]),
-    );
+    const byName = new Map(libraryTags.map((t) => [t.name.toLowerCase(), t.id]));
     const ids: number[] = [];
     const unknown: string[] = [];
     for (const name of wanted) {
@@ -223,12 +223,11 @@ const DirTree = ({
   const autoAddedMeasurements = useRef<Set<string>>(new Set());
   const basketItemsRef = useRef<BasketItem[]>(basketItems);
   const onAddToBasketRef = useRef<typeof onAddToBasket>(onAddToBasket);
-  const onStartLoadingAttributesRef = useRef<typeof onStartLoadingAttributes>(
-    onStartLoadingAttributes,
+  const onStartLoadingAttributesRef =
+    useRef<typeof onStartLoadingAttributes>(onStartLoadingAttributes);
+  const onUpdateBasketItemAttributesRef = useRef<typeof onUpdateBasketItemAttributes>(
+    onUpdateBasketItemAttributes,
   );
-  const onUpdateBasketItemAttributesRef = useRef<
-    typeof onUpdateBasketItemAttributes
-  >(onUpdateBasketItemAttributes);
 
   useEffect(() => {
     basketItemsRef.current = basketItems;
@@ -393,25 +392,17 @@ const DirTree = ({
             // Incrementally update apiData without full rebuild
             setApiData((prevData) => {
               // Create a map of existing measurements by ID for quick lookup
-              const existingMap = new Map(
-                prevData.map((node) => [node.id, node]),
-              );
+              const existingMap = new Map(prevData.map((node) => [node.id, node]));
 
               // Create a map of new measurements by ID
-              const newMap = new Map(
-                newMeasurements.map((node: TreeNode) => [node.id, node]),
-              );
+              const newMap = new Map(newMeasurements.map((node: TreeNode) => [node.id, node]));
 
               // Find measurements to add (in new but not in existing)
-              const toAdd = newMeasurements.filter(
-                (node: TreeNode) => !existingMap.has(node.id),
-              );
+              const toAdd = newMeasurements.filter((node: TreeNode) => !existingMap.has(node.id));
 
               // Find measurements to remove (in existing but not in new)
               const toRemove = new Set(
-                prevData
-                  .filter((node) => !newMap.has(node.id))
-                  .map((node) => node.id),
+                prevData.filter((node) => !newMap.has(node.id)).map((node) => node.id),
               );
 
               // Update existing nodes and add new ones
@@ -433,21 +424,11 @@ const DirTree = ({
                 // Auto-add new live measurements to basket
                 toAdd.forEach((node: TreeNode) => {
                   // Check if already in basket or already auto-added
-                  const inBasket = basketItemsRef.current?.some(
-                    (item) => item.id === node.id,
-                  );
-                  const alreadyAutoAdded = autoAddedMeasurements.current.has(
-                    node.id,
-                  );
+                  const inBasket = basketItemsRef.current?.some((item) => item.id === node.id);
+                  const alreadyAutoAdded = autoAddedMeasurements.current.has(node.id);
 
-                  if (
-                    !inBasket &&
-                    !alreadyAutoAdded &&
-                    onAddToBasketRef.current
-                  ) {
-                    console.log(
-                      `Auto-adding live measurement to basket: ${node.name}`,
-                    );
+                  if (!inBasket && !alreadyAutoAdded && onAddToBasketRef.current) {
+                    console.log(`Auto-adding live measurement to basket: ${node.name}`);
                     onAddToBasketRef.current(node);
                     autoAddedMeasurements.current.add(node.id);
 
@@ -468,20 +449,14 @@ const DirTree = ({
                             node.id,
                             // response.data,
                           );
-                          onUpdateBasketItemAttributesRef.current?.(
-                            node.id,
-                            response.data,
-                          );
+                          onUpdateBasketItemAttributesRef.current?.(node.id, response.data);
                         })
                         .catch((error) => {
                           console.error(
                             "Error loading attributes for auto-added live measurement:",
                             error,
                           );
-                          onUpdateBasketItemAttributesRef.current?.(
-                            node.id,
-                            {},
-                          );
+                          onUpdateBasketItemAttributesRef.current?.(node.id, {});
                         });
                     }
                   }
@@ -515,14 +490,10 @@ const DirTree = ({
   // Signature that changes only when a library filter is active AND the
   // relevant heart/trash state changes.
   const libFilterSignature = useMemo(() => {
-    if (!filterHeartedOnly && !hideTrashed && effectiveTagIds.length === 0)
-      return "";
+    if (!filterHeartedOnly && !hideTrashed && effectiveTagIds.length === 0) return "";
     return Object.entries(libStatesByPath)
       .filter(([, v]) => v.hearted || v.trashed || v.tags.length > 0)
-      .map(
-        ([k, v]) =>
-          `${k}:${v.hearted ? 1 : 0}${v.trashed ? 1 : 0}:${v.tags.join(",")}`,
-      )
+      .map(([k, v]) => `${k}:${v.hearted ? 1 : 0}${v.trashed ? 1 : 0}:${v.tags.join(",")}`)
       .sort()
       .join("|");
   }, [libStatesByPath, filterHeartedOnly, hideTrashed, effectiveTagIds]);
@@ -613,10 +584,7 @@ const DirTree = ({
         const st = libStatesByPath[normalizePath(node.path)];
         if (hideTrashed && st?.trashed) return false;
         if (filterHeartedOnly && !st?.hearted) return false;
-        if (
-          effectiveTagIds.length > 0 &&
-          !effectiveTagIds.some((id) => st?.tags?.includes(id))
-        )
+        if (effectiveTagIds.length > 0 && !effectiveTagIds.some((id) => st?.tags?.includes(id)))
           return false;
       } else if (libraryFilterActive) {
         return false;
@@ -676,10 +644,7 @@ const DirTree = ({
         // Include node if:
         // 1. It matches both the filter criteria AND search term, OR
         // 2. It's a folder that contains matching children (to maintain hierarchy)
-        if (
-          (shouldInclude && nodeMatchesSearch) ||
-          (isFolder && folderHasMatches)
-        ) {
+        if ((shouldInclude && nodeMatchesSearch) || (isFolder && folderHasMatches)) {
           let processedNode = { ...node };
 
           // Process children if they exist
@@ -827,13 +792,10 @@ const DirTree = ({
       return () => clearTimeout(timeoutId);
     }
   }, [rootNodes, tree, sortBy, updateDirTreeState]);
-  const updateExpandedNodeState = useCallback(
-    (nodeId: string, nextExpanded: boolean) => {
-      void nodeId;
-      void nextExpanded;
-    },
-    [],
-  );
+  const updateExpandedNodeState = useCallback((nodeId: string, nextExpanded: boolean) => {
+    void nodeId;
+    void nextExpanded;
+  }, []);
 
   const handleSort = (newSortBy: typeof sortBy) => {
     if (sortBy === newSortBy) {
@@ -859,14 +821,11 @@ const DirTree = ({
 
       // Check if the dragged item is selected
       const selectedNodes = getSelectedNodes();
-      const isNodeSelected = selectedNodes.some(
-        (selectedNode) => selectedNode.id === node.id,
-      );
+      const isNodeSelected = selectedNodes.some((selectedNode) => selectedNode.id === node.id);
 
       // If the dragged item is selected and there are multiple selected items, drag all selected
       // Otherwise, just drag the single item
-      const itemsToDrag =
-        isNodeSelected && selectedNodes.length > 1 ? selectedNodes : [node];
+      const itemsToDrag = isNodeSelected && selectedNodes.length > 1 ? selectedNodes : [node];
 
       // Process each item to collect all valid items to drag
       const validItemsToDrag: TreeNode[] = [];
@@ -879,18 +838,14 @@ const DirTree = ({
         } else if (item.type === "folder") {
           // For folders, add all direct children that are dataset files.
           const folderChildren = item.children || [];
-          const datasetChildren = folderChildren.filter((child) =>
-            isDatasetNode(child),
-          );
+          const datasetChildren = folderChildren.filter((child) => isDatasetNode(child));
           validItemsToDrag.push(...datasetChildren);
         }
       });
 
       if (validItemsToDrag.length === 0) {
         const message =
-          node.type === "folder"
-            ? "No datasets found in folder"
-            : "No valid files to drag";
+          node.type === "folder" ? "No datasets found in folder" : "No valid files to drag";
         console.error(message);
         showToast(message, "warning");
         e.preventDefault();
@@ -927,8 +882,7 @@ const DirTree = ({
 
     if (node.type === "folder") {
       const isQcodesDateFolder =
-        node.tags?.includes("qcodes-date") === true ||
-        node.path.includes("#date=");
+        node.tags?.includes("qcodes-date") === true || node.path.includes("#date=");
       if (isQcodesDateFolder) {
         // Virtual date folders inside sqlite/qcodes trees are only for visual grouping.
         // They should not mutate the explorer path.
@@ -993,27 +947,48 @@ const DirTree = ({
   const handleBulkHeart = async () => {
     const paths = getSelectedDatasetPaths();
     if (paths.length === 0) return;
-    const target = !paths.every(
-      (p) => libStatesByPath[normalizePath(p)]?.hearted,
-    );
+    const target = !paths.every((p) => libStatesByPath[normalizePath(p)]?.hearted);
     await applyHeartMany(paths, target);
   };
 
   const handleBulkTrash = async () => {
     const paths = getSelectedDatasetPaths();
     if (paths.length === 0) return;
-    const target = !paths.every(
-      (p) => libStatesByPath[normalizePath(p)]?.trashed,
-    );
+    const target = !paths.every((p) => libStatesByPath[normalizePath(p)]?.trashed);
     await applyTrashMany(paths, target);
   };
+
+  // Keyboard shortcuts for the two bulk actions, so a multi-selection can be
+  // hearted or trashed without reaching for the toolbar. Alt+Shift, matching
+  // the app's other multi-key shortcuts -- every bare letter is already taken
+  // (H is HeatMap, and so on). Ignored while typing, and they set rather than
+  // toggle, exactly like the toolbar buttons above.
+  useEffect(() => {
+    if (!dbAvailable) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!e.altKey || !e.shiftKey || e.ctrlKey || e.metaKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
+      ) {
+        return;
+      }
+      // Alt can rewrite e.key on some layouts, so match the physical key.
+      const code = e.code;
+      if (code !== "KeyH" && code !== "KeyT") return;
+      if (getSelectedDatasetPaths().length === 0) return;
+      e.preventDefault();
+      void (code === "KeyH" ? handleBulkHeart() : handleBulkTrash());
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
 
   const handleBulkTag = async (tagId: number) => {
     const paths = getSelectedDatasetPaths();
     if (paths.length === 0) return;
-    const add = !paths.every((p) =>
-      libStatesByPath[normalizePath(p)]?.tags?.includes(tagId),
-    );
+    const add = !paths.every((p) => libStatesByPath[normalizePath(p)]?.tags?.includes(tagId));
     await applyTagMany(paths, tagId, add);
   };
 
@@ -1023,11 +998,7 @@ const DirTree = ({
     if (paths.length === 0) return [];
     return (libraryTags ?? [])
       .map((t) => t.id)
-      .filter((id) =>
-        paths.every((p) =>
-          libStatesByPath[normalizePath(p)]?.tags?.includes(id),
-        ),
-      );
+      .filter((id) => paths.every((p) => libStatesByPath[normalizePath(p)]?.tags?.includes(id)));
   };
 
   // Download all selected files/folders as ZIP
@@ -1105,9 +1076,7 @@ const DirTree = ({
     const selectedFiles = selectedNodes.filter((node) => node.type === "file");
     return (
       selectedFiles.length > 0 &&
-      selectedFiles.every((node) =>
-        basketItems.some((item) => item.id === node.id),
-      )
+      selectedFiles.every((node) => basketItems.some((item) => item.id === node.id))
     );
   };
 
@@ -1161,8 +1130,7 @@ const DirTree = ({
     if (direction === "next") {
       nextIndex = (currentIndex + 1) % datasetNodes.length;
     } else {
-      nextIndex =
-        currentIndex === 0 ? datasetNodes.length - 1 : currentIndex - 1;
+      nextIndex = currentIndex === 0 ? datasetNodes.length - 1 : currentIndex - 1;
     }
 
     const nextNode = datasetNodes[nextIndex];
@@ -1251,9 +1219,7 @@ const DirTree = ({
             type="text"
             placeholder="Search files and folders..."
             value={searchInput}
-            onChange={(e) =>
-              updateDirTreeState({ searchInput: e.target.value })
-            }
+            onChange={(e) => updateDirTreeState({ searchInput: e.target.value })}
             className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
           />
           {searchInput && (
@@ -1276,39 +1242,29 @@ const DirTree = ({
             {/* Row 1: Sort buttons */}
             <div className="flex items-center justify-center w-full mb-1">
               <div className="flex space-x-1">
-                {(["name", "timestamp", "size", "chrono"] as const).map(
-                  (sort) => (
-                    <button
-                      type="button"
-                      key={sort}
-                      onClick={() => handleSort(sort)}
-                      title={
-                        sort === "chrono"
-                          ? "Chronological (Newest)"
-                          : `Sort by ${sort}`
-                      }
-                      className={`px-2 py-1 text-xs rounded flex items-center space-x-1 ${
-                        sortBy === sort
-                          ? "bg-blue-100 text-blue-800"
-                          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                      }`}
-                    >
-                      <span className="capitalize">
-                        {sort === "timestamp"
-                          ? "date"
-                          : sort === "chrono"
-                            ? "Chrono"
-                            : sort}
-                      </span>
-                      {sortBy === sort &&
-                        (sort === "chrono" || sortDirection === "desc" ? (
-                          <SortDesc size={10} />
-                        ) : (
-                          <SortAsc size={10} />
-                        ))}
-                    </button>
-                  ),
-                )}
+                {(["name", "timestamp", "size", "chrono"] as const).map((sort) => (
+                  <button
+                    type="button"
+                    key={sort}
+                    onClick={() => handleSort(sort)}
+                    title={sort === "chrono" ? "Chronological (Newest)" : `Sort by ${sort}`}
+                    className={`px-2 py-1 text-xs rounded flex items-center space-x-1 ${
+                      sortBy === sort
+                        ? "bg-blue-100 text-blue-800"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    <span className="capitalize">
+                      {sort === "timestamp" ? "date" : sort === "chrono" ? "Chrono" : sort}
+                    </span>
+                    {sortBy === sort &&
+                      (sort === "chrono" || sortDirection === "desc" ? (
+                        <SortDesc size={10} />
+                      ) : (
+                        <SortAsc size={10} />
+                      ))}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -1339,10 +1295,7 @@ const DirTree = ({
                       : "Show only live measurements (refreshes every second)"
                   }
                 >
-                  <Radio
-                    size={16}
-                    className={showLiveOnly ? "animate-pulse" : ""}
-                  />
+                  <Radio size={16} className={showLiveOnly ? "animate-pulse" : ""} />
                 </button>
               </Tooltip>
 
@@ -1354,10 +1307,7 @@ const DirTree = ({
                   className="px-2 py-1 flex items-center justify-center text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-md shadow-sm transition-all duration-200 group active:scale-95"
                   title="Help & Tips"
                 >
-                  <Lightbulb
-                    size={16}
-                    className="group-hover:fill-amber-200 transition-colors"
-                  />
+                  <Lightbulb size={16} className="group-hover:fill-amber-200 transition-colors" />
                 </button>
               </Tooltip>
 
@@ -1372,13 +1322,10 @@ const DirTree = ({
                     }
                   }}
                   disabled={isLoading || !path || !path.trim()}
-                  className="px-2 py-1 text-[#6ea030] bg-[#f4fae8] hover:bg-[#dff1bd] rounded disabled:opacity-50 transition-colors"
+                  className="px-2 py-1 text-[#6ea030] bg-[var(--qimchi-accent-light-bg)] hover:bg-[var(--qimchi-accent-header-bg)] rounded disabled:opacity-50 transition-colors"
                   title="Refresh directory"
                 >
-                  <RefreshCw
-                    size={16}
-                    className={isLoading ? "animate-spin" : ""}
-                  />
+                  <RefreshCw size={16} className={isLoading ? "animate-spin" : ""} />
                 </button>
               </Tooltip>
 
@@ -1422,9 +1369,7 @@ const DirTree = ({
               <Tooltip content="Toggle filters" position="top">
                 <button
                   type="button"
-                  onClick={() =>
-                    updateDirTreeState({ showFilters: !showFilters })
-                  }
+                  onClick={() => updateDirTreeState({ showFilters: !showFilters })}
                   className={`px-2 py-1 rounded ${
                     showFilters
                       ? "bg-blue-100 text-blue-800"
@@ -1439,19 +1384,14 @@ const DirTree = ({
               {/* Add all selected to basket button */}
               <Tooltip
                 content={
-                  getSelectedNodes().filter((n) => n.type === "file").length ===
-                  0
+                  getSelectedNodes().filter((n) => n.type === "file").length === 0
                     ? "Select files first"
                     : selectedInBasket()
                       ? "All selected files already in basket"
                       : `Add ${
-                          getSelectedNodes().filter((n) => n.type === "file")
-                            .length
+                          getSelectedNodes().filter((n) => n.type === "file").length
                         } selected file${
-                          getSelectedNodes().filter((n) => n.type === "file")
-                            .length > 1
-                            ? "s"
-                            : ""
+                          getSelectedNodes().filter((n) => n.type === "file").length > 1 ? "s" : ""
                         } to basket`
                 }
                 position="top"
@@ -1460,8 +1400,8 @@ const DirTree = ({
                   type="button"
                   onClick={handleAddAllSelectedToBasket}
                   disabled={
-                    getSelectedNodes().filter((n) => n.type === "file")
-                      .length === 0 || selectedInBasket()
+                    getSelectedNodes().filter((n) => n.type === "file").length === 0 ||
+                    selectedInBasket()
                   }
                   className="px-2 py-1 text-gray-600 hover:bg-green-200 rounded disabled:opacity-50 transition-colors"
                   title="Add all selected files to basket"
@@ -1504,10 +1444,7 @@ const DirTree = ({
                     : null;
                 return (
                   <>
-                    <Tooltip
-                      content={reason ?? `Heart / unheart ${suffix}`}
-                      position="top"
-                    >
+                    <Tooltip content={reason ?? `Heart / unheart ${suffix}`} position="top">
                       <button
                         type="button"
                         onClick={handleBulkHeart}
@@ -1518,10 +1455,7 @@ const DirTree = ({
                         <Heart size={16} />
                       </button>
                     </Tooltip>
-                    <Tooltip
-                      content={reason ?? `Trash / restore ${suffix}`}
-                      position="top"
-                    >
+                    <Tooltip content={reason ?? `Trash / restore ${suffix}`} position="top">
                       <button
                         type="button"
                         onClick={handleBulkTrash}
@@ -1535,11 +1469,7 @@ const DirTree = ({
                     <Tooltip content={reason ?? `Tag ${suffix}`} position="top">
                       <button
                         type="button"
-                        onClick={(e) =>
-                          setBulkTagAnchor(
-                            bulkTagAnchor ? null : e.currentTarget,
-                          )
-                        }
+                        onClick={(e) => setBulkTagAnchor(bulkTagAnchor ? null : e.currentTarget)}
                         disabled={disabled}
                         className="px-2 py-1 text-gray-600 hover:bg-indigo-200 rounded disabled:opacity-50 transition-colors"
                         title={reason ?? `Tag ${suffix}`}
@@ -1555,9 +1485,7 @@ const DirTree = ({
               <Tooltip
                 content={
                   isCyclingEnabled()
-                    ? `Previous dataset (${
-                        getCurrentDatasetIndex() + 1
-                      }/${getTotalDatasets()})`
+                    ? `Previous dataset (${getCurrentDatasetIndex() + 1}/${getTotalDatasets()})`
                     : "Add exactly one dataset to basket to enable cycling"
                 }
                 position="top"
@@ -1576,9 +1504,7 @@ const DirTree = ({
               <Tooltip
                 content={
                   isCyclingEnabled()
-                    ? `Next dataset (${
-                        getCurrentDatasetIndex() + 1
-                      }/${getTotalDatasets()})`
+                    ? `Next dataset (${getCurrentDatasetIndex() + 1}/${getTotalDatasets()})`
                     : "Add exactly one dataset to basket to enable cycling"
                 }
                 position="top"
@@ -1618,6 +1544,8 @@ const DirTree = ({
             currentTagIds={commonSelectedTagIds()}
             onToggle={(tagId) => void handleBulkTag(tagId)}
             onCreate={createLibraryTag}
+            onRename={renameLibraryTag}
+            onDelete={deleteLibraryTag}
             onClose={() => setBulkTagAnchor(null)}
           />
         )}
@@ -1629,13 +1557,10 @@ const DirTree = ({
             role="status"
             title={dbError ?? undefined}
           >
-            <span className="font-semibold">Library unavailable.</span> Hearts,
-            tags and notes can&apos;t be saved this session. Plotting still
-            works.
+            <span className="font-semibold">Library unavailable.</span> Hearts, tags and notes
+            can&apos;t be saved this session. Plotting still works.
             {dbError && (
-              <span className="block mt-0.5 font-mono opacity-80 wrap-break-word">
-                {dbError}
-              </span>
+              <span className="block mt-0.5 font-mono opacity-80 wrap-break-word">{dbError}</span>
             )}
           </div>
         )}
@@ -1681,12 +1606,7 @@ const DirTree = ({
                     : "bg-white text-gray-600 hover:bg-gray-100"
                 }`}
               >
-                <Heart
-                  size={12}
-                  className={
-                    filterHeartedOnly ? "fill-red-500 text-red-500" : ""
-                  }
-                />
+                <Heart size={12} className={filterHeartedOnly ? "fill-red-500 text-red-500" : ""} />
                 Hearted
               </button>
               <button
@@ -1967,10 +1887,8 @@ const TreeItemComponent = ({
   searchTerm = "",
   basketItems = [],
 }: TreeItemComponentProps) => {
-  const { copyToClipboard: copyFNameToClipboard, isCopied: isFNameCopied } =
-    useCopyToClipboard();
-  const { copyToClipboard: copyPathToClipboard, isCopied: isPathCopied } =
-    useCopyToClipboard();
+  const { copyToClipboard: copyFNameToClipboard, isCopied: isFNameCopied } = useCopyToClipboard();
+  const { copyToClipboard: copyPathToClipboard, isCopied: isPathCopied } = useCopyToClipboard();
   const nodeData = item.getItemData() as TreeNode;
   const isExpanded = item.isExpanded();
   const isFocused = item.isFocused();
@@ -1981,25 +1899,21 @@ const TreeItemComponent = ({
   const isDatasetLeafNode = isDatasetNode(nodeData) && !isSqliteContainerNode;
   const datasetKind = detectDatasetKind(nodeData.path, nodeData.tags);
   // Library (heart/trash) state for this node, keyed by normalized path.
-  const libState = useLibraryStore(
-    (s) => s.statesByPath[normalizePath(nodeData.path)],
-  );
+  const libState = useLibraryStore((s) => s.statesByPath[normalizePath(nodeData.path)]);
   const toggleHeart = useLibraryStore((s) => s.toggleHeart);
   const toggleTrash = useLibraryStore((s) => s.toggleTrash);
   const allTags = useLibraryStore((s) => s.tags);
   const toggleTag = useLibraryStore((s) => s.toggleTag);
   const createTag = useLibraryStore((s) => s.createTag);
+  const renameTag = useLibraryStore((s) => s.renameTag);
+  const deleteTag = useLibraryStore((s) => s.deleteTag);
   const [tagAnchor, setTagAnchor] = useState<HTMLElement | null>(null);
   const isSampleFolder =
     isFolder &&
-    (nodeData.children || []).some(
-      (child) => child.type === "file" && isDatasetPath(child.path),
-    );
+    (nodeData.children || []).some((child) => child.type === "file" && isDatasetPath(child.path));
 
   // Check if this item is in the basket
-  const isInBasket = basketItems.some(
-    (basketItem) => basketItem.id === nodeData.id,
-  );
+  const isInBasket = basketItems.some((basketItem) => basketItem.id === nodeData.id);
 
   // Skip rendering the root item
   if (nodeData.id === "root") {
@@ -2025,22 +1939,25 @@ const TreeItemComponent = ({
     );
   };
 
+  // One colour per dataset kind, the same in both themes (see the
+  // --qimchi-icon-* tokens): the icon is how a kind is recognised, so it
+  // should not change identity when the theme flips.
   const renderDatasetIcon = () => {
     switch (datasetKind) {
       case "zarr":
-        return <FileArchive size={16} className="text-violet-600" />;
+        return <FileArchive size={16} className="text-[var(--qimchi-icon-zarr)]" />;
       case "netcdf":
-        return <FileText size={16} className="text-sky-600" />;
+        return <FileText size={16} className="text-[var(--qimchi-icon-netcdf)]" />;
       case "hdf5":
-        return <HardDrive size={16} className="text-indigo-600" />;
+        return <HardDrive size={16} className="text-[var(--qimchi-icon-hdf5)]" />;
       case "qcodes":
-        return <DatabaseIcon size={16} className="text-teal-600" />;
+        return <DatabaseIcon size={16} className="text-[var(--qimchi-icon-qcodes)]" />;
       case "sqlite":
-        return <DatabaseIcon size={16} className="text-emerald-600" />;
+        return <DatabaseIcon size={16} className="text-[var(--qimchi-icon-sqlite)]" />;
       case "csv":
-        return <Table size={16} className="text-orange-600" />;
+        return <Table size={16} className="text-[var(--qimchi-icon-csv)]" />;
       default:
-        return <DatabaseIcon size={16} className="text-green-500" />;
+        return <DatabaseIcon size={16} className="text-[var(--qimchi-icon-generic)]" />;
     }
   };
 
@@ -2054,7 +1971,9 @@ const TreeItemComponent = ({
             : isSelected
               ? "border-l-blue-500 bg-blue-100"
               : "border-transparent"
-      } ${draggedItem === nodeData.id ? "dragging opacity-50" : ""}`}
+      } ${draggedItem === nodeData.id ? "dragging opacity-50" : ""} ${
+        libState?.trashed ? "qimchi-trashed pointer-events-none" : ""
+      }`}
       data-level={item.getItemMeta().level}
       draggable={true} // Allow both files and folders to be draggable
       onDragStart={(e) => onDragStart(e, nodeData)}
@@ -2092,11 +2011,7 @@ const TreeItemComponent = ({
             }}
             className="mr-1 shrink-0 p-1 hover:bg-gray-200 rounded transition-colors"
             aria-label={
-              isFolder
-                ? isExpanded
-                  ? "Collapse folder"
-                  : "Expand folder"
-                : "Open sqlite runs"
+              isFolder ? (isExpanded ? "Collapse folder" : "Expand folder") : "Open sqlite runs"
             }
           >
             {isFolder && isExpanded ? (
@@ -2128,9 +2043,9 @@ const TreeItemComponent = ({
             <span
               className={`text-sm truncate block ${
                 isDatasetPath(nodeData.path)
-                  ? "text-purple-700 font-medium"
-                  : "text-gray-800"
-              } ${libState?.trashed ? "line-through opacity-50" : ""}`}
+                  ? "qimchi-tree-dataset font-medium"
+                  : "qimchi-tree-folder"
+              } ${libState?.trashed ? "qimchi-trashed" : ""}`}
             >
               {highlightSearchTerm(nodeData.name, searchTerm)}
             </span>
@@ -2159,11 +2074,7 @@ const TreeItemComponent = ({
               className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors shrink-0"
               aria-label={`Copy filename: ${nodeData.name}`}
             >
-              {isFNameCopied ? (
-                <Check size={14} className="text-green-600" />
-              ) : (
-                <Copy size={14} />
-              )}
+              {isFNameCopied ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
             </button>
           </Tooltip>
 
@@ -2178,11 +2089,7 @@ const TreeItemComponent = ({
               className="p-1 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors shrink-0"
               aria-label={`Copy full path: ${nodeData.path}`}
             >
-              {isPathCopied ? (
-                <Check size={14} className="text-green-600" />
-              ) : (
-                <Copy size={14} />
-              )}
+              {isPathCopied ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
             </button>
           </Tooltip>
 
@@ -2203,12 +2110,9 @@ const TreeItemComponent = ({
             </Tooltip>
           )}
 
-          {/* Heart / Trash Buttons - dataset leaves (qcutils measurements) */}
+          {/* Heart / Trash Buttons - dataset leaves (qanary measurements) */}
           {isDatasetLeafNode && (
-            <Tooltip
-              content={libState?.hearted ? "Unheart" : "Heart"}
-              position="top"
-            >
+            <Tooltip content={libState?.hearted ? "Unheart" : "Heart"} position="top">
               <button
                 type="button"
                 onClick={(e) => {
@@ -2228,10 +2132,7 @@ const TreeItemComponent = ({
                       size={14}
                       className="fill-red-500 text-red-500 group-hover/heart:hidden"
                     />
-                    <HeartCrack
-                      size={14}
-                      className="hidden text-red-500 group-hover/heart:block"
-                    />
+                    <HeartCrack size={14} className="hidden text-red-500 group-hover/heart:block" />
                   </>
                 ) : (
                   <Heart size={14} />
@@ -2241,10 +2142,7 @@ const TreeItemComponent = ({
           )}
 
           {isDatasetLeafNode && (
-            <Tooltip
-              content={libState?.trashed ? "Restore" : "Trash"}
-              position="top"
-            >
+            <Tooltip content={libState?.trashed ? "Restore" : "Trash"} position="top">
               <button
                 type="button"
                 onClick={(e) => {
@@ -2253,7 +2151,10 @@ const TreeItemComponent = ({
                 }}
                 className={`p-1 rounded transition-colors shrink-0 ${
                   libState?.trashed
-                    ? "text-red-600 hover:bg-red-50"
+                    ? // Restore is the one thing left to do on a trashed row:
+                      // re-enabled against the row's pointer-events:none, and
+                      // muted rather than red, since nothing is being deleted.
+                      "qimchi-trashed-interactive text-gray-400 hover:text-gray-600 hover:bg-gray-100"
                     : "text-gray-400 hover:text-red-600 hover:bg-red-50"
                 }`}
                 aria-label={libState?.trashed ? "Restore from trash" : "Trash"}
@@ -2291,6 +2192,8 @@ const TreeItemComponent = ({
               currentTagIds={libState?.tags ?? []}
               onToggle={(tagId) => toggleTag(nodeData.path, tagId)}
               onCreate={createTag}
+              onRename={renameTag}
+              onDelete={deleteTag}
               onClose={() => setTagAnchor(null)}
             />
           )}
@@ -2328,10 +2231,7 @@ const TreeItemComponent = ({
             </Tooltip>
           ) : (
             /* Add/Remove Basket Button - only for non-container files */
-            <Tooltip
-              content={isInBasket ? "Remove from basket" : "Add to basket"}
-              position="top"
-            >
+            <Tooltip content={isInBasket ? "Remove from basket" : "Add to basket"} position="top">
               <button
                 type="button"
                 onClick={(e) => {
@@ -2370,11 +2270,7 @@ const TreeItemComponent = ({
               className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors shrink-0"
               aria-label={`Copy folder name: ${nodeData.name}`}
             >
-              {isFNameCopied ? (
-                <Check size={14} className="text-green-600" />
-              ) : (
-                <Copy size={14} />
-              )}
+              {isFNameCopied ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
             </button>
           </Tooltip>
 
@@ -2389,11 +2285,7 @@ const TreeItemComponent = ({
               className="p-1 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors shrink-0"
               aria-label={`Copy folder path: ${nodeData.path}`}
             >
-              {isPathCopied ? (
-                <Check size={14} className="text-green-600" />
-              ) : (
-                <Copy size={14} />
-              )}
+              {isPathCopied ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
             </button>
           </Tooltip>
 

@@ -1,13 +1,14 @@
 // Zustand store for the Qimchi library: per-measurement heart/trash/tag state
 // and the DirTree filter toggles. State is keyed by normalized dataset path (the
 // backend returns abs_path alongside the uuid). The backend resolves a uuid for
-// every readable dataset (qcutils id, QCoDeS guid, or a content signature); a
+// every readable dataset (qanary id, QCoDeS guid, or a content signature); a
 // dataset it cannot identify comes back without one and its actions are no-ops.
 import { create } from "zustand";
 
 import {
   createTag as apiCreateTag,
   deleteTag as apiDeleteTag,
+  renameTag as apiRenameTag,
   getDbStatus,
   getLibraryStates,
   getTags,
@@ -20,8 +21,7 @@ import {
 } from "../services/libraryAPI";
 
 /** Normalize a filesystem path for use as a map key (slashes + trailing slash). */
-export const normalizePath = (path: string): string =>
-  path.replace(/\\/g, "/").replace(/\/+$/, "");
+export const normalizePath = (path: string): string => path.replace(/\\/g, "/").replace(/\/+$/, "");
 
 interface PathState {
   uuid: string;
@@ -46,14 +46,13 @@ interface LibraryStore {
 
   checkDbStatus: () => Promise<void>;
   fetchStates: () => Promise<void>;
-  register: (
-    path: string,
-    attrs?: Record<string, unknown>,
-  ) => Promise<LibraryState>;
+  register: (path: string, attrs?: Record<string, unknown>) => Promise<LibraryState>;
   toggleHeart: (path: string) => Promise<void>;
   toggleTrash: (path: string) => Promise<void>;
   createTag: (name: string) => Promise<Tag | undefined>;
   deleteTag: (id: number) => Promise<void>;
+  /** Rename a tag; returns the error message when the name is taken. */
+  renameTag: (id: number, name: string) => Promise<string | undefined>;
   toggleTag: (path: string, tagId: number) => Promise<void>;
 
   // Bulk actions over a DirTree multi-selection (set, not toggle).
@@ -205,6 +204,25 @@ export const useLibraryStore = create<LibraryStore>((set, get) => ({
     } catch (error) {
       console.error("Failed to create tag:", error);
       return undefined;
+    }
+  },
+
+  renameTag: async (id, name) => {
+    try {
+      const renamed = await apiRenameTag(id, name);
+      set((s) => ({
+        tags: s.tags
+          .map((t) => (t.id === id ? { ...t, name: renamed.name } : t))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      }));
+      return undefined;
+    } catch (error) {
+      // A 409 means another tag already has the name; the popover shows it
+      // rather than leaving the rename silently undone.
+      const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data
+        ?.detail;
+      console.error("Failed to rename tag:", error);
+      return detail ?? "Could not rename the tag";
     }
   },
 
