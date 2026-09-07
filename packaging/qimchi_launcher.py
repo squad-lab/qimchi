@@ -241,7 +241,13 @@ class _Api:
         """
         import webview
 
-        result = webview.windows[0].create_file_dialog(webview.FOLDER_DIALOG)
+        # pywebview 5 replaced the FOLDER_DIALOG constant with the FileDialog
+        # enum and deprecated the old name; accept whichever this build has.
+        file_dialog = getattr(webview, "FileDialog", None)
+        dialog_type = (
+            file_dialog.FOLDER if file_dialog is not None else webview.FOLDER_DIALOG
+        )
+        result = webview.windows[0].create_file_dialog(dialog_type)
         if not result:
             return ""
         return result[0] if isinstance(result, (list, tuple)) else str(result)

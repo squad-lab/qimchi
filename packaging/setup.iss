@@ -108,7 +108,7 @@ end;
   (saved window/UI state), and the debug log. The library database
   (qimchi.db -- notes, hearts, tags) is deliberately KEPT so annotations
   survive a reinstall/upgrade, as are exports (~/Downloads), the datasets, and
-  the shared ~/.qcutils. }
+  the live registry (live_measurements.db) written by qimchi-connect. }
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   QimchiHome: string;
