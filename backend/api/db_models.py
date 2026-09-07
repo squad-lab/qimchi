@@ -8,7 +8,7 @@ here needs a matching migration, or an existing database will not match.
 
 - Everything keys on the measurement UUID, never on ``abs_path`` -- so future
   cross-node sync stays additive. ``shared/identity.py`` resolves it: the
-  qcutils ``Measurement ID``, else a QCoDeS run ``guid``, else a
+  qanary ``Measurement ID``, else a QCoDeS run ``guid``, else a
   content-signature uuid5. ``measurements.uuid_origin`` records which tier
   answered.
 - ``user_id`` is present from the start; desktop runs a single implicit
@@ -63,7 +63,7 @@ class Measurement(SQLModel, table=True):
     uuid: str = Field(primary_key=True)
     abs_path: str | None = Field(default=None, index=True)
     source_format: str | None = None  # zarr | netcdf | qcodes | csv | ...
-    uuid_origin: str = "qcutils"  # where the UUID came from
+    uuid_origin: str = "qanary"  # where the UUID came from
     cryostat: str | None = None
     sample: str | None = None
     wafer_id: str | None = None

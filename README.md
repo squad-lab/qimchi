@@ -1,6 +1,6 @@
 # <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.7.0
 
-Plotly based data visualization tool for `xarray` data. Optimized to work with the optional [`qcutils`](https://gitlab.com/squad-lab/qcutils) package (the installer no longer installs `qcutils` by default). Qimchi supports any dataset format convertible to `xarray` (see [Supported Dataset Types](#supported-dataset-types) below). Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html).
+Plotly based data visualization tool for `xarray` data. Optimized to work with the optional [`qanary`](https://gitlab.com/squad-lab/qanary) package (the installer no longer installs `qanary` by default). Qimchi supports any dataset format convertible to `xarray` (see [Supported Dataset Types](#supported-dataset-types) below). Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html).
 
 This repository contains a unified FastAPI application that serves a React-based frontend for the Qimchi plotter.
 
@@ -11,7 +11,7 @@ This repository contains a unified FastAPI application that serves a React-based
 
 - **Library:** heart, trash and tag your measurements. Marks are saved locally and shown in the Explorer, with filters for hearted-only, hiding trash, and tags. Select several measurements and apply any of them at once.
 - **Tags work like labels** -- a measurement can carry several. Filter from the searchable Tags dropdown, or type `#tag` (or `#"two words"`) in the Explorer search alongside an ordinary name search.
-- **Marks follow a measurement** even if you rename or move its file. Qimchi identifies it by its qcutils ID, a QCoDeS run GUID, or -- failing both -- a signature derived from the data itself. Nothing is written next to your files.
+- **Marks follow a measurement** even if you rename or move its file. Qimchi identifies it by its qanary ID, a QCoDeS run GUID, or -- failing both -- a signature derived from the data itself. Nothing is written next to your files.
 - **Notes** live in the library instead of `.md` sidecars, so QCoDeS runs and artefacts can have notes too. Existing sidecar notes are imported automatically.
 - **Dark mode**, with a toggle in the footer. Follows your system preference by default; plots, metadata and filters all follow the theme.
 - **Plot pinning:** hold a plot on its measurement while Next/Prev moves the others, to compare two datasets side by side. Adding a measurement also reproduces your custom plots for it, with the same variables and filters.
@@ -47,6 +47,7 @@ This repository contains a unified FastAPI application that serves a React-based
   - [Environment Variables](#environment-variables)
   - [Supported Dataset Types](#supported-dataset-types)
   - [Measurements](#measurements)
+  - [Authors](#authors)
 
 ## Installation
 
@@ -60,13 +61,13 @@ Qimchi supports multiple installation methods, including executable scripts, Doc
 Download the latest `qimchi.exe` from the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases) and run it. The executable will:
 - Automatically install all required dependencies (Git, Python, Node.js, fd-find)
 - Set up the application in `%USERPROFILE%\.qimchi`
-- Clone and configure Qimchi (QCUtils is optional and not installed by the Windows installer)
+- Clone and configure Qimchi (Qanary is optional and not installed by the Windows installer)
 - Build the frontend and start the server
 - Open the web interface in your browser
 
 Simply double-click `qimchi.exe` and follow the prompts. The web interface will be available at http://localhost:8001.
 
-Note: The Windows installer no longer clones or installs `qcutils`.
+Note: The Windows installer no longer clones or installs `qanary` (formerly, `qcutils`) by default. If you need `qanary`, please install it manually from its [repository](https://gitlab.com/squad-lab/qanary).
 
 ### Linux/macOS
 
@@ -84,7 +85,7 @@ After installation, either restart your shell, or run:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Note: The Linux/macOS installer (`qimchi-install.sh`) no longer clones or installs `qcutils`.
+Note: The Linux/macOS installer (`qimchi-install.sh`) no longer clones or installs `qanary` (formerly, `qcutils`) by default. If you need `qanary`, please install it manually from its [repository](https://gitlab.com/squad-lab/qanary).
 
 Then simply start qimchi with `qimchi`. The web interface will be available at http://localhost:8001.
 
@@ -420,7 +421,7 @@ EXPORT_MAX_WORKERS=4
 EXPORT_TIMING_LOG=true
 
 # Enable Kaleido warm-up on startup (default: 0/off). Set to 1/true/yes to enable.
-ENABLE_KALEIDO_WARMUP=0
+ENABLE_KALEIDO_WARMUP=1
 
 # Max depth for directory traversal (default: 6)
 QIMCHI_MAX_DEPTH=6
@@ -441,4 +442,10 @@ Qimchi's backend supports loading datasets in any format that can be converted t
 - Custom formats convertible to `xarray` via user-defined loaders (see [Custom Dataset Support](https://qimchi.squad-lab.org/docs/custom_datasets.md))
 
 ## Measurements
-Measurement examples referencing `qcutils` can be found in its own repository. Refer to [its repository](https://gitlab.com/squad-lab/qcutils) for more details. If you need `qcutils`, the project must be installed manually; it is no longer installed automatically by the Qimchi installer.
+Measurement examples referencing `qanary` can be found in its own repository. Refer to [its repository](https://gitlab.com/squad-lab/qanary) for more details. If you need `qanary`, the project must be installed manually; it is no longer installed automatically by the Qimchi installer.
+
+
+## Authors
+
+- Spandan Anupam: [s.anupam@fz-juelich.de](mailto:s.anupam@fz-juelich.de)
+- Jyotirmaya Shivottam: [shivottam@proton.me](mailto:shivottam@proton.me)

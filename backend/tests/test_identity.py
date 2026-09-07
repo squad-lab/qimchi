@@ -35,9 +35,9 @@ def _sweep(start: float = 0.0, stop: float = 1.0, n: int = 64, **attrs) -> xr.Da
 # --------------------------------------------------------------------------- #
 # Tier 1 / 2: native ids
 # --------------------------------------------------------------------------- #
-def test_qcutils_measurement_id_wins():
+def test_qanary_measurement_id_wins():
     attrs = {"Measurement ID": "12-abcdef", "guid": "should-be-ignored"}
-    assert resolve_from_attrs(attrs) == ("12-abcdef", "qcutils")
+    assert resolve_from_attrs(attrs) == ("12-abcdef", "qanary")
 
 
 def test_qcodes_guid_used_when_no_measurement_id():
@@ -58,7 +58,7 @@ def test_blank_sentinels_are_not_identities(sentinel):
 
 def test_native_id_short_circuits_without_a_dataset():
     """A native id must resolve even when the dataset can't be opened."""
-    assert resolve_identity({"Measurement ID": "7-xyz"}, None) == ("7-xyz", "qcutils")
+    assert resolve_identity({"Measurement ID": "7-xyz"}, None) == ("7-xyz", "qanary")
 
 
 def test_no_dataset_and_no_native_id_is_unresolved():
@@ -67,7 +67,7 @@ def test_no_dataset_and_no_native_id_is_unresolved():
 
 def test_dataset_attrs_consulted_when_caller_attrs_lack_the_id():
     ds = _sweep(**{"Measurement ID": "42-from-the-dataset"})
-    assert resolve_identity({}, ds) == ("42-from-the-dataset", "qcutils")
+    assert resolve_identity({}, ds) == ("42-from-the-dataset", "qanary")
 
 
 # --------------------------------------------------------------------------- #

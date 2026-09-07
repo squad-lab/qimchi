@@ -14,12 +14,11 @@ import time
 import numpy as np
 import pytest
 import xarray as xr
+from sqlmodel import select
 
 from api import library
 from api.db_models import Measurement
 from api.dirtree import build_attrs_payload
-from sqlmodel import select
-
 from api.shared.db import session_scope
 
 
@@ -46,7 +45,7 @@ def _dataset() -> xr.Dataset:
 
 
 def _register(path: str, attrs: dict) -> str | None:
-    return library._register(path, attrs, "uuid-under-test", "qcutils").uuid
+    return library._register(path, attrs, "uuid-under-test", "qanary").uuid
 
 
 def test_payload_shape_matches_the_endpoint(tmp_path):

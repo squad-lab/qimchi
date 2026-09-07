@@ -7,8 +7,8 @@ and is never a key.
 
 Resolution ladder, most authoritative first:
 
-1. ``attrs["Measurement ID"]`` -- the qcutils UUID (``measure.py`` mints it and
-   names the file after it). Origin ``qcutils``.
+1. ``attrs["Measurement ID"]`` -- the qanary UUID (``measure.py`` mints it and
+   names the file after it). Origin ``qanary``.
 2. ``attrs["guid"]`` -- QCoDeS mints a per-run GUID and ``to_xarray_dataset()``
    exports it, so ``.db``/``.sqlite`` runs carry a native identity too.
    Origin ``qcodes``.
@@ -162,7 +162,7 @@ def resolve_from_attrs(attrs: dict | None) -> tuple[str | None, str | None]:
         return None, None
     native = _clean(attrs.get("Measurement ID"))
     if native:
-        return native, "qcutils"
+        return native, "qanary"
     guid = _clean(attrs.get("guid"))
     if guid:
         return guid, "qcodes"
@@ -175,7 +175,7 @@ def resolve_identity(
     """
     Resolve a measurement's UUID and its origin.
 
-    Falls through the ladder: qcutils id -> QCoDeS guid -> content signature.
+    Falls through the ladder: qanary id -> QCoDeS guid -> content signature.
     ``dataset`` may be None when only attrs are available; in that case the
     content tier is skipped and ``(None, None)`` is returned.
 
