@@ -2,6 +2,11 @@
 
 ### v0.7.0 - 2026-08-16
 
+- [Feature] The footer now shows the exact build version, including release-candidate tags, links to this changelog, and uses its pulsing dot to report whether the backend is reachable. Docker and all three desktop packages carry the release tag into the bundled frontend.
+- [Fix] Instrument snapshots containing Python's non-standard `Infinity`, `-Infinity`, or `NaN` JSON constants now render as their corresponding JavaScript numeric values instead of appearing as a character-counted string.
+- [Fix] Light/dark theme changes now apply atomically instead of briefly showing mixed-theme colours, and plot status, background-correction, and LineCut overlays have proper dark backgrounds.
+- [Misc] Plot-clearing controls are more compact: Clear All uses a labelled trash icon, and the maximized LineCut preview no longer duplicates the main close action.
+- [Misc] Preview CI reserves fast hosted runners for tests and builds, starts the bottleneck Windows build immediately, and makes untagged desktop builds explicit choices in manually started pipelines.
 - [Feature] Dark mode: an app-wide dark theme (Atom One Dark palette) with a light/dark toggle in the branding footer. The choice is remembered across restarts and defaults to your system preference. Plots, the metadata JSON view, filters, and sliders all follow the theme; the Qimchi brand green is preserved in both modes.
 - [Feature] Library: heart, trash and tag your measurements. Marks are saved to a local database and shown in the Explorer, with filters for hearted-only, hiding trash, and tags. Select several measurements and apply any of them at once.
 - [Feature] Tags work like labels -- a measurement can carry several. Filter by them from the searchable Tags dropdown, or type `#tag` (or `#"two words"`) in the Explorer search box alongside an ordinary name search.
