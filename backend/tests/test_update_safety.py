@@ -70,10 +70,16 @@ def _restore_logger():
 def test_index_html_is_served_uncacheable():
     """
     A cached shell survives an update and references deleted hashed assets.
+
+    The assertion is about the root route only.  Do not enter the application's
+    production lifespan here: that starts the image-export process pool and
+    Kaleido workers, which require Chrome and are unrelated to HTTP caching.
+    The minimal CI test image deliberately does not install Chrome.
     """
     import main
 
-    with TestClient(main.app) as client:
+    client = TestClient(main.app)
+    try:
         resp = client.get("/")
         if resp.status_code != 200 or "text/html" not in resp.headers.get(
             "content-type", ""
@@ -81,6 +87,8 @@ def test_index_html_is_served_uncacheable():
             pytest.skip("frontend/dist not built; static serving disabled")
         cache_control = resp.headers.get("cache-control", "")
         assert "no-store" in cache_control, cache_control
+    finally:
+        client.close()
 
 
 def test_launcher_and_backend_agree_on_the_app_home(monkeypatch, tmp_path):
