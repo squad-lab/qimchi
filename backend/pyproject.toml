@@ -115,6 +115,11 @@ repository = "https://gitlab.com/squad-lab/qimchi"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# A hung test should fail with a traceback, not consume the job's whole hour
+# in silence. Generous, because the live end-to-end tests provision an
+# isolated environment from PyPI; a single slow case can raise its own bar
+# with @pytest.mark.timeout.
+timeout = 300
 
 [tool.coverage.run]
 source = ["api"]

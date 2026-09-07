@@ -12,6 +12,9 @@ stages:
 
 pytest:
   stage: test
+  # The suite runs in under a minute; anything near this is a hang, and the
+  # per-test timeout in backend/pyproject.toml should have caught it first.
+  timeout: 20m
   before_script:
     - curl -LsSf https://astral.sh/uv/install.sh | sh
     - export PATH="$HOME/.local/bin:$PATH"
