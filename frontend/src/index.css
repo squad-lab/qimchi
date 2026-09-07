@@ -18,6 +18,14 @@ body {
   overflow: hidden;
 }
 
+/* Theme changes must be atomic. Components retain their normal hover,
+   resize, and disclosure transitions at every other time. */
+html.qimchi-theme-switching *,
+html.qimchi-theme-switching *::before,
+html.qimchi-theme-switching *::after {
+  transition: none !important;
+}
+
 /* Subtle fade-in for the Basket field-row hover expansion (a touch of transition). */
 @keyframes qimchi-fade-in {
   from {

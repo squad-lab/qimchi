@@ -3160,7 +3160,7 @@ const PlotWrapper: React.FC<Props> = ({
                 }}
               >
                 <div
-                  className="plot-status-badge absolute top-3 left-3 z-20 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-2.5 py-1 shadow-sm"
+                  className="plot-status-badge absolute top-3 left-3 z-20 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-2.5 py-1 shadow-sm dark:bg-gray-800/90"
                   aria-label={`Status: ${statusLabel[displayStatus]}`}
                 >
                   <span
@@ -3188,7 +3188,7 @@ const PlotWrapper: React.FC<Props> = ({
                 {/* BG Corr Controls Overlay (Maximized) */}
 
                 {isBGCorrActive && (
-                  <div className="absolute top-16 left-1/2 transform -translate-x-1/2 z-30 flex flex-col items-center gap-3 bg-white/95 backdrop-blur-md border border-blue-200 px-6 py-4 rounded-[2rem] shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300 min-w-[400px]">
+                  <div className="absolute top-16 left-1/2 transform -translate-x-1/2 z-30 flex flex-col items-center gap-3 bg-white/95 dark:bg-gray-800/95 backdrop-blur-md border border-blue-200 px-6 py-4 rounded-[2rem] shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300 min-w-[400px]">
                     <div className="flex items-center justify-between w-full mb-1">
                       <div className="flex items-center gap-2">
                         <div className="flex h-2.5 w-2.5 rounded-full bg-blue-500 animate-pulse" />
@@ -3203,7 +3203,7 @@ const PlotWrapper: React.FC<Props> = ({
 
                     <div className="flex items-center gap-2 w-full">
                       {isHeatmapPlot ? (
-                        <div className="flex items-center gap-1.5 p-1 bg-gray-100/80 rounded-full w-full">
+                        <div className="flex items-center gap-1.5 p-1 bg-gray-100/80 dark:bg-gray-700/80 rounded-full w-full">
                           {[
                             {
                               id: "constant",
@@ -3315,7 +3315,7 @@ const PlotWrapper: React.FC<Props> = ({
                   className="h-full bg-white border-l border-gray-200 flex flex-col z-30 transition-all duration-300 animate-in slide-in-from-right"
                   style={{ width: "50%" }}
                 >
-                  <div className="flex items-center justify-between p-3 border-b border-gray-100 bg-gray-50/50">
+                  <div className="flex items-center justify-between p-3 border-b border-gray-100 bg-gray-50/50 dark:bg-gray-900/50">
                     <div className="flex items-center gap-2">
                       <div className="p-1 px-2 bg-blue-100 text-blue-700 rounded-md text-[10px] font-black uppercase tracking-tighter">
                         LineCut Preview
@@ -3407,7 +3407,7 @@ const PlotWrapper: React.FC<Props> = ({
         <div className="plot-content">
           <div className={`p-2 pb-0 relative ${isSquareMode ? "square-mode" : ""}`}>
             <div
-              className="plot-status-badge absolute top-3 left-3 z-20 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-2.5 py-1 shadow-sm"
+              className="plot-status-badge absolute top-3 left-3 z-20 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-2.5 py-1 shadow-sm dark:bg-gray-800/90"
               aria-label={`Status: ${statusLabel[displayStatus]}`}
             >
               <span
@@ -3431,7 +3431,7 @@ const PlotWrapper: React.FC<Props> = ({
             {/* BG Corr Controls Overlay */}
 
             {isBGCorrActive && (
-              <div className="absolute top-12 left-1/2 transform -translate-x-1/2 z-30 flex items-center gap-2 bg-white/95 backdrop-blur-md border border-blue-200 px-3 py-2 rounded-full shadow-xl animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="absolute top-12 left-1/2 transform -translate-x-1/2 z-30 flex items-center gap-2 bg-white/95 dark:bg-gray-800/95 backdrop-blur-md border border-blue-200 px-3 py-2 rounded-full shadow-xl animate-in fade-in slide-in-from-top-2 duration-300">
                 <span className="text-[10px] font-bold text-blue-600 px-1 uppercase tracking-wider">
                   {bgCorrPoints.length === 0
                     ? "Pick Points"

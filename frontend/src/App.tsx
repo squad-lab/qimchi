@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { PROD_BACKEND_URL } from "./config";
 
@@ -26,8 +26,16 @@ const App: React.FC = () => {
   const { setSidebarCollapsed, setNotesCollapsed, updateExplorerState } = useSidebarStore();
   const theme = useThemeStore((state) => state.theme);
 
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+
+    // Theme changes touch many elements that normally animate hover/state
+    // colors. Disable those transitions for this style flush so the entire UI
+    // switches as one frame instead of showing a low-contrast mixed theme.
+    root.classList.add("qimchi-theme-switching");
+    root.classList.toggle("dark", theme === "dark");
+    void root.offsetWidth;
+    root.classList.remove("qimchi-theme-switching");
   }, [theme]);
 
   const datasetKeys = useMemo(
