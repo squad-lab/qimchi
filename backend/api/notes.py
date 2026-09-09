@@ -6,16 +6,18 @@ FastAPI endpoints for loading and saving notes associated with .zarr datasets.
 import asyncio
 import os
 import re
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, Tuple
+
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 # Local imports
-from .models import PathData, NotesData
-from .logger import logger
-from .data_loader import load_xarray_dataset, _detect_filesystem_format
+from .data_loader import _detect_filesystem_format, load_xarray_dataset
 from .db_models import LOCAL_USER_ID, Note, _utcnow
+from .logger import logger
+from .models import NotesData, PathData
 from .shared.db import require_db, session_scope
 
 # Notes are DB-backed, so both endpoints are guarded. Loading must 503 rather
@@ -56,13 +58,18 @@ def _db_get_note(uuid: str) -> Tuple[str, datetime] | None:
 def _db_upsert_note(uuid: str, body: str, when: datetime | None = None) -> datetime:
     """Insert or update a measurement note; returns the stored timestamp."""
     ts = when or _utcnow()
+    statement = sqlite_insert(Note).values(
+        uuid=uuid,
+        user_id=LOCAL_USER_ID,
+        body=body,
+        updated_at=ts,
+    )
+    statement = statement.on_conflict_do_update(
+        index_elements=["uuid", "user_id"],
+        set_={"body": body, "updated_at": ts},
+    )
     with session_scope() as session:
-        note = session.get(Note, (uuid, LOCAL_USER_ID))
-        if note is None:
-            session.add(Note(uuid=uuid, user_id=LOCAL_USER_ID, body=body, updated_at=ts))
-        else:
-            note.body = body
-            note.updated_at = ts
+        session.exec(statement)
     return ts
 
 
