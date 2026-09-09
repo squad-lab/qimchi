@@ -2,6 +2,7 @@ import React from "react";
 
 // Local imports
 import IndividualPlot from "./Plots/IndividualPlot";
+import type { BasketItem } from "./Basket";
 import type { PlotConfiguration } from "./interfaces";
 import usePainterStore from "../stores/painterStore";
 
@@ -17,7 +18,17 @@ interface PlotContainerProps {
   onAddPlot?: (config: Omit<PlotConfiguration, "id">) => void;
   selectedPlotId?: string | null;
   onSelectPlot?: (id: string) => void;
+  basketItems?: BasketItem[];
 }
+
+const datasetIdentity = (path: string): string => {
+  const name =
+    path
+      .replace(/^memory:\/\//i, "")
+      .split(/[\\/]/)
+      .pop() ?? path;
+  return name.replace(/\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i, "");
+};
 
 const PlotContainer: React.FC<PlotContainerProps> = ({
   plotConfigs,
@@ -29,6 +40,7 @@ const PlotContainer: React.FC<PlotContainerProps> = ({
   perPlotWidthMap,
   selectedPlotId,
   onSelectPlot,
+  basketItems = [],
 }) => {
   const setShiftHeld = usePainterStore((s) => s.setShiftHeld);
 
@@ -77,6 +89,10 @@ const PlotContainer: React.FC<PlotContainerProps> = ({
           // NOTE: Use calc to subtract a small fixed gap so items don't wrap due to
           // flex gaps, borders or rounding errors.
           const effective = `calc(${pct}% - ${GAP_PX}px)`;
+          const measurementInfo =
+            basketItems.find((item) => item.path === config.fpath)?.attributes ??
+            basketItems.find((item) => datasetIdentity(item.path) === datasetIdentity(config.fpath))
+              ?.attributes;
           return (
             <div
               key={config.id}
@@ -97,6 +113,7 @@ const PlotContainer: React.FC<PlotContainerProps> = ({
                 onRemove={onRemovePlot}
                 onSetPinned={onSetPlotPinned}
                 onAddPlot={onAddPlot}
+                measurementInfo={measurementInfo}
               />
             </div>
           );

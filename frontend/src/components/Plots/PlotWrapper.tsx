@@ -32,7 +32,7 @@ import AppearanceModal from "./AppearanceModal";
 import FiltersModal from "./FiltersModal";
 import type { AppliedFilter } from "../../components/interfaces";
 import type { PlotAppearanceSettings } from "../../components/types";
-import type { PlotConfiguration, SliderConfig } from "../../components/interfaces";
+import type { AttrData, PlotConfiguration, SliderConfig } from "../../components/interfaces";
 import { useToast } from "../../hooks/useToast";
 import { usePlotStore } from "../../stores/plotStore";
 import type { PlotPersistentState } from "../../components/interfaces";
@@ -61,6 +61,7 @@ type Props = {
   availableSliders?: Record<string, SliderConfig>; // Sliders from backend
   onAddPlot?: (config: Omit<PlotConfiguration, "id">) => void;
   onSwapAxesChange?: (swapped: boolean) => void;
+  measurementInfo?: AttrData;
 };
 
 // Default appearance settings based on backend
@@ -222,6 +223,7 @@ const PlotWrapper: React.FC<Props> = ({
   availableSliders = {},
   onAddPlot,
   onSwapAxesChange,
+  measurementInfo,
 }) => {
   const { showToast } = useToast();
 
@@ -318,6 +320,8 @@ const PlotWrapper: React.FC<Props> = ({
           plot_json: customizedPlotJson,
           fpath: plotConfig.fpath,
           relayout_data: relayoutData,
+          applied_filters: appliedFilters,
+          measurement_info: measurementInfo,
         },
         {
           headers: { "Content-Type": "application/json" },
@@ -408,6 +412,8 @@ const PlotWrapper: React.FC<Props> = ({
           plot_json: customizedPlotJson,
           fpath: plotConfig.fpath,
           relayout_data: relayoutData,
+          applied_filters: appliedFilters,
+          measurement_info: measurementInfo,
         },
         {
           headers: { "Content-Type": "application/json" },

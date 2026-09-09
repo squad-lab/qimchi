@@ -13,6 +13,7 @@ import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
+from html import escape
 from pathlib import Path
 from typing import Any, Dict
 
@@ -22,6 +23,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from plotly import graph_objects as go
 
 from .data_loader import resolve_to_disk_path
+
+# Local imports
+from .logger import logger
 from .notes import (
     _make_frontmatter,
     _measurement_notes_paths,
@@ -29,15 +33,130 @@ from .notes import (
     append_sample_rollup,
 )
 
-# Local imports
-from .logger import logger
-
 router = APIRouter()
 
 
 # In-memory task registry for export tasks
 # Structure: { task_id: { "status": "pending|completed|failed", "result": {...}, "error": str, "created_at": datetime, "zip_path": str } }
 _export_tasks: Dict[str, Dict] = {}
+
+_FILTER_DISPLAY_NAMES = {
+    "diff": "Differentiate",
+    "diff_x": "Diff along Y",
+    "diff_y": "Diff along X",
+    "savgol": "Savitzky-Golay",
+    "sma": "Moving Average",
+    "normalize": "Normalize",
+    "gamma_corr": "Gamma Correction",
+    "log_corr": "Log Correction",
+    "sig_corr": "Sigmoid Correction",
+    "rescale_intensity": "Rescale Intensity",
+    "log_scale": "Log Scale",
+    "polyfit": "Polynomial Fit",
+    "rotate": "Rotate Heatmap",
+    "flip": "Flip Heatmap",
+    "bg_corr_constant": "BG Correction (Constant)",
+    "bg_corr_linear": "BG Correction (Linear)",
+    "bg_corr_row_mean": "BG Correction (Row Mean)",
+    "bg_corr_col_mean": "BG Correction (Column Mean)",
+    "bg_corr_plane": "BG Correction (Plane)",
+}
+
+_MEASUREMENT_INFO_FIELDS = (
+    ("Timestamp", ("Timestamp", "timestamp")),
+    ("Cryostat", ("Cryostat", "cryostat")),
+    ("Wafer ID", ("Wafer ID", "wafer_id")),
+    ("Device Type", ("Device Type", "device_type")),
+    ("Sample Name", ("Sample Name", "sample_name")),
+    ("Experiment Name", ("Experiment Name", "experiment_name")),
+    ("Measurement ID", ("Measurement ID", "measurement_id")),
+)
+
+_PLOTLY_DEFAULT_WIDTH = int(getattr(pio.defaults, "default_width", 700) or 700)
+_PLOTLY_DEFAULT_HEIGHT = int(getattr(pio.defaults, "default_height", 500) or 500)
+_EXPORT_INFO_FONT_FAMILY = "monospace"
+
+
+def _add_export_info_footer(
+    fig: go.Figure,
+    applied_filters: list[Dict] | None,
+    measurement_info: Dict | None = None,
+    *,
+    dark: bool = False,
+    base_width: int = _PLOTLY_DEFAULT_WIDTH,
+    base_height: int = _PLOTLY_DEFAULT_HEIGHT,
+) -> None:
+    """Append export details without changing the original plot canvas."""
+    info_lines = []
+    if isinstance(measurement_info, dict):
+        consumed_keys = set()
+        for label, aliases in _MEASUREMENT_INFO_FIELDS:
+            consumed_keys.update(aliases)
+            value = next(
+                (
+                    measurement_info.get(alias)
+                    for alias in aliases
+                    if measurement_info.get(alias) not in (None, "", "N/A")
+                ),
+                None,
+            )
+            if value is not None:
+                info_lines.append(f"<b>{label}:</b> {escape(str(value))}")
+
+        for key, value in measurement_info.items():
+            if key in consumed_keys or key in ("independents", "dependents", "Size", "size"):
+                continue
+            if value in (None, "", "N/A"):
+                continue
+            label = str(key).replace("_", " ").title()
+            info_lines.append(f"<b>{escape(label)}:</b> {escape(str(value))}")
+
+    entries = []
+    for applied_filter in applied_filters or []:
+        if not isinstance(applied_filter, dict):
+            continue
+        filter_name = str(applied_filter.get("name", "")).strip()
+        if not filter_name:
+            continue
+        display_name = _FILTER_DISPLAY_NAMES.get(
+            filter_name, filter_name.replace("_", " ").title()
+        )
+        entries.append(escape(display_name))
+
+    if not info_lines and not entries:
+        return
+
+    current_bottom = fig.layout.margin.b if fig.layout.margin and fig.layout.margin.b else 80
+    footer_lines = [
+        *info_lines,
+        f"<b>Applied Filters:</b> {' -> '.join(entries) if entries else 'None'}",
+    ]
+    footer_height = 42 + 19 * len(footer_lines)
+    current_width = fig.layout.width or base_width
+    current_height = fig.layout.height or base_height
+    fig.update_layout(
+        width=current_width,
+        height=current_height + footer_height,
+        margin=dict(b=current_bottom + footer_height),
+    )
+    fig.add_annotation(
+        name="qimchi-export-info",
+        text="<br>".join(footer_lines),
+        x=0,
+        y=0,
+        xref="paper",
+        yref="paper",
+        xanchor="left",
+        yanchor="top",
+        yshift=-(current_bottom + 22),
+        align="left",
+        showarrow=False,
+        font=dict(
+            family=_EXPORT_INFO_FONT_FAMILY,
+            size=15,
+            color="#e5e7eb" if dark else "#374151",
+        ),
+    )
 
 
 def _cleanup_old_tasks() -> None:
@@ -68,6 +187,8 @@ def _export_plot_images_sync(
     disk_fpath: str,
     relayout_data: Dict | None = None,
     export_pool=None,
+    applied_filters: list[Dict] | None = None,
+    measurement_info: Dict | None = None,
 ) -> Dict:
     """
     Synchronous function to export plot images (runs in executor).
@@ -77,6 +198,8 @@ def _export_plot_images_sync(
         disk_fpath (str): dataset .zarr path on disk
         relayout_data (Dict | None): optional relayout data to apply
         export_pool: optional ProcessPoolExecutor for parallel writes
+        applied_filters (list[Dict] | None): ordered filters to print below the plot
+        measurement_info (Dict | None): Basket hover-card fields to print below the plot
 
     Returns:
         Returns dict with:
@@ -175,11 +298,34 @@ def _export_plot_images_sync(
             outlinecolor="white",
         )
     )
+    # Process workers use Plotly's native export size. The thread
+    # fallback historically requests 1920 x 1080. Reserve that exact original
+    # canvas, then let the footer extend only the image height below it.
+    base_width, base_height = (
+        (_PLOTLY_DEFAULT_WIDTH, _PLOTLY_DEFAULT_HEIGHT)
+        if export_pool
+        else (1920, 1080)
+    )
+    _add_export_info_footer(
+        fig,
+        applied_filters,
+        measurement_info,
+        base_width=base_width,
+        base_height=base_height,
+    )
+    _add_export_info_footer(
+        dark_fig,
+        applied_filters,
+        measurement_info,
+        dark=True,
+        base_width=base_width,
+        base_height=base_height,
+    )
 
     # helper to write and time a single write
     def _write_and_time(local_fig, local_path_str):
-        _width = 1920
-        _height = 1080
+        _width = int(local_fig.layout.width or 1920)
+        _height = int(local_fig.layout.height or 1080)
         _scale = 300.0 / 96.0
         start = time.perf_counter()
         pio.write_image(
@@ -255,6 +401,10 @@ def _export_plot_images_sync(
     tmp_zip = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
     tmp_zip.close()
     export_meta = _library_metadata(dataset_path, dataset_uuid)
+    if applied_filters:
+        export_meta["applied_filters"] = applied_filters
+    if measurement_info:
+        export_meta["measurement_info"] = measurement_info
     for p in saved_paths.values():
         if str(p).lower().endswith(".png"):
             _embed_png_metadata(p, export_meta)
@@ -313,6 +463,8 @@ async def _run_export_task(
     disk_fpath: str,
     relayout_data: Dict | None = None,
     export_pool=None,
+    applied_filters: list[Dict] | None = None,
+    measurement_info: Dict | None = None,
 ) -> None:
     """
     Background task to run export in executor.
@@ -330,6 +482,8 @@ async def _run_export_task(
             disk_fpath,
             relayout_data,
             export_pool,
+            applied_filters,
+            measurement_info,
         )
 
         # Update task status
@@ -534,6 +688,8 @@ def _save_light_dark_pngs(
     ts: str | None = None,
     only_light: bool = False,
     relayout_data: Dict | None = None,
+    applied_filters: list[Dict] | None = None,
+    measurement_info: Dict | None = None,
 ) -> Dict:
     """
     Save only PNGs for light and dark variants and return paths dict.
@@ -544,6 +700,8 @@ def _save_light_dark_pngs(
         ts: optional timestamp string to include in filename; if None, use current time
         only_light: if True, only save the light variant PNG
         relayout_data: optional relayout data to apply
+        applied_filters: ordered filters to print below the plot
+        measurement_info: Basket hover-card fields to print below the plot
 
     Returns:
         Dict: keys: 'png_light', 'png_dark' (if only_light is False)
@@ -625,6 +783,7 @@ def _save_light_dark_pngs(
 
     if only_light:
         # Only write the light PNG
+        _add_export_info_footer(fig, applied_filters, measurement_info)
         try:
             pio.write_image(
                 fig,
@@ -663,6 +822,13 @@ def _save_light_dark_pngs(
             tickcolor="white",
             outlinecolor="white",
         )
+    )
+    _add_export_info_footer(fig, applied_filters, measurement_info)
+    _add_export_info_footer(
+        dark_fig,
+        applied_filters,
+        measurement_info,
+        dark=True,
     )
 
     # Write light & dark PNGs in parallel to avoid repeated engine startup overhead
@@ -746,6 +912,12 @@ async def export_plot_images(request: Request) -> JSONResponse:
     plot_json = data.get("plot_json")
     fpath = data.get("fpath")
     relayout_data = data.get("relayout_data")
+    applied_filters = data.get("applied_filters")
+    if not isinstance(applied_filters, list):
+        applied_filters = []
+    measurement_info = data.get("measurement_info")
+    if not isinstance(measurement_info, dict):
+        measurement_info = {}
     if not plot_json or not fpath:
         return JSONResponse(
             status_code=400,
@@ -775,7 +947,15 @@ async def export_plot_images(request: Request) -> JSONResponse:
 
         # Start background task
         asyncio.create_task(
-            _run_export_task(task_id, plot_json, disk_fpath, relayout_data, export_pool)
+            _run_export_task(
+                task_id,
+                plot_json,
+                disk_fpath,
+                relayout_data,
+                export_pool,
+                applied_filters,
+                measurement_info,
+            )
         )
 
         logger.info(f"Created export task {task_id} for {fpath}")
@@ -887,6 +1067,12 @@ async def export_and_send_to_notes(request: Request) -> JSONResponse:
     plot_json = data.get("plot_json")
     fpath = data.get("fpath")
     relayout_data = data.get("relayout_data")
+    applied_filters = data.get("applied_filters")
+    if not isinstance(applied_filters, list):
+        applied_filters = []
+    measurement_info = data.get("measurement_info")
+    if not isinstance(measurement_info, dict):
+        measurement_info = {}
     if not plot_json or not fpath:
         return JSONResponse(
             status_code=400,
@@ -897,7 +1083,12 @@ async def export_and_send_to_notes(request: Request) -> JSONResponse:
         now = datetime.now(timezone.utc)
         ts = now.strftime("%Y-%m-%d-%H-%M-%S")
         saved = _save_light_dark_pngs(
-            plot_json, fpath, ts=ts, relayout_data=relayout_data
+            plot_json,
+            fpath,
+            ts=ts,
+            relayout_data=relayout_data,
+            applied_filters=applied_filters,
+            measurement_info=measurement_info,
         )
 
         # Resolve memory:// paths to disk paths for notes file operations

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { Data, Layout, Config } from "plotly.js";
 import PlotWrapper from "./PlotWrapper";
 import { PlotAPI, PlotRequest } from "../../services/plotAPI";
-import type { SliderConfig, PlotConfiguration } from "../../components/interfaces";
+import type { AttrData, SliderConfig, PlotConfiguration } from "../../components/interfaces";
 import { useToast } from "../../hooks/useToast";
 import { usePlotStore } from "../../stores/plotStore";
 
@@ -30,6 +30,7 @@ interface IndividualPlotProps {
   onRemove: (id: string) => void;
   onSetPinned?: (id: string, pinned: boolean) => void;
   onAddPlot?: (config: Omit<PlotConfiguration, "id">) => void;
+  measurementInfo?: AttrData;
 }
 
 type PlotLiveStatus = "live" | "paused" | "error" | "completed";
@@ -39,6 +40,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
   onRemove,
   onSetPinned,
   onAddPlot,
+  measurementInfo,
 }) => {
   const [plotJson, setPlotJson] = useState<PlotlyJSON | null>(null);
   const [plotRef, setPlotRef] = useState<string | undefined>(undefined);
@@ -469,6 +471,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         onFiltersModalOpenChange={setIsFiltersModalOpen}
         availableSliders={availableSliders}
         onAddPlot={onAddPlot}
+        measurementInfo={measurementInfo}
         onSwapAxesChange={(swapped) => {
           isAxesSwappedRef.current = swapped;
         }}

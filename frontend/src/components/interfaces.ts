@@ -154,6 +154,13 @@ export interface PlotTheme {
   };
 }
 export interface AttrData {
+  "Measurement ID"?: string;
+  Timestamp?: string;
+  Cryostat?: string;
+  "Wafer ID"?: string;
+  "Device Type"?: string;
+  "Sample Name"?: string;
+  "Experiment Name"?: string;
   measurement_id?: string;
   timestamp?: string;
   cryostat?: string;
@@ -163,4 +170,5 @@ export interface AttrData {
   experiment_name?: string;
   independents?: string[];
   dependents?: string[];
+  [key: string]: string | string[] | number | boolean | undefined;
 }

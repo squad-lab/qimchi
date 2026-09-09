@@ -803,6 +803,7 @@ const Viewer = ({
                     perPlotWidthMap={perPlotWidthMap}
                     selectedPlotId={effectiveSelectedPlotId}
                     onSelectPlot={setSelectedPlotId}
+                    basketItems={basketItems}
                   />
                 </div>
               ) : (
