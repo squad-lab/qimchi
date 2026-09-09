@@ -25,6 +25,7 @@ import {
   Tag as TagIcon,
 } from "lucide-react";
 import { Rnd } from "react-rnd";
+import Tooltip from "./Tooltip";
 
 // Section Definitions
 interface HelpSection {
@@ -988,13 +989,16 @@ const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
                 </span>
               </div>
             </div>
-            <button
-              onClick={onClose}
-              className="p-1 rounded-md hover:bg-red-50 hover:text-red-600 transition-all group"
-              title="Close (Esc)"
-            >
-              <X size={18} className="text-gray-400 group-hover:scale-110" />
-            </button>
+            <Tooltip content="Close modal" position="bottom">
+              <button
+                onClick={onClose}
+                className="p-1.5 rounded hover:bg-gray-300 transition-colors"
+                title="Close modal"
+                aria-label="Close modal"
+              >
+                <X size={16} className="text-red-600" />
+              </button>
+            </Tooltip>
           </div>
 
           {/* Body: left tabs + right content */}

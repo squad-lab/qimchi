@@ -3084,7 +3084,9 @@ const PlotWrapper: React.FC<Props> = ({
                   <button
                     onClick={handleSwapAxes}
                     className={`relative p-1.5 rounded transition-colors duration-150 ${
-                      areAxesSwapped ? "bg-blue-100 text-blue-600" : "hover:bg-gray-200"
+                      areAxesSwapped
+                        ? "bg-blue-100 text-blue-600"
+                        : "qimchi-dark-hover-plain hover:bg-gray-200"
                     }`}
                     title="Swap X & Y Axes"
                     disabled={isApplyingFilters}
@@ -3105,7 +3107,7 @@ const PlotWrapper: React.FC<Props> = ({
                     className={`relative p-1.5 rounded transition-colors duration-150 ${
                       isLineCutActive
                         ? "bg-blue-100 text-blue-600 border border-blue-600"
-                        : "hover:bg-gray-200"
+                        : "qimchi-dark-hover-plain hover:bg-gray-200"
                     }`}
                     title="Generate line slices (X/Y keys)"
                     disabled={isApplyingFilters}
@@ -3118,30 +3120,33 @@ const PlotWrapper: React.FC<Props> = ({
                 </Tooltip>
               )}
 
-              {/* Background Correction */}
-              <Tooltip content="Background Correction" position="bottom">
-                <button
-                  onClick={handleBGCorrToggle}
-                  className={`relative p-1.5 rounded transition-colors duration-150 ${
-                    isBGCorrActive
-                      ? "bg-blue-100 text-blue-600 border border-blue-600"
-                      : "hover:bg-gray-200"
-                  }`}
-                  title="BG Correction (interactive)"
-                  disabled={isApplyingFilters}
-                >
-                  <Crosshair
-                    size={16}
-                    className={isBGCorrActive ? "text-blue-600" : "text-gray-600"}
-                  />
-                </button>
-              </Tooltip>
+              {/* Background Correction is not available while the expanded
+                  view is dedicated to the LineCut workflow. */}
+              {!isLineCutActive && (
+                <Tooltip content="Background Correction" position="bottom">
+                  <button
+                    onClick={handleBGCorrToggle}
+                    className={`relative p-1.5 rounded transition-colors duration-150 ${
+                      isBGCorrActive
+                        ? "bg-blue-100 text-blue-600 border border-blue-600"
+                        : "qimchi-dark-hover-plain hover:bg-gray-200"
+                    }`}
+                    title="BG Correction (interactive)"
+                    disabled={isApplyingFilters}
+                  >
+                    <Crosshair
+                      size={16}
+                      className={isBGCorrActive ? "text-blue-600" : "text-gray-600"}
+                    />
+                  </button>
+                </Tooltip>
+              )}
 
               <div className="w-px h-6 bg-gray-200 mx-1" />
 
               <button
                 onClick={handleMaximize}
-                className="p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
+                className="qimchi-dark-hover-plain p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
                 title="Restore"
               >
                 <Minimize2 size={16} className="text-gray-600" />
@@ -3160,13 +3165,19 @@ const PlotWrapper: React.FC<Props> = ({
                 }}
               >
                 <div
-                  className="plot-status-badge absolute top-3 left-3 z-20 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-2.5 py-1 shadow-sm dark:bg-gray-800/90"
+                  className="plot-status-badge absolute top-3 left-3 z-20 inline-flex items-center rounded-full border border-gray-200 bg-white/90 p-1.5 shadow-sm dark:bg-gray-800/90"
                   aria-label={`Status: ${statusLabel[displayStatus]}`}
+                  role="status"
+                  tabIndex={0}
                 >
                   <span
-                    className={`block h-3.5 w-3.5 rounded-full border border-black/10 ${statusClass[displayStatus]}`}
+                    aria-hidden="true"
+                    className={`block h-3.5 w-3.5 shrink-0 rounded-full border border-black/10 ${statusClass[displayStatus]}`}
                   ></span>
-                  <span className="text-xs font-medium text-gray-700">
+                  <span
+                    aria-hidden="true"
+                    className="plot-status-label text-xs font-medium text-gray-700 dark:text-gray-200"
+                  >
                     {statusLabel[displayStatus]}
                   </span>
                 </div>
@@ -3261,7 +3272,7 @@ const PlotWrapper: React.FC<Props> = ({
                           bgCorrPoints.length === 0 ||
                           (isHeatmapPlot && bgCorrMode === "plane" && bgCorrPoints.length < 3)
                         }
-                        className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold py-2 rounded-full transition-all shadow-md active:scale-[0.98]"
+                        className="qimchi-bg-corr-apply flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold py-2 rounded-full transition-all shadow-md active:scale-[0.98]"
                       >
                         Apply{" "}
                         {isHeatmapPlot
@@ -3272,7 +3283,7 @@ const PlotWrapper: React.FC<Props> = ({
                       </button>
                       <button
                         onClick={() => setBgCorrPoints([])}
-                        className="px-4 py-2 hover:bg-gray-100 text-gray-600 text-xs font-bold rounded-full transition-colors"
+                        className="qimchi-dark-hover-plain px-4 py-2 hover:bg-gray-100 text-gray-600 text-xs font-bold rounded-full transition-colors"
                       >
                         Clear
                       </button>
@@ -3282,7 +3293,7 @@ const PlotWrapper: React.FC<Props> = ({
                           setIs3DMode(false);
                           setBgCorrPoints([]);
                         }}
-                        className="px-4 py-2 hover:bg-red-50 text-red-600 text-xs font-bold rounded-full transition-colors"
+                        className="qimchi-dark-hover-plain px-4 py-2 hover:bg-red-50 text-red-600 text-xs font-bold rounded-full transition-colors"
                       >
                         Cancel
                       </button>
@@ -3398,13 +3409,19 @@ const PlotWrapper: React.FC<Props> = ({
         <div className="plot-content">
           <div className={`p-2 pb-0 relative ${isSquareMode ? "square-mode" : ""}`}>
             <div
-              className="plot-status-badge absolute top-3 left-3 z-20 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-2.5 py-1 shadow-sm dark:bg-gray-800/90"
+              className="plot-status-badge absolute top-3 left-3 z-20 inline-flex items-center rounded-full border border-gray-200 bg-white/90 p-1.5 shadow-sm dark:bg-gray-800/90"
               aria-label={`Status: ${statusLabel[displayStatus]}`}
+              role="status"
+              tabIndex={0}
             >
               <span
-                className={`block h-3.5 w-3.5 rounded-full border border-black/10 ${statusClass[displayStatus]}`}
+                aria-hidden="true"
+                className={`block h-3.5 w-3.5 shrink-0 rounded-full border border-black/10 ${statusClass[displayStatus]}`}
               ></span>
-              <span className="text-xs font-medium text-gray-700">
+              <span
+                aria-hidden="true"
+                className="plot-status-label text-xs font-medium text-gray-700 dark:text-gray-200"
+              >
                 {statusLabel[displayStatus]}
               </span>
             </div>
@@ -3433,13 +3450,13 @@ const PlotWrapper: React.FC<Props> = ({
                   <button
                     onClick={() => applyBGCorrNow(bgCorrPoints)}
                     disabled={bgCorrPoints.length === 0}
-                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-[10px] font-bold px-2.5 py-1 rounded-full transition-all active:scale-95"
+                    className="qimchi-bg-corr-apply bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-[10px] font-bold px-2.5 py-1 rounded-full transition-all active:scale-95"
                   >
                     Apply
                   </button>
                   <button
                     onClick={() => setIsBGCorrActive(false)}
-                    className="hover:bg-red-50 text-red-600 text-[10px] font-bold px-2 py-1 rounded-full transition-colors"
+                    className="qimchi-dark-hover-plain hover:bg-red-50 text-red-600 text-[10px] font-bold px-2 py-1 rounded-full transition-colors"
                   >
                     Cancel
                   </button>
@@ -3494,7 +3511,7 @@ const PlotWrapper: React.FC<Props> = ({
                 <Tooltip content="Close" position="left">
                   <button
                     onClick={onClose}
-                    className="p-1.5 rounded hover:bg-gray-300 transition-colors"
+                    className="qimchi-dark-hover-plain p-1.5 rounded hover:bg-gray-300 transition-colors"
                     title="Close"
                   >
                     <X size={16} className="text-red-600" />
@@ -3516,7 +3533,9 @@ const PlotWrapper: React.FC<Props> = ({
                   <button
                     onClick={() => onTogglePinned(!plotConfig?.pinned)}
                     className={`p-1.5 rounded transition-colors ${
-                      plotConfig?.pinned ? "bg-amber-100 hover:bg-amber-200" : "hover:bg-gray-300"
+                      plotConfig?.pinned
+                        ? "bg-amber-100 hover:bg-amber-200"
+                        : "qimchi-dark-hover-plain hover:bg-gray-300"
                     }`}
                     title={plotConfig?.pinned ? "Unpin" : "Pin to measurement"}
                     aria-pressed={Boolean(plotConfig?.pinned)}
@@ -3534,7 +3553,7 @@ const PlotWrapper: React.FC<Props> = ({
               <Tooltip content="Reset plot" position="left">
                 <button
                   onClick={handleReset}
-                  className="p-1.5 rounded hover:bg-orange-100 hover:text-orange-600 transition-colors duration-150"
+                  className="qimchi-dark-hover-plain p-1.5 rounded hover:bg-orange-100 hover:text-orange-600 transition-colors duration-150"
                   title="Reset"
                 >
                   <RotateCcw size={16} className="text-gray-600" />
@@ -3550,7 +3569,7 @@ const PlotWrapper: React.FC<Props> = ({
               <Tooltip content="Export images" position="left">
                 <button
                   onClick={handleSavePlotImages}
-                  className="relative p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
+                  className="qimchi-dark-hover-plain relative p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
                   title="Export images"
                 >
                   <ImageDown size={16} className="text-gray-600" />
@@ -3561,7 +3580,7 @@ const PlotWrapper: React.FC<Props> = ({
               <Tooltip content="Send to Notes" position="left">
                 <button
                   onClick={handleSendToNotes}
-                  className="relative p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
+                  className="qimchi-dark-hover-plain relative p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
                   title="Send to Notes"
                 >
                   <ImagePlus size={16} className="text-gray-600" />
@@ -3584,7 +3603,7 @@ const PlotWrapper: React.FC<Props> = ({
                   }}
                   onMouseEnter={() => setHoverAppearanceBtn(true)}
                   onMouseLeave={() => setHoverAppearanceBtn(false)}
-                  className="relative p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
+                  className="qimchi-dark-hover-plain relative p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
                   title={shiftHeld && hoverAppearanceBtn ? "Paint Appearance" : "Edit Appearance"}
                 >
                   <Palette
@@ -3622,7 +3641,7 @@ const PlotWrapper: React.FC<Props> = ({
                   }}
                   onMouseEnter={() => setHoverFiltersBtn(true)}
                   onMouseLeave={() => setHoverFiltersBtn(false)}
-                  className="relative p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
+                  className="qimchi-dark-hover-plain relative p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
                   title={
                     shiftHeld && hoverFiltersBtn
                       ? "Paint Filters"
@@ -3662,7 +3681,9 @@ const PlotWrapper: React.FC<Props> = ({
                   <button
                     onClick={handleSwapAxes}
                     className={`relative p-1.5 rounded transition-colors duration-150 ${
-                      areAxesSwapped ? "bg-blue-100 text-blue-600" : "hover:bg-gray-200"
+                      areAxesSwapped
+                        ? "bg-blue-100 text-blue-600"
+                        : "qimchi-dark-hover-plain hover:bg-gray-200"
                     }`}
                     title="Swap X & Y Axes"
                     disabled={isApplyingFilters}
@@ -3683,7 +3704,7 @@ const PlotWrapper: React.FC<Props> = ({
                     className={`relative p-1.5 rounded transition-colors duration-150 ${
                       isLineCutActive
                         ? "bg-blue-100 text-blue-600 border border-blue-600"
-                        : "hover:bg-gray-200"
+                        : "qimchi-dark-hover-plain hover:bg-gray-200"
                     }`}
                     title="Generate line slices (X/Y keys)"
                     disabled={isApplyingFilters}
@@ -3709,7 +3730,7 @@ const PlotWrapper: React.FC<Props> = ({
                   className={`relative p-1.5 rounded transition-colors duration-150 ${
                     isBGCorrActive
                       ? "bg-blue-100 text-blue-600 border border-blue-600"
-                      : "hover:bg-gray-200"
+                      : "qimchi-dark-hover-plain hover:bg-gray-200"
                   }`}
                   title="BG Correction (interactive)"
                   disabled={isApplyingFilters}
@@ -3731,7 +3752,7 @@ const PlotWrapper: React.FC<Props> = ({
               <Tooltip content="Maximize" position="left">
                 <button
                   onClick={handleMaximize}
-                  className="p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
+                  className="qimchi-dark-hover-plain p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
                   title="Maximize"
                 >
                   <Maximize2 size={16} className="text-gray-600" />

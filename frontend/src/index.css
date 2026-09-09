@@ -360,9 +360,8 @@ select {
   text-decoration: line-through;
 }
 
-/* Restoring is the one action left on a trashed row, so it alone
-   keeps pointer events -- and it lifts to normal opacity on hover so
-   it is reachable without being loud. */
+/* Explicit recovery/view controls on a trashed row keep pointer events and
+   lift to normal opacity on hover so they remain reachable without being loud. */
 .qimchi-trashed-interactive {
   pointer-events: auto;
   opacity: 1;
@@ -503,6 +502,75 @@ select {
   color: #dcdfe4;
 }
 
+/* Compact action bars use Tailwind's light semantic hover fills. Scope their
+   dark counterparts to the controls opted into this class so blue, red,
+   green, amber and purple actions keep their identity without flashing a
+   pale background. Active/toggled controls intentionally omit the class. */
+.dark .qimchi-dark-hover-plain:hover {
+  background-color: #323842;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-gray-50:hover {
+  background-color: #21252b;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-gray-100:hover {
+  background-color: #282c34;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-gray-200:hover {
+  background-color: #323842;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-gray-300:hover {
+  background-color: #3e4451;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-blue-50:hover {
+  background-color: #1c2733;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-blue-100:hover {
+  background-color: #223244;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-blue-200:hover {
+  background-color: #2b3f57;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-red-50:hover {
+  background-color: #2c1e20;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-red-100:hover {
+  background-color: #3a2529;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-red-200:hover {
+  background-color: #4a2e33;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-green-200:hover,
+.dark .qimchi-dark-hover-plain.qimchi-dark-hover-accent:hover {
+  background-color: #33452c;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-green-50:hover {
+  background-color: #212a1c;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-amber-100:hover {
+  background-color: #3a301b;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-amber-200:hover {
+  background-color: #4a3e22;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-indigo-200:hover {
+  background-color: #343a5a;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-indigo-50:hover {
+  background-color: #262436;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-purple-50:hover {
+  background-color: #2b2233;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-purple-200:hover {
+  background-color: #42334f;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-orange-100:hover {
+  background-color: #3a2e1e;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-orange-50:hover {
+  background-color: #2e2519;
+}
+
 /* Semantic "light chip" colors (badges, dropzones, error/warning boxes):
    dark-tinted backgrounds + lightened text so contrast survives the
    surface flip. Related hues share an Atom One Dark accent. */
@@ -510,6 +578,9 @@ select {
 /* blue / sky */
 .dark .bg-blue-50,
 .dark .bg-sky-50 {
+  background-color: #1c2733;
+}
+.dark .bg-sky-50\/50 {
   background-color: #1c2733;
 }
 .dark .bg-blue-100 {
@@ -542,6 +613,9 @@ select {
 .dark .bg-indigo-50 {
   background-color: #262436;
 }
+.dark .bg-indigo-50\/50 {
+  background-color: #262436;
+}
 .dark .bg-indigo-100 {
   background-color: #262c44;
 }
@@ -561,6 +635,9 @@ select {
   color: #c7d2fe;
 }
 .dark .bg-violet-50 {
+  background-color: #2b2233;
+}
+.dark .bg-violet-50\/50 {
   background-color: #2b2233;
 }
 .dark .border-violet-100 {
@@ -601,6 +678,9 @@ select {
 .dark .bg-emerald-50 {
   background-color: #212a1c;
 }
+.dark .bg-emerald-50\/50 {
+  background-color: #212a1c;
+}
 .dark .bg-green-100,
 .dark .bg-emerald-100 {
   background-color: #283522;
@@ -624,6 +704,9 @@ select {
 /* amber / yellow */
 .dark .bg-amber-50,
 .dark .bg-yellow-50 {
+  background-color: #2e2716;
+}
+.dark .bg-amber-50\/50 {
   background-color: #2e2716;
 }
 .dark .bg-amber-100,
@@ -657,6 +740,9 @@ select {
 .dark .bg-teal-100 {
   background-color: #1c333a;
 }
+.dark .bg-teal-50\/50 {
+  background-color: #1c333a;
+}
 .dark .border-teal-200 {
   border-color: #24424b;
 }
@@ -666,6 +752,9 @@ select {
 
 /* orange */
 .dark .bg-orange-50 {
+  background-color: #2e2519;
+}
+.dark .bg-orange-50\/50 {
   background-color: #2e2519;
 }
 .dark .bg-orange-100 {

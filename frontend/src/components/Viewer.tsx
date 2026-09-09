@@ -725,7 +725,9 @@ const Viewer = ({
                       }
                     }}
                     className={`p-1.5 rounded transition-colors duration-150 ${
-                      isSquareModeGlobal ? "bg-blue-50" : "hover:bg-gray-200"
+                      isSquareModeGlobal
+                        ? "bg-blue-50"
+                        : "qimchi-dark-hover-plain hover:bg-gray-200"
                     }`}
                   >
                     <svg
@@ -766,7 +768,9 @@ const Viewer = ({
                         }}
                         title={`${pct}% width`}
                         className={`px-2 py-1 text-xs font-medium ${
-                          plotWidthPercent === pct ? "bg-gray-100" : "hover:bg-gray-50"
+                          plotWidthPercent === pct
+                            ? "bg-gray-100"
+                            : "qimchi-dark-hover-plain hover:bg-gray-50"
                         } ${idx > 0 ? "-ml-px" : ""}`}
                       >
                         {pct}

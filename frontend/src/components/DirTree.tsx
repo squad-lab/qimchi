@@ -1355,7 +1355,7 @@ const DirTree = ({
                   className={`px-2 py-1 rounded-md transition-all duration-200 ${
                     showLiveOnly
                       ? "bg-linear-to-r from-green-500 to-emerald-500 text-white shadow-md hover:shadow-lg hover:from-green-600 hover:to-emerald-600"
-                      : "bg-blue-50 text-gray-600 hover:bg-blue-100 border border-blue-200"
+                      : "qimchi-dark-hover-plain bg-blue-50 text-gray-600 hover:bg-blue-100 border border-blue-200"
                   }`}
                   title={
                     showLiveOnly
@@ -1416,7 +1416,7 @@ const DirTree = ({
                     }
                   }}
                   disabled={isLoading || !path || !path.trim()}
-                  className="px-2 py-1 text-[#6ea030] bg-[var(--qimchi-accent-light-bg)] hover:bg-[var(--qimchi-accent-header-bg)] rounded disabled:opacity-50 transition-colors"
+                  className="qimchi-dark-hover-plain qimchi-dark-hover-accent px-2 py-1 text-[#6ea030] bg-[var(--qimchi-accent-light-bg)] hover:bg-[var(--qimchi-accent-header-bg)] rounded disabled:opacity-50 transition-colors"
                   title="Refresh directory"
                 >
                   <RefreshCw size={16} className={isLoading ? "animate-spin" : ""} />
@@ -1446,7 +1446,7 @@ const DirTree = ({
                     }
                   }}
                   disabled={sortBy === "chrono"}
-                  className="px-2 py-1 text-gray-600 hover:bg-blue-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="qimchi-dark-hover-plain px-2 py-1 text-gray-600 hover:bg-blue-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   title={
                     sortBy === "chrono"
                       ? "Unavailable in chronological view"
@@ -1467,7 +1467,7 @@ const DirTree = ({
                   className={`px-2 py-1 rounded ${
                     showFilters
                       ? "bg-blue-100 text-blue-800"
-                      : "text-gray-600 hover:bg-blue-200 rounded transition-colors"
+                      : "qimchi-dark-hover-plain text-gray-600 hover:bg-blue-200 rounded transition-colors"
                   }`}
                   title="Toggle filters"
                 >
@@ -1497,7 +1497,7 @@ const DirTree = ({
                     getSelectedNodes().filter((n) => n.type === "file").length === 0 ||
                     selectedInBasket()
                   }
-                  className="px-2 py-1 text-gray-600 hover:bg-green-200 rounded disabled:opacity-50 transition-colors"
+                  className="qimchi-dark-hover-plain px-2 py-1 text-gray-600 hover:bg-green-200 rounded disabled:opacity-50 transition-colors"
                   title="Add all selected files to basket"
                 >
                   <Plus size={16} />
@@ -1519,7 +1519,7 @@ const DirTree = ({
                   type="button"
                   onClick={handleDownloadAllSelected}
                   disabled={getSelectedNodes().length === 0}
-                  className="px-2 py-1 text-gray-600 hover:bg-blue-200 rounded disabled:opacity-50 transition-colors"
+                  className="qimchi-dark-hover-plain px-2 py-1 text-gray-600 hover:bg-blue-200 rounded disabled:opacity-50 transition-colors"
                   title="Download all selected items as ZIP"
                 >
                   <Download size={16} />
@@ -1543,7 +1543,7 @@ const DirTree = ({
                         type="button"
                         onClick={handleBulkHeart}
                         disabled={disabled}
-                        className="px-2 py-1 text-gray-600 hover:bg-red-200 rounded disabled:opacity-50 transition-colors"
+                        className="qimchi-dark-hover-plain px-2 py-1 text-gray-600 hover:bg-red-200 rounded disabled:opacity-50 transition-colors"
                         title={reason ?? `Heart / unheart ${suffix}`}
                       >
                         <Heart size={16} />
@@ -1554,7 +1554,7 @@ const DirTree = ({
                         type="button"
                         onClick={handleBulkTrash}
                         disabled={disabled}
-                        className="px-2 py-1 text-gray-600 hover:bg-amber-200 rounded disabled:opacity-50 transition-colors"
+                        className="qimchi-dark-hover-plain px-2 py-1 text-gray-600 hover:bg-amber-200 rounded disabled:opacity-50 transition-colors"
                         title={reason ?? `Trash / restore ${suffix}`}
                       >
                         <Trash2 size={16} />
@@ -1565,7 +1565,7 @@ const DirTree = ({
                         type="button"
                         onClick={(e) => setBulkTagAnchor(bulkTagAnchor ? null : e.currentTarget)}
                         disabled={disabled}
-                        className="px-2 py-1 text-gray-600 hover:bg-indigo-200 rounded disabled:opacity-50 transition-colors"
+                        className="qimchi-dark-hover-plain px-2 py-1 text-gray-600 hover:bg-indigo-200 rounded disabled:opacity-50 transition-colors"
                         title={reason ?? `Tag ${suffix}`}
                       >
                         <TagIcon size={16} />
@@ -1588,7 +1588,7 @@ const DirTree = ({
                   type="button"
                   onClick={() => handleCycleDataset("prev")}
                   disabled={!isCyclingEnabled()}
-                  className="px-2 py-1 text-gray-600 hover:bg-purple-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                  className="qimchi-dark-hover-plain px-2 py-1 text-gray-600 hover:bg-purple-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                   title="Previous dataset"
                 >
                   <MoveUp size={16} />
@@ -1607,7 +1607,7 @@ const DirTree = ({
                   type="button"
                   onClick={() => handleCycleDataset("next")}
                   disabled={!isCyclingEnabled()}
-                  className="px-2 py-1 text-gray-600 hover:bg-purple-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                  className="qimchi-dark-hover-plain px-2 py-1 text-gray-600 hover:bg-purple-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                   title="Next dataset"
                 >
                   <MoveDown size={16} />
@@ -2201,7 +2201,7 @@ const TreeItemComponent = ({
                 e.stopPropagation();
                 await copyFNameToClipboard(nodeData.name);
               }}
-              className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors shrink-0"
+              className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors shrink-0"
               aria-label={`Copy filename: ${nodeData.name}`}
             >
               {isFNameCopied ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
@@ -2216,7 +2216,7 @@ const TreeItemComponent = ({
                 e.stopPropagation();
                 await copyPathToClipboard(nodeData.path);
               }}
-              className="p-1 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors shrink-0"
+              className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors shrink-0"
               aria-label={`Copy full path: ${nodeData.path}`}
             >
               {isPathCopied ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
@@ -2232,7 +2232,7 @@ const TreeItemComponent = ({
                   e.stopPropagation();
                   onDownload?.(nodeData);
                 }}
-                className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors shrink-0"
+                className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors shrink-0"
                 aria-label="Download dataset"
               >
                 <Download size={14} />
@@ -2249,7 +2249,7 @@ const TreeItemComponent = ({
                   e.stopPropagation();
                   toggleHeart(nodeData.path);
                 }}
-                className={`group/heart p-1 rounded transition-colors shrink-0 ${
+                className={`qimchi-dark-hover-plain group/heart p-1 rounded transition-colors shrink-0 ${
                   libState?.hearted
                     ? "text-red-500 hover:bg-red-50"
                     : "text-gray-400 hover:text-red-500 hover:bg-red-50"
@@ -2279,7 +2279,7 @@ const TreeItemComponent = ({
                   e.stopPropagation();
                   toggleTrash(nodeData.path);
                 }}
-                className={`p-1 rounded transition-colors shrink-0 ${
+                className={`qimchi-dark-hover-plain p-1 rounded transition-colors shrink-0 ${
                   libState?.trashed
                     ? // Restore is the one thing left to do on a trashed row:
                       // re-enabled against the row's pointer-events:none, and
@@ -2304,7 +2304,7 @@ const TreeItemComponent = ({
                   const el = e.currentTarget as HTMLElement;
                   setTagAnchor((a) => (a ? null : el));
                 }}
-                className={`p-1 rounded transition-colors shrink-0 ${
+                className={`qimchi-dark-hover-plain p-1 rounded transition-colors shrink-0 ${
                   (libState?.tags?.length ?? 0) > 0
                     ? "text-indigo-600 hover:bg-indigo-50"
                     : "text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"
@@ -2337,7 +2337,7 @@ const TreeItemComponent = ({
                   e.stopPropagation();
                   onOpenNotes?.(nodeData);
                 }}
-                className="p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors shrink-0"
+                className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors shrink-0"
                 aria-label="Open notes"
               >
                 <NotebookPen size={14} />
@@ -2353,7 +2353,7 @@ const TreeItemComponent = ({
                   e.stopPropagation();
                   onOpenSqliteNode(nodeData);
                 }}
-                className="p-1 rounded transition-colors shrink-0 text-gray-400 hover:text-blue-600 hover:bg-blue-100"
+                className="qimchi-dark-hover-plain p-1 rounded transition-colors shrink-0 text-gray-400 hover:text-blue-600 hover:bg-blue-100"
                 aria-label="Open runs"
               >
                 <FolderOpenIcon size={14} />
@@ -2372,7 +2372,7 @@ const TreeItemComponent = ({
                     onAddToBasket?.(nodeData);
                   }
                 }}
-                className={`p-1 rounded transition-colors shrink-0 ${
+                className={`qimchi-dark-hover-plain p-1 rounded transition-colors shrink-0 ${
                   isInBasket
                     ? "text-red-500 hover:text-red-700 hover:bg-red-50"
                     : "text-gray-400 hover:text-blue-600 hover:bg-blue-100"
@@ -2397,7 +2397,7 @@ const TreeItemComponent = ({
                 e.stopPropagation();
                 await copyFNameToClipboard(nodeData.name);
               }}
-              className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors shrink-0"
+              className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors shrink-0"
               aria-label={`Copy folder name: ${nodeData.name}`}
             >
               {isFNameCopied ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
@@ -2412,7 +2412,7 @@ const TreeItemComponent = ({
                 e.stopPropagation();
                 await copyPathToClipboard(nodeData.path);
               }}
-              className="p-1 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors shrink-0"
+              className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors shrink-0"
               aria-label={`Copy folder path: ${nodeData.path}`}
             >
               {isPathCopied ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
@@ -2427,7 +2427,7 @@ const TreeItemComponent = ({
                 e.stopPropagation();
                 onDownloadFolder?.(nodeData);
               }}
-              className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors shrink-0"
+              className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors shrink-0"
               aria-label={`Download folder: ${nodeData.name}`}
             >
               <Download size={14} />
@@ -2443,7 +2443,7 @@ const TreeItemComponent = ({
                   e.stopPropagation();
                   onOpenSampleNotes?.(nodeData);
                 }}
-                className="p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors shrink-0"
+                className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors shrink-0"
                 aria-label="Open pooled sample notes"
               >
                 <NotebookPen size={14} />

@@ -647,7 +647,7 @@ const Basket = ({
                           e.stopPropagation();
                           onDownload(items);
                         }}
-                        className="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded"
+                        className="qimchi-dark-hover-plain p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded"
                         aria-label="Download basket"
                       >
                         <Download size={16} />
@@ -662,7 +662,7 @@ const Basket = ({
                         e.stopPropagation();
                         onClearAll();
                       }}
-                      className="p-1 text-red-600 hover:text-red-800 hover:bg-red-100 rounded"
+                      className="qimchi-dark-hover-plain p-1 text-red-600 hover:text-red-800 hover:bg-red-100 rounded"
                       aria-label="Clear basket"
                     >
                       <Trash2 size={16} />
@@ -768,7 +768,7 @@ const Basket = ({
                                 e.stopPropagation();
                                 await copyToClipboard(item.name, item.id, "filename");
                               }}
-                              className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                              className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                               title="Copy filename"
                             >
                               {copiedItems[item.id] === "filename" ? (
@@ -820,7 +820,7 @@ const Basket = ({
                                     e.stopPropagation();
                                     onOpenNotesItem(item);
                                   }}
-                                  className="p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                                  className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
                                   title="Open notes"
                                 >
                                   <NotebookPen size={14} />
@@ -837,7 +837,7 @@ const Basket = ({
                                 e.stopPropagation();
                                 onRemoveItem(item.id);
                               }}
-                              className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-100 rounded transition-colors"
+                              className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-red-600 hover:bg-red-100 rounded transition-colors"
                               title="Remove"
                             >
                               <X size={14} />
