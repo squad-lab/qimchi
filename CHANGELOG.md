@@ -23,6 +23,7 @@
 - [Fix] The app no longer writes its log into its own installation folder, which could make a silent update skip files.
 - [Fix] Logs are kept across restarts and updates instead of the debug log being wiped on every launch, and are consolidated in `~/.qimchi/logs`.
 - [Fix] Live qanary plots no longer flicker between live and disk state when a measurement finishes during a refresh, and the release test now exercises the published qanary package reproducibly.
+- [Feature] Unwanted ongoing measurements can be hidden from the Live Measurements view without marking them finished or stopping their producer. Hidden runs stay ignored across restarts, can be restored or immediately undone, and are forgotten after they actually end.
 - [Fix] The Docker image now includes database migrations and dataset readers, and nginx forwards the library and plot-transform APIs used by the frontend.
 - [Fix] The first image export is no longer slow. The export workers and the browser they drive now start with the app, in the background, instead of on your first export -- a wait of several seconds that only ever hit the first plot you exported.
 - [Fix] Plot titles are no longer dark on a dark background in dark mode.

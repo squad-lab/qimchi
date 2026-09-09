@@ -52,6 +52,8 @@ import {
   MoveUp,
   MoveDown,
   Radio,
+  Eye,
+  EyeOff,
   Heart,
   HeartCrack,
   Trash2,
@@ -148,6 +150,7 @@ const DirTree = ({
     showFilters,
     isExpanded,
     showLiveOnly,
+    hiddenLiveMeasurementIds = [],
     // lastPath, // TODO: Use this to track the last loaded path
   } = componentStates.dirTree;
 
@@ -221,6 +224,8 @@ const DirTree = ({
   const [treeError, setTreeError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [apiData, setApiData] = useState<TreeNode[]>([]);
+  const hiddenLiveIdsRef = useRef<Set<string>>(new Set(hiddenLiveMeasurementIds));
+  const latestLiveMeasurementsRef = useRef<TreeNode[]>([]);
   const autoAddedMeasurements = useRef<Set<string>>(new Set());
   const basketItemsRef = useRef<BasketItem[]>(basketItems);
   const onAddToBasketRef = useRef<typeof onAddToBasket>(onAddToBasket);
@@ -228,6 +233,74 @@ const DirTree = ({
     useRef<typeof onStartLoadingAttributes>(onStartLoadingAttributes);
   const onUpdateBasketItemAttributesRef = useRef<typeof onUpdateBasketItemAttributes>(
     onUpdateBasketItemAttributes,
+  );
+
+  useEffect(() => {
+    hiddenLiveIdsRef.current = new Set(hiddenLiveMeasurementIds);
+  }, [hiddenLiveMeasurementIds]);
+
+  const setHiddenLiveIds = useCallback(
+    (ids: Set<string>) => {
+      hiddenLiveIdsRef.current = ids;
+      updateDirTreeState({ hiddenLiveMeasurementIds: Array.from(ids) });
+    },
+    [updateDirTreeState],
+  );
+
+  const restoreHiddenLiveMeasurement = useCallback(
+    (measurementId?: string) => {
+      const nextHidden = new Set(hiddenLiveIdsRef.current);
+      if (measurementId) {
+        nextHidden.delete(measurementId);
+      } else {
+        nextHidden.clear();
+      }
+      setHiddenLiveIds(nextHidden);
+      setApiData(latestLiveMeasurementsRef.current.filter((node) => !nextHidden.has(node.id)));
+    },
+    [setHiddenLiveIds],
+  );
+
+  const hideLiveMeasurement = useCallback(
+    (node: TreeNode) => {
+      const nextHidden = new Set(hiddenLiveIdsRef.current);
+      nextHidden.add(node.id);
+      setHiddenLiveIds(nextHidden);
+      setApiData((current) => current.filter((item) => item.id !== node.id));
+
+      // This also closes the small race between dismissing a row and the next
+      // one-second poll deciding it is a newly discovered measurement.
+      autoAddedMeasurements.current.add(node.id);
+      showToast(`${node.name} hidden from Live Measurements`, "info", 6000, "Explorer", undefined, {
+        label: "Undo",
+        onClick: () => restoreHiddenLiveMeasurement(node.id),
+      });
+    },
+    [restoreHiddenLiveMeasurement, setHiddenLiveIds, showToast],
+  );
+
+  const filterHiddenLiveMeasurements = useCallback(
+    (measurements: TreeNode[]): TreeNode[] => {
+      latestLiveMeasurementsRef.current = measurements;
+      const activeIds = new Set(measurements.map((node) => node.id));
+      const retainedHidden = new Set(
+        Array.from(hiddenLiveIdsRef.current).filter((id) => activeIds.has(id)),
+      );
+
+      // Once a measurement actually ends, forget its dismissal. A future run
+      // should never inherit UI state from an old registry entry.
+      if (retainedHidden.size !== hiddenLiveIdsRef.current.size) {
+        for (const id of hiddenLiveIdsRef.current) {
+          if (!activeIds.has(id)) {
+            autoAddedMeasurements.current.delete(id);
+          }
+        }
+        setHiddenLiveIds(retainedHidden);
+      }
+
+      return measurements.filter((node) => !retainedHidden.has(node.id));
+    },
+    [setHiddenLiveIds],
   );
 
   useEffect(() => {
@@ -273,7 +346,9 @@ const DirTree = ({
           .post(`${PROD_BACKEND_URL}/load-live/`)
           .then((response) => {
             if (response.data.success && response.data.children) {
-              const children = response.data.children.map(convertApiNode);
+              const children = filterHiddenLiveMeasurements(
+                response.data.children.map(convertApiNode),
+              );
               setApiData(children);
               console.log(`Loaded ${children.length} live measurements`);
             } else {
@@ -358,7 +433,7 @@ const DirTree = ({
           setIsLoading(false);
         });
     },
-    [showLiveOnly, showToast],
+    [filterHiddenLiveMeasurements, showLiveOnly, showToast],
   );
 
   // Load data when path or showLiveOnly changes
@@ -388,7 +463,9 @@ const DirTree = ({
         .post(`${PROD_BACKEND_URL}/load-live/`)
         .then((response) => {
           if (response.data.success && response.data.children) {
-            const newMeasurements = response.data.children.map(convertApiNode);
+            const newMeasurements = filterHiddenLiveMeasurements(
+              response.data.children.map(convertApiNode),
+            );
 
             // Incrementally update apiData without full rebuild
             setApiData((prevData) => {
@@ -486,7 +563,7 @@ const DirTree = ({
       console.log("Stopping live measurement polling");
       clearInterval(pollInterval);
     };
-  }, [showLiveOnly]); // Only re-run when showLiveOnly changes
+  }, [filterHiddenLiveMeasurements, showLiveOnly]);
 
   // Signature that changes only when a library filter is active AND the
   // relevant heart/trash state changes.
@@ -1290,12 +1367,38 @@ const DirTree = ({
                 </button>
               </Tooltip>
 
+              {showLiveOnly && hiddenLiveMeasurementIds.length > 0 && (
+                <Tooltip
+                  content={`Restore ${hiddenLiveMeasurementIds.length} hidden live measurement${
+                    hiddenLiveMeasurementIds.length === 1 ? "" : "s"
+                  }`}
+                  position="top"
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const count = hiddenLiveIdsRef.current.size;
+                      restoreHiddenLiveMeasurement();
+                      showToast(
+                        `Restored ${count} live measurement${count === 1 ? "" : "s"}`,
+                        "success",
+                      );
+                    }}
+                    className="qimchi-dark-hover-plain inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100"
+                    aria-label="Restore hidden live measurements"
+                  >
+                    <Eye size={16} />
+                    <span>{hiddenLiveMeasurementIds.length}</span>
+                  </button>
+                </Tooltip>
+              )}
+
               {/* Help Modal Button */}
               <Tooltip content="Help & Tips (Shift+H)" position="right">
                 <button
                   type="button"
                   onClick={() => onOpenHelp?.()}
-                  className="px-2 py-1 flex items-center justify-center text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-md shadow-sm transition-all duration-200 group active:scale-95"
+                  className="qimchi-dark-hover-plain px-2 py-1 flex items-center justify-center text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-md shadow-sm transition-all duration-200 group active:scale-95"
                   title="Help & Tips"
                 >
                   <Lightbulb size={16} className="group-hover:fill-amber-200 transition-colors" />
@@ -1686,6 +1789,9 @@ const DirTree = ({
           searchTerm={searchText}
           basketItems={basketItems}
           path={path}
+          showLiveOnly={showLiveOnly}
+          hiddenLiveMeasurementCount={hiddenLiveMeasurementIds.length}
+          onHideLiveMeasurement={hideLiveMeasurement}
         />
       </div>
     </div>
@@ -1712,6 +1818,9 @@ interface VirtualizedTreeViewProps {
   searchTerm?: string;
   basketItems?: BasketItem[];
   path?: string;
+  showLiveOnly: boolean;
+  hiddenLiveMeasurementCount: number;
+  onHideLiveMeasurement: (node: TreeNode) => void;
 }
 
 const VirtualizedTreeView = forwardRef<
@@ -1738,6 +1847,9 @@ const VirtualizedTreeView = forwardRef<
       searchTerm,
       basketItems,
       path,
+      showLiveOnly,
+      hiddenLiveMeasurementCount,
+      onHideLiveMeasurement,
     },
     ref,
   ) => {
@@ -1815,6 +1927,8 @@ const VirtualizedTreeView = forwardRef<
                     onToggleFolderExpand={onToggleFolderExpand}
                     searchTerm={searchTerm}
                     basketItems={basketItems}
+                    showLiveOnly={showLiveOnly}
+                    onHideLiveMeasurement={onHideLiveMeasurement}
                   />
                 </div>
               );
@@ -1827,9 +1941,13 @@ const VirtualizedTreeView = forwardRef<
               <span>No items to display</span>
             </div>
             <div className="text-xs mt-1">
-              {path
-                ? "Try a different path or check your filters"
-                : "Enter a path to load directory structure"}
+              {showLiveOnly
+                ? hiddenLiveMeasurementCount > 0
+                  ? "All live measurements are hidden"
+                  : "No live measurements"
+                : path
+                  ? "Try a different path or check your filters"
+                  : "Enter a path to load directory structure"}
             </div>
           </div>
         )}
@@ -1858,7 +1976,8 @@ interface TreeItemComponentProps {
   onToggleFolderExpand: (nodeId: string, expanded: boolean) => void;
   searchTerm?: string;
   basketItems?: BasketItem[]; // Items already in the basket
-  // liveStatusMap removed
+  showLiveOnly: boolean;
+  onHideLiveMeasurement: (node: TreeNode) => void;
 }
 
 const TreeItemComponent = ({
@@ -1877,6 +1996,8 @@ const TreeItemComponent = ({
   onToggleFolderExpand,
   searchTerm = "",
   basketItems = [],
+  showLiveOnly,
+  onHideLiveMeasurement,
 }: TreeItemComponentProps) => {
   const { copyToClipboard: copyFNameToClipboard, isCopied: isFNameCopied } = useCopyToClipboard();
   const { copyToClipboard: copyPathToClipboard, isCopied: isPathCopied } = useCopyToClipboard();
@@ -2054,6 +2175,24 @@ const TreeItemComponent = ({
       {!isFolder && (
         <div className="flex items-center px-1 py-0.5 rounded-md">
           {/* className="flex items-center space-x-1 opacity-0 group-hover:backdrop-blur-md group-hover:bg-white/90 group-hover:opacity-100 transition-opacity px-1 py-0.5 rounded-md"> */}
+          {showLiveOnly && nodeData.path.startsWith("memory://") && (
+            <Tooltip content="Hide from Live Measurements" position="top">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onHideLiveMeasurement(nodeData);
+                }}
+                className={`qimchi-dark-hover-plain p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 rounded transition-colors shrink-0 ${
+                  libState?.trashed ? "qimchi-trashed-interactive" : ""
+                }`}
+                aria-label={`Hide ${nodeData.name} from Live Measurements`}
+              >
+                <EyeOff size={14} />
+              </button>
+            </Tooltip>
+          )}
+
           {/* Copy filename button */}
           <Tooltip content="Copy filename" position="top">
             <button

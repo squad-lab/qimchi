@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { X, AlertCircle, CheckCircle, Info, AlertTriangle } from "lucide-react";
-import { ToastContext, LogItem } from "../hooks/useToast";
+import { ToastContext, LogItem, ToastAction } from "../hooks/useToast";
 import NotificationLogModal from "./NotificationLogModal";
 import { useShortcut } from "../hooks/useGlobalShortcuts";
 
@@ -10,6 +10,7 @@ interface ToastProps {
   duration?: number;
   onClose?: () => void;
   className?: string;
+  action?: ToastAction;
 }
 
 interface ToastItem {
@@ -17,6 +18,7 @@ interface ToastItem {
   message: string;
   type: "success" | "error" | "warning" | "info";
   duration: number;
+  action?: ToastAction;
 }
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -31,9 +33,10 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       duration: number = 3000,
       source?: string,
       metadata?: any,
+      action?: ToastAction,
     ) => {
       const id = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-      const newToast: ToastItem = { id, message, type, duration };
+      const newToast: ToastItem = { id, message, type, duration, action };
 
       setToasts((prev) => [...prev, newToast]);
       setLogs((prev) => [
@@ -96,6 +99,7 @@ const ToastContainer: React.FC<{
           message={toast.message}
           type={toast.type}
           duration={toast.duration}
+          action={toast.action}
           onClose={() => onRemove(toast.id)}
         />
       ))}
@@ -109,6 +113,7 @@ const Toast: React.FC<ToastProps> = ({
   duration = 3000,
   onClose,
   className = "",
+  action,
 }) => {
   const [isVisible, setIsVisible] = useState(true);
   const [isExiting, setIsExiting] = useState(false);
@@ -176,6 +181,19 @@ const Toast: React.FC<ToastProps> = ({
     >
       {styles.icon}
       <span className="flex-1 text-sm font-medium">{message}</span>
+      {action && (
+        <button
+          type="button"
+          onClick={() => {
+            action.onClick();
+            setIsVisible(false);
+            onClose?.();
+          }}
+          className="rounded px-2 py-1 text-sm font-semibold underline underline-offset-2 hover:bg-black/5"
+        >
+          {action.label}
+        </button>
+      )}
       <button
         onClick={() => {
           setIsExiting(true);

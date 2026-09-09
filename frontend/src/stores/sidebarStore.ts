@@ -34,6 +34,7 @@ interface ComponentStates {
     isExpanded: boolean;
     lastPath: string; // Track the last loaded path
     showLiveOnly: boolean; // Show only live measurements
+    hiddenLiveMeasurementIds: string[]; // Locally dismissed while still live
   };
 }
 
@@ -90,6 +91,7 @@ const initialComponentStates: ComponentStates = {
     isExpanded: true,
     lastPath: "",
     showLiveOnly: false,
+    hiddenLiveMeasurementIds: [],
   },
 };
 

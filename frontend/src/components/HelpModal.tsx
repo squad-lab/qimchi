@@ -254,6 +254,13 @@ const ExplorerHelp = memo(() => (
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          <span>
+            Use <strong>Hide from Live Measurements</strong> to ignore an unwanted ongoing run. This
+            only changes your local view; it does not stop the measurement or mark it finished.
+          </span>
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           New live measurements are automatically added to the Basket
         </li>
       </ul>
