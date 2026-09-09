@@ -1,6 +1,10 @@
 /* eslint-disable react-refresh/only-export-components -- plot helpers intentionally share this component module */
 import { ChartLine, Grid, Check } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
+import {
+  extractQanaryMeasurementId,
+  formatQanaryMeasurementId,
+} from "../../utils/measurementDisplay";
 
 // Type for option with icon
 type OptionWithIconType = {
@@ -16,10 +20,11 @@ const formatTitleWithUUID = (title: string, maxLength = 15) => {
   const uuid = extractUUID(title);
 
   if (uuid) {
-    if (uuid.length <= maxLength) {
-      return uuid;
+    const displayId = formatQanaryMeasurementId(uuid);
+    if (displayId.length <= maxLength) {
+      return displayId;
     }
-    return `${uuid.substring(0, maxLength - 3)}...`;
+    return `${displayId.substring(0, maxLength - 3)}...`;
   }
 
   // No UUID (non-qanary dataset): show the title itself, truncated
@@ -43,9 +48,7 @@ const getPlotTypeIcon = (plotType: string) => {
 
 // Helper function to extract UUID from plot title
 const extractUUID = (title: string): string | null => {
-  const uuidRegex = /[0-9]\d*-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const match = title.match(uuidRegex);
-  return match ? match[0] : null;
+  return extractQanaryMeasurementId(title);
 };
 
 // Custom icon for log axis

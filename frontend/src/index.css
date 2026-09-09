@@ -284,6 +284,7 @@ select {
      without needing a second hue. */
   --qimchi-tree-folder-fg: #010409;
   --qimchi-tree-dataset-fg: #46536b;
+  --qimchi-tree-shortened-marker-fg: #9aa3af;
 
   /* Trashed rows: still findable, plainly out of the way. */
   --qimchi-trashed-fg: #9aa3af;
@@ -308,6 +309,7 @@ select {
 
   --qimchi-tree-folder-fg: #f0f6fc;
   --qimchi-tree-dataset-fg: #cddaf3;
+  --qimchi-tree-shortened-marker-fg: #7f8795;
 
   --qimchi-trashed-fg: #6b7280;
   --qimchi-trashed-opacity: 0.5;
@@ -345,6 +347,11 @@ select {
 
 .qimchi-tree-dataset {
   color: var(--qimchi-tree-dataset-fg);
+}
+
+/* Only the Explorer's Qanary/QCUtils abbreviation marker is subdued. */
+.qimchi-tree-shortened-marker {
+  color: var(--qimchi-tree-shortened-marker-fg);
 }
 
 /* A trashed row loses its colour and its weight, and keeps only the

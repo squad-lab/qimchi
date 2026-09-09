@@ -5,21 +5,54 @@ Includes Line and HeatMap classes for plotting line graphs and heatmaps using Pl
 """
 
 import json
+import re
 from abc import ABC, abstractmethod
-from xarray import Dataset
 
+from plotly import graph_objects as go
 from plotly.express import colors, imshow
 from plotly.express.colors import named_colorscales
-from plotly import graph_objects as go
+from xarray import Dataset
 
 # Local imports
 from .logger import logger
-
 
 # Default vars # TODOLATER: Remove?
 # QIMCHI_HOME = Path("~/.qimchi").expanduser()
 # DATA_REFRESH_INTERVAL = 1_000  # ms
 SQUARIFY_SIZE = "450px"
+
+_QANARY_MEASUREMENT_ID_RE = re.compile(
+    r"^(\d+-[0-9a-f]{8})-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def _metadata_text(meta: dict, key: str) -> str:
+    value = str(meta.get(key, "")).strip()
+    return "" if value in ("", "N/A") else value
+
+
+def format_measurement_plot_title(meta: dict, fallback: str) -> str:
+    """Build the default display title without changing canonical metadata."""
+    experiment_name = _metadata_text(meta, "Experiment Name")
+    measurement_id = _metadata_text(meta, "Measurement ID")
+    if not experiment_name or not measurement_id:
+        return fallback
+
+    match = _QANARY_MEASUREMENT_ID_RE.fullmatch(measurement_id)
+    display_id = f"{match.group(1)}*" if match else measurement_id
+
+    device_type = _metadata_text(meta, "Device Type")
+    wafer_id = _metadata_text(meta, "Wafer ID")
+    sample_name = _metadata_text(meta, "Sample Name")
+    device_and_wafer = " ".join(part for part in (device_type, wafer_id) if part)
+    context = (
+        f"{device_and_wafer}_{sample_name}"
+        if device_and_wafer and sample_name
+        else device_and_wafer or sample_name
+    )
+
+    return f"{experiment_name}: {display_id}" + (f" ({context})" if context else "")
 
 
 # Plot width options
@@ -347,11 +380,10 @@ class Line(QimchiFigure):
             )
             self.y_title = dep_var
 
-        # Create safe plot title
-        if "Device Type" in self.meta and "Wafer ID" in self.meta:
-            plot_title = f"{self.meta.get('Device Type', '')} {self.meta.get('Wafer ID', '')} {self.meta.get('Sample Name', '')} {self.meta.get('Measurement ID', '')}"
-        else:
-            plot_title = f"{dep_var} vs {self.ind[0]}"
+        # Plot titles are a display surface: Qanary IDs are shortened here only.
+        plot_title = format_measurement_plot_title(
+            self.meta, f"{dep_var} vs {self.ind[0]}"
+        )
 
         layout = {
             "title": {
@@ -585,11 +617,10 @@ class HeatMap(QimchiFigure):
             )
             self.z_title = dep_var
 
-        # Create safe plot title
-        if "Device Type" in self.meta and "Wafer ID" in self.meta:
-            plot_title = f"{self.meta.get('Device Type', '')} {self.meta.get('Wafer ID', '')} {self.meta.get('Sample Name', '')} {self.meta.get('Measurement ID', '')}"
-        else:
-            plot_title = f"{dep_var} vs {self.ind[1]}, {self.ind[0]}"
+        # Plot titles are a display surface: Qanary IDs are shortened here only.
+        plot_title = format_measurement_plot_title(
+            self.meta, f"{dep_var} vs {self.ind[1]}, {self.ind[0]}"
+        )
 
         layout = {
             "title": {

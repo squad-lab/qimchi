@@ -80,6 +80,7 @@ import {
   isSqliteContainerPath,
 } from "../utils/datasetPaths";
 import { finishArchiveDownload } from "../utils/download";
+import { formatQanaryDatasetName } from "../utils/measurementDisplay";
 
 // Global cache to persist data across component mounts/unmounts
 const globalDirTreeCache = new Map<
@@ -2010,6 +2011,7 @@ const TreeItemComponent = ({
     isSqliteContainerPath(nodeData.path) && !nodeData.path.includes("#");
   const isDatasetLeafNode = isDatasetNode(nodeData) && !isSqliteContainerNode;
   const datasetKind = detectDatasetKind(nodeData.path, nodeData.tags);
+  const displayName = isDatasetLeafNode ? formatQanaryDatasetName(nodeData.name) : nodeData.name;
   // Library (heart/trash) state for this node, keyed by normalized path.
   const libState = useLibraryStore((s) => s.statesByPath[normalizePath(nodeData.path)]);
   const toggleHeart = useLibraryStore((s) => s.toggleHeart);
@@ -2048,6 +2050,21 @@ const TreeItemComponent = ({
       ) : (
         part
       ),
+    );
+  };
+
+  const renderExplorerDisplayName = () => {
+    if (displayName === nodeData.name) return highlightSearchTerm(displayName, searchTerm);
+
+    const shortenedMarkerIndex = displayName.indexOf("*");
+    if (shortenedMarkerIndex < 0) return highlightSearchTerm(displayName, searchTerm);
+
+    return (
+      <>
+        {highlightSearchTerm(displayName.slice(0, shortenedMarkerIndex), searchTerm)}
+        <span className="qimchi-tree-shortened-marker">*</span>
+        {highlightSearchTerm(displayName.slice(shortenedMarkerIndex + 1), searchTerm)}
+      </>
     );
   };
 
@@ -2159,7 +2176,7 @@ const TreeItemComponent = ({
                   : "qimchi-tree-folder"
               } ${libState?.trashed ? "qimchi-trashed" : ""}`}
             >
-              {highlightSearchTerm(nodeData.name, searchTerm)}
+              {renderExplorerDisplayName()}
             </span>
             {isSqliteContainerNode && (
               <span className="text-[10px] uppercase tracking-wide text-teal-700 bg-teal-100 border border-teal-200 rounded px-1 py-0.5 shrink-0">
