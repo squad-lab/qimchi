@@ -271,6 +271,9 @@ build-windows:
     #   6. Inno Setup installer → packaging/build/qimchi-setup.exe
     - ./build_local.ps1
     - if (!(Test-Path "packaging/build/qimchi-setup.exe")) { throw "Installer build failed" }
+    # This runner has no interactive Windows desktop. Exercise the actual
+    # packaged exe in headless smoke mode: backend, bundled SPA and downloads.
+    - backend/.venv/Scripts/python.exe scripts/run_packaged_smoke.py packaging/build/qimchi/qimchi.exe --mode headless
     - $installerSize = (Get-Item "packaging/build/qimchi-setup.exe").Length / 1MB
     - echo "Successfully built qimchi-setup.exe ($([math]::Round($installerSize, 2)) MB)"
 
@@ -381,7 +384,7 @@ build-linux:
     - |
       apt-get update -qq
       DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-          python3-pip curl file patchelf squashfs-tools imagemagick \
+          python3-pip curl file patchelf squashfs-tools imagemagick xvfb dbus-x11 \
           libgirepository1.0-dev gcc pkg-config libcairo2-dev \
           gir1.2-gtk-3.0 gir1.2-webkit2-4.0 libwebkit2gtk-4.0-dev
       # uv: install via pip into /usr/local/bin so it is on PATH in script:.
@@ -405,6 +408,10 @@ build-linux:
         exit 1
       fi
       echo "Successfully built qimchi-${ARCH}.AppImage ($(du -m packaging/build/qimchi-${ARCH}.AppImage | cut -f1) MB)"
+      python3 scripts/run_packaged_smoke.py "packaging/build/qimchi-${ARCH}.AppImage" --mode headless
+      WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 dbus-run-session -- \
+        xvfb-run -a python3 scripts/run_packaged_smoke.py \
+          "packaging/build/qimchi-${ARCH}.AppImage" --mode native --timeout 240
   artifacts:
     name: "qimchi-linux"
     paths:

@@ -22,7 +22,13 @@ def _bundle_dir() -> str:
     if getattr(sys, "frozen", False):
         # PyInstaller onefile (temp extraction dir) or onedir (_internal/ subdir)
         return sys._MEIPASS  # type: ignore[attr-defined]
-    return os.path.dirname(os.path.abspath(__file__))
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    repository_root = os.path.dirname(script_dir)
+    # The canonical launcher can also be exercised directly during development;
+    # the staged copy is frozen and continues to resolve through sys._MEIPASS.
+    if os.path.isdir(os.path.join(repository_root, "backend")):
+        return repository_root
+    return script_dir
 
 
 def _qimchi_home() -> str:
@@ -162,7 +168,7 @@ def _find_installed_chrome() -> str | None:
     Locate a real Chrome/Chromium (NOT Edge -- Edge is unreliable with
     choreographer). Checks PATH and common Windows install locations, plus a
     Chrome we may have downloaded on a previous run.
-    
+
     """
     import glob
     import shutil
@@ -212,7 +218,9 @@ def _ensure_chrome_for_kaleido(log) -> None:
 
     def _download() -> None:
         try:
-            log("[chrome] no Chrome found; downloading Chrome for Testing (one-time)...")
+            log(
+                "[chrome] no Chrome found; downloading Chrome for Testing (one-time)..."
+            )
             import kaleido
 
             exe = kaleido.get_chrome_sync(path=_persistent_chrome_dir())
@@ -382,9 +390,7 @@ class _Api:
             ):
                 if shutil.which(term):
                     if term in ("gnome-terminal", "xfce4-terminal"):
-                        subprocess.Popen(
-                            [term, "--", "bash", "-c", f"tail -f '{log}'"]
-                        )
+                        subprocess.Popen([term, "--", "bash", "-c", f"tail -f '{log}'"])
                     elif term == "konsole":
                         subprocess.Popen([term, "-e", "bash", "-c", f"tail -f '{log}'"])
                     else:
@@ -606,15 +612,180 @@ def _run_update_check(window, log) -> None:
         log(f"[updater] unexpected error: {exc!r}")
 
 
-def main() -> None:
+def _prepare_smoke_fixture() -> tuple[str, str]:
+    """Create the isolated dataset and download directory used by CI smoke tests."""
+    smoke_root = os.path.join(_qimchi_home(), "desktop-smoke")
+    download_dir = os.environ.get(
+        "QIMCHI_DOWNLOAD_DIR", os.path.join(smoke_root, "downloads")
+    )
+    dataset_path = os.environ.get(
+        "QIMCHI_SMOKE_DATASET", os.path.join(smoke_root, "smoke-measurement.nc")
+    )
+    os.makedirs(download_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(dataset_path), exist_ok=True)
+    with open(dataset_path, "wb") as dataset:
+        dataset.write(b"qimchi packaged desktop smoke fixture")
+    os.environ["QIMCHI_DOWNLOAD_DIR"] = download_dir
+    return dataset_path, download_dir
+
+
+def _validate_smoke_archive(archive_path: str, dataset_path: str) -> None:
+    """Assert that the desktop download is a readable ZIP containing the fixture."""
+    import zipfile
+
+    if not os.path.isfile(archive_path):
+        raise RuntimeError(f"Desktop download was not created: {archive_path}")
+    with zipfile.ZipFile(archive_path) as archive:
+        if os.path.basename(dataset_path) not in archive.namelist():
+            raise RuntimeError(
+                f"Desktop archive does not contain {os.path.basename(dataset_path)}"
+            )
+
+
+def _run_headless_smoke(base_url: str, log) -> bool:
+    """Exercise the packaged backend, bundled SPA, and desktop download path."""
+    import io
+    import json
+    import traceback
+    import urllib.parse
+    import urllib.request
+    import zipfile
+
+    try:
+        dataset_path, download_dir = _prepare_smoke_fixture()
+
+        with urllib.request.urlopen(f"{base_url}/", timeout=15) as response:
+            index_html = response.read().decode("utf-8")
+            if response.status != 200 or 'id="root"' not in index_html:
+                raise RuntimeError("Bundled frontend index did not load")
+
+        with urllib.request.urlopen(f"{base_url}/health", timeout=15) as response:
+            health = json.loads(response.read())
+            if response.status != 200 or health.get("ok") is not True:
+                raise RuntimeError(f"Backend health check failed: {health}")
+
+        request = urllib.request.Request(
+            f"{base_url}/download/",
+            data=json.dumps({"path": dataset_path}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            archive_bytes = response.read()
+            saved_header = response.headers.get("X-Qimchi-Saved-To")
+            if response.status != 200 or not saved_header:
+                raise RuntimeError(
+                    "Desktop download response did not report a saved path"
+                )
+
+        saved_path = urllib.parse.unquote(saved_header)
+        if os.path.commonpath(
+            (os.path.abspath(saved_path), os.path.abspath(download_dir))
+        ) != os.path.abspath(download_dir):
+            raise RuntimeError(
+                f"Desktop download escaped its test directory: {saved_path}"
+            )
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            if os.path.basename(dataset_path) not in archive.namelist():
+                raise RuntimeError("HTTP download response is not the expected archive")
+        _validate_smoke_archive(saved_path, dataset_path)
+        log(f"[smoke] PASS headless packaged-app smoke; archive={saved_path}")
+        return True
+    except Exception:
+        log("[smoke] FAIL headless packaged-app smoke:\n" + traceback.format_exc())
+        return False
+
+
+def _run_native_smoke(window, dataset_path: str, download_dir: str, log) -> bool:
+    """Drive one real pywebview workflow and close the native window."""
+    import glob
+    import time
+    import traceback
+
+    try:
+        deadline = time.time() + 60
+        ready = False
+        while time.time() < deadline:
+            try:
+                state = window.evaluate_js(
+                    """
+                    (() => ({
+                      root: Boolean(document.querySelector('#root')),
+                      bridge: Boolean(window.pywebview && window.pywebview.api),
+                      download: Boolean(document.querySelector(
+                        'button[aria-label="Download smoke-measurement.nc"]'
+                      )),
+                    }))()
+                    """
+                )
+                if (
+                    state
+                    and state.get("root")
+                    and state.get("bridge")
+                    and state.get("download")
+                ):
+                    ready = True
+                    break
+            except Exception:
+                pass
+            time.sleep(0.25)
+
+        if not ready:
+            raise RuntimeError("SPA or pywebview bridge did not become ready")
+
+        clicked = window.evaluate_js(
+            """
+            (() => {
+              const button = document.querySelector(
+                'button[aria-label="Download smoke-measurement.nc"]'
+              );
+              if (!button) return false;
+              button.click();
+              return true;
+            })()
+            """
+        )
+        if not clicked:
+            raise RuntimeError("Could not click the desktop download action")
+
+        archive_path = None
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            matches = glob.glob(os.path.join(download_dir, "smoke-measurement*.zip"))
+            if matches:
+                archive_path = matches[0]
+                break
+            time.sleep(0.25)
+        if archive_path is None:
+            raise RuntimeError("Native frontend did not create a desktop download")
+
+        _validate_smoke_archive(archive_path, dataset_path)
+        log(f"[smoke] PASS native pywebview smoke; archive={archive_path}")
+        return True
+    except Exception:
+        log("[smoke] FAIL native pywebview smoke:\n" + traceback.format_exc())
+        return False
+    finally:
+        try:
+            window.destroy()
+        except Exception:
+            pass
+
+
+def main() -> int:
     # Re-entry guard (against fork bombs). If a dependency or a
     # stray call ever re-launches the frozen exe, the child inherits this env
     # var and exits immediately instead of starting a second server + window.
     # Note: multiprocessing export workers never reach here -- freeze_support()
     # intercepts them earlier -- so this does not affect the export pool.
     if os.environ.get("QIMCHI_LAUNCHER_ACTIVE") == "1":
-        return
+        return 0
     os.environ["QIMCHI_LAUNCHER_ACTIVE"] = "1"
+
+    headless_smoke = os.environ.get("QIMCHI_HEADLESS_SMOKE") == "1"
+    native_smoke = os.environ.get("QIMCHI_NATIVE_SMOKE") == "1"
+    if headless_smoke or native_smoke:
+        os.environ["ENABLE_KALEIDO_WARMUP"] = "0"
 
     import socket
     import threading
@@ -623,7 +794,9 @@ def main() -> None:
     import urllib.request
 
     import uvicorn
-    import webview
+
+    if not headless_smoke:
+        import webview
 
     log_file = _open_log_file(_log_path())
 
@@ -653,9 +826,11 @@ def main() -> None:
             port = s.getsockname()[1]
         log(f"Default port busy; using free port {port}")
 
-    _ensure_chrome_for_kaleido(log)
+    if not (headless_smoke or native_smoke):
+        _ensure_chrome_for_kaleido(log)
 
     server_error: dict[str, str] = {}
+    server_ref: dict[str, uvicorn.Server] = {}
 
     def start_server() -> None:
         try:
@@ -663,7 +838,10 @@ def main() -> None:
             from main import app
 
             log(f"Running uvicorn on 127.0.0.1:{port}...")
-            uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+            config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="info")
+            server = uvicorn.Server(config)
+            server_ref["server"] = server
+            server.run()
         except BaseException:  # noqa: BLE001 - we want EVERYTHING logged
             tb = traceback.format_exc()
             server_error["tb"] = tb
@@ -689,14 +867,37 @@ def main() -> None:
         except Exception:
             time.sleep(0.25)
 
+    base_url = health_url.removesuffix("/health")
+    if headless_smoke:
+        passed = ready and _run_headless_smoke(base_url, log)
+        server = server_ref.get("server")
+        if server is not None:
+            server.should_exit = True
+        t.join(timeout=30)
+        if t.is_alive():
+            log("[smoke] FAIL backend did not stop cleanly")
+            passed = False
+        log_file.flush()
+        return 0 if passed else 1
+
+    if native_smoke and not ready:
+        log_file.flush()
+        return 1
+
     # The _Api instance is shared between the folder-picker and the updater so
     # both have access to the log function.
     api = _Api(log)
 
+    smoke_fixture = _prepare_smoke_fixture() if native_smoke else None
     if ready:
+        window_url = base_url + "/"
+        if smoke_fixture is not None:
+            import urllib.parse
+
+            window_url += "?dataset=" + urllib.parse.quote(smoke_fixture[0])
         window = webview.create_window(
             "Qimchi",
-            health_url.replace("/health", "/"),
+            window_url,
             js_api=api,
             maximized=True,
         )
@@ -723,9 +924,16 @@ def main() -> None:
 
     # Run the update check in the background after the window is ready.
     # Only run when the app started successfully and we're in a frozen build.
-    if window is not None and getattr(sys, "frozen", False):
+    native_smoke_result = {"passed": False}
+    if window is not None and (getattr(sys, "frozen", False) or native_smoke):
+
         def _on_loaded() -> None:
-            _run_update_check(window, log)
+            if native_smoke and smoke_fixture is not None:
+                native_smoke_result["passed"] = _run_native_smoke(
+                    window, smoke_fixture[0], smoke_fixture[1], log
+                )
+            else:
+                _run_update_check(window, log)
 
         webview.start(
             func=_on_loaded,
@@ -735,10 +943,22 @@ def main() -> None:
     else:
         webview.start(private_mode=False, storage_path=storage_path)
 
+    if native_smoke:
+        server = server_ref.get("server")
+        if server is not None:
+            server.should_exit = True
+        t.join(timeout=30)
+        if t.is_alive():
+            log("[smoke] FAIL backend did not stop cleanly")
+            native_smoke_result["passed"] = False
+        log_file.flush()
+        return 0 if native_smoke_result["passed"] else 1
+    return 0
+
 
 if __name__ == "__main__":
     # MUST be first: on Windows, ProcessPoolExecutor export workers re-execute
     # this frozen exe. freeze_support() makes those children run the worker and
     # exit instead of re-launching uvicorn + a new window.
     multiprocessing.freeze_support()
-    main()
+    raise SystemExit(main())
