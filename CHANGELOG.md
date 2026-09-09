@@ -35,6 +35,7 @@
 - [Misc] Measurement metadata is read once and cached, so reopening a dataset no longer re-reads the file.
 - [Misc] Windows uninstaller now offers to also remove the app's runtime data and cache (`~/.qimchi`: saved settings/window state, logs, and the ~150 MB downloaded Chrome used for image export). Your library, exported plots, notes, and datasets are left untouched.
 - [Misc] CI now verifies the locked backend environment and runs frontend ESLint, Prettier, and production-build checks; frontend formatting and linting are available as npm scripts.
+- [Misc] Backend regression coverage now spans every module, including downloads, exports, filters, notes, live data, library state, plotting, and application lifecycle, with a 75% coverage floor enforced in CI.
 - [Misc] Hovering the filter button now lists the filters applied to that plot, by name and in the order they are applied.
 - [Misc] Trashed measurements are quieter: greyed out, no red on the icon, and only Restore responds -- so a trashed dataset cannot be opened or plotted by accident.
 - [Misc] Following a live measurement now transfers only the rows measured since the last refresh instead of the whole grid every time, which keeps a long sweep as cheap to watch at the end as at the start. Takes effect once your producers run qimchi-connect 0.3.0 or newer.

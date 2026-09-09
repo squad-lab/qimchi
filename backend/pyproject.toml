@@ -129,6 +129,7 @@ omit = ["migrations/*"]
 
 [tool.coverage.report]
 show_missing = true
+fail_under = 75
 exclude_also = [
     "if TYPE_CHECKING:",
     "raise NotImplementedError",
