@@ -32,6 +32,7 @@ import {
   isComposerCompatibleWithDataset,
 } from "../utils/datasetFieldSelectors";
 import { isDatasetPath, isMemoryPath } from "../utils/datasetPaths";
+import { finishArchiveDownload } from "../utils/download";
 
 interface ViewerProps {
   defaultWidth?: number; // In percentage (0-100)
@@ -614,17 +615,15 @@ const Viewer = ({
         responseType: "blob",
       });
 
-      // Create a download link
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", `selected_datasets_${datasetItems.length}_files.zip`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      const result = finishArchiveDownload(
+        response,
+        `selected_datasets_${datasetItems.length}_files.zip`,
+      );
 
       console.log("Download initiated successfully");
+      if (result.savedTo) {
+        showToast(`Saved to ${result.savedTo}`, "success");
+      }
     } catch {
       // console.error("Error downloading selected items:", error);
       showToast("Failed to download selected items", "error");

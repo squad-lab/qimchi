@@ -11,6 +11,7 @@ import DirTree from "./DirTree";
 import { TreeNode } from "./treeUtils";
 import Tooltip from "./Tooltip";
 import { useSidebarStore } from "../stores/sidebarStore";
+import { finishArchiveDownload } from "../utils/download";
 // window.pywebview types: see src/pywebview.d.ts
 
 interface ExplorerProps {
@@ -184,17 +185,12 @@ const Explorer = ({
         { responseType: "blob" },
       );
 
-      // Create a download link
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", `${node.name}.zip`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      const result = finishArchiveDownload(response, `${node.name}.zip`);
 
       console.log("Download initiated successfully");
+      if (result.savedTo) {
+        showToast(`Saved to ${result.savedTo}`, "success");
+      }
     } catch (error) {
       console.error("Error downloading dataset:", error);
       showToast("Failed to download dataset", "error", 3000, "Explorer", {

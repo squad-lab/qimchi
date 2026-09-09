@@ -28,18 +28,8 @@ import Tooltip from "./Tooltip";
 import { useToast } from "../hooks/useToast";
 import { SharedFieldResult, isFieldShared } from "../utils/datasetFieldSelectors";
 import { detectDatasetKind, isDatasetPath, isSqliteContainerPath } from "../utils/datasetPaths";
-
-interface AttrData {
-  measurement_id?: string;
-  timestamp?: string;
-  cryostat?: string;
-  wafer_id?: string;
-  device_type?: string;
-  sample_name?: string;
-  experiment_name?: string;
-  independents?: string[];
-  dependents?: string[];
-}
+import { finishArchiveDownload } from "../utils/download";
+import type { AttrData } from "./interfaces";
 
 export interface BasketItem {
   id: string;
@@ -800,21 +790,21 @@ const Basket = ({
                                     { paths: [item.path] },
                                     { responseType: "blob" },
                                   );
-                                  const url = window.URL.createObjectURL(new Blob([response.data]));
-                                  const link = document.createElement("a");
-                                  link.href = url;
-                                  link.setAttribute("download", `${item.name}.zip`);
-                                  document.body.appendChild(link);
-                                  link.click();
-                                  link.remove();
-                                  window.URL.revokeObjectURL(url);
+                                  const result = finishArchiveDownload(
+                                    response,
+                                    `${item.name}.zip`,
+                                  );
+                                  if (result.savedTo) {
+                                    showToast(`Saved to ${result.savedTo}`, "success");
+                                  }
                                 } catch (error) {
                                   console.error("Error downloading item:", error);
                                   showToast("Failed to download item", "error");
                                 }
                               }}
-                              className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-100 rounded transition-colors"
+                              className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-100 rounded transition-colors"
                               title="Download"
+                              aria-label={`Download ${item.name}`}
                             >
                               <Download size={14} />
                             </button>

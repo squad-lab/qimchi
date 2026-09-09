@@ -4,19 +4,68 @@ FastAPI endpoints for downloading datasets, folders, and multiple files as zip f
 """
 
 import os
-import zipfile
+import shutil
 import tempfile
-
+import zipfile
 from pathlib import Path
+from urllib.parse import quote
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-# Local imports
-from .models import PathData, PathsData
 from .logger import logger
 
+# Local imports
+from .models import PathData, PathsData
 
 router = APIRouter()
+
+
+def _desktop_download_dir() -> Path | None:
+    """Return the local download directory used by the desktop shell."""
+    if os.environ.get("QIMCHI_DESKTOP", "").lower() not in ("1", "true", "yes"):
+        return None
+
+    override = os.environ.get("QIMCHI_DOWNLOAD_DIR")
+    target = Path(override).expanduser() if override else (Path.home() / "Downloads")
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+    except OSError:
+        logger.exception("Could not create desktop download dir %s", target)
+        return None
+
+
+def _unique_destination(directory: Path, filename: str) -> Path:
+    """Choose a destination without replacing a previous download."""
+    destination = directory / filename
+    counter = 2
+    while destination.exists():
+        destination = (
+            directory / f"{Path(filename).stem} ({counter}){Path(filename).suffix}"
+        )
+        counter += 1
+    return destination
+
+
+def _download_response(zip_path: Path, zip_filename: str) -> FileResponse:
+    """Return an archive and persist it directly when running in pywebview."""
+    headers = {"Content-Disposition": f"attachment; filename={zip_filename}"}
+    save_dir = _desktop_download_dir()
+    if save_dir is not None:
+        destination = _unique_destination(save_dir, zip_filename)
+        shutil.copy2(zip_path, destination)
+        # Keep the response header ASCII-safe; the frontend decodes it before
+        # showing the destination and skips its unsupported blob download.
+        headers["X-Qimchi-Saved-To"] = quote(str(destination), safe="")
+        logger.info("Saved desktop download to %s", destination)
+
+    return FileResponse(
+        path=zip_path,
+        filename=zip_filename,
+        media_type="application/zip",
+        headers=headers,
+    )
 
 
 @router.post("/download/")
@@ -39,12 +88,8 @@ async def download_dataset(path: PathData) -> FileResponse:
     # NOTE: The datasets are .zarr folders, so we need to zip them before downloading
 
     if not path.exists():
-        logger.error(
-            f"download_dataset | Path does not exist: {path}"
-        )
-        raise HTTPException(
-            status_code=404, detail="Path does not exist"
-        )
+        logger.error(f"download_dataset | Path does not exist: {path}")
+        raise HTTPException(status_code=404, detail="Path does not exist")
 
     try:
         # Create a temporary zip file
@@ -80,12 +125,7 @@ async def download_dataset(path: PathData) -> FileResponse:
         logger.debug(f"download_dataset | Created zip file: {zip_path}")
 
         # Return the zip file for download
-        return FileResponse(
-            path=zip_path,
-            filename=zip_filename,
-            media_type="application/zip",
-            headers={"Content-Disposition": f"attachment; filename={zip_filename}"},
-        )
+        return _download_response(zip_path, zip_filename)
 
     except Exception as e:
         logger.error(
@@ -170,12 +210,7 @@ async def download_selected_datasets(paths: list[PathData]) -> FileResponse:
         )
 
         # Return the zip file for download
-        return FileResponse(
-            path=zip_path,
-            filename=zip_filename,
-            media_type="application/zip",
-            headers={"Content-Disposition": f"attachment; filename={zip_filename}"},
-        )
+        return _download_response(zip_path, zip_filename)
 
     except Exception as e:
         logger.error(
@@ -236,8 +271,18 @@ async def download_multiple_datasets(data: PathsData) -> FileResponse:
                 zipf.write(file_path, file_path.name)
 
                 # If it's a supported dataset, also add the associated notes/metadata folder if it exists
-                dataset_extensions = {".zarr", ".nc", ".h5", ".hdf5", ".csv", ".txt", ".dat"}
-                if file_path.suffix in dataset_extensions or file_path.name.endswith(".zarr"):
+                dataset_extensions = {
+                    ".zarr",
+                    ".nc",
+                    ".h5",
+                    ".hdf5",
+                    ".csv",
+                    ".txt",
+                    ".dat",
+                }
+                if file_path.suffix in dataset_extensions or file_path.name.endswith(
+                    ".zarr"
+                ):
                     dataset_uuid = file_path.stem
                     notes_folder = file_path.parent / dataset_uuid
 
@@ -283,7 +328,15 @@ async def download_multiple_datasets(data: PathsData) -> FileResponse:
                                 zipf.write(notes_file_path, arcname)
                 else:
                     # If directory contains datasets, also add associated notes/metadata folders
-                    dataset_extensions = ["*.zarr", "*.nc", "*.h5", "*.hdf5", "*.csv", "*.txt", "*.dat"]
+                    dataset_extensions = [
+                        "*.zarr",
+                        "*.nc",
+                        "*.h5",
+                        "*.hdf5",
+                        "*.csv",
+                        "*.txt",
+                        "*.dat",
+                    ]
                     for ext in dataset_extensions:
                         for ds_file in dir_path.glob(ext):
                             dataset_uuid = ds_file.stem
@@ -309,12 +362,7 @@ async def download_multiple_datasets(data: PathsData) -> FileResponse:
         )
 
         # Return the zip file for download
-        return FileResponse(
-            path=zip_path,
-            filename=zip_filename,
-            media_type="application/zip",
-            headers={"Content-Disposition": f"attachment; filename={zip_filename}"},
-        )
+        return _download_response(zip_path, zip_filename)
 
     except Exception as e:
         logger.error(
@@ -368,7 +416,15 @@ async def download_folder(path: PathData) -> FileResponse:
                     zipf.write(file_path, arcname)
 
             # Also add notes folders for any datasets found in the folder
-            dataset_extensions = ["*.zarr", "*.nc", "*.h5", "*.hdf5", "*.csv", "*.txt", "*.dat"]
+            dataset_extensions = [
+                "*.zarr",
+                "*.nc",
+                "*.h5",
+                "*.hdf5",
+                "*.csv",
+                "*.txt",
+                "*.dat",
+            ]
             for ext in dataset_extensions:
                 for ds_path in path.glob(ext):
                     dataset_uuid = ds_path.stem
@@ -388,12 +444,7 @@ async def download_folder(path: PathData) -> FileResponse:
         logger.debug(f"download_folder | Created zip file: {zip_path}")
 
         # Return the zip file for download
-        return FileResponse(
-            path=zip_path,
-            filename=zip_filename,
-            media_type="application/zip",
-            headers={"Content-Disposition": f"attachment; filename={zip_filename}"},
-        )
+        return _download_response(zip_path, zip_filename)
 
     except Exception as e:
         logger.error(

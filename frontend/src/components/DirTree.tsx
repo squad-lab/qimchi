@@ -77,6 +77,7 @@ import {
   isDatasetPath,
   isSqliteContainerPath,
 } from "../utils/datasetPaths";
+import { finishArchiveDownload } from "../utils/download";
 
 // Global cache to persist data across component mounts/unmounts
 const globalDirTreeCache = new Map<
@@ -1019,21 +1020,16 @@ const DirTree = ({
         { responseType: "blob" },
       );
 
-      // Create a download link
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement("a");
-      link.href = url;
       const filename =
         selectedNodes.length === 1
           ? `${selectedNodes[0].name}.zip`
           : `selected_items_${new Date().toISOString().split("T")[0]}.zip`;
-      link.setAttribute("download", filename);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      const result = finishArchiveDownload(response, filename);
       console.log("Download initiated successfully");
-      showToast("Download started successfully", "success");
+      showToast(
+        result.savedTo ? `Saved to ${result.savedTo}` : "Download started successfully",
+        "success",
+      );
     } catch (error) {
       console.error("Error downloading selected items:", error);
       showToast("Failed to download selected items", "error");
@@ -1052,18 +1048,13 @@ const DirTree = ({
         { responseType: "blob" },
       );
 
-      // Create a download link
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement("a");
-      link.href = url;
       const filename = `${node.name}.zip`;
-      link.setAttribute("download", filename);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      const result = finishArchiveDownload(response, filename);
       console.log("Folder download initiated successfully");
-      showToast("Folder download started successfully", "success");
+      showToast(
+        result.savedTo ? `Saved to ${result.savedTo}` : "Folder download started successfully",
+        "success",
+      );
     } catch (error) {
       console.error("Error downloading folder:", error);
       showToast("Failed to download folder", "error");
