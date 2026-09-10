@@ -5,15 +5,18 @@ The filters are adapted from the Qimchi Dash app.
 """
 
 import base64
-import numpy as np
+import math
 from copy import deepcopy
-from fastapi import APIRouter, HTTPException
 
+import numpy as np
+from fastapi import APIRouter, HTTPException
 from numpy.polynomial.polynomial import Polynomial
-from skimage import exposure
-from scipy.signal import savgol_filter
-from scipy.ndimage import affine_transform
 from plotly import graph_objects as go
+from scipy.ndimage import affine_transform
+from scipy.signal import savgol_filter
+from skimage import exposure
+
+from .json_utils import sanitize_for_json
 
 # Local imports
 from .logger import logger
@@ -21,8 +24,20 @@ from .models import (
     TransformPlotRequest,
     TransformPlotResponse,
 )
-from .json_utils import sanitize_for_json
-
+from .units import (
+    SCALE_QUANTITIES,
+    Unit,
+    axis_definition,
+    axis_definition_from_figure,
+    axis_title_template_from_figure,
+    divide_units,
+    inverse_unit,
+    multiply_units,
+    render_unit,
+    scale_quantity_label_suffix,
+    set_figure_axis_definition,
+    set_figure_derivative_axis_definition,
+)
 
 # FastAPI Router
 router = APIRouter()
@@ -60,9 +75,12 @@ DEFAULT_SC_OPTS = {
 }
 
 DEFAULT_POLYFIT_OPTS = {
-    "deg": 5,
+    "deg": 2,
     "window": [0, 1],  # TODOLATER: window
 }
+
+POLYFIT_META_KEY = "qimchi_polyfit"
+POLYFIT_ANNOTATION_NAME = "qimchi-polyfit-equation"
 
 # TODOLATER: Can allow specifying the range to scale to.
 # TODOLATER: See: https://scikit-image.org/docs/stable/api/skimage.exposure.html#skimage.exposure.rescale_intensity
@@ -111,45 +129,88 @@ def _safe_init(options: dict, key: str, default: dict) -> dict:
     return options.get(key, default) if options else default
 
 
-def _pprint_poly(poly: Polynomial, x_var: str):
+def _format_latex_coefficient(value: float, notation: str = "scientific") -> str:
+    """Format a coefficient to two significant figures in the chosen notation."""
+    if value == 0 or not math.isfinite(value):
+        return f"{value:.2g}"
+
+    exponent = math.floor(math.log10(abs(value)))
+    if notation == "engineering":
+        exponent = 3 * math.floor(exponent / 3)
+        upper_limit = 1000
+    else:
+        upper_limit = 10
+
+    significand = value / (10.0**exponent)
+    leading_power = math.floor(math.log10(abs(significand)))
+    rounding_places = 1 - leading_power
+    decimal_places = max(0, rounding_places)
+    significand = round(significand, rounding_places)
+
+    # Rounding 9.96 or 999.6 can move the significand into the next range.
+    if abs(significand) >= upper_limit:
+        exponent += 3 if notation == "engineering" else 1
+        significand /= upper_limit
+        leading_power = math.floor(math.log10(abs(significand)))
+        rounding_places = 1 - leading_power
+        decimal_places = max(0, rounding_places)
+        significand = round(significand, rounding_places)
+
+    rendered = f"{significand:.{decimal_places}f}"
+    if "." in rendered:
+        rendered = rendered.rstrip("0").rstrip(".")
+    if exponent == 0:
+        return rendered
+    return rf"{rendered}\times 10^{{{exponent}}}"
+
+
+def _physical_polynomial_coefficients(poly: Polynomial) -> list[float]:
+    physical = poly.convert()
+    coefficient_scale = max((abs(float(value)) for value in physical.coef), default=0.0)
+    zero_tolerance = np.finfo(float).eps * max(1.0, coefficient_scale) * 100
+    return [
+        0.0 if abs(float(value)) <= zero_tolerance else float(value)
+        for value in physical.coef
+    ]
+
+
+def _pprint_poly(poly: Polynomial, notation: str = "scientific") -> str:
     """
     Helper function to pretty-print a polynomial equation in LaTeX.
 
     Args:
         poly (Polynomial): Polynomial object.
-        x_var (str): Variable name for the polynomial.
-
     Returns:
         str: Pretty-printed polynomial equation in LaTeX
 
     """
 
-    # If x_var is too long, only use the capitalized letters in the string + the unit in parentheses
-    if len(x_var) > 4:
-        unit = x_var[x_var.find("(") :]
-        x_var = x_var.split("(")[0].strip()
-        x_var = "".join([c for c in x_var if c.isupper()])
-        x_var += f"({unit})" if unit else ""
-
-    # TODOLATER: Add support for auto-wrapped text
-    for i, coef in enumerate(poly.coef):
-        # # Format the coefficient for LaTeX, converting scientific notation if needed
-        # if "e" in _format_number(coef):
-        #     base, exponent = _format_number(abs(coef) if i > 0 else coef).split("e")
-        #     formatted_coef = f"{base}\\times 10^{{{int(exponent)}}}"
-        # else:
-        #     formatted_coef = _format_number(abs(coef) if i > 0 else coef)
-
-        if i == 0:
-            poly_str = f"{_format_number(coef)}"
-            # poly_str = f"{formatted_coef}"
-
+    # ``Polynomial.fit`` works in a mapped numerical domain.  Convert before
+    # reading coefficients so the displayed equation is in the physical x
+    # coordinate used by the plot.
+    coefficients = _physical_polynomial_coefficients(poly)
+    terms: list[str] = []
+    for power in range(len(coefficients) - 1, -1, -1):
+        coefficient = coefficients[power]
+        if coefficient == 0 and power > 0:
+            continue
+        sign = "-" if coefficient < 0 else "+"
+        rendered_coefficient = _format_latex_coefficient(abs(coefficient), notation)
+        variable = ""
+        if power == 1:
+            variable = r"\,x"
+        elif power > 1:
+            variable = rf"\,x^{{{power}}}"
+        term = f"{rendered_coefficient}{variable}"
+        if not terms:
+            terms.append(("-" if sign == "-" else "") + term)
         else:
-            sign = "+" if coef >= 0 else "-"
-            poly_str += f" {sign} {_format_number(abs(coef))}({x_var})^{i}"
+            terms.append(f" {sign} {term}")
 
+    expression = "".join(terms) or "0"
+    poly_str = f"${expression}$"
     logger.debug(f"Pretty-printed polynomial equation: {poly_str}")
-    return f"{poly_str}"
+    return poly_str
 
 
 def _extract_axis_data(data_dict: dict, axis_name: str) -> np.ndarray:
@@ -252,6 +313,8 @@ class Filter:
         # Extract labels and title from the dict
         self.x_label = figure["layout"]["xaxis"]["title"]["text"]
         self.y_label = figure["layout"]["yaxis"]["title"]["text"]
+        self.x_definition = axis_definition_from_figure(figure, "x")
+        self.y_definition = axis_definition_from_figure(figure, "y")
         # Handle title that might be a string or a dict with 'text' key
         title_obj = figure["layout"].get("title", "")
         if isinstance(title_obj, dict):
@@ -265,10 +328,23 @@ class Filter:
             if self.z_axis.ndim == 1:
                 # Reshape to 2D array if it's a 1D array
                 self.z_axis = self.z_axis.reshape((self.y_axis.size, self.x_axis.size))
-            self.z_label = figure["layout"]["coloraxis"]["colorbar"]["title"]["text"]
+            self.z_definition = axis_definition_from_figure(figure, "z")
+            self.z_label = self.z_definition["label"]
 
         # Convert dict to go.Figure object after extracting data
         self.new_fig = go.Figure(figure)
+        # Attach semantic metadata without flattening an existing MathJax axis
+        # title (for example, a derivative produced by an earlier filter).
+        set_figure_axis_definition(
+            self.new_fig, "x", self.x_definition, update_title=False
+        )
+        set_figure_axis_definition(
+            self.new_fig, "y", self.y_definition, update_title=False
+        )
+        if self.num_axes == 2:
+            set_figure_axis_definition(
+                self.new_fig, "z", self.z_definition, update_title=False
+            )
 
     def apply(self, *args, **kwargs):
         """
@@ -303,7 +379,12 @@ class Filter:
         """Leave the plot title unchanged; filter provenance is stored elsewhere."""
         del fil
 
-    def _hmap_update(self, z_data: np.ndarray, fil: str) -> None:
+    def _hmap_update(
+        self,
+        z_data: np.ndarray,
+        fil: str,
+        definition: dict[str, str] | None = None,
+    ) -> None:
         """
         Updates the 2D HeatMap plot with new Z-axis data & label and re-scales the colorbar.
 
@@ -314,21 +395,12 @@ class Filter:
         """
         # Update the coloraxis properties
         self.new_fig.update_layout(
-            coloraxis=dict(
-                colorbar=dict(
-                    title=dict(
-                        text=f"Filt.<br>{self.z_label}"
-                        if "Filt." not in self.z_label
-                        else self.z_label
-                    )
-                ),
-                cmin=np.nanmin(z_data),
-                cmax=np.nanmax(z_data),
-            )
+            coloraxis=dict(cmin=np.nanmin(z_data), cmax=np.nanmax(z_data))
         )
-
         # Update the z data for the first trace
         self.new_fig.data[0].z = z_data
+        if definition is not None:
+            set_figure_axis_definition(self.new_fig, "z", definition)
         self._update_title(fil)
 
 
@@ -381,7 +453,19 @@ class Differentiate(Filter):
         """
         # Update y data and y-axis label
         self.new_fig.data[0].y = np.gradient(self.y_axis, self.x_axis)
-        self.new_fig.update_layout(yaxis=dict(title=dict(text=f"d{self.y_label}")))
+        definition = axis_definition(
+            f"d{self.y_definition['label']}/d{self.x_definition['label']}",
+            render_unit(
+                divide_units(self.y_definition["unit"], self.x_definition["unit"])
+            ),
+        )
+        set_figure_derivative_axis_definition(
+            self.new_fig,
+            "y",
+            self.y_definition["label"],
+            self.x_definition["label"],
+            definition,
+        )
         self._update_title("d")
 
     def apply_2d(self, twod_axis=0):
@@ -399,15 +483,19 @@ class Differentiate(Filter):
                 # Differentiate along axis 0 (rows/y-direction)
                 # Use y_axis spacing since axis 0 corresponds to y-direction
                 z_data = np.gradient(self.z_axis, self.y_axis, axis=0)
+                denominator = self.y_definition
+                compact_denominator = "y"
                 twod_axis_label = (
-                    f"d{self.y_label}" if "$" not in self.y_label else "dx"
+                    f"d{self.z_definition['label']}/d{denominator['label']}"
                 )
             case 1:
                 # Differentiate along axis 1 (columns/x-direction)
                 # Use x_axis spacing since axis 1 corresponds to x-direction
                 z_data = np.gradient(self.z_axis, self.x_axis, axis=1)
+                denominator = self.x_definition
+                compact_denominator = "x"
                 twod_axis_label = (
-                    f"d{self.x_label}" if "$" not in self.x_label else "dy"
+                    f"d{self.z_definition['label']}/d{denominator['label']}"
                 )
             case _:
                 err = f"Invalid value of `twod_axis={twod_axis}` for differentiation."
@@ -415,7 +503,97 @@ class Differentiate(Filter):
                 raise ValueError(err)
 
         # Update the figure
+        definition = axis_definition(
+            twod_axis_label,
+            render_unit(divide_units(self.z_definition["unit"], denominator["unit"])),
+        )
         self._hmap_update(z_data, fil=twod_axis_label)
+        set_figure_derivative_axis_definition(
+            self.new_fig,
+            "z",
+            self.z_definition["label"],
+            denominator["label"],
+            definition,
+            compact=True,
+            compact_denominator=compact_denominator,
+        )
+
+
+class Scale(Filter):
+    """Apply a user-requested scalar or quantity transformation to Y/Z."""
+
+    def __init__(self, figure: dict, num_axes: int, options: dict = None) -> None:
+        super().__init__(figure, num_axes, options)
+        self.operation = _safe_init(options, "operation", "multiply")
+        self.factor = float(_safe_init(options, "factor", 1.0))
+        self.factor_unit = str(_safe_init(options, "factor_unit", "") or "")
+        self.result_unit = str(_safe_init(options, "result_unit", "") or "")
+        self.result_label = str(_safe_init(options, "result_label", "") or "")
+
+    def _transform(self, values: np.ndarray, definition: dict[str, str]):
+        operation = self.operation
+        if operation == "inverse":
+            transformed = np.reciprocal(values.astype(float))
+            inferred = inverse_unit(definition["unit"])
+            label = f"1/{definition['label']}"
+        elif operation == "multiply":
+            transformed = values * self.factor
+            inferred = multiply_units(definition["unit"], self.factor_unit)
+            label = definition["label"]
+        elif operation in SCALE_QUANTITIES:
+            # Quantity scales express the data *in units of* the constant, so
+            # they divide: a conductance in S over G0 (S) is dimensionless.
+            quantity = SCALE_QUANTITIES[operation]
+            transformed = values / float(quantity["value"])
+            inferred = divide_units(definition["unit"], str(quantity["unit"]))
+            label = (
+                f"{self.result_label or definition['label']}"
+                f"{scale_quantity_label_suffix(quantity['expression'])}"
+            )
+        else:
+            raise ValueError(f"Unsupported scale operation: {operation}")
+
+        if inferred.is_dimensionless and not math.isclose(inferred.scale, 1.0):
+            transformed = transformed * inferred.scale
+            inferred = Unit()
+        unit = self.result_unit or render_unit(inferred)
+        result_label = (
+            label if operation in SCALE_QUANTITIES else self.result_label or label
+        )
+        return transformed, axis_definition(result_label, unit)
+
+    def _set_axis_definition(self, axis: str, definition: dict[str, str]) -> None:
+        template = axis_title_template_from_figure(self.new_fig, axis)
+        if (
+            not self.result_label
+            and template is not None
+            and template.get("kind") == "derivative"
+        ):
+            numerator = template.get("numerator_label", "Y")
+            denominator = template.get("denominator_label", "X")
+            if self.operation == "inverse":
+                numerator, denominator = denominator, numerator
+            set_figure_derivative_axis_definition(
+                self.new_fig,
+                axis,
+                numerator,
+                denominator,
+                definition,
+                compact=bool(template.get("compact", False)),
+                compact_denominator=str(template.get("compact_denominator", "x")),
+            )
+            return
+        set_figure_axis_definition(self.new_fig, axis, definition)
+
+    def apply_1d(self):
+        values, definition = self._transform(self.y_axis, self.y_definition)
+        self.new_fig.data[0].y = values
+        self._set_axis_definition("y", definition)
+
+    def apply_2d(self):
+        values, definition = self._transform(self.z_axis, self.z_definition)
+        self._hmap_update(values, fil="Scale")
+        self._set_axis_definition("z", definition)
 
 
 class Smooth(Filter):
@@ -450,20 +628,24 @@ class Smooth(Filter):
         data = np.copy(data)
         # Convert infs to nans for interpolation
         data[np.isinf(data)] = np.nan
-        
+
         warning_text = "Interpolated missing data for Smoothing"
         if warning_text not in self.warnings:
             self.warnings.append(warning_text)
-        
+
         def _fill_1d(arr):
             nans = np.isnan(arr)
             if not np.any(nans):
                 return arr
             if np.all(nans):
                 return np.zeros_like(arr)
-            
-            x = lambda z: z.nonzero()[0]
-            arr[nans] = np.interp(x(nans), x(~nans), arr[~nans])
+
+            def nonzero_indices(values):
+                return values.nonzero()[0]
+
+            arr[nans] = np.interp(
+                nonzero_indices(nans), nonzero_indices(~nans), arr[~nans]
+            )
             return arr
 
         if data.ndim == 1:
@@ -512,7 +694,6 @@ class Smooth(Filter):
             mode=self.mode,
             cval=self.cval,
         )
-        self.new_fig.update_layout(yaxis=dict(title=dict(text=f"Sm {self.y_label}")))
         self._update_title("Sm")
 
     def apply_2d(self):
@@ -572,7 +753,7 @@ class Smooth(Filter):
             # For axis=2, we smooth along 0 then 1. Need to clean both directions or just clean all.
             # Easiest is to clean along axis 0, smooth, then clean the result along axis 1 (though smoothing shouldn't introduce NaNs)
             clean_z = self._fill_nans(self.z_axis, axis=0)
-            
+
             z_data_x = savgol_filter(
                 clean_z,
                 window_length=window_x,
@@ -671,7 +852,6 @@ class SimpleMovingAverage(Filter):
         self.new_fig.data[0].y = np.convolve(
             self.y_axis, np.ones(safe_window) / safe_window, mode="same"
         )
-        self.new_fig.update_layout(yaxis=dict(title=dict(text=f"SMA {self.y_label}")))
         self._update_title("SMA")
 
     def apply_2d(self):
@@ -703,7 +883,6 @@ class Normalize(Filter):
 
         """
         self.new_fig.data[0].y = self.y_axis / np.nanmax(np.abs(self.y_axis))
-        self.new_fig.update_layout(yaxis=dict(title=dict(text=f"Norm {self.y_label}")))
         self._update_title("Norm")
 
     def apply_2d(self):
@@ -956,7 +1135,6 @@ class LogScale(Filter):
 
         """
         self.new_fig.data[0].y = np.log(self.y_axis)
-        self.new_fig.update_layout(yaxis=dict(title=dict(text=f"log {self.y_label}")))
         self._update_title("log")
 
     def apply_2d(self):
@@ -987,6 +1165,8 @@ class PolyFit(Filter):
         Applies the polynomial fitting filter to a 1D plot.
 
         """
+        self.new_fig.update_layout(showlegend=False)
+
         # Fit the data to a polynomial
         poly = Polynomial.fit(
             self.x_axis,
@@ -995,6 +1175,12 @@ class PolyFit(Filter):
             window=self.window,
         )
         fit_line = poly(self.x_axis)
+        current_meta = dict(self.new_fig.layout.meta or {})
+        current_meta[POLYFIT_META_KEY] = {
+            "coefficients": _physical_polynomial_coefficients(poly),
+            "engineering": _pprint_poly(poly, "engineering"),
+        }
+        self.new_fig.update_layout(meta=current_meta)
 
         # Add the fit line to the plot
         self.new_fig.add_trace(
@@ -1020,7 +1206,8 @@ class PolyFit(Filter):
             y=0.95,
             xref="paper",
             yref="paper",
-            text=f"{_pprint_poly(poly, self.x_label)}",
+            name=POLYFIT_ANNOTATION_NAME,
+            text=current_meta[POLYFIT_META_KEY]["engineering"],
             showarrow=False,
             font=dict(size=16, color="rebeccapurple"),
             bgcolor="white",
@@ -1100,11 +1287,6 @@ class BackgroundCorrection(Filter):
         else:
             logger.error(f"Unknown background correction mode: {self.mode}")
             return
-
-        new_label = (
-            f"Filt. {self.y_label}" if "Filt." not in self.y_label else self.y_label
-        )
-        self.new_fig.update_layout(yaxis=dict(title=dict(text=new_label)))
 
     def apply_2d(self):
         """
@@ -1325,6 +1507,12 @@ def apply_filters(
                 filt_fig, filter_warnings = filt_obj.apply(twod_axis=1)
                 all_warnings.extend(filter_warnings)
 
+            case "transform":
+                logger.debug("apply_filters | Applying user scale...")
+                filt_obj = Scale(fig_tmp, fig_num_axes, opts)
+                filt_fig, filter_warnings = filt_obj.apply()
+                all_warnings.extend(filter_warnings)
+
             case "savgol":
                 logger.debug("apply_filters | Applying `Smooth` filter...")
                 filt_obj = Smooth(fig_tmp, fig_num_axes, opts)
@@ -1427,8 +1615,8 @@ def _generate_plot_json_for_transform(
     swap_xy: bool,
 ) -> tuple[dict, list[str]]:
     """Generate a plot JSON from canonical plot context + transform settings."""
-    from .plots import create_line_plots, create_heat_maps
     from .data_loader import load_dataset_sync
+    from .plots import create_heat_maps, create_line_plots
 
     dataset = load_dataset_sync(fpath)
     logger.debug(f"Loaded dataset with dims: {list(dataset.dims)}")
@@ -1503,7 +1691,9 @@ async def transform_plot_endpoint(
 
         plot_json = sanitize_for_json(plot_json)
 
-        return TransformPlotResponse(plot_json=plot_json, plot_ref=request.plot_ref, warnings=warnings)
+        return TransformPlotResponse(
+            plot_json=plot_json, plot_ref=request.plot_ref, warnings=warnings
+        )
     except HTTPException:
         raise
     except Exception as e:

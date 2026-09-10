@@ -16,6 +16,7 @@ import {
   FlipHorizontal,
   Info,
   MoveHorizontal,
+  Ruler,
   AlertTriangle,
   Crosshair,
 } from "lucide-react";
@@ -57,6 +58,7 @@ const FILTER_CATEGORIES = {
     "sma",
     "normalize",
     "log_scale",
+    "transform",
     "polyfit",
     "bg_corr_constant",
     "bg_corr_linear",
@@ -76,6 +78,7 @@ const FILTER_CATEGORIES = {
     "bg_corr_col_mean",
     "bg_corr_plane",
     "log_scale",
+    "transform",
     "rotate",
   ],
 };
@@ -142,6 +145,11 @@ const FILTER_DEFINITIONS = {
     name: "Polynomial Fit",
     icon: ChartLine,
     description: "Fit a polynomial to the line plot",
+  },
+  transform: {
+    name: "Scale",
+    icon: Ruler,
+    description: "Scale or invert Y/Z data with smart unit handling",
   },
   rotate: {
     name: "Rotate Heatmap",
@@ -225,8 +233,16 @@ const DEFAULT_FILTER_OPTIONS = {
 
   polyfit: {
     enabled: false,
-    deg: 5,
+    deg: 2,
     window: [0, 1],
+  },
+  transform: {
+    enabled: false,
+    operation: "multiply",
+    factor: 1,
+    factor_unit: "",
+    result_unit: "",
+    result_label: "",
   },
   rotate: {
     enabled: false,
@@ -1535,6 +1551,104 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                       )}
 
                       {/* Polynomial Fit options */}
+                      {activeTab === "transform" && (
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Operation
+                            </label>
+                            <select
+                              value={(filterConfig as Record<string, unknown>).operation as string}
+                              onChange={(e) =>
+                                updateFilterSetting(activeTab, "operation", e.target.value)
+                              }
+                              className="w-full p-2 border border-gray-300 rounded"
+                              aria-label="Scale operation"
+                              title="Scale operation"
+                            >
+                              <option value="multiply">Multiply</option>
+                              <option value="inverse">Inverse (1/value)</option>
+                              <option value="g0">Divide by e² / h (G₀)</option>
+                              <option value="2g0">Divide by 2e² / h (2G₀)</option>
+                              <option value="r0">Divide by h / e² (R₀)</option>
+                            </select>
+                          </div>
+
+                          {(filterConfig as Record<string, unknown>).operation === "multiply" && (
+                            <>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Scalar
+                                </label>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  value={(filterConfig as Record<string, unknown>).factor as number}
+                                  onChange={(e) =>
+                                    updateFilterSetting(activeTab, "factor", Number(e.target.value))
+                                  }
+                                  className="w-full p-2 border border-gray-300 rounded"
+                                  aria-label="Scale scalar"
+                                  title="Scale scalar"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Scalar Unit (optional)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={
+                                    (filterConfig as Record<string, unknown>).factor_unit as string
+                                  }
+                                  onChange={(e) =>
+                                    updateFilterSetting(activeTab, "factor_unit", e.target.value)
+                                  }
+                                  placeholder="e.g. V, mA, Ω"
+                                  className="w-full p-2 border border-gray-300 rounded"
+                                  aria-label="Scale scalar unit"
+                                />
+                              </div>
+                            </>
+                          )}
+
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Result Unit (optional override)
+                            </label>
+                            <input
+                              type="text"
+                              value={
+                                (filterConfig as Record<string, unknown>).result_unit as string
+                              }
+                              onChange={(e) =>
+                                updateFilterSetting(activeTab, "result_unit", e.target.value)
+                              }
+                              placeholder="Leave blank to infer"
+                              className="w-full p-2 border border-gray-300 rounded"
+                              aria-label="Result unit override"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Result Label (optional)
+                            </label>
+                            <input
+                              type="text"
+                              value={
+                                (filterConfig as Record<string, unknown>).result_label as string
+                              }
+                              onChange={(e) =>
+                                updateFilterSetting(activeTab, "result_label", e.target.value)
+                              }
+                              placeholder="Leave blank to retain the label"
+                              className="w-full p-2 border border-gray-300 rounded"
+                              aria-label="Result label override"
+                            />
+                          </div>
+                        </div>
+                      )}
+
                       {activeTab === "polyfit" && (
                         <div>
                           <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">

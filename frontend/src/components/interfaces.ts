@@ -54,6 +54,14 @@ export interface FilterSettings {
     deg: number;
     window: [number, number];
   };
+  transform?: {
+    enabled: boolean;
+    operation: "inverse" | "multiply" | "g0" | "2g0" | "r0";
+    factor: number;
+    factor_unit: string;
+    result_unit: string;
+    result_label: string;
+  };
   rotate?: {
     enabled: boolean;
     angle: number;
