@@ -4,9 +4,11 @@ FastAPI endpoint to export Plotly plots as PNG, PDF and SVG.
 """
 
 import asyncio
+import base64
 import json
 import os
 import shutil
+import sys
 import tempfile
 import time
 import uuid
@@ -53,6 +55,7 @@ _FILTER_DISPLAY_NAMES = {
     "rescale_intensity": "Rescale Intensity",
     "log_scale": "Log Scale",
     "polyfit": "Polynomial Fit",
+    "transform": "Scale",
     "rotate": "Rotate Heatmap",
     "flip": "Flip Heatmap",
     "bg_corr_constant": "BG Correction (Constant)",
@@ -75,12 +78,206 @@ _MEASUREMENT_INFO_FIELDS = (
 _PLOTLY_DEFAULT_WIDTH = int(getattr(pio.defaults, "default_width", 700) or 700)
 _PLOTLY_DEFAULT_HEIGHT = int(getattr(pio.defaults, "default_height", 500) or 500)
 _EXPORT_INFO_FONT_FAMILY = "monospace"
+_FIRA_SANS_WEIGHTS = (400, 500, 600, 700)
+_MATHJAX_FIRA_SVG_URL = (
+    "https://cdn.jsdelivr.net/npm/@mathjax/mathjax-fira-font@4.1.3/"
+    "tex-mml-svg-mathjax-fira.js"
+)
+
+
+def _find_fira_sans_fonts() -> dict[int, Path]:
+    """Locate the bundled frontend font files in dev, Docker, and frozen builds."""
+    project_root = Path(__file__).resolve().parents[2]
+    asset_roots = [
+        project_root / "frontend" / "dist" / "assets",
+        Path("/app/frontend/dist/assets"),
+    ]
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        asset_roots.insert(0, Path(sys._MEIPASS) / "frontend" / "dist" / "assets")  # type: ignore[attr-defined]
+
+    for root in asset_roots:
+        found: dict[int, Path] = {}
+        for weight in _FIRA_SANS_WEIGHTS:
+            matches = sorted(root.glob(f"fira-sans-latin-{weight}-normal*.woff2"))
+            if matches:
+                found[weight] = matches[0]
+        if len(found) == len(_FIRA_SANS_WEIGHTS):
+            return found
+
+    source_root = (
+        project_root
+        / "frontend"
+        / "node_modules"
+        / "@fontsource"
+        / "fira-sans"
+        / "files"
+    )
+    source_fonts = {
+        weight: source_root / f"fira-sans-latin-{weight}-normal.woff2"
+        for weight in _FIRA_SANS_WEIGHTS
+    }
+    return source_fonts if all(path.is_file() for path in source_fonts.values()) else {}
+
+
+def _fira_sans_font_faces(fonts: dict[int, Path]) -> str:
+    """Return self-contained font-face rules suitable for HTML or SVG."""
+    return "\n".join(
+        (
+            "@font-face {"
+            "font-family:'Fira Sans';"
+            "font-style:normal;"
+            f"font-weight:{weight};"
+            "font-display:block;"
+            "src:url('data:font/woff2;base64,"
+            f"{base64.b64encode(path.read_bytes()).decode('ascii')}"
+            "') format('woff2');"
+            "}"
+        )
+        for weight, path in fonts.items()
+    )
+
+
+def _embed_fira_sans_in_svg(path: str | Path) -> None:
+    """Make an exported SVG portable instead of relying on installed fonts."""
+    svg_path = Path(path)
+    if svg_path.suffix.lower() != ".svg":
+        return
+
+    fonts = _find_fira_sans_fonts()
+    if not fonts:
+        logger.warning("Could not embed Fira Sans in SVG %s", svg_path)
+        return
+
+    svg = svg_path.read_text(encoding="utf-8")
+    if 'id="qimchi-export-fonts"' in svg:
+        return
+    opening_tag_end = svg.find(">")
+    if opening_tag_end < 0:
+        logger.warning("Could not find the opening tag in SVG %s", svg_path)
+        return
+
+    embedded_style = (
+        '<defs><style id="qimchi-export-fonts" type="text/css"><![CDATA['
+        f"{_fira_sans_font_faces(fonts)}"
+        "]]></style></defs>"
+    )
+    svg_path.write_text(
+        f"{svg[: opening_tag_end + 1]}{embedded_style}{svg[opening_tag_end + 1 :]}",
+        encoding="utf-8",
+    )
+
+
+def export_page_generator():
+    """Build Kaleido's page with Qimchi's Fira text and mathematics fonts."""
+    from kaleido import PageGenerator
+
+    base = PageGenerator(mathjax=_MATHJAX_FIRA_SVG_URL)
+    fonts = _find_fira_sans_fonts()
+    if not fonts:
+        logger.warning(
+            "Bundled Fira Sans files were not found; exports may use a fallback"
+        )
+        return base
+
+    font_faces = _fira_sans_font_faces(fonts)
+    font_loads = ",".join(
+        (
+            f"document.fonts.load('{weight} 16px \"Fira Sans\"')"
+            ".then((faces) => {"
+            "if (!faces.length) throw new Error('Fira Sans did not load');"
+            "return faces;"
+            "})"
+        )
+        for weight in fonts
+    )
+    injection = f"""
+        <style id="qimchi-export-fonts">{font_faces}</style>
+        <script>
+          (() => {{
+            const qimchiFontsReady = Promise.all([{font_loads}])
+              .then(() => document.fonts.ready);
+            const qimchiMathReady = window.MathJax?.startup?.promise
+              ?? Promise.resolve();
+            const qimchiExportReady = Promise.all([
+              qimchiFontsReady,
+              qimchiMathReady,
+            ]);
+            const plotlyToImage = Plotly.toImage.bind(Plotly);
+            Plotly.toImage = (...args) => qimchiExportReady
+              .then(() => plotlyToImage(...args));
+            window.qimchiFontsReady = qimchiFontsReady;
+            window.qimchiExportReady = qimchiExportReady;
+          }})();
+        </script>
+    """
+
+    class QimchiExportPage:
+        def generate_index(self) -> str:
+            return base.generate_index().replace("</head>", f"{injection}</head>", 1)
+
+    return QimchiExportPage()
+
+
+def _write_plotly_image(
+    fig: go.Figure | Dict,
+    path: str | Path,
+    *,
+    width: int | None = None,
+    height: int | None = None,
+    scale: float | None = None,
+) -> None:
+    """Write through Kaleido without re-supplying options to its live server.
+
+    Plotly's ``write_image`` currently always forwards a non-empty ``kopts``
+    dictionary. Kaleido ignores that dictionary, and emits a warning, when its
+    persistent sync server is running. Qimchi configures that server once with
+    :func:`export_page_generator`, so forwarding the page options per render is
+    both redundant and noisy.
+
+    If this function is used without the persistent server, the same custom
+    page is supplied to the one-shot Kaleido instance so font and MathJax
+    rendering remain identical.
+    """
+    import kaleido
+
+    target = Path(path)
+    figure_layout = (
+        fig.layout.to_plotly_json()
+        if isinstance(fig, go.Figure)
+        else fig.get("layout", {})
+    )
+    template_layout = figure_layout.get("template", {}).get("layout", {})
+    opts = {
+        "format": target.suffix.lstrip(".").lower()
+        or getattr(pio.defaults, "default_format", "png"),
+        "width": width
+        or figure_layout.get("width")
+        or template_layout.get("width")
+        or _PLOTLY_DEFAULT_WIDTH,
+        "height": height
+        or figure_layout.get("height")
+        or template_layout.get("height")
+        or _PLOTLY_DEFAULT_HEIGHT,
+        "scale": scale or getattr(pio.defaults, "default_scale", 1) or 1,
+    }
+    server = getattr(kaleido, "_global_server", None)
+    server_running = bool(server and server.is_running())
+    kwargs: Dict[str, Any] = {"topojson": getattr(pio.defaults, "topojson", None)}
+    if not server_running:
+        kwargs["kopts"] = {"page_generator": export_page_generator()}
+
+    image_bytes = kaleido.calc_fig_sync(fig, opts=opts, **kwargs)
+    if isinstance(image_bytes, str):
+        image_bytes = image_bytes.encode("utf-8")
+    target.write_bytes(image_bytes)
+    _embed_fira_sans_in_svg(target)
 
 
 def _add_export_info_footer(
     fig: go.Figure,
     applied_filters: list[Dict] | None,
     measurement_info: Dict | None = None,
+    custom_tags: list[str] | None = None,
     *,
     dark: bool = False,
     base_width: int = _PLOTLY_DEFAULT_WIDTH,
@@ -104,12 +301,26 @@ def _add_export_info_footer(
                 info_lines.append(f"<b>{label}:</b> {escape(str(value))}")
 
         for key, value in measurement_info.items():
-            if key in consumed_keys or key in ("independents", "dependents", "Size", "size"):
+            if key in consumed_keys or key in (
+                "independents",
+                "dependents",
+                "Size",
+                "size",
+            ):
                 continue
             if value in (None, "", "N/A"):
                 continue
             label = str(key).replace("_", " ").title()
             info_lines.append(f"<b>{escape(label)}:</b> {escape(str(value))}")
+
+    tag_names = sorted(
+        {
+            tag.strip()
+            for tag in custom_tags or []
+            if isinstance(tag, str) and tag.strip()
+        },
+        key=str.casefold,
+    )
 
     entries = []
     for applied_filter in applied_filters or []:
@@ -123,12 +334,15 @@ def _add_export_info_footer(
         )
         entries.append(escape(display_name))
 
-    if not info_lines and not entries:
+    if not info_lines and not entries and not tag_names:
         return
 
-    current_bottom = fig.layout.margin.b if fig.layout.margin and fig.layout.margin.b else 80
+    current_bottom = (
+        fig.layout.margin.b if fig.layout.margin and fig.layout.margin.b else 80
+    )
     footer_lines = [
         *info_lines,
+        f"<b>Custom Tags:</b> {', '.join(escape(tag) for tag in tag_names) if tag_names else 'None'}",
         f"<b>Applied Filters:</b> {' -> '.join(entries) if entries else 'None'}",
     ]
     footer_height = 42 + 19 * len(footer_lines)
@@ -302,14 +516,15 @@ def _export_plot_images_sync(
     # fallback historically requests 1920 x 1080. Reserve that exact original
     # canvas, then let the footer extend only the image height below it.
     base_width, base_height = (
-        (_PLOTLY_DEFAULT_WIDTH, _PLOTLY_DEFAULT_HEIGHT)
-        if export_pool
-        else (1920, 1080)
+        (_PLOTLY_DEFAULT_WIDTH, _PLOTLY_DEFAULT_HEIGHT) if export_pool else (1920, 1080)
     )
+    export_meta = _library_metadata(dataset_path, dataset_uuid)
+    custom_tags = export_meta.get("tags", [])
     _add_export_info_footer(
         fig,
         applied_filters,
         measurement_info,
+        custom_tags,
         base_width=base_width,
         base_height=base_height,
     )
@@ -317,6 +532,7 @@ def _export_plot_images_sync(
         dark_fig,
         applied_filters,
         measurement_info,
+        custom_tags,
         dark=True,
         base_width=base_width,
         base_height=base_height,
@@ -328,7 +544,7 @@ def _export_plot_images_sync(
         _height = int(local_fig.layout.height or 1080)
         _scale = 300.0 / 96.0
         start = time.perf_counter()
-        pio.write_image(
+        _write_plotly_image(
             local_fig, local_path_str, width=_width, height=_height, scale=_scale
         )
         elapsed = time.perf_counter() - start
@@ -400,7 +616,6 @@ def _export_plot_images_sync(
     # Create a zip archive
     tmp_zip = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
     tmp_zip.close()
-    export_meta = _library_metadata(dataset_path, dataset_uuid)
     if applied_filters:
         export_meta["applied_filters"] = applied_filters
     if measurement_info:
@@ -443,7 +658,7 @@ def _desktop_export_dir() -> Path | None:
 
     Controlled by env: QIMCHI_DESKTOP=1 enables it; QIMCHI_EXPORT_DIR overrides
     the destination (default: ~/Downloads). Set by the desktop launcher.
-    
+
     """
     if os.environ.get("QIMCHI_DESKTOP", "").lower() not in ("1", "true", "yes"):
         return None
@@ -572,22 +787,26 @@ def _library_metadata(dataset_path: Path, dataset_uuid: str) -> Dict[str, Any]:
         from .shared.db import session_scope
 
         with session_scope() as session:
-            measurement = session.exec(
-                select(Measurement).where(Measurement.abs_path == str(dataset_path))
-            ).first()
+            # The filename stem is the canonical measurement UUID. Prefer it
+            # over the node-local path, while retaining the path lookup for
+            # legacy records whose filename was not their identity.
+            measurement = session.get(Measurement, dataset_uuid)
             if measurement is None:
-                return meta
-            meta["measurement_uuid"] = measurement.uuid
-            meta["uuid_origin"] = measurement.uuid_origin
-            state = session.get(MeasurementState, (measurement.uuid, LOCAL_USER_ID))
+                measurement = session.exec(
+                    select(Measurement).where(Measurement.abs_path == str(dataset_path))
+                ).first()
+            measurement_uuid = measurement.uuid if measurement else dataset_uuid
+            meta["measurement_uuid"] = measurement_uuid
+            if measurement is not None:
+                meta["uuid_origin"] = measurement.uuid_origin
+            state = session.get(MeasurementState, (measurement_uuid, LOCAL_USER_ID))
             meta["hearted"] = bool(state.hearted) if state else False
             meta["trashed"] = bool(state.trashed) if state else False
             meta["tags"] = sorted(
-                name
-                for (name,) in session.exec(
+                session.exec(
                     select(Tag.name)
                     .join(MeasurementTag, MeasurementTag.tag_id == Tag.id)
-                    .where(MeasurementTag.uuid == measurement.uuid)
+                    .where(MeasurementTag.uuid == measurement_uuid)
                 ).all()
             )
     except Exception as exc:
@@ -641,7 +860,6 @@ def _write_image_worker(fig_dict: Dict, path_str: str) -> tuple[str, float]:
     """
     import time
 
-    import plotly.io as pio
     from plotly import graph_objects as go
 
     fig = go.Figure(fig_dict)
@@ -651,7 +869,7 @@ def _write_image_worker(fig_dict: Dict, path_str: str) -> tuple[str, float]:
     # _height = 1080
     # _scale = 300.0 / 96.0
     start = time.perf_counter()
-    pio.write_image(
+    _write_plotly_image(
         fig,
         path_str,
         # width=_width,
@@ -659,7 +877,6 @@ def _write_image_worker(fig_dict: Dict, path_str: str) -> tuple[str, float]:
         # scale=_scale,
     )
     return path_str, time.perf_counter() - start
-
 
 
 def warm_export_worker() -> float:
@@ -679,8 +896,11 @@ def warm_export_worker() -> float:
     """
     figure = go.Figure({"data": [{"x": [0, 1], "y": [0, 1]}]})
     with tempfile.TemporaryDirectory(prefix="qimchi-warmup-") as tmp:
-        _, elapsed = _write_image_worker(figure.to_dict(), str(Path(tmp) / "warmup.png"))
+        _, elapsed = _write_image_worker(
+            figure.to_dict(), str(Path(tmp) / "warmup.png")
+        )
     return elapsed
+
 
 def _save_light_dark_pngs(
     plot_json: Dict,
@@ -712,6 +932,8 @@ def _save_light_dark_pngs(
 
     dataset_path = Path(disk_fpath)
     dataset_uuid = dataset_path.stem
+    export_meta = _library_metadata(dataset_path, dataset_uuid)
+    custom_tags = export_meta.get("tags", [])
     extras_dir = dataset_path.parent / dataset_uuid
     extras_dir.mkdir(parents=True, exist_ok=True)
 
@@ -783,9 +1005,9 @@ def _save_light_dark_pngs(
 
     if only_light:
         # Only write the light PNG
-        _add_export_info_footer(fig, applied_filters, measurement_info)
+        _add_export_info_footer(fig, applied_filters, measurement_info, custom_tags)
         try:
-            pio.write_image(
+            _write_plotly_image(
                 fig,
                 str(out_light),
                 # width=_width,
@@ -823,11 +1045,12 @@ def _save_light_dark_pngs(
             outlinecolor="white",
         )
     )
-    _add_export_info_footer(fig, applied_filters, measurement_info)
+    _add_export_info_footer(fig, applied_filters, measurement_info, custom_tags)
     _add_export_info_footer(
         dark_fig,
         applied_filters,
         measurement_info,
+        custom_tags,
         dark=True,
     )
 
@@ -836,7 +1059,7 @@ def _save_light_dark_pngs(
         with ThreadPoolExecutor(max_workers=2) as ex:
             futures = {
                 ex.submit(
-                    pio.write_image,
+                    _write_plotly_image,
                     fig,
                     str(out_light),
                     # width=_width,
@@ -844,7 +1067,7 @@ def _save_light_dark_pngs(
                     # scale=_scale,
                 ): "light",
                 ex.submit(
-                    pio.write_image,
+                    _write_plotly_image,
                     dark_fig,
                     str(out_dark),
                     # width=_width,
@@ -866,7 +1089,7 @@ def _save_light_dark_pngs(
         # fallback: try sequential writes
         logger.error(f"Parallel PNG write failed, falling back to sequential: {e}")
         try:
-            pio.write_image(
+            _write_plotly_image(
                 fig,
                 str(out_light),
                 # width=_width,
@@ -877,7 +1100,7 @@ def _save_light_dark_pngs(
         except Exception as e2:
             logger.error(f"Failed to write light png: {e2}")
         try:
-            pio.write_image(
+            _write_plotly_image(
                 dark_fig,
                 str(out_dark),
                 # width=_width,

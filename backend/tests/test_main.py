@@ -15,29 +15,33 @@ from api.shared import db, paths
 def test_kaleido_sync_server_start_stop_and_disabled(monkeypatch):
     calls = []
     fake = SimpleNamespace(
-        start_sync_server=lambda: calls.append("start"),
+        start_sync_server=lambda **kwargs: calls.append(("start", kwargs)),
         stop_sync_server=lambda: calls.append("stop"),
     )
     monkeypatch.setitem(__import__("sys").modules, "kaleido", fake)
     monkeypatch.setattr(main, "_enable_kaleido_sync_server", True)
+    monkeypatch.setattr(main.export, "export_page_generator", lambda: "font-page")
 
     assert main._start_kaleido_sync_server("test") is True
     main._stop_kaleido_sync_server("test")
-    assert calls == ["start", "stop"]
+    assert calls == [("start", {"page_generator": "font-page"}), "stop"]
 
     monkeypatch.setattr(main, "_enable_kaleido_sync_server", False)
     assert main._start_kaleido_sync_server("test") is False
     main._stop_kaleido_sync_server("test")
-    assert calls == ["start", "stop"]
+    assert calls == [("start", {"page_generator": "font-page"}), "stop"]
 
 
 def test_kaleido_sync_server_failures_are_nonfatal(monkeypatch):
     fake = SimpleNamespace(
-        start_sync_server=lambda: (_ for _ in ()).throw(RuntimeError("start")),
+        start_sync_server=lambda **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("start")
+        ),
         stop_sync_server=lambda: (_ for _ in ()).throw(RuntimeError("stop")),
     )
     monkeypatch.setitem(__import__("sys").modules, "kaleido", fake)
     monkeypatch.setattr(main, "_enable_kaleido_sync_server", True)
+    monkeypatch.setattr(main.export, "export_page_generator", lambda: "font-page")
 
     assert main._start_kaleido_sync_server("test") is False
     main._stop_kaleido_sync_server("test")
@@ -122,7 +126,9 @@ async def test_lifespan_initializes_and_shuts_down_services(monkeypatch):
     )
     monkeypatch.setattr(main, "_start_kaleido_sync_server", lambda _context: True)
     monkeypatch.setattr(
-        main, "_stop_kaleido_sync_server", lambda context: events.append(("stop", context))
+        main,
+        "_stop_kaleido_sync_server",
+        lambda context: events.append(("stop", context)),
     )
     monkeypatch.setattr(main, "ProcessPoolExecutor", Pool)
     monkeypatch.setattr(main, "threading", SimpleNamespace(Thread=Thread))
@@ -187,7 +193,9 @@ def test_database_guard_and_path_overrides(tmp_path, monkeypatch):
 
 def test_root_and_root_asset_handlers(monkeypatch, tmp_path):
     root_endpoint = next(
-        route.endpoint for route in main.app.routes if getattr(route, "path", None) == "/"
+        route.endpoint
+        for route in main.app.routes
+        if getattr(route, "path", None) == "/"
     )
     logo_endpoint = next(
         route.endpoint

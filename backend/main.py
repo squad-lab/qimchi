@@ -1,28 +1,27 @@
-import os
 import asyncio
 import atexit
 import logging
+import os
 import threading
 import time
-from dotenv import load_dotenv
+from concurrent.futures import ProcessPoolExecutor
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
 from fastapi import APIRouter, FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from concurrent.futures import ProcessPoolExecutor
-
+from fastapi.staticfiles import StaticFiles
 
 # Local imports
 from api import (
     dirtree,
-    notes,
     download,
-    plots,
-    filters,
     export,
-    live_measurements,
+    filters,
     library,
+    live_measurements,
+    notes,
+    plots,
 )
 from api.shared.db import db_status, run_migrations, seed_local_user, set_db_status
 
@@ -63,7 +62,7 @@ def _start_kaleido_sync_server(context: str) -> bool:
     try:
         import kaleido
 
-        kaleido.start_sync_server()
+        kaleido.start_sync_server(page_generator=export.export_page_generator())
         logging.info("Kaleido sync server started for %s", context)
         return True
     except Exception:
@@ -264,8 +263,8 @@ if serve_static:
     # print(f"Serving static files from FastAPI backend from {frontend_dist_path}")
 
     # Root-level assets from frontend/dist.
-    # Only /assets is mounted as a static directory, 
-    # so every file the SPA references from the dist 
+    # Only /assets is mounted as a static directory,
+    # so every file the SPA references from the dist
     # root needs a route here
     _ROOT_ASSETS = {
         "qimchi-logo.png": "image/png",
