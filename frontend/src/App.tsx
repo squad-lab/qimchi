@@ -5,6 +5,7 @@ import { PROD_BACKEND_URL } from "./config";
 // Local imports
 import BaseLayout from "./components/BaseLayout";
 import Sidebar from "./components/Sidebar";
+import SidebarRail from "./components/SidebarRail";
 import Viewer from "./components/Viewer";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ToastProvider } from "./components/Toast";
@@ -276,6 +277,7 @@ const App: React.FC = () => {
     <ToastProvider>
       <ErrorBoundary>
         <BaseLayout
+          rail={<SidebarRail onOpenHelp={() => setIsHelpOpen(true)} />}
           sidebar={
             <ErrorBoundary>
               <Sidebar
@@ -291,7 +293,6 @@ const App: React.FC = () => {
                 notesSelectedItemId={notesSelectedItemId}
                 onNotesSelectedItemChange={handleNotesSelectedItemChange}
                 onCycleDataset={handleCycleDataset}
-                onOpenHelp={() => setIsHelpOpen(true)}
               />
             </ErrorBoundary>
           }

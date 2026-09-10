@@ -374,6 +374,18 @@ select {
   opacity: 1;
 }
 
+/* Wide ("desktop") Explorer layout: the per-row date column only exists
+   once DirTree's own container is wide enough for them -- reached by dragging
+   the sidebar wider or by the full-window Explorer view. Kept in CSS so the
+   virtualized row component does not have to subscribe to the width. */
+.qimchi-row-meta {
+  display: none;
+}
+
+.qimchi-dirtree-wide .qimchi-row-meta {
+  display: flex;
+}
+
 .dark body {
   /* GitHub's canvas: near-black page, near-white text. The surface
      ramp above stays Atom One Dark, so panels read as raised. */

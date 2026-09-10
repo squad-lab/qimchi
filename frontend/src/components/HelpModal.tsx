@@ -57,6 +57,32 @@ const ExplorerHelp = memo(() => (
         and highlighted with specific icons in the tree:
       </p>
 
+      <div className="space-y-2 mb-4">
+        <h4 className="font-medium text-gray-800">Sidebar layout</h4>
+        <ul className="space-y-1.5 text-gray-600">
+          <li className="flex gap-2">
+            <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+            The narrow icon rail on the far left switches between Explorer, Metadata, Notes and Live
+            -- one is shown at a time, filling the sidebar
+          </li>
+          <li className="flex gap-2">
+            <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+            Clicking the icon of the section that is already open collapses the sidebar; the button
+            at the bottom of the rail collapses and re-opens it too
+          </li>
+          <li className="flex gap-2">
+            <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+            The expand button next to the folder button opens the Explorer across the whole window.
+            Esc (or the same button) returns it to the sidebar
+          </li>
+          <li className="flex gap-2">
+            <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+            Rows show a modified-date column whenever the Explorer is wide enough -- either expanded
+            or with the sidebar dragged wider
+          </li>
+        </ul>
+      </div>
+
       <div className="grid grid-cols-2 gap-2 mb-4">
         <div className="flex items-center gap-2 p-2 bg-violet-50/50 rounded-lg border border-violet-100">
           <FileArchive size={16} className="text-violet-600" />
@@ -250,8 +276,9 @@ const ExplorerHelp = memo(() => (
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Toggle the Live button (Radio icon) to see only active live measurements, auto-refreshed
-          every second
+          Pick the Live tab (Radio icon) in the sidebar rail to see only active live measurements,
+          auto-refreshed every second. It is the Explorer in live mode, so the Explorer tab switches
+          straight back to browsing files
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />

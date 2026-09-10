@@ -826,7 +826,7 @@ export default function Notes({
             />
           </div>
         ) : (
-          <div className="h-32 flex flex-col items-center justify-center text-gray-500">
+          <div className="h-full flex flex-col items-center justify-center text-gray-500">
             <NotebookPen size={48} className="mb-2 text-gray-400" />
             <p>No datasets in basket</p>
             <p className="text-sm mt-1">Add datasets to view or edit notes</p>

@@ -561,15 +561,22 @@ const Metadata = ({ basketItems }: MetadataProps) => {
 
         {/* No datasets message - Fixed at top when header is hidden */}
         {basketItems.filter((item) => item.type === "file").length === 0 && (
-          <div className="h-32 flex flex-col items-center justify-center text-gray-500">
+          <div className="flex-1 min-h-0 flex flex-col items-center justify-center text-gray-500">
             <BadgeInfo size={48} className="mb-2 text-gray-400" />
             <p>No datasets in basket</p>
             <p className="text-sm mt-1">Add datasets to view their metadata</p>
           </div>
         )}
 
-        {/* Scrollable container for search results or regular metadata cards */}
-        <div className="flex-1 overflow-y-auto min-h-0">
+        {/* Scrollable container for search results or regular metadata cards.
+            With an empty basket it renders nothing, so it must not claim half
+            the pane -- otherwise the empty-state message centres in the top
+            half instead of the whole panel. */}
+        <div
+          className={`overflow-y-auto min-h-0 ${
+            basketItems.filter((item) => item.type === "file").length > 0 ? "flex-1" : "hidden"
+          }`}
+        >
           {/* Search results or regular metadata cards */}
           {searchQuery ? (
             // Search results view

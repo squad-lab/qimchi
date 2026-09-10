@@ -44,14 +44,12 @@ import {
   HardDrive,
   Table,
   SearchXIcon,
-  Lightbulb,
   X,
   NotebookPen,
   LoaderCircle,
   Download,
   MoveUp,
   MoveDown,
-  Radio,
   Eye,
   EyeOff,
   Heart,
@@ -106,7 +104,6 @@ interface DirTreeProps {
   onCycleDataset?: (direction: "prev" | "next") => void; // For cycling through datasets
   onStartLoadingAttributes?: (itemId: string) => void;
   onUpdateBasketItemAttributes?: (itemId: string, attributes: AttrData) => void;
-  onOpenHelp?: () => void; // For opening the Help modal
 }
 
 /**
@@ -123,6 +120,26 @@ interface DirTreeProps {
  * - Maintains smooth scrolling and interactions
  * - Reduces memory footprint for large tree structures
  */
+// Explorer layout mode. Rows gain a date column once the tree actually has
+// room for them -- reached either by dragging the sidebar wider or by the
+// full-window Explorer view. The switch is a class on the DirTree root plus a
+// CSS rule (see .qimchi-row-meta in index.css) rather than a context, so the
+// row component stays untouched by the width state.
+const WIDE_LAYOUT_MIN_WIDTH = 640;
+
+// Fixed-width, locale-independent stamp: the column is a scan-and-compare aid,
+// so a stable "2026-03-14 08:32" beats a localised string that changes length
+// with the month name and gets truncated mid-word.
+const pad = (value: number) => String(value).padStart(2, "0");
+
+const formatRowTimestamp = (timestamp?: Date) => {
+  if (!timestamp || Number.isNaN(timestamp.getTime())) return "";
+  const date = `${timestamp.getFullYear()}-${pad(timestamp.getMonth() + 1)}-${pad(
+    timestamp.getDate(),
+  )}`;
+  return `${date} ${pad(timestamp.getHours())}:${pad(timestamp.getMinutes())}`;
+};
+
 const DirTree = ({
   path,
   onSelectNode,
@@ -136,9 +153,23 @@ const DirTree = ({
   onCycleDataset,
   onStartLoadingAttributes,
   onUpdateBasketItemAttributes,
-  onOpenHelp,
 }: DirTreeProps) => {
   const { showToast } = useToast();
+
+  // Width-driven layout mode. A callback ref (rather than useRef) because the
+  // component returns early while loading/erroring, so the node identity has to
+  // re-trigger the observer when the real tree finally mounts.
+  const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
+  const [isWide, setIsWide] = useState(false);
+
+  useEffect(() => {
+    if (!rootEl) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setIsWide(entry.contentRect.width >= WIDE_LAYOUT_MIN_WIDTH);
+    });
+    observer.observe(rootEl);
+    return () => observer.disconnect();
+  }, [rootEl]);
 
   // Use Zustand store for persistent state
   const { componentStates, updateDirTreeState } = useSidebarStore();
@@ -1275,7 +1306,10 @@ const DirTree = ({
   }
 
   return (
-    <div className="flex flex-col h-full w-full">
+    <div
+      ref={setRootEl}
+      className={`flex flex-col h-full w-full ${isWide ? "qimchi-dirtree-wide" : ""}`}
+    >
       {/* Fixed Toolbar Section */}
       <div className="shrink-0 space-y-2 mb-2 w-full">
         {/* Search Bar */}
@@ -1339,35 +1373,6 @@ const DirTree = ({
 
             {/* Row 2: Toolbar buttons */}
             <div className="flex items-center justify-center w-full gap-1">
-              {/* LIVE Toggle Button */}
-              <Tooltip
-                content={
-                  showLiveOnly
-                    ? "Showing only live measurements (refreshes every second)"
-                    : "Show only live measurements (refreshes every second)"
-                }
-                position="right"
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    updateDirTreeState({ showLiveOnly: !showLiveOnly });
-                  }}
-                  className={`px-2 py-1 rounded-md transition-all duration-200 ${
-                    showLiveOnly
-                      ? "bg-linear-to-r from-green-500 to-emerald-500 text-white shadow-md hover:shadow-lg hover:from-green-600 hover:to-emerald-600"
-                      : "qimchi-dark-hover-plain bg-blue-50 text-gray-600 hover:bg-blue-100 border border-blue-200"
-                  }`}
-                  title={
-                    showLiveOnly
-                      ? "Show all files"
-                      : "Show only live measurements (refreshes every second)"
-                  }
-                >
-                  <Radio size={16} className={showLiveOnly ? "animate-pulse" : ""} />
-                </button>
-              </Tooltip>
-
               {showLiveOnly && hiddenLiveMeasurementIds.length > 0 && (
                 <Tooltip
                   content={`Restore ${hiddenLiveMeasurementIds.length} hidden live measurement${
@@ -1393,18 +1398,6 @@ const DirTree = ({
                   </button>
                 </Tooltip>
               )}
-
-              {/* Help Modal Button */}
-              <Tooltip content="Help & Tips (Shift+H)" position="right">
-                <button
-                  type="button"
-                  onClick={() => onOpenHelp?.()}
-                  className="qimchi-dark-hover-plain px-2 py-1 flex items-center justify-center text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-md shadow-sm transition-all duration-200 group active:scale-95"
-                  title="Help & Tips"
-                >
-                  <Lightbulb size={16} className="group-hover:fill-amber-200 transition-colors" />
-                </button>
-              </Tooltip>
 
               {/* Refresh Button */}
               <Tooltip content="Refresh directory" position="top">
@@ -2186,6 +2179,13 @@ const TreeItemComponent = ({
           </div>
           {/* </Tooltip> */}
         </div>
+      </div>
+
+      {/* Wide layout only: the modified date gets its own column instead of
+          being hidden behind the Metadata panel. Shown by CSS when the DirTree
+          root carries .qimchi-dirtree-wide. */}
+      <div className="qimchi-row-meta shrink-0 items-center pr-3 text-xs text-gray-500 tabular-nums">
+        <span className="w-32 text-right">{formatRowTimestamp(nodeData.timestamp)}</span>
       </div>
 
       {/* For Datasets */}
