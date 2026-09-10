@@ -24,7 +24,7 @@ export const lightTheme: PlotTheme = {
     zeroline: "#e5e7eb",
   },
   font: {
-    family: '"Inter", "Segoe UI", "Roboto", sans-serif',
+    family: '"Fira Sans", Arial, sans-serif',
     size: 12,
   },
 };
@@ -51,32 +51,33 @@ export const darkTheme: PlotTheme = {
     zeroline: "#5C6370",
   },
   font: {
-    family: '"Inter", "Segoe UI", "Roboto", sans-serif',
+    family: '"Fira Sans", Arial, sans-serif',
     size: 12,
   },
 };
 
 export const applyThemeToLayout = (layout: Partial<Layout>, theme: PlotTheme): Partial<Layout> => {
+  const titleSize = layout.font?.size ?? 16;
+  const tickSize = 14;
+
   return {
     ...layout,
     paper_bgcolor: theme.colors.paper,
     plot_bgcolor: theme.colors.background,
     font: {
-      family: theme.font.family,
-      size: theme.font.size,
-      color: theme.colors.text,
       ...layout.font,
+      family: theme.font.family,
+      size: layout.font?.size ?? theme.font.size,
+      color: theme.colors.text,
     },
-    // The backend bakes a light-mode colour into the title, so the theme has
-    // to win here -- hence `color` after the incoming font spread. Size and
-    // family stay whatever the figure asked for.
     ...(layout.title
       ? {
           title: {
             ...layout.title,
             font: {
-              family: theme.font.family,
               ...layout.title.font,
+              family: theme.font.family,
+              size: layout.title.font?.size ?? titleSize,
               color: theme.colors.titleText,
             },
           },
@@ -95,13 +96,17 @@ export const applyThemeToLayout = (layout: Partial<Layout>, theme: PlotTheme): P
       gridcolor: theme.colors.grid,
       zerolinecolor: theme.colors.zeroline,
       tickfont: {
-        size: theme.font.size - 1,
+        size: tickSize,
         color: theme.colors.text,
         family: theme.font.family,
       },
       title: {
+        ...(typeof layout.xaxis?.title === "object" ? layout.xaxis.title : {}),
         font: {
-          size: theme.font.size,
+          ...(typeof layout.xaxis?.title === "object" ? layout.xaxis.title.font : {}),
+          size:
+            (typeof layout.xaxis?.title === "object" && layout.xaxis.title.font?.size) ||
+            titleSize,
           color: theme.colors.text,
           family: theme.font.family,
         },
@@ -112,17 +117,35 @@ export const applyThemeToLayout = (layout: Partial<Layout>, theme: PlotTheme): P
       gridcolor: theme.colors.grid,
       zerolinecolor: theme.colors.zeroline,
       tickfont: {
-        size: theme.font.size - 1,
+        size: tickSize,
         color: theme.colors.text,
         family: theme.font.family,
       },
       title: {
+        ...(typeof layout.yaxis?.title === "object" ? layout.yaxis.title : {}),
         font: {
-          size: theme.font.size,
+          ...(typeof layout.yaxis?.title === "object" ? layout.yaxis.title.font : {}),
+          size:
+            (typeof layout.yaxis?.title === "object" && layout.yaxis.title.font?.size) ||
+            titleSize,
           color: theme.colors.text,
           family: theme.font.family,
         },
       },
     },
+    coloraxis: layout.coloraxis
+      ? {
+          ...layout.coloraxis,
+          colorbar: {
+            ...layout.coloraxis.colorbar,
+            tickfont: {
+              ...layout.coloraxis.colorbar?.tickfont,
+              size: tickSize,
+              color: theme.colors.text,
+              family: theme.font.family,
+            },
+          },
+        }
+      : layout.coloraxis,
   };
 };
