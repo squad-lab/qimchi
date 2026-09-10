@@ -105,8 +105,7 @@ export const applyThemeToLayout = (layout: Partial<Layout>, theme: PlotTheme): P
         font: {
           ...(typeof layout.xaxis?.title === "object" ? layout.xaxis.title.font : {}),
           size:
-            (typeof layout.xaxis?.title === "object" && layout.xaxis.title.font?.size) ||
-            titleSize,
+            (typeof layout.xaxis?.title === "object" && layout.xaxis.title.font?.size) || titleSize,
           color: theme.colors.text,
           family: theme.font.family,
         },
@@ -126,8 +125,7 @@ export const applyThemeToLayout = (layout: Partial<Layout>, theme: PlotTheme): P
         font: {
           ...(typeof layout.yaxis?.title === "object" ? layout.yaxis.title.font : {}),
           size:
-            (typeof layout.yaxis?.title === "object" && layout.yaxis.title.font?.size) ||
-            titleSize,
+            (typeof layout.yaxis?.title === "object" && layout.yaxis.title.font?.size) || titleSize,
           color: theme.colors.text,
           family: theme.font.family,
         },
