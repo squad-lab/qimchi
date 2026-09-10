@@ -15,6 +15,14 @@ from xarray import Dataset
 
 # Local imports
 from .logger import logger
+from .units import (
+    axis_title,
+    colorbar_gutter_px,
+    colorbar_title_annotation,
+    plain_axis_title,
+    resolve_axis_definition,
+    unit_layout_meta,
+)
 
 # Default vars # TODOLATER: Remove?
 # QIMCHI_HOME = Path("~/.qimchi").expanduser()
@@ -341,44 +349,14 @@ class Line(QimchiFigure):
 
     def plot(self) -> go.Figure:
         theme = self.theme
-        # Create safe titles for axes
-        if (
-            "label" in self.data.coords[self.ind[0]].attrs
-            and "unit" in self.data.coords[self.ind[0]].attrs
-        ):
-            logger.debug("Line || X-axis label and unit found in data coords attrs.")
-            self.x_title = f"{self.data.coords[self.ind[0]].attrs['label']} ({self.data.coords[self.ind[0]].attrs['unit']})"
-        elif (
-            self.ind[0] in self.metadata
-            and "label" in self.metadata[self.ind[0]]
-            and "unit" in self.metadata[self.ind[0]]
-        ):
-            logger.debug("Line || X-axis label and unit found in metadata.")
-            self.x_title = f"{self.metadata[self.ind[0]]['label']} ({self.metadata[self.ind[0]]['unit']})"
-        else:
-            logger.debug(
-                "Line || X-axis label and unit NOT found; using variable name."
-            )
-            self.x_title = self.ind[0]
-
         dep_var = self.deps[0] if isinstance(self.deps, list) else self.deps
-        if "label" in self.data[dep_var].attrs and "unit" in self.data[dep_var].attrs:
-            logger.debug("Line || Y-axis label and unit found in data attrs.")
-            self.y_title = f"{self.data[dep_var].attrs['label']} ({self.data[dep_var].attrs['unit']})"
-        elif (
-            dep_var in self.metadata
-            and "label" in self.metadata[dep_var]
-            and "unit" in self.metadata[dep_var]
-        ):
-            logger.debug("Line || Y-axis label and unit found in metadata.")
-            self.y_title = (
-                f"{self.metadata[dep_var]['label']} ({self.metadata[dep_var]['unit']})"
-            )
-        else:
-            logger.debug(
-                "Line || Y-axis label and unit NOT found; using variable name."
-            )
-            self.y_title = dep_var
+        x_definition = resolve_axis_definition(self.data, self.metadata, self.ind[0])
+        y_definition = resolve_axis_definition(self.data, self.metadata, dep_var)
+        self.x_title = axis_title(x_definition)
+        self.y_title = axis_title(y_definition)
+        # Hover text is HTML, so it needs the plain-text form of each title.
+        self.x_hover_title = plain_axis_title(x_definition)
+        self.y_hover_title = plain_axis_title(y_definition)
 
         # Plot titles are a display surface: Qanary IDs are shortened here only.
         plot_title = format_measurement_plot_title(
@@ -389,8 +367,8 @@ class Line(QimchiFigure):
             "title": {
                 "text": plot_title,
                 "font": dict(
-                    family="Roboto, sans-serif",
-                    size=14,
+                    family="Fira Sans, Arial, sans-serif",
+                    size=16,
                     color="rgba(0,0,0,0.6)",
                 ),
                 "x": 0.5,
@@ -401,6 +379,10 @@ class Line(QimchiFigure):
                 "ticks": "outside",
                 "showline": True,
                 "mirror": True,
+                "exponentformat": "power",
+                "showexponent": "last",
+                "tickformat": "",
+                "minexponent": 0,
                 "automargin": True,
                 "zeroline": False,
                 "linecolor": "black",
@@ -432,7 +414,10 @@ class Line(QimchiFigure):
                 "ticks": "outside",
                 "showline": True,
                 "mirror": True,
-                "exponentformat": "e",
+                "exponentformat": "power",
+                "showexponent": "last",
+                "tickformat": "",
+                "minexponent": 0,
                 "automargin": True,
                 "zeroline": False,
                 "linecolor": "black",
@@ -460,11 +445,13 @@ class Line(QimchiFigure):
                 },
             },
             "font": {
+                "family": "Fira Sans, Arial, sans-serif",
                 "size": 16,
             },
             "margin": {"l": 50, "r": 10, "t": 40, "b": 50},
             "paper_bgcolor": "rgba(0,0,0,0)",
             "plot_bgcolor": "rgba(0,0,0,0)",
+            "meta": unit_layout_meta(x=x_definition, y=y_definition),
         }
 
         dep_var = self.deps[0] if isinstance(self.deps, list) else self.deps
@@ -476,13 +463,20 @@ class Line(QimchiFigure):
 
         # Create hover template
         hover_template = (
-            f"{self.x_title}: %{{x}}<br>{self.y_title}: %{{y}}<extra></extra>"
+            f"{self.x_hover_title}: %{{x}}<br>"
+            f"{self.y_hover_title}: %{{y}}<extra></extra>"
         )
 
         # Create figure with go.Scatter to preserve data order
         fig = go.Figure()
         fig.add_trace(
-            go.Scatter(x=x_data, y=y_data, hovertemplate=hover_template, **self.traces)
+            go.Scatter(
+                x=x_data,
+                y=y_data,
+                hovertemplate=hover_template,
+                showlegend=False,
+                **self.traces,
+            )
         )
         fig.update_layout(layout)
         logger.debug("Line || PLOTTED")
@@ -549,73 +543,29 @@ class HeatMap(QimchiFigure):
     def plot(self) -> go.Figure:
         theme = self.theme
 
-        # Create safe titles for axes
         if len(self.ind) >= 2:
-            if (
-                "label" in self.data.coords[self.ind[1]].attrs
-                and "unit" in self.data.coords[self.ind[1]].attrs
-            ):
-                logger.info(
-                    "HeatMap || X-axis label and unit found in data coords attrs."
-                )
-                self.x_title = f"{self.data.coords[self.ind[1]].attrs['label']} ({self.data.coords[self.ind[1]].attrs['unit']})"
-            elif (
-                self.ind[1] in self.metadata
-                and "label" in self.metadata[self.ind[1]]
-                and "unit" in self.metadata[self.ind[1]]
-            ):
-                logger.info("HeatMap || X-axis label and unit found in metadata.")
-                self.x_title = f"{self.metadata[self.ind[1]]['label']} ({self.metadata[self.ind[1]]['unit']})"
-            else:
-                logger.info(
-                    "HeatMap || X-axis label and unit NOT found; using variable name."
-                )
-                self.x_title = self.ind[1]
-
-            if (
-                "label" in self.data.coords[self.ind[0]].attrs
-                and "unit" in self.data.coords[self.ind[0]].attrs
-            ):
-                logger.info(
-                    "HeatMap || Y-axis label and unit found in data coords attrs."
-                )
-                self.y_title = f"{self.data.coords[self.ind[0]].attrs['label']} ({self.data.coords[self.ind[0]].attrs['unit']})"
-            elif (
-                self.ind[0] in self.metadata
-                and "label" in self.metadata[self.ind[0]]
-                and "unit" in self.metadata[self.ind[0]]
-            ):
-                logger.info("HeatMap || Y-axis label and unit found in metadata.")
-                self.y_title = f"{self.metadata[self.ind[0]]['label']} ({self.metadata[self.ind[0]]['unit']})"
-            else:
-                logger.info(
-                    "HeatMap || Y-axis label and unit NOT found; using variable name."
-                )
-                self.y_title = self.ind[0]
+            x_definition = resolve_axis_definition(
+                self.data, self.metadata, self.ind[1]
+            )
+            y_definition = resolve_axis_definition(
+                self.data, self.metadata, self.ind[0]
+            )
 
         else:
-            self.x_title = self.ind[0] if len(self.ind) > 0 else "X"
-            self.y_title = "Y"
+            x_variable = self.ind[0] if len(self.ind) > 0 else "X"
+            x_definition = resolve_axis_definition(self.data, self.metadata, x_variable)
+            y_definition = {"label": "Y", "unit": ""}
 
-        # Create safe title for color axis
+        self.x_title = axis_title(x_definition)
+        self.y_title = axis_title(y_definition)
+
         dep_var = self.deps[0] if isinstance(self.deps, list) else self.deps
-        if "label" in self.data[dep_var].attrs and "unit" in self.data[dep_var].attrs:
-            logger.info("HeatMap || Color axis label and unit found in data attrs.")
-            self.z_title = f"{self.data[dep_var].attrs['label']} ({self.data[dep_var].attrs['unit']})"
-        elif (
-            dep_var in self.metadata
-            and "label" in self.metadata[dep_var]
-            and "unit" in self.metadata[dep_var]
-        ):
-            logger.info("HeatMap || Color axis label and unit found in metadata.")
-            self.z_title = (
-                f"{self.metadata[dep_var]['label']} ({self.metadata[dep_var]['unit']})"
-            )
-        else:
-            logger.info(
-                "HeatMap || Color axis label and unit NOT found; using variable name."
-            )
-            self.z_title = dep_var
+        z_definition = resolve_axis_definition(self.data, self.metadata, dep_var)
+        self.z_title = axis_title(z_definition)
+        # Hover text is HTML, so it needs the plain-text form of each title.
+        self.x_hover_title = plain_axis_title(x_definition)
+        self.y_hover_title = plain_axis_title(y_definition)
+        self.z_hover_title = plain_axis_title(z_definition)
 
         # Plot titles are a display surface: Qanary IDs are shortened here only.
         plot_title = format_measurement_plot_title(
@@ -626,8 +576,8 @@ class HeatMap(QimchiFigure):
             "title": {
                 "text": plot_title,
                 "font": dict(
-                    family="Roboto, sans-serif",
-                    size=14,
+                    family="Fira Sans, Arial, sans-serif",
+                    size=16,
                     color="rgba(0,0,0,0.6)",
                 ),
                 "x": 0.5,
@@ -642,6 +592,10 @@ class HeatMap(QimchiFigure):
                 "zeroline": False,
                 "linewidth": 2,
                 "showgrid": False,
+                "exponentformat": "power",
+                "showexponent": "last",
+                "tickformat": "",
+                "minexponent": 0,
                 # Customizable
                 "nticks": theme["x"]["maj"]["nticks"],
                 "tickcolor": theme["x"]["maj"]["tickcolor"],
@@ -664,6 +618,10 @@ class HeatMap(QimchiFigure):
                 "zeroline": False,
                 "linewidth": 2,
                 "showgrid": False,
+                "exponentformat": "power",
+                "showexponent": "last",
+                "tickformat": "",
+                "minexponent": 0,
                 # Customizable
                 "nticks": theme["y"]["maj"]["nticks"],
                 "tickcolor": theme["y"]["maj"]["tickcolor"],
@@ -678,25 +636,47 @@ class HeatMap(QimchiFigure):
                 },
             },
             "font": {
+                "family": "Fira Sans, Arial, sans-serif",
                 "size": 16,
             },
             "coloraxis": {
-                "colorbar_title": self.z_title,
                 "colorscale": colors.get_colorscale(self.colorscale),
                 "cmin": self.rangecolor[0],
                 "cmax": self.rangecolor[1],
                 "colorbar": {
-                    "exponentformat": "e",  # TODOLATER: Autoscaling Units # CONCERN: Why not "SI"?
+                    "title": {
+                        "text": "",
+                        "side": "top",
+                    },
+                    "exponentformat": "power",
+                    "showexponent": "last",
+                    "tickformat": "~s",
+                    "minexponent": 0,
                     "ticklen": 5,
                     "outlinewidth": 2,
+                    "thicknessmode": "pixels",
+                    "thickness": 20,
+                    "x": 1.02,
+                    "xanchor": "left",
                     # Colorbar height settings
                     "lenmode": "fraction",
-                    "len": 0.9,
-                    "y": 0.5,
+                    "len": 0.78,
+                    "y": 0.45,
                     "yanchor": "middle",
                 },
             },
-            "margin": {"l": 50, "r": 10, "t": 40, "b": 50},
+            # MathJax colorbar titles do not contribute a reliable automatic
+            # right margin in Plotly, so the gutter is measured here: wide
+            # enough for this title -- a filtered one runs long -- in compact
+            # plot cards and exports alike.
+            "margin": {
+                "l": 50,
+                "r": colorbar_gutter_px(self.z_title),
+                "t": 40,
+                "b": 50,
+            },
+            "annotations": [colorbar_title_annotation(self.z_title)],
+            "meta": unit_layout_meta(x=x_definition, y=y_definition, z=z_definition),
         }
 
         # TODOLATER: Squarify plots
@@ -735,9 +715,9 @@ class HeatMap(QimchiFigure):
             # TODOLATER: Custom hover template
             # hoverinfo="none",
             # hovertemplate=None,  # No native hover box
-            hovertemplate=f"{self.x_title}: %{{x}}<br>"
-            f"{self.y_title}: %{{y}}<br>"
-            f"{self.z_title}: %{{z}}<extra></extra>",
+            hovertemplate=f"{self.x_hover_title}: %{{x}}<br>"
+            f"{self.y_hover_title}: %{{y}}<br>"
+            f"{self.z_hover_title}: %{{z}}<extra></extra>",
             # NOTE: "<extra></extra>" is required to remove the trace index from the hover info
         )
         # logger.debug("HeatMap || PLOTTED")

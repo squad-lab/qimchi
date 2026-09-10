@@ -24,6 +24,7 @@ import type { AxisType, Dash } from "plotly.js";
 
 // Local imports
 import plotlyColorscales from "./plotly_colorscales_plotlyjs.json";
+import { applyThemeToLayout, lightTheme } from "./themes";
 import { PlotAPI } from "../../services/plotAPI";
 import { PROD_BACKEND_URL } from "../../config";
 import "./PlotWrapper.css";
@@ -47,6 +48,78 @@ type PlotlyJSON = {
 };
 
 type PlotLiveStatus = "live" | "paused" | "error" | "completed";
+
+const COLORBAR_TITLE_ANNOTATION_NAME = "qimchi-colorbar-title";
+
+// Mirrors api/units.py::colorbar_title_font_size -- MathJax shrinks a
+// fraction's terms, so a derivative title needs a larger base size to stay
+// readable next to a plain one. Only a leading fraction counts: one inside a
+// scale suffix ("[/ 2e^2/h (2G_0)]") sits beside a full-sized label already.
+const COLORBAR_TITLE_FONT_SIZE = 16;
+const COLORBAR_TITLE_MATH_FONT_SIZE = 20;
+
+const colorbarTitleFontSize = (text: unknown): number =>
+  typeof text === "string" && text.replace(/^\$+/, "").startsWith("\\frac")
+    ? COLORBAR_TITLE_MATH_FONT_SIZE
+    : COLORBAR_TITLE_FONT_SIZE;
+
+const createColorbarTitleAnnotation = (text: string) => ({
+  name: COLORBAR_TITLE_ANNOTATION_NAME,
+  text,
+  xref: "paper" as const,
+  yref: "paper" as const,
+  x: 1.02,
+  y: 0.88,
+  xanchor: "left" as const,
+  yanchor: "bottom" as const,
+  align: "left" as const,
+  textangle: 0,
+  showarrow: false,
+  font: { size: colorbarTitleFontSize(text) },
+});
+
+// Mirrors api/units.py::_PREFIXES. Used for tick labels on a dimensionless
+// axis, where there is no unit string to attach the prefix to.
+const SI_PREFIXES: Record<number, string> = {
+  24: "Y",
+  21: "Z",
+  18: "E",
+  15: "P",
+  12: "T",
+  9: "G",
+  6: "M",
+  3: "k",
+  0: "",
+  "-3": "m",
+  "-6": "µ",
+  "-9": "n",
+  "-12": "p",
+  "-15": "f",
+  "-18": "a",
+  "-21": "z",
+  "-24": "y",
+};
+
+const normalizeMixedLatexTitle = (value: unknown): unknown => {
+  if (typeof value !== "string") return value;
+  const matches = [...value.matchAll(/\$([^$]+)\$/g)];
+  if (!matches.length || (matches.length === 1 && matches[0][0] === value)) return value;
+
+  const escapeText = (text: string) =>
+    text.replace(/([\\{}%&#_^])/g, "\\$1").replace(/\s+/g, "\\ ");
+  let cursor = 0;
+  let latex = "$";
+  for (const match of matches) {
+    const index = match.index ?? cursor;
+    const plain = value.slice(cursor, index);
+    if (plain) latex += "\\mathrm{" + escapeText(plain) + "}";
+    latex += match[1];
+    cursor = index + match[0].length;
+  }
+  const trailing = value.slice(cursor);
+  if (trailing) latex += "\\mathrm{" + escapeText(trailing) + "}";
+  return latex + "$";
+};
 
 type Props = {
   plotJson: PlotlyJSON;
@@ -287,6 +360,16 @@ const PlotWrapper: React.FC<Props> = ({
     getInitialSettings(plotType),
   );
   const [customizedPlotJson, setCustomizedPlotJson] = useState<PlotlyJSON>(plotJson);
+  const exportPlotJson = useMemo<PlotlyJSON>(
+    () => ({
+      ...customizedPlotJson,
+      // PlotComponent applies this typography while rendering, so apply the
+      // same layout before serialization rather than exporting the raw
+      // backend layout with different tick and nested-title font settings.
+      layout: applyThemeToLayout(customizedPlotJson.layout, lightTheme),
+    }),
+    [customizedPlotJson],
+  );
   const [isHoveredOrFocused, setIsHoveredOrFocused] = useState(false);
   const [relayoutData, setRelayoutData] = useState<Record<string, unknown> | null>(null);
   const [activePlotRef, setActivePlotRef] = useState<string | undefined>(plotRef);
@@ -294,13 +377,117 @@ const PlotWrapper: React.FC<Props> = ({
   // Store the original plot JSON (never modified, always the raw data from backend)
   const [originalPlotJson, setOriginalPlotJson] = useState<PlotlyJSON>(plotJson);
   // Store the base plot JSON (original or filtered, before appearance modifications)
+  const [basePlotJson, setBasePlotJson] = useState<PlotlyJSON>(plotJson);
 
   useEffect(() => {
     setActivePlotRef(plotRef);
   }, [plotRef]);
 
   const handleRelayout = useCallback((data: Record<string, unknown>) => {
-    setRelayoutData(data);
+    const nativeTitleKey = "coloraxis.colorbar.title.text";
+    const axisTitleKey = Object.keys(data).find((key) => /^[xy]axis\.title\.text$/.test(key));
+    const annotationTitleKey = Object.keys(data).find((key) =>
+      /^annotations\[\d+\]\.text$/.test(key),
+    );
+    const titleKey = Object.prototype.hasOwnProperty.call(data, nativeTitleKey)
+      ? nativeTitleKey
+      : axisTitleKey || annotationTitleKey;
+    const normalizedTitle = titleKey ? normalizeMixedLatexTitle(data[titleKey]) : undefined;
+    const normalizedData =
+      !titleKey || normalizedTitle === data[titleKey]
+        ? data
+        : { ...data, [titleKey]: normalizedTitle };
+    setRelayoutData((current) => ({ ...(current || {}), ...normalizedData }));
+
+    if (!titleKey || typeof normalizedTitle !== "string") return;
+    const axisTitleMatch = titleKey.match(/^([xy])axis\.title\.text$/);
+    if (axisTitleMatch) {
+      const axis = axisTitleMatch[1] as "x" | "y";
+      const retainEditedAxisTitle = (figure: PlotlyJSON): PlotlyJSON => {
+        const layout = { ...(figure.layout as any) };
+        const axisKey = `${axis}axis`;
+        const axisLayout = { ...(layout[axisKey] || {}) };
+        const title =
+          typeof axisLayout.title === "object"
+            ? { ...axisLayout.title }
+            : { text: axisLayout.title || "" };
+        title.text = normalizedTitle;
+        axisLayout.title = title;
+        layout[axisKey] = axisLayout;
+
+        // A manual title is a display override. Retain engineering tick
+        // scaling, but do not replace the edited title when its prefix changes.
+        const meta = { ...(layout.meta || {}) };
+        const unitDefinitions = { ...(meta.qimchi_units || {}) };
+        const definition = { ...(unitDefinitions[axis] || {}) };
+        const engineeringTitles = { ...(definition.engineering_titles || {}) };
+        for (const exponent of Object.keys(engineeringTitles)) {
+          engineeringTitles[exponent] = normalizedTitle;
+        }
+        definition.engineering_titles = engineeringTitles;
+        unitDefinitions[axis] = definition;
+        meta.qimchi_units = unitDefinitions;
+        layout.meta = meta;
+        return { ...figure, layout };
+      };
+
+      setBasePlotJson(retainEditedAxisTitle);
+      setCustomizedPlotJson(retainEditedAxisTitle);
+      return;
+    }
+
+    const annotationIndexMatch = titleKey.match(/^annotations\[(\d+)\]\.text$/);
+    const annotationIndex = annotationIndexMatch ? Number(annotationIndexMatch[1]) : null;
+
+    const retainEditedColorbarTitle = (figure: PlotlyJSON): PlotlyJSON => {
+      const layout = { ...(figure.layout as any) };
+      const annotations = Array.isArray(layout.annotations)
+        ? layout.annotations.map((annotation: any) => ({ ...annotation }))
+        : [];
+      const targetIndex =
+        annotationIndex === null
+          ? annotations.findIndex(
+              (annotation: any) => annotation?.name === COLORBAR_TITLE_ANNOTATION_NAME,
+            )
+          : annotationIndex;
+      if (
+        annotationIndex !== null &&
+        annotations[targetIndex]?.name !== COLORBAR_TITLE_ANNOTATION_NAME
+      ) {
+        return figure;
+      }
+      if (targetIndex >= 0) {
+        annotations[targetIndex].text = normalizedTitle;
+      } else {
+        annotations.push(createColorbarTitleAnnotation(normalizedTitle));
+      }
+      layout.annotations = annotations;
+
+      const coloraxis = { ...(layout.coloraxis || {}) };
+      const colorbar = { ...(coloraxis.colorbar || {}) };
+      const title =
+        typeof colorbar.title === "object" ? { ...colorbar.title } : { text: colorbar.title || "" };
+      title.text = "";
+      colorbar.title = title;
+      coloraxis.colorbar = colorbar;
+      layout.coloraxis = coloraxis;
+
+      const meta = { ...(layout.meta || {}) };
+      const unitDefinitions = { ...(meta.qimchi_units || {}) };
+      const zDefinition = { ...(unitDefinitions.z || {}) };
+      const engineeringTitles = { ...(zDefinition.engineering_titles || {}) };
+      for (const exponent of Object.keys(engineeringTitles)) {
+        engineeringTitles[exponent] = normalizedTitle;
+      }
+      zDefinition.engineering_titles = engineeringTitles;
+      unitDefinitions.z = zDefinition;
+      meta.qimchi_units = unitDefinitions;
+      layout.meta = meta;
+      return { ...figure, layout };
+    };
+
+    setBasePlotJson(retainEditedColorbarTitle);
+    setCustomizedPlotJson(retainEditedColorbarTitle);
   }, []);
 
   // Save plot as PNG, PDF & SVG
@@ -317,7 +504,7 @@ const PlotWrapper: React.FC<Props> = ({
       const startResponse = await axios.post(
         `${PROD_BACKEND_URL}/export-plot-images`,
         {
-          plot_json: customizedPlotJson,
+          plot_json: exportPlotJson,
           fpath: plotConfig.fpath,
           relayout_data: relayoutData,
           applied_filters: appliedFilters,
@@ -409,7 +596,7 @@ const PlotWrapper: React.FC<Props> = ({
       const axiosResponse = await axios.post(
         `${PROD_BACKEND_URL}/export-plot-images/send-to-notes`,
         {
-          plot_json: customizedPlotJson,
+          plot_json: exportPlotJson,
           fpath: plotConfig.fpath,
           relayout_data: relayoutData,
           applied_filters: appliedFilters,
@@ -452,8 +639,6 @@ const PlotWrapper: React.FC<Props> = ({
       showToast(`Failed to send to notes: ${err}`, "error");
     }
   };
-  const [basePlotJson, setBasePlotJson] = useState<PlotlyJSON>(plotJson);
-
   // Filters state
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [appliedFilters, setAppliedFilters] = useState<AppliedFilter[]>([]);
@@ -869,6 +1054,10 @@ const PlotWrapper: React.FC<Props> = ({
         };
 
         const getZTitle = () => {
+          const annotation = (customizedPlotJson.layout.annotations as any[])?.find(
+            (item: any) => item?.name === COLORBAR_TITLE_ANNOTATION_NAME,
+          );
+          if (annotation?.text) return annotation.text;
           const coloraxis = (customizedPlotJson.layout as any)?.coloraxis;
           if (coloraxis?.colorbar?.title?.text) return coloraxis.colorbar.title.text;
           return "Intensity";
@@ -1159,6 +1348,7 @@ const PlotWrapper: React.FC<Props> = ({
           "sma",
           "normalize",
           "log_scale",
+          "transform",
           "polyfit",
           "bg_corr_constant",
           "bg_corr_linear",
@@ -1552,7 +1742,7 @@ const PlotWrapper: React.FC<Props> = ({
             (newColoraxis as Record<string, unknown>).cauto = true;
             (newColoraxis as Record<string, unknown>).autocolorscale = false;
           }
-          layoutRef.coloraxis = newColoraxis;
+          layoutRef.coloraxis = newColoraxis as any;
         }
 
         if (updatedPlotJson.layout.xaxis) {
@@ -1568,6 +1758,9 @@ const PlotWrapper: React.FC<Props> = ({
             tickwidth: settings.x.maj.tickwidth,
             ticklen: settings.x.maj.ticklen,
             tickangle: settings.x.maj.tickangle,
+            exponentformat: "none",
+            showexponent: "none",
+            tickformat: "",
             minor: {
               ...(updatedPlotJson.layout.xaxis.minor || {}),
               showgrid: settings.x.min.showgrid,
@@ -1595,6 +1788,9 @@ const PlotWrapper: React.FC<Props> = ({
             tickwidth: settings.y.maj.tickwidth,
             ticklen: settings.y.maj.ticklen,
             tickangle: settings.y.maj.tickangle,
+            exponentformat: "none",
+            showexponent: "none",
+            tickformat: "",
             minor: {
               ...(updatedPlotJson.layout.yaxis.minor || {}),
               showgrid: settings.y.min.showgrid,
@@ -1608,11 +1804,201 @@ const PlotWrapper: React.FC<Props> = ({
             },
           };
         }
+
+        // Remove annotations from the retired scientific-notation mode. Fit
+        // equations now always use engineering exponents.
+        const scientificAnnotationNames = new Set([
+          "qimchi-scientific-x-exponent",
+          "qimchi-scientific-y-exponent",
+        ]);
+        const fitEquations = (updatedPlotJson.layout.meta as any)?.qimchi_polyfit;
+        const selectedFitEquation = fitEquations?.engineering;
+        let existingAnnotations = Array.isArray(updatedPlotJson.layout.annotations)
+          ? updatedPlotJson.layout.annotations
+              .filter((annotation: any) => !scientificAnnotationNames.has(annotation?.name))
+              .map((annotation: any) =>
+                annotation?.name === "qimchi-polyfit-equation" &&
+                typeof selectedFitEquation === "string"
+                  ? { ...annotation, text: selectedFitEquation }
+                  : annotation,
+              )
+          : [];
+        const coloraxisBeforeFormatting = (updatedPlotJson.layout as any).coloraxis;
+        const nativeColorbarTitle = coloraxisBeforeFormatting?.colorbar?.title?.text;
+        if (
+          hasHeatmap &&
+          !existingAnnotations.some(
+            (annotation: any) => annotation?.name === COLORBAR_TITLE_ANNOTATION_NAME,
+          ) &&
+          typeof nativeColorbarTitle === "string" &&
+          nativeColorbarTitle
+        ) {
+          existingAnnotations.push(createColorbarTitleAnnotation(nativeColorbarTitle));
+        }
+        updatedPlotJson.layout.annotations = existingAnnotations;
+
+        type EngineeringUnitMeta = {
+          unit?: string;
+          engineering_scale?: number;
+          engineering_titles?: Record<string, string>;
+        };
+        const unitDefinitions =
+          ((updatedPlotJson.layout.meta as any)?.qimchi_units as
+            Record<string, EngineeringUnitMeta> | undefined) || {};
+
+        const formatTick = (value: number, step: number): string => {
+          if (Math.abs(value) < Math.abs(step) * 1e-10) return "0";
+          const decimals = Math.max(0, Math.min(8, -Math.floor(Math.log10(Math.abs(step))) + 1));
+          return Number(value.toFixed(decimals)).toString().replace("-", "−");
+        };
+
+        const niceStep = (span: number, count: number): number => {
+          const rough = span / Math.max(1, count - 1);
+          if (!Number.isFinite(rough) || rough <= 0) return 1;
+          const power = 10 ** Math.floor(Math.log10(rough));
+          const fraction = rough / power;
+          const niceFraction = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10;
+          return niceFraction * power;
+        };
+
+        const engineeringPresentation = (
+          definition: EngineeringUnitMeta | undefined,
+          values: number[],
+          requestedTicks: number,
+        ) => {
+          const titles = definition?.engineering_titles || {};
+          const exponents = Object.keys(titles).map(Number).filter(Number.isFinite);
+          // A dimensionless axis (a filter cancelled its units, say) has no
+          // unit to carry a prefix, so the prefix goes on the tick labels
+          // instead -- "0.5m" rather than "0.0005". Its title is left alone.
+          const dimensionless = !exponents.length && definition?.unit === "";
+          if (!values.length || (!exponents.length && !dimensionless)) return null;
+
+          const unitScale = Number(definition?.engineering_scale ?? 1);
+          if (!Number.isFinite(unitScale) || unitScale <= 0) return null;
+          let minimum = Infinity;
+          let maximum = -Infinity;
+          for (const value of values) {
+            if (value < minimum) minimum = value;
+            if (value > maximum) maximum = value;
+          }
+          if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) return null;
+          const maxMagnitude = Math.max(Math.abs(minimum), Math.abs(maximum)) * unitScale;
+          let desiredExponent = 0;
+          if (maxMagnitude > 0 && Number.isFinite(maxMagnitude)) {
+            desiredExponent = 3 * Math.floor(Math.log10(maxMagnitude) / 3);
+          }
+          const exponent = dimensionless
+            ? Math.max(-24, Math.min(24, desiredExponent))
+            : exponents.reduce((best, candidate) =>
+                Math.abs(candidate - desiredExponent) < Math.abs(best - desiredExponent)
+                  ? candidate
+                  : best,
+              );
+          const displayFactor = unitScale / 10 ** exponent;
+          const displayMinimum = minimum * displayFactor;
+          const displayMaximum = maximum * displayFactor;
+          const step = niceStep(displayMaximum - displayMinimum, requestedTicks);
+          const first = Math.ceil(displayMinimum / step - 1e-10) * step;
+          const last = Math.floor(displayMaximum / step + 1e-10) * step;
+          const displayTicks: number[] = [];
+          for (let tick = first, guard = 0; tick <= last + step * 1e-9 && guard < 1000; guard++) {
+            displayTicks.push(tick);
+            tick += step;
+          }
+          if (!displayTicks.length) displayTicks.push(displayMinimum);
+          const tickPrefix = dimensionless ? SI_PREFIXES[exponent] || "" : "";
+          return {
+            title: dimensionless ? undefined : titles[String(exponent)],
+            tickvals: displayTicks.map((tick) => tick / displayFactor),
+            ticktext: displayTicks.map((tick) => {
+              const text = formatTick(tick, step);
+              // A bare "0m" reads as a unit, not a magnitude.
+              return tickPrefix && text !== "0" ? `${text}${tickPrefix}` : text;
+            }),
+          };
+        };
+
+        for (const axis of ["x", "y"] as const) {
+          const axisLayout = updatedPlotJson.layout[`${axis}axis`] as any;
+          if (!axisLayout || (axisLayout.type && axisLayout.type !== "linear")) continue;
+          const explicitRange = toNumericArray(axisLayout.range);
+          const values =
+            explicitRange.length >= 2
+              ? explicitRange.slice(0, 2)
+              : (updatedPlotJson.data || []).flatMap((trace: any) => toNumericArray(trace?.[axis]));
+          const presentation = engineeringPresentation(
+            unitDefinitions[axis],
+            values,
+            Number(axisLayout.nticks || 5),
+          );
+          if (!presentation) continue;
+          updatedPlotJson.layout[`${axis}axis`] = {
+            ...axisLayout,
+            tickmode: "array",
+            tickvals: presentation.tickvals,
+            ticktext: presentation.ticktext,
+            ...(presentation.title === undefined
+              ? {}
+              : {
+                  title: {
+                    ...(typeof axisLayout.title === "object" ? axisLayout.title : {}),
+                    text: presentation.title,
+                  },
+                }),
+          } as any;
+        }
+
+        const coloraxis = (updatedPlotJson.layout as any).coloraxis;
+        if (coloraxis?.colorbar) {
+          const explicitBounds =
+            Number.isFinite(Number(coloraxis.cmin)) && Number.isFinite(Number(coloraxis.cmax))
+              ? [Number(coloraxis.cmin), Number(coloraxis.cmax)]
+              : [];
+          const zValues = explicitBounds.length
+            ? explicitBounds
+            : (updatedPlotJson.data || []).flatMap((trace: any) =>
+                toNumeric2DArray(trace?.z).flat(),
+              );
+          const presentation = engineeringPresentation(unitDefinitions.z, zValues, 5);
+          const presentationTitle = presentation?.title;
+          if (presentationTitle !== undefined) {
+            existingAnnotations = existingAnnotations.map((annotation: any) =>
+              annotation?.name === COLORBAR_TITLE_ANNOTATION_NAME
+                ? // Keep the backend's font size: it is fitted to the title's
+                  // length and to the gutter reserved for it, which a prefix
+                  // swap does not change.
+                  { ...annotation, text: presentationTitle }
+                : annotation,
+            );
+          }
+          (updatedPlotJson.layout as any).coloraxis = {
+            ...coloraxis,
+            colorbar: {
+              ...coloraxis.colorbar,
+              exponentformat: "none",
+              showexponent: "none",
+              tickformat: "",
+              title: {
+                ...(typeof coloraxis.colorbar.title === "object" ? coloraxis.colorbar.title : {}),
+                text: "",
+              },
+              ...(presentation
+                ? {
+                    tickmode: "array",
+                    tickvals: presentation.tickvals,
+                    ticktext: presentation.ticktext,
+                  }
+                : {}),
+            },
+          };
+          updatedPlotJson.layout.annotations = existingAnnotations;
+        }
       }
 
       return updatedPlotJson;
     },
-    [],
+    [toNumeric2DArray, toNumericArray],
   );
 
   // Apply current appearance settings when a new plot loads or when appearance settings change
@@ -3028,8 +3414,9 @@ const PlotWrapper: React.FC<Props> = ({
     if (mode === "theme") {
       const appearance = usePainterStore.getState().sourceAppearance;
       if (appearance) {
-        setAppearanceSettings(appearance);
-        if (plotConfig?.id) setPlotAppearance(plotConfig.id, appearance);
+        const normalized = mergeAppearanceDefaults(getInitialSettings(plotType), appearance);
+        setAppearanceSettings(normalized);
+        if (plotConfig?.id) setPlotAppearance(plotConfig.id, normalized);
         showToast("Theme applied", "success");
       }
     } else if (mode === "filter") {
@@ -3171,7 +3558,7 @@ const PlotWrapper: React.FC<Props> = ({
                 }}
               >
                 <div
-                  className="plot-status-badge absolute top-3 left-3 z-20 inline-flex items-center rounded-full border border-gray-200 bg-white/90 p-1.5 shadow-sm dark:bg-gray-800/90"
+                  className="plot-status-badge absolute top-3 left-3 z-20 inline-flex items-center rounded-full border border-gray-200 bg-white/90 p-1 shadow-sm dark:bg-gray-800/90"
                   aria-label={`Status: ${statusLabel[displayStatus]}`}
                   role="status"
                   tabIndex={0}
@@ -3415,7 +3802,7 @@ const PlotWrapper: React.FC<Props> = ({
         <div className="plot-content">
           <div className={`p-2 pb-0 relative ${isSquareMode ? "square-mode" : ""}`}>
             <div
-              className="plot-status-badge absolute top-3 left-3 z-20 inline-flex items-center rounded-full border border-gray-200 bg-white/90 p-1.5 shadow-sm dark:bg-gray-800/90"
+              className="plot-status-badge absolute top-3 left-3 z-20 inline-flex items-center rounded-full border border-gray-200 bg-white/90 p-1 shadow-sm dark:bg-gray-800/90"
               aria-label={`Status: ${statusLabel[displayStatus]}`}
               role="status"
               tabIndex={0}
