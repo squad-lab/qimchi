@@ -437,15 +437,16 @@ wheels = [
 
 [[package]]
 name = "choreographer"
-version = "1.2.1"
+version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "logistro" },
+    { name = "platformdirs" },
     { name = "simplejson" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/74/47/64a035c6f764450ea9f902cbeba14c8c70316c2641125510066d8f912bfa/choreographer-1.2.1.tar.gz", hash = "sha256:022afd72b1e9b0bcb950420b134e70055a294c791b6f36cfb47d89745b701b5f", size = 43399, upload-time = "2025-11-09T23:04:44.749Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/17/69/3058cd4f16d6b75c80e8f95e5b713d930526353ce294df9a7887453ba215/choreographer-1.3.0.tar.gz", hash = "sha256:6c44a0e48e9b37977344d40bfa5a9ed88575fe4bc0fd836771bf702bc24d6884", size = 48291, upload-time = "2026-04-28T22:57:45.114Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b7/9f/d73dfb85d7a5b1a56a99adc50f2074029468168c970ff5daeade4ad819e4/choreographer-1.2.1-py3-none-any.whl", hash = "sha256:9af5385effa3c204dbc337abf7ac74fd8908ced326a15645dc31dde75718c77e", size = 49338, upload-time = "2025-11-09T23:04:43.154Z" },
+    { url = "https://files.pythonhosted.org/packages/ba/6c/ff8bf52315064dbeb55cb5067e191120a5b2e58bb648d0d34cf7969dc2c2/choreographer-1.3.0-py3-none-any.whl", hash = "sha256:cea4cb739e4f61625e4b53888a8d3fa1d3bf73948b56753e460ab44da7d8d44f", size = 52622, upload-time = "2026-04-28T22:57:44.015Z" },
 ]
 
 [[package]]
@@ -1377,18 +1378,17 @@ wheels = [
 
 [[package]]
 name = "kaleido"
-version = "1.2.0"
+version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "choreographer" },
     { name = "logistro" },
     { name = "orjson" },
     { name = "packaging" },
-    { name = "pytest-timeout" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/38/ad/76eec859b71eda803a88ea50ed3f270281254656bb23d19eb0a39aa706a0/kaleido-1.2.0.tar.gz", hash = "sha256:fa621a14423e8effa2895a2526be00af0cf21655be1b74b7e382c171d12e71ef", size = 64160, upload-time = "2025-11-04T21:24:23.833Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/81/8f/bce1fa4fb2aa30ffef9be03afd3d3dc2852e73a68e6cfe227fc478399830/kaleido-1.4.0.tar.gz", hash = "sha256:7b893e3e24e28f180844fcf1b0255d1bc3787377507b4669a555a74bcf1d1f92", size = 69673, upload-time = "2026-08-31T20:48:35.194Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4b/97/f6de8d4af54d6401d6581a686cce3e3e2371a79ba459a449104e026c08bc/kaleido-1.2.0-py3-none-any.whl", hash = "sha256:c27ed82b51df6b923d0e656feac221343a0dbcd2fb9bc7e6b1db97f61e9a1513", size = 68997, upload-time = "2025-11-04T21:24:21.704Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/91/e3026cabbac6e4f724aab486d5593ff9cf2274b03416ac7f56064d7e0bf6/kaleido-1.4.0-py3-none-any.whl", hash = "sha256:cd75a0b11ea64d313c2c73c58db9dc519eef9eb494830b414a8492b33108d192", size = 56129, upload-time = "2026-08-31T20:48:34.095Z" },
 ]
 
 [[package]]
@@ -2154,15 +2154,15 @@ wheels = [
 
 [[package]]
 name = "plotly"
-version = "6.6.0"
+version = "7.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "narwhals" },
     { name = "packaging" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/24/fb/41efe84970cfddefd4ccf025e2cbfafe780004555f583e93dba3dac2cdef/plotly-6.6.0.tar.gz", hash = "sha256:b897f15f3b02028d69f755f236be890ba950d0a42d7dfc619b44e2d8cea8748c", size = 7027956, upload-time = "2026-03-02T21:10:25.321Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ec/9e/8894e8eae20a5b2a44aa568b1d2d80291e8eea6ce7bc75cdc7a152aef0ac/plotly-7.0.0.tar.gz", hash = "sha256:08b21f1244a97e7a1a699833c4bb2678475aa108b3f1989886ed0b038ebfd849", size = 6218668, upload-time = "2026-08-25T17:47:29.088Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/52/d2/c6e44dba74f17c6216ce1b56044a9b93a929f1c2d5bdaff892512b260f5e/plotly-6.6.0-py3-none-any.whl", hash = "sha256:8d6daf0f87412e0c0bfe72e809d615217ab57cc715899a1e5145135a7800d1d0", size = 9910315, upload-time = "2026-03-02T21:10:18.131Z" },
+    { url = "https://files.pythonhosted.org/packages/e0/2f/6f492108d9955bac97979d9949c1b35eab30fc630b1f22bbdd2c7cacbab4/plotly-7.0.0-py3-none-any.whl", hash = "sha256:78cbf7bd06d1b05bb3b8ec1b709864695229b55151b6f7530fbf55517ead6fdd", size = 9052859, upload-time = "2026-08-25T17:47:24.689Z" },
 ]
 
 [[package]]
@@ -2840,6 +2840,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
+    { name = "pytest-timeout" },
     { name = "ruff" },
     { name = "wheel" },
 ]
@@ -2850,6 +2851,7 @@ test = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
+    { name = "pytest-timeout" },
 ]
 
 [package.dev-dependencies]
@@ -2869,12 +2871,14 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
+    { name = "pytest-timeout" },
     { name = "ruff" },
 ]
 test = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
+    { name = "pytest-timeout" },
 ]
 
 [package.metadata]
@@ -2885,13 +2889,13 @@ requires-dist = [
     { name = "gunicorn", specifier = "~=25.3.0" },
     { name = "h5netcdf", marker = "extra == 'datasets'", specifier = "~=1.8.1" },
     { name = "h5py", marker = "extra == 'datasets'", specifier = "~=3.16.0" },
-    { name = "kaleido", specifier = "~=1.2.0" },
+    { name = "kaleido", specifier = "~=1.4.0" },
     { name = "netcdf4", marker = "extra == 'datasets'", specifier = "~=1.7.4" },
     { name = "numcodecs", marker = "extra == 'datasets'", specifier = "~=0.16.5" },
     { name = "numpy", specifier = "~=2.4.0" },
     { name = "pillow", specifier = "~=12.1" },
     { name = "pip", specifier = "~=26.0.0" },
-    { name = "plotly", specifier = "~=6.6.0" },
+    { name = "plotly", specifier = "~=7.0.0" },
     { name = "polars", marker = "extra == 'datasets'", specifier = "~=1.39.3" },
     { name = "portalocker", specifier = "~=3.2.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4" },
@@ -2902,6 +2906,8 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=1.3,<2" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=5" },
+    { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2,<3" },
+    { name = "pytest-timeout", marker = "extra == 'test'", specifier = ">=2,<3" },
     { name = "python-dotenv", specifier = "~=1.2.0" },
     { name = "qcodes", specifier = "~=0.59.0" },
     { name = "qimchi-connect", specifier = "~=0.2.0" },
@@ -2938,12 +2944,14 @@ dev = [
     { name = "pytest", specifier = ">=9.0,<10" },
     { name = "pytest-asyncio", specifier = ">=1.3,<2" },
     { name = "pytest-cov", specifier = ">=5" },
+    { name = "pytest-timeout", specifier = ">=2,<3" },
     { name = "ruff", specifier = ">=0.15,<1" },
 ]
 test = [
     { name = "pytest", specifier = ">=9.0,<10" },
     { name = "pytest-asyncio", specifier = ">=1.3,<2" },
     { name = "pytest-cov", specifier = ">=5" },
+    { name = "pytest-timeout", specifier = ">=2,<3" },
 ]
 
 [[package]]
