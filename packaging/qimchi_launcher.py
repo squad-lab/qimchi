@@ -751,7 +751,12 @@ def _run_native_smoke(window, dataset_path: str, download_dir: str, log) -> bool
         archive_path = None
         deadline = time.time() + 30
         while time.time() < deadline:
-            matches = glob.glob(os.path.join(download_dir, "smoke-measurement*.zip"))
+            # The basket posts to /download-multiple/, which names its archive
+            # after the item count ("items_1_files.zip"), not after the
+            # dataset. The download directory is a fresh temp dir per run, so
+            # any archive in it is this run's; _validate_smoke_archive checks
+            # that it really holds the fixture.
+            matches = glob.glob(os.path.join(download_dir, "*.zip"))
             if matches:
                 archive_path = matches[0]
                 break

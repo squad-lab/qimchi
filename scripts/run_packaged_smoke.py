@@ -73,7 +73,10 @@ def run_smoke(executable: Path, mode: str, timeout: int) -> None:
                 f"Packaged {mode} smoke failed with exit code {completed.returncode}"
             )
 
-        archives = list(downloads.glob("smoke-measurement*.zip"))
+        # Archive names differ per endpoint (/download/ uses the dataset name,
+        # /download-multiple/ an item count), and this directory is created
+        # fresh per run -- so match any archive and assert on its contents.
+        archives = list(downloads.glob("*.zip"))
         if len(archives) != 1:
             raise RuntimeError(f"Expected one smoke download, found: {archives}")
         with zipfile.ZipFile(archives[0]) as archive:
