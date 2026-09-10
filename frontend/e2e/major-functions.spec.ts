@@ -126,7 +126,11 @@ async function mockApplicationApi(page: Page): Promise<ApiState> {
                       },
                     ]
                   : [{ type: "scatter", mode: "lines", x: [0, 1], y: [1, 2] }],
-                layout: { title: { text: body.plotType } },
+                layout: {
+                  title: { text: body.plotType },
+                  xaxis: { title: { text: "$\\mathrm{Gate}\\;\\left(\\mathrm{V}\\right)$" } },
+                  yaxis: { title: { text: "$\\mathrm{Current}\\;\\left(\\mathrm{A}\\right)$" } },
+                },
               },
             },
           ],
@@ -236,6 +240,29 @@ test("adds a measurement, creates default plots and clears the workspace", async
   await expect(page.getByRole("heading", { name: /Viewer\s*\(0\)/ })).toBeVisible();
   await page.getByRole("button", { name: "Clear basket" }).click();
   await expect(page.getByText("Basket(0)")).toBeVisible();
+});
+
+test("edits MathJax X and Y axis titles inline", async ({ page }) => {
+  await loadExplorer(page);
+  await addDatasetToBasket(page, "run.nc");
+
+  for (const [axisClass, replacement] of [
+    ["xtitle", "Edited X axis"],
+    ["ytitle", "Edited Y axis"],
+  ] as const) {
+    const mathTitle = page.locator(`g.${axisClass}-math-group`).first();
+    await expect(mathTitle).toBeVisible();
+    await mathTitle.scrollIntoViewIfNeeded();
+    const bounds = await mathTitle.boundingBox();
+    expect(bounds).not.toBeNull();
+    await page.mouse.click(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2);
+
+    const editor = page.locator(".plugin-editable[contenteditable='true']").last();
+    await expect(editor).toBeVisible();
+    await editor.fill(replacement);
+    await editor.press("Enter");
+    await expect(page.locator(`text.${axisClass}`).first()).toHaveText(replacement);
+  }
 });
 
 test("loads searchable metadata and saves measurement notes", async ({ page }) => {

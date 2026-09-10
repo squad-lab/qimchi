@@ -32,6 +32,103 @@ type Props = {
   onHover?: (event: Plotly.PlotMouseEvent) => void;
 };
 
+/**
+ * Plotly binds its inline title editor to the source SVG <text> element, but
+ * MathJax hides that element and places a non-interactive SVG group over it.
+ * Forward clicks from primary X/Y MathJax titles to Plotly's existing editor.
+ */
+const mathAxisTitleSource = (mathTitle: SVGGElement): SVGTextElement | null => {
+  const mathClass = [...mathTitle.classList].find((className) =>
+    /^[xy]title-math-group$/.test(className),
+  );
+  if (!mathClass) return null;
+  const titleClass = mathClass.slice(0, -"-math-group".length);
+  return mathTitle.parentElement?.querySelector<SVGTextElement>(`text.${titleClass}`) || null;
+};
+
+/**
+ * Annotation text -- the heatmap colorbar title among it -- is already
+ * editable through Plotly's own delegate on the surrounding group, so a click
+ * only has to reach it. MathJax's overlay is what stops it.
+ */
+const MATH_GROUP_SELECTOR = "g[class*='-math-group']";
+const isAnnotationMathGroup = (mathTitle: SVGGElement) =>
+  mathTitle.classList.contains("annotation-text-math-group");
+
+const enableMathAxisTitleEditing = (plotElement: HTMLDivElement) => {
+  const mathTitles = plotElement.querySelectorAll<SVGGElement>(MATH_GROUP_SELECTOR);
+  for (const mathTitle of mathTitles) {
+    if (!mathAxisTitleSource(mathTitle) && !isAnnotationMathGroup(mathTitle)) continue;
+
+    mathTitle.style.pointerEvents = "all";
+    mathTitle.style.cursor = "text";
+    const mathSvg = mathTitle.querySelector<SVGSVGElement>("svg");
+    if (mathSvg) {
+      mathSvg.style.pointerEvents = "all";
+      mathSvg.style.cursor = "text";
+    }
+  }
+};
+
+/**
+ * Plotly anchors its editor to the title it replaces, which for a rotated Y
+ * title lands off the left edge of small cards. Tag every axis-title editor so
+ * the stylesheet can centre it inside the plot area instead.
+ */
+const tagAxisTitleEditor = (plotElement: HTMLDivElement) => {
+  plotElement
+    .querySelector<HTMLElement>(".plugin-editable[contenteditable='true']")
+    ?.classList.add("qimchi-axis-title-editor");
+};
+
+const forwardMathAxisTitleClick = (plotElement: HTMLDivElement, event: MouseEvent) => {
+  if (event.target instanceof Element && event.target.matches("text.xtitle, text.ytitle")) {
+    // Plain-text titles go straight to Plotly's own handler; tag the editor it
+    // creates once that handler has run.
+    window.requestAnimationFrame(() => tagAxisTitleEditor(plotElement));
+    return;
+  }
+
+  const mathTitles = plotElement.querySelectorAll<SVGGElement>(MATH_GROUP_SELECTOR);
+  for (const mathTitle of mathTitles) {
+    const bounds = mathTitle.getBoundingClientRect();
+    if (
+      event.clientX < bounds.left ||
+      event.clientX > bounds.right ||
+      event.clientY < bounds.top ||
+      event.clientY > bounds.bottom
+    ) {
+      continue;
+    }
+
+    if (isAnnotationMathGroup(mathTitle)) {
+      // Plotly listens on the annotation's own group, so this click already
+      // reaches its editor -- let it through and only tag what it opens.
+      window.requestAnimationFrame(() => tagAxisTitleEditor(plotElement));
+      return;
+    }
+
+    const sourceTitle = mathAxisTitleSource(mathTitle);
+    if (!sourceTitle) continue;
+    event.preventDefault();
+    event.stopPropagation();
+
+    // Give Plotly's HTML editor a measurable source element to align to.
+    // Plotly hides it again when the edited value is re-rendered.
+    sourceTitle.style.display = "";
+    sourceTitle.style.opacity = "0";
+    sourceTitle.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      }),
+    );
+    tagAxisTitleEditor(plotElement);
+    return;
+  }
+};
+
 const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onClick, onHover }) => {
   // Defer plot JSON updates to reduce flickering during rapid appearance changes
   const deferredPlotJson = useDeferredValue(plotJson);
@@ -74,15 +171,16 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
 
   // Enhanced layout with better visual styling using theme
   const enhancedLayout: Partial<Layout> = useMemo(() => {
+    const themedLayout = applyThemeToLayout(deferredPlotJson.layout, plotTheme);
     const baseLayout = {
-      ...applyThemeToLayout(deferredPlotJson.layout, plotTheme),
+      ...themedLayout,
       autosize: true,
       width: dimensions.width || undefined,
       height: dimensions.height || undefined,
       plot_bgcolor: "rgba(0,0,0,0)",
       paper_bgcolor: "rgba(0,0,0,0)",
       xaxis: {
-        ...deferredPlotJson.layout.xaxis,
+        ...themedLayout.xaxis,
         ticks: "outside" as const,
         showline: true,
         mirror: true,
@@ -93,7 +191,7 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
         linecolor: plotTheme.colors.text,
       },
       yaxis: {
-        ...deferredPlotJson.layout.yaxis,
+        ...themedLayout.yaxis,
         ticks: "outside" as const,
         showline: true,
         mirror: true,
@@ -116,14 +214,19 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
 
   const enhancedConfig: Partial<Config> = useMemo(
     () => ({
-      typesetMath: true,
       editable: true,
       edits: {
         annotationTail: true,
-        annotationText: false,
+        annotationText: true,
         annotationPosition: true,
         axisTitleText: true,
-        colorbarTitleText: true,
+        // Heatmap titles are rendered by the MathJax-safe annotation above
+        // the colorbar. The native title is intentionally blank, so enabling
+        // its editor exposes Plotly's "Click to enter Colorscale title"
+        // placeholder behind the real title. This only covers trace-level
+        // colorbars -- a layout `coloraxis` one is routed to axisTitleText by
+        // Plotly, so its placeholder is hidden in PlotWrapper.css instead.
+        colorbarTitleText: false,
         colorbarPosition: true,
         titleText: false,
       },
@@ -139,6 +242,10 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
         scale: 2,
       },
       ...deferredPlotJson.config,
+      // Fit equations and derivative labels are supplied as TeX by the
+      // backend. Keep Plotly's own SVG MathJax conversion enabled even when
+      // an older saved plot config did not know about this setting.
+      typesetMath: true,
     }),
     [deferredPlotJson.config, dimensions.height, dimensions.width],
   );
@@ -158,39 +265,34 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
         console.log("[Plot] Structure unchanged, using Plotly.react for efficient update");
       }
 
+      // Plotly v4 supports MathJax v3/v4 directly. Wait for the configured
+      // tex-svg component so its first render can typeset axis titles and fit
+      // annotations instead of racing MathJax startup.
+      const mathJax = (window as any).MathJax;
+      if (mathJax?.startup?.promise) {
+        await mathJax.startup.promise;
+      }
+
       // Use Plotly.react - it automatically determines whether to create or update
       await Plotly.react(plotRef.current, deferredPlotJson.data, enhancedLayout, enhancedConfig);
+      enableMathAxisTitleEditing(plotRef.current);
 
-      // If MathJax is loaded, typeset the container so TeX axis labels render.
-      try {
-        // MathJax v3 exposes typesetPromise. If not present, this will be a no-op.
-        if (
-          // @ts-expect-error allow access to global MathJax added by index.html
-          window.MathJax &&
-          // @ts-expect-error allow access to global MathJax added by index.html
-          typeof window.MathJax.typesetPromise === "function"
-        ) {
-          // @ts-expect-error call typesetPromise dynamically
-          await window.MathJax.typesetPromise([plotRef.current]);
+      // Explicitly typeset dynamic Plotly content after every react/update.
+      // Plotly handles its own math, while this pass catches any labels or
+      // annotations inserted during the update cycle.
+      if (typeof mathJax?.typesetPromise === "function") {
+        try {
+          await mathJax.typesetPromise([plotRef.current]);
+        } catch (error) {
+          // Plotly has already rendered its own MathJax groups. A secondary
+          // page-level typeset failure must not disable plot interactions.
+          console.warn("[Plot] Additional MathJax typeset failed", error);
         }
-      } catch (err: unknown) {
-        // If MathJax is still initializing and reports missing output jax, retry once
-        const msg = (err && (err as { message?: string }).message) || String(err);
-        const msgStr = String(msg);
-        if (msgStr.includes('Output Jax "svg" is not defined')) {
-          // Give MathJax a short moment and retry once
-          try {
-            await new Promise((res) => setTimeout(res, 200));
-            // @ts-expect-error call typesetPromise dynamically
-            await window.MathJax.typesetPromise([plotRef.current]);
-          } catch (err2) {
-            console.warn("[Plot] MathJax retry failed:", err2);
-          }
-        } else {
-          // Non-fatal: log for debugging but don't break plot rendering
-          console.warn("[Plot] MathJax typeset failed:", err);
-        }
+      } else {
+        console.warn("[Plot] MathJax tex-svg component is not available");
       }
+
+      enableMathAxisTitleEditing(plotRef.current);
 
       // Attach the plotly_relayout listener the first time the plot is ready.
       // Guard prevents duplicate registration across multiple updatePlot calls.
@@ -248,6 +350,33 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
   useEffect(() => {
     updatePlot();
   }, [updatePlot]);
+
+  // MathJax replaces its SVG groups asynchronously, including after a title
+  // edit triggers Plotly.react. Re-attach the title click bridge whenever
+  // those groups are replaced.
+  useEffect(() => {
+    const plotElement = plotRef.current;
+    if (!plotElement) return;
+
+    let animationFrame: number | null = null;
+    const observer = new MutationObserver(() => {
+      if (animationFrame !== null) return;
+      animationFrame = window.requestAnimationFrame(() => {
+        animationFrame = null;
+        enableMathAxisTitleEditing(plotElement);
+      });
+    });
+    observer.observe(plotElement, { childList: true, subtree: true });
+    const clickHandler = (event: MouseEvent) => forwardMathAxisTitleClick(plotElement, event);
+    plotElement.addEventListener("click", clickHandler, true);
+    enableMathAxisTitleEditing(plotElement);
+
+    return () => {
+      observer.disconnect();
+      plotElement.removeEventListener("click", clickHandler, true);
+      if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
+    };
+  }, [dimensions.height, dimensions.width]);
 
   // Clean up the plotly_relayout listener when the component unmounts.
   // The listener itself is registered inside updatePlot after Plotly initialises,
@@ -336,6 +465,7 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
       {dimensions.width > 0 && dimensions.height > 0 && (
         <div
           ref={plotRef}
+          className="qimchi-plot"
           style={{
             width: "100%",
             height: "100%",
