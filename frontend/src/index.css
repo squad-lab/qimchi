@@ -617,6 +617,35 @@ select {
 }
 
 /* indigo / violet (tag UI: chips + TagPopover) */
+.qimchi-tag-action {
+  color: #6b7280;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+.qimchi-tag-action-edit:hover,
+.qimchi-tag-action-edit:focus-visible {
+  color: #4f46e5;
+  background-color: #eef2ff;
+}
+.qimchi-tag-action-delete:hover,
+.qimchi-tag-action-delete:focus-visible {
+  color: #dc2626;
+  background-color: #fef2f2;
+}
+.dark .qimchi-tag-action {
+  color: #9da5b4;
+}
+.dark .qimchi-tag-action-edit:hover,
+.dark .qimchi-tag-action-edit:focus-visible {
+  color: #c7d2fe;
+  background-color: #343a5a;
+}
+.dark .qimchi-tag-action-delete:hover,
+.dark .qimchi-tag-action-delete:focus-visible {
+  color: #f5aeb4;
+  background-color: #4a2e33;
+}
 .dark .bg-indigo-50 {
   background-color: #262436;
 }

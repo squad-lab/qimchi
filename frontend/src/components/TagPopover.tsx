@@ -121,7 +121,7 @@ const TagPopover = ({
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-[1000] w-64 bg-white border border-gray-200 rounded-lg shadow-lg p-2 text-sm"
+      className="fixed z-[1000] w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-2 text-sm"
       style={{ top: pos.top, left: pos.left }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -198,12 +198,15 @@ const TagPopover = ({
           }
 
           return (
-            <div key={tag.id} className="group flex items-center rounded hover:bg-gray-100">
+            <div
+              key={tag.id}
+              className="group flex items-center rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+            >
               <button
                 type="button"
                 onClick={() => onToggle(tag.id)}
                 className={`flex-1 min-w-0 flex items-center gap-2 px-2 py-1 text-left ${
-                  on ? "text-indigo-700" : "text-gray-700"
+                  on ? "text-indigo-700 dark:text-indigo-300" : "text-gray-700 dark:text-gray-200"
                 }`}
               >
                 <span
@@ -222,7 +225,7 @@ const TagPopover = ({
                 <button
                   type="button"
                   onClick={() => startRename(tag)}
-                  className="p-1 mr-0.5 text-gray-400 hover:text-indigo-600 opacity-0 group-hover:opacity-100 shrink-0"
+                  className="qimchi-tag-action qimchi-tag-action-edit p-1 mr-0.5 rounded shrink-0"
                   aria-label={`Rename tag ${tag.name}`}
                   title="Rename tag"
                 >
@@ -236,7 +239,7 @@ const TagPopover = ({
                     setEditingId(null);
                     setConfirmingId(tag.id);
                   }}
-                  className="p-1 mr-1 text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 shrink-0"
+                  className="qimchi-tag-action qimchi-tag-action-delete p-1 mr-1 rounded shrink-0"
                   aria-label={`Delete tag ${tag.name}`}
                   title="Delete tag"
                 >
