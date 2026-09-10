@@ -41,6 +41,13 @@
 - [Misc] Following a live measurement now transfers only the rows measured since the last refresh instead of the whole grid every time, which keeps a long sweep as cheap to watch at the end as at the start. Takes effect once your producers run qimchi-connect 0.3.0 or newer.
 - [Misc] Dark mode colours -- panel titles, the Explorer tree, dataset icons -- come from theme tokens instead of values written into components, so the two themes stay in step. Dataset icons keep one colour in both themes, so a kind is recognisable either way.
 - [Misc] Qimchi now runs against QCoDeS 0.59.
+- [Feature] Axis and colorbar labels now carry the units of the data and are typeset as mathematics. Units are read from the dataset, kept correct through filters -- differentiating a current against a gate voltage gives a conductance, in siemens -- and shown with the engineering prefix that suits the values on screen, so ticks read `1.2` and `(mV)` rather than `0.0012`. Where a filter cancels the units out, the prefix moves onto the tick labels themselves.
+- [Feature] New Scale filter for Y or Z data: multiply by a number (optionally with its own unit), invert, or express the data in units of the conductance and resistance quanta, G0, 2G0 and R0. Units of the result are inferred, and can be overridden along with the label.
+- [Feature] Axis and colorbar labels can be renamed in place: click one, type, and press Enter. An edited label is kept as the plot rescales.
+- [Feature] Plots are set in Fira Sans, matching the rest of the app, and exported images embed both it and the mathematics fonts, so a PNG or SVG looks the same on any machine.
+- [Fix] Long colorbar labels are no longer cut off at the edge of the plot, on screen or in exports. The space reserved for the label now follows its length, and a very long one is set slightly smaller instead of taking the plot with it.
+- [Fix] Hovering a point shows plain axis labels instead of the raw LaTeX behind them.
+- [Fix] The colorbar of a running measurement no longer shifts the plot sideways as values grow, and Plotly's "Click to enter Colorscale title" placeholder no longer sits behind the real label.
 
 ### v0.6.2 - 2026-06-23
 
