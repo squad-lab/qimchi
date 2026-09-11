@@ -211,36 +211,11 @@ async def test_attrs_payload_skips_nested_values(monkeypatch):
     assert out["tuid"] == "20260911-120000-123-abcdef"
 
 
-def test_count_nodes_expands_json_stored_as_a_string():
-    """
-    QCoDeS keeps its station snapshot as a JSON string, not a dict.
-
-    Counted as a string it is one node, so the budget never fired on the very
-    payload it exists for: a real run here carries ~220KB of JSON in one attr
-    that the pane expands into ~7200 nodes.
-    """
-    snapshot = json.dumps(
-        {f"instrument_{i}": {f"p_{j}": j for j in range(10)} for i in range(10)}
-    )
-
-    assert dirtree._count_nodes({"snapshot": snapshot}) > 100
-    # Strings that are not JSON stay worth one node.
-    assert dirtree._count_nodes({"note": "just text"}) == 1
-    assert dirtree._count_nodes({"note": "{not json"}) == 1
-
-
 @pytest.mark.asyncio
-async def test_only_the_oversized_section_is_withheld(monkeypatch):
-    """
-    The budget is per section, so one huge sibling cannot hide the rest.
-
-    A real QCoDeS run carries 15 sections: 13 single scalars, a 67-node run
-    description, and a station snapshot of ~7,000. Refusing the whole payload
-    would drop run_id, guid and sample_name over that one section.
-    """
-    snapshot = json.dumps(
-        {f"instrument_{i}": {f"p_{j}": j for j in range(10)} for i in range(10)}
-    )
+async def test_large_qcodes_snapshot_is_returned_without_bookkeeping(monkeypatch):
+    snapshot_data = {
+        f"instrument_{i}": {f"p_{j}": j for j in range(10)} for i in range(10)
+    }
     _patch_loader(
         monkeypatch,
         _dataset(
@@ -248,44 +223,22 @@ async def test_only_the_oversized_section_is_withheld(monkeypatch):
                 "run_id": 8,
                 "ds_name": "sweep",
                 "guid": "aaaa-bbbb",
-                "snapshot": snapshot,
+                "snapshot": json.dumps(snapshot_data),
             }
         ),
     )
-    monkeypatch.setattr(dirtree, "METADATA_MAX_NODES", 100)
 
     out = await dirtree.get_metadata(PathData(path="/tmp/experiments.db#run_id=8"))
 
-    # The small sections come through untouched.
     qcodes = out[dirtree.QCODES_META_SECTION]
     assert qcodes["ds_name"] == "sweep"
     assert qcodes["guid"] == "aaaa-bbbb"
-
-    # Only the snapshot is replaced, and by a report of its real size.
-    report = qcodes["snapshot"]
-    assert report[dirtree.METADATA_TOO_LARGE_KEY] is True
-    assert report["nodeCount"] > 100
-    assert report["nodeLimit"] == 100
-
-
-def test_count_nodes_reports_the_whole_structure():
-    """
-    The count must not depend on the budget it is compared against.
-
-    Stopping early made the same dataset report 33 entries against a limit of
-    20 and 57 against 50 -- a number that told the user nothing.
-    """
-    assert dirtree._count_nodes({"a": {"b": [1, 2, 3]}}) == 5
-    assert dirtree._count_nodes({}) == 0
-
-    deep = {"root": [{"k": list(range(50))} for _ in range(50)]}
-    # 1 root + 50 dicts + 50 keys + 2500 items, whatever the budget is.
-    assert dirtree._count_nodes(deep) == 1 + 50 + 50 * (1 + 50)
+    assert qcodes["snapshot"] == snapshot_data
+    assert "__qimchi_metadata_too_large__" not in json.dumps(qcodes)
 
 
 @pytest.mark.asyncio
-async def test_oversized_section_contents_never_ride_along(monkeypatch):
-    """The withheld section is replaced, not merely flagged."""
+async def test_large_metadata_section_is_returned_unchanged(monkeypatch):
     snapshot = {
         f"instrument_{i}": {f"param_{j}": j for j in range(20)} for i in range(40)
     }
@@ -293,22 +246,15 @@ async def test_oversized_section_contents_never_ride_along(monkeypatch):
         monkeypatch,
         _dataset({"Instruments Snapshot": snapshot, "Sweeps": {"x": [0, 1]}}),
     )
-    monkeypatch.setattr(dirtree, "METADATA_MAX_NODES", 100)
-
     out = await dirtree.get_metadata(PathData(path="/tmp/huge.zarr"))
 
     assert out["Sweeps"] == {"x": [0, 1]}
-    assert set(out["Instruments Snapshot"]) == {
-        dirtree.METADATA_TOO_LARGE_KEY,
-        "nodeCount",
-        "nodeLimit",
-    }
+    assert out["Instruments Snapshot"] == snapshot
 
 
 @pytest.mark.asyncio
-async def test_metadata_under_the_budget_is_returned_whole(monkeypatch):
+async def test_small_metadata_section_is_returned_unchanged(monkeypatch):
     _patch_loader(monkeypatch, _dataset({"Sweeps": {"x": [0, 1, 2]}}))
-    monkeypatch.setattr(dirtree, "METADATA_MAX_NODES", 100)
 
     out = await dirtree.get_metadata(PathData(path="/tmp/small.zarr"))
 
