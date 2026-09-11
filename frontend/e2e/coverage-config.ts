@@ -22,6 +22,15 @@ const coverageOptions: CoverageReportOptions = {
     ["lcovonly", { file: "lcov.info", projectRoot: repositoryRoot }],
     ["cobertura", { file: "cobertura-coverage.xml", projectRoot: repositoryRoot }],
   ],
+  // Fails the run if coverage drops below what the suite reaches today. Set
+  // just under the current figure: a floor that is already breached teaches
+  // people to ignore it.
+  thresholds: {
+    lines: 43,
+    statements: 43,
+    branches: 33,
+    functions: 38,
+  },
   entryFilter: (entry) => /\/src\/.*\.tsx?(?:\?|$)/.test(entry.url),
   sourceFilter: (sourcePath) => /\.tsx?$/.test(sourcePath),
   sourcePath: (sourcePath) => sourcePathByBasename.get(path.basename(sourcePath)) ?? sourcePath,

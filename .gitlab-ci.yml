@@ -68,17 +68,25 @@ frontend-quality:
     - npm run lint
     - npm run format:check
     - npm run build
+    # Unit (vitest, jsdom) then e2e (playwright, chromium). Both enforce their
+    # own coverage floor; the unit run is first because it is seconds rather
+    # than a minute, so a broken build fails fast.
+    - npm run test:unit -- --coverage
     - npx playwright install --with-deps chromium
     - npm run test:e2e
   cache:
     key: npm-$CI_JOB_NAME
     paths:
       - .npm/
+  # Both runners print a "Lines : X%" summary and GitLab keeps the LAST match,
+  # so this reports the Playwright figure. Reordering the steps above would
+  # silently change which number the badge shows.
   coverage: '/Lines\s*:\s*([0-9.]+)%/'
   artifacts:
     when: always
     paths:
       - frontend/coverage/playwright/
+      - frontend/coverage/unit/
     reports:
       coverage_report:
         coverage_format: cobertura
