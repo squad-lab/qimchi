@@ -127,6 +127,22 @@ def _get_folder_size(path: Path) -> int:
         return 0
 
 
+def _close_dataset(dataset) -> None:
+    """
+    Release a loaded dataset, tolerating the ones that cannot be closed.
+
+    A dataset read out of a DataTree node is a ``DatasetView``, and xarray
+    raises AttributeError rather than closing it ("close the associated
+    DataTree node instead"). Raising from a ``finally`` replaced the response
+    with a 500 for every DataTree reference, so the close is best-effort.
+
+    """
+    try:
+        dataset.close()
+    except Exception as exc:  # noqa: BLE001 - releasing must never fail a request
+        logger.debug(f"_close_dataset | could not close dataset: {exc}")
+
+
 def _iso_from_mtime(mtime: float) -> str:
     """Format an already-read mtime as an ISO string, avoiding a second stat."""
     import datetime
@@ -1365,7 +1381,7 @@ async def get_meta_attrs(path: PathData) -> Dict:
 
     finally:
         if data is not None:
-            data.close()
+            _close_dataset(data)
 
 
 @router.post("/load-meta/")
@@ -1436,7 +1452,7 @@ async def get_metadata(path: PathData) -> Dict:
         raise HTTPException(status_code=500, detail=f"Error loading metadata: {str(e)}")
     finally:
         if data is not None:
-            data.close()
+            _close_dataset(data)
 
 
 @router.post("/dataset-status/")
