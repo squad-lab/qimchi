@@ -1,4 +1,5 @@
 import sqlite3
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -6,6 +7,40 @@ import pytest
 import xarray as xr
 
 from api import data_loader
+
+
+@pytest.mark.asyncio
+async def test_load_data_async_zarr_runs_off_the_event_loop(tmp_path, monkeypatch):
+    """
+    The zarr provider must open the file in a thread, not inline.
+
+    Opening a dataset is blocking I/O, and this provider is the common path.
+    Awaiting it inline pinned the event loop for the whole read, which is what
+    made a large Basket stall unrelated requests while metadata loaded.
+
+    """
+    zarr_path = tmp_path / "demo.zarr"
+    zarr_path.mkdir(parents=True)
+
+    ds = xr.Dataset(
+        data_vars={"signal": (("x",), [1.0, 2.0, 3.0])},
+        coords={"x": [0, 1, 2]},
+    )
+
+    opened_on = []
+
+    def _record_thread(*_args):
+        opened_on.append(threading.current_thread().name)
+        return ds
+
+    monkeypatch.setattr(data_loader, "_load_xarray_dataset", _record_thread)
+
+    loaded = await data_loader.load_data_async(str(zarr_path))
+
+    assert loaded.kind == "dataset"
+    assert loaded.format == "zarr"
+    # asyncio.to_thread runs on a worker, never the thread the loop is on.
+    assert opened_on and opened_on[0] != threading.current_thread().name
 
 
 def test_load_data_sync_zarr(tmp_path, monkeypatch):
@@ -638,7 +673,7 @@ def test_datatree_reference_loads_selected_node_dataset(tmp_path, monkeypatch):
 # quantify-core-generated files (dim_0-indexed flat x0/x1 coordinates,
 # grid_2d/xlen/ylen attrs, long_name/units on every coord and data var),
 # verified against actual `quantify_core.data.handling.to_gridded_dataset()`
-# output rather than assumed from documentation.
+# output.
 
 
 def _quantify_1d_dataset() -> xr.Dataset:

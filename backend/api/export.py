@@ -482,6 +482,7 @@ def _export_plot_images_sync(
 
     # Prepare output paths for light and dark variants
     saved_paths = {}
+    write_errors: list[str] = []
     outs = []
     for variant in ("light", "dark"):
         for fmt in ("png", "svg"):
@@ -592,6 +593,7 @@ def _export_plot_images_sync(
             except Exception as e:
                 logger.error(f"Failed to write {variant} {fmt} via process pool: {e}")
                 timings[f"{fmt}_{variant}"] = None
+                write_errors.append(f"{variant} {fmt}: {e}")
     else:
         # Fallback to ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=min(6, (os.cpu_count() or 1))) as ex:
@@ -612,6 +614,14 @@ def _export_plot_images_sync(
                         f"Failed to write {variant} {fmt} via thread pool: {e}"
                     )
                     timings[f"{fmt}_{variant}"] = None
+                    write_errors.append(f"{variant} {fmt}: {e}")
+
+    # Every variant failed. Zipping timings.json and metadata.json alone yields
+    # an archive that looks like a successful export but contains no plot, and
+    # the task would report success -- so fail the task instead.
+    if not saved_paths:
+        detail = "; ".join(write_errors) or "no writer produced a file"
+        raise RuntimeError(f"Plot image export produced no images: {detail}")
 
     # Create a zip archive
     tmp_zip = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
@@ -753,65 +763,16 @@ def _resolve_fpath_to_disk(fpath: str) -> str:
 # NOTE: Worker function must be module-level (picklable) for ProcessPoolExecutor on Windows
 def _library_metadata(dataset_path: Path, dataset_uuid: str) -> Dict[str, Any]:
     """
-    Collect what the library knows about the measurement being exported.
+    What the library knows about the measurement being exported.
 
-    An exported image otherwise leaves the annotations behind: which tags it
-    carried, whether it was hearted. The library database is optional, so a
-    failure here degrades to the identifiers alone rather than failing the
-    export.
-
-    Args:
-        dataset_path (Path): Dataset the plots were made from.
-        dataset_uuid (Path): Identifier used to name the export files.
-
-    Returns:
-        Dict[str, Any]: Metadata for the sidecar file and the PNG chunks.
+    Thin wrapper over library.library_metadata so plot exports and dataset
+    downloads describe a measurement identically -- a tag list must mean the
+    same thing wherever it lands.
 
     """
-    meta: Dict[str, Any] = {
-        "dataset_uuid": dataset_uuid,
-        "dataset_path": str(dataset_path),
-        "exported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "exported_by": "Qimchi",
-    }
-    try:
-        from sqlmodel import select
+    from .library import library_metadata
 
-        from .db_models import (
-            LOCAL_USER_ID,
-            Measurement,
-            MeasurementState,
-            MeasurementTag,
-            Tag,
-        )
-        from .shared.db import session_scope
-
-        with session_scope() as session:
-            # The filename stem is the canonical measurement UUID. Prefer it
-            # over the node-local path, while retaining the path lookup for
-            # legacy records whose filename was not their identity.
-            measurement = session.get(Measurement, dataset_uuid)
-            if measurement is None:
-                measurement = session.exec(
-                    select(Measurement).where(Measurement.abs_path == str(dataset_path))
-                ).first()
-            measurement_uuid = measurement.uuid if measurement else dataset_uuid
-            meta["measurement_uuid"] = measurement_uuid
-            if measurement is not None:
-                meta["uuid_origin"] = measurement.uuid_origin
-            state = session.get(MeasurementState, (measurement_uuid, LOCAL_USER_ID))
-            meta["hearted"] = bool(state.hearted) if state else False
-            meta["trashed"] = bool(state.trashed) if state else False
-            meta["tags"] = sorted(
-                session.exec(
-                    select(Tag.name)
-                    .join(MeasurementTag, MeasurementTag.tag_id == Tag.id)
-                    .where(MeasurementTag.uuid == measurement_uuid)
-                ).all()
-            )
-    except Exception as exc:
-        logger.info("Export metadata unavailable for %s: %s", dataset_uuid, exc)
-    return meta
+    return library_metadata(dataset_path, dataset_uuid)
 
 
 def _embed_png_metadata(path: str, meta: Dict[str, Any]) -> None:

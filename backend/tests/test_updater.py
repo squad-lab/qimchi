@@ -181,3 +181,70 @@ def test_release_list_is_fetched_deep_enough_to_see_past_previews():
 
     match = _re.search(r"per_page=(\d+)", updater._RELEASES_URL)
     assert match and int(match.group(1)) > 1, updater._RELEASES_URL
+
+
+def test_current_version_falls_back_when_metadata_is_missing(monkeypatch):
+    """
+    A frozen build without package metadata must not crash the check.
+
+    Returning "0.0.0" makes every release look newer, which is the safe
+    direction: offering an update beats silently never offering one.
+
+    """
+    import importlib.metadata as metadata
+
+    def _boom(_name):
+        raise metadata.PackageNotFoundError("qimchi-api")
+
+    monkeypatch.setattr(metadata, "version", _boom)
+
+    assert updater.current_version() == "0.0.0"
+
+
+def test_current_version_reads_package_metadata(monkeypatch):
+    import importlib.metadata as metadata
+
+    monkeypatch.setattr(metadata, "version", lambda _name: "1.2.3")
+
+    assert updater.current_version() == "1.2.3"
+
+
+def test_a_network_failure_is_not_an_update(monkeypatch):
+    """The check runs at startup; a flaky network must never surface an error."""
+
+    class _Failing:
+        @staticmethod
+        def get(*_args, **_kwargs):
+            raise OSError("no route to host")
+
+    monkeypatch.setitem(__import__("sys").modules, "requests", _Failing)
+
+    assert updater.check_for_update() is None
+
+
+def test_an_empty_release_list_is_not_an_update(monkeypatch):
+    _install_fake_requests(monkeypatch, [])
+
+    assert updater.check_for_update() is None
+
+
+def test_an_unparseable_tag_sorts_lowest_rather_than_raising(monkeypatch):
+    # A hand-made tag must not break ordering for everyone else.
+    assert updater._parse_ver("not-a-version") == (0,)
+    assert updater._parse_ver("v0.6.3") > updater._parse_ver("nonsense")
+
+
+def test_an_asset_for_another_platform_is_ignored(monkeypatch):
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+
+    assert updater._platform_asset_match("qimchi.dmg", "https://x/qimchi.dmg") is None
+    assert updater._platform_asset_match("qimchi-setup.exe", "https://x/s.exe") == (
+        "windows",
+        "run-installer",
+    )
+
+
+def test_an_unknown_platform_matches_nothing(monkeypatch):
+    monkeypatch.setattr(updater.sys, "platform", "sunos5")
+
+    assert updater._platform_asset_match("qimchi-setup.exe", "https://x/s.exe") is None

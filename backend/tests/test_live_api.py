@@ -44,7 +44,9 @@ def test_live_utils_lists_and_resolves_registry_entries(monkeypatch):
     assert live_utils.resolve_live_dataset("missing")["disk_path"] is None
 
 
-@pytest.mark.parametrize("registry", [None, SimpleNamespace(init_database=lambda: 1 / 0)])
+@pytest.mark.parametrize(
+    "registry", [None, SimpleNamespace(init_database=lambda: 1 / 0)]
+)
 def test_live_utils_degrades_when_registry_is_unavailable(monkeypatch, registry):
     monkeypatch.setattr(live_utils, "live_db", registry)
 

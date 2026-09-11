@@ -316,6 +316,67 @@ def test_export_plot_images_sync_writes_variants_and_archive(tmp_path, monkeypat
     Path(result["zip_path"]).unlink()
 
 
+def test_export_fails_rather_than_zipping_an_archive_with_no_images(
+    tmp_path, monkeypatch
+):
+    """
+    Every writer failing must fail the export, not produce a metadata-only zip.
+
+    A broken orjson install once made all four image writes raise while the task
+    still reported success, handing the user an archive containing only
+    timings.json and metadata.json -- a failure that looked exactly like a
+    working export.
+    """
+    dataset = tmp_path / "run.zarr"
+    dataset.mkdir()
+
+    def always_fails(_figure, _path, **_kwargs):
+        raise RuntimeError("module 'orjson' has no attribute 'dumps'")
+
+    monkeypatch.setattr(export, "_write_plotly_image", always_fails)
+    plot = {
+        "data": [{"type": "scatter", "x": [0, 1], "y": [2, 3]}],
+        "layout": {"xaxis": {}, "yaxis": {}},
+    }
+
+    with pytest.raises(RuntimeError) as excinfo:
+        export._export_plot_images_sync(plot, str(dataset))
+
+    # The per-variant reason travels with the error, so the task's recorded
+    # message says what actually broke.
+    assert "produced no images" in str(excinfo.value)
+    assert "orjson" in str(excinfo.value)
+
+
+def test_export_survives_a_partially_failed_write(tmp_path, monkeypatch):
+    """One failed variant is reported in timings but still yields an archive."""
+    dataset = tmp_path / "run.zarr"
+    dataset.mkdir()
+
+    def fail_svg_only(_figure, path, **_kwargs):
+        target = Path(path)
+        if target.suffix == ".svg":
+            raise RuntimeError("svg writer unavailable")
+        Image.new("RGB", (2, 2), "white").save(target)
+
+    monkeypatch.setattr(export, "_write_plotly_image", fail_svg_only)
+    plot = {
+        "data": [{"type": "scatter", "x": [0, 1], "y": [2, 3]}],
+        "layout": {"xaxis": {}, "yaxis": {}},
+    }
+
+    result = export._export_plot_images_sync(plot, str(dataset))
+
+    assert set(result["saved_paths"]) == {"png_light", "png_dark"}
+    assert result["timings"]["svg_light"] is None
+    assert result["timings"]["svg_dark"] is None
+    with zipfile.ZipFile(result["zip_path"]) as archive:
+        names = set(archive.namelist())
+        assert {"metadata.json", "timings.json"} <= names
+        assert any(name.endswith(".png") for name in names)
+    Path(result["zip_path"]).unlink()
+
+
 def test_save_light_dark_pngs_supports_one_or_both_variants(tmp_path, monkeypatch):
     dataset = tmp_path / "run.zarr"
     footer_texts = []
@@ -348,6 +409,91 @@ def test_save_light_dark_pngs_supports_one_or_both_variants(tmp_path, monkeypatc
     assert all(Path(path).exists() for path in [*light.values(), *both.values()])
     assert len(footer_texts) == 3
     assert all("<b>Custom Tags:</b> notes-tag" in text for text in footer_texts)
+
+
+def test_save_light_dark_pngs_writes_beside_the_dataset(tmp_path, monkeypatch):
+    """
+    The PNGs land in the dataset's own extras folder, named by uuid and time.
+
+    That folder is what the Notes panel and the download endpoints look in, so
+    the location is part of the contract, not an implementation detail.
+
+    """
+    dataset = tmp_path / "run.zarr"
+
+    monkeypatch.setattr(export, "_resolve_fpath_to_disk", lambda _path: str(dataset))
+    monkeypatch.setattr(export, "_library_metadata", lambda _path, _uuid: {"tags": []})
+    monkeypatch.setattr(
+        export,
+        "_write_plotly_image",
+        lambda _fig, path, **_k: Path(path).write_bytes(b"png"),
+    )
+
+    saved = export._save_light_dark_pngs(
+        {"data": [{"x": [0], "y": [0]}], "layout": {}}, str(dataset), ts="stamp"
+    )
+
+    light = Path(saved["png_light"])
+    assert light.parent == tmp_path / "run"
+    assert light.name == "run__stamp__plot_light.png"
+    assert Path(saved["png_dark"]).name == "run__stamp__plot_dark.png"
+
+
+def test_save_light_dark_pngs_stamps_a_timestamp_when_none_is_given(
+    tmp_path, monkeypatch
+):
+    dataset = tmp_path / "run.zarr"
+    monkeypatch.setattr(export, "_resolve_fpath_to_disk", lambda _path: str(dataset))
+    monkeypatch.setattr(export, "_library_metadata", lambda _path, _uuid: {"tags": []})
+    monkeypatch.setattr(
+        export,
+        "_write_plotly_image",
+        lambda _fig, path, **_k: Path(path).write_bytes(b"png"),
+    )
+
+    saved = export._save_light_dark_pngs(
+        {"data": [{"x": [0], "y": [0]}], "layout": {}}, str(dataset)
+    )
+
+    # Two exports of one dataset must not overwrite each other.
+    assert "__plot_light.png" in saved["png_light"]
+    assert Path(saved["png_light"]).name.count("__") == 2
+
+
+def test_find_fira_sans_fonts_prefers_the_built_assets(tmp_path, monkeypatch):
+    """
+    The export embeds the same fonts the app renders with.
+
+    Several roots are searched -- dev, Docker, frozen -- and a root only counts
+    when it has every weight, or an export would mix typefaces.
+
+    """
+    assets = tmp_path / "frontend" / "dist" / "assets"
+    assets.mkdir(parents=True)
+    for weight in export._FIRA_SANS_WEIGHTS:
+        (assets / f"fira-sans-latin-{weight}-normal-hash.woff2").write_bytes(b"font")
+
+    monkeypatch.setattr(
+        export, "__file__", str(tmp_path / "backend" / "api" / "export.py")
+    )
+    found = export._find_fira_sans_fonts()
+
+    assert set(found) == set(export._FIRA_SANS_WEIGHTS)
+
+
+def test_find_fira_sans_fonts_rejects_an_incomplete_set(tmp_path, monkeypatch):
+    assets = tmp_path / "frontend" / "dist" / "assets"
+    assets.mkdir(parents=True)
+    # One weight short: mixing weights is worse than embedding none.
+    for weight in export._FIRA_SANS_WEIGHTS[:-1]:
+        (assets / f"fira-sans-latin-{weight}-normal-hash.woff2").write_bytes(b"font")
+
+    monkeypatch.setattr(
+        export, "__file__", str(tmp_path / "backend" / "api" / "export.py")
+    )
+    found = export._find_fira_sans_fonts()
+
+    assert found == {} or set(found) != set(export._FIRA_SANS_WEIGHTS)
 
 
 @pytest.mark.asyncio

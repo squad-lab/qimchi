@@ -3,6 +3,7 @@ FastAPI endpoints for downloading datasets, folders, and multiple files as zip f
 
 """
 
+import json
 import os
 import shutil
 import tempfile
@@ -19,6 +20,41 @@ from .logger import logger
 from .models import PathData, PathsData
 
 router = APIRouter()
+
+
+# Extension of the sidecar written beside every downloaded dataset.
+LIBRARY_SIDECAR_SUFFIX = ".qimchi.json"
+
+
+def _write_library_sidecar(zipf, dataset_path: Path, prefix: Path) -> None:
+    """
+    Write a dataset's library record into the archive, beside its notes.
+
+    A downloaded zip otherwise leaves every annotation behind: the tags, the
+    heart, the measurement UUID. It goes in the dataset's notes folder, which
+    every download endpoint already builds, so Qimchi's own files stay in one
+    place rather than scattered beside the data.
+
+    Written even when the record is empty: an absent file is ambiguous -- it
+    could mean untagged, or a download that predates this -- and an explicit
+    empty list is not.
+
+    Args:
+        zipf: The open archive.
+        dataset_path (Path): Dataset on disk the record describes.
+        prefix (Path): Archive folder to write into, matching where this
+            endpoint puts that dataset's notes.
+
+    """
+    try:
+        from .library import library_metadata
+
+        record = library_metadata(dataset_path)
+        arcname = prefix / f"{dataset_path.stem}{LIBRARY_SIDECAR_SUFFIX}"
+        zipf.writestr(str(arcname), json.dumps(record, indent=2))
+    except Exception as exc:
+        # Annotations are a bonus; losing them must never lose the download.
+        logger.info(f"Library sidecar unavailable for {dataset_path}: {exc}")
 
 
 def _desktop_download_dir() -> Path | None:
@@ -113,6 +149,7 @@ async def download_dataset(path: PathData) -> FileResponse:
             # Following the same pattern as load_notes function
             dataset_uuid = path.stem
             notes_folder = path.parent / dataset_uuid
+            _write_library_sidecar(zipf, path, Path(dataset_uuid))
 
             if notes_folder.exists() and notes_folder.is_dir():
                 logger.debug(f"download_dataset | Adding notes folder: {notes_folder}")
@@ -191,6 +228,7 @@ async def download_selected_datasets(paths: list[PathData]) -> FileResponse:
                 # Following the same pattern as load_notes function
                 dataset_uuid = dataset_path.stem
                 notes_folder = dataset_path.parent / dataset_uuid
+                _write_library_sidecar(zipf, dataset_path, Path(dataset_uuid))
 
                 if notes_folder.exists() and notes_folder.is_dir():
                     logger.debug(
@@ -285,6 +323,7 @@ async def download_multiple_datasets(data: PathsData) -> FileResponse:
                 ):
                     dataset_uuid = file_path.stem
                     notes_folder = file_path.parent / dataset_uuid
+                    _write_library_sidecar(zipf, file_path, Path(dataset_uuid))
 
                     if notes_folder.exists() and notes_folder.is_dir():
                         logger.debug(
@@ -313,6 +352,7 @@ async def download_multiple_datasets(data: PathsData) -> FileResponse:
                 if dir_path.name.endswith(".zarr"):
                     dataset_uuid = dir_path.stem
                     notes_folder = dir_path.parent / dataset_uuid
+                    _write_library_sidecar(zipf, dir_path, Path(dataset_uuid))
 
                     if notes_folder.exists() and notes_folder.is_dir():
                         logger.debug(
@@ -341,6 +381,9 @@ async def download_multiple_datasets(data: PathsData) -> FileResponse:
                         for ds_file in dir_path.glob(ext):
                             dataset_uuid = ds_file.stem
                             notes_folder = dir_path / dataset_uuid
+                            _write_library_sidecar(
+                                zipf, ds_file, Path(dir_path.name) / dataset_uuid
+                            )
 
                             if notes_folder.exists() and notes_folder.is_dir():
                                 logger.debug(
@@ -429,6 +472,9 @@ async def download_folder(path: PathData) -> FileResponse:
                 for ds_path in path.glob(ext):
                     dataset_uuid = ds_path.stem
                     notes_folder = path / dataset_uuid
+                    _write_library_sidecar(
+                        zipf, ds_path, Path(path.name) / dataset_uuid
+                    )
 
                     if notes_folder.exists() and notes_folder.is_dir():
                         logger.debug(

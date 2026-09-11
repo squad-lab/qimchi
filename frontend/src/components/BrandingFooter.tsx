@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
-import { Gitlab, Link, ScrollText, History, Sun, Moon } from "lucide-react";
+import { Gitlab, Link, ScrollText } from "lucide-react";
 import { useSidebarStore } from "../stores/sidebarStore";
 import { useThemeStore } from "../stores/themeStore";
-import { useToast } from "../hooks/useToast";
 import { PROD_BACKEND_URL } from "../config";
 
 const changelogUrl = "https://gitlab.com/squad-lab/qimchi/-/blob/main/CHANGELOG.md";
@@ -45,9 +44,10 @@ const iconButtonClass =
 
 const BrandingFooter = () => {
   const { brandingCollapsed, setBrandingCollapsed } = useSidebarStore();
-  const { theme, toggleTheme } = useThemeStore();
+  // The theme toggle and the notifications log now live in the sidebar rail;
+  // the theme is still read here to pick the right SQUAD logo.
+  const theme = useThemeStore((state) => state.theme);
   const isDark = theme === "dark";
-  const { openLogModal } = useToast();
   const [backendConnection, setBackendConnection] = useState<BackendConnection>("checking");
   const connectionAppearance = backendConnectionAppearance[backendConnection];
 
@@ -155,26 +155,6 @@ const BrandingFooter = () => {
                       <Icon size={17} strokeWidth={1.8} />
                     </a>
                   ))}
-                  <button
-                    onClick={toggleTheme}
-                    aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
-                    title={isDark ? "Switch to light theme" : "Switch to dark theme"}
-                    className={iconButtonClass}
-                  >
-                    {isDark ? (
-                      <Sun size={17} strokeWidth={1.8} />
-                    ) : (
-                      <Moon size={17} strokeWidth={1.8} />
-                    )}
-                  </button>
-                  <button
-                    onClick={openLogModal}
-                    aria-label="View notifications log"
-                    title="View notifications log"
-                    className={iconButtonClass}
-                  >
-                    <History size={17} strokeWidth={1.8} />
-                  </button>
                 </div>
               </div>
             </div>

@@ -16,6 +16,9 @@ const Tooltip: React.FC<TooltipProps> = ({
 }) => {
   const [isVisible, setIsVisible] = useState(false);
   const [positionClass, setPositionClass] = useState("");
+  // The side actually used, which may differ from `position` when the
+  // requested side has no room (see the flip below). The arrow follows this.
+  const [resolvedPosition, setResolvedPosition] = useState(position);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
   const portalRef = useRef<HTMLDivElement | null>(null);
@@ -27,6 +30,22 @@ const Tooltip: React.FC<TooltipProps> = ({
 
     const triggerRect = triggerRef.current.getBoundingClientRect();
 
+    // Flip a top/bottom tooltip to the other side when the requested one would
+    // run off the viewport -- buttons in a toolbar sitting at y=0 (the section
+    // rail, the Explorer path row) otherwise render their tooltip off-screen.
+    // The tooltip is not mounted yet, so its extent has to be estimated; this
+    // is deliberately generous so a two-line tooltip still flips.
+    const TOOLTIP_CLEARANCE = 56;
+    let side = position;
+    if (position === "top" && triggerRect.top < TOOLTIP_CLEARANCE) {
+      side = "bottom";
+    } else if (
+      position === "bottom" &&
+      window.innerHeight - triggerRect.bottom < TOOLTIP_CLEARANCE
+    ) {
+      side = "top";
+    }
+
     // Compute coords in viewport space and set CSS variables on :root so
     // the portal-rendered tooltip can use position:fixed and escape ancestor
     // clipping (overflow:hidden). This avoids inline styles which trigger
@@ -35,7 +54,7 @@ const Tooltip: React.FC<TooltipProps> = ({
     let top = triggerRect.top;
     let transform = "translate(-50%, -100%)";
 
-    switch (position) {
+    switch (side) {
       case "top":
         top = triggerRect.top - 8;
         transform = "translate(-50%, -100%)";
@@ -74,7 +93,8 @@ const Tooltip: React.FC<TooltipProps> = ({
       // ignore in SSR or restricted environments
     }
 
-    setPositionClass(`tooltip-${position}`);
+    setPositionClass(`tooltip-${side}`);
+    setResolvedPosition(side);
   }, [position]);
 
   // No rAF: we compute position before mounting the tooltip so it doesn't flash at 0,0
@@ -223,13 +243,13 @@ const Tooltip: React.FC<TooltipProps> = ({
               {/* Small arrow attached to the tooltip */}
               <div
                 className={`absolute w-2 h-2 bg-gray-900 transform rotate-45 ${
-                  position === "top"
+                  resolvedPosition === "top"
                     ? "bottom-[-4px] left-1/2 -translate-x-1/2"
-                    : position === "bottom"
+                    : resolvedPosition === "bottom"
                       ? "top-[-4px] left-1/2 -translate-x-1/2"
-                      : position === "left"
+                      : resolvedPosition === "left"
                         ? "right-[-4px] top-1/2 -translate-y-1/2"
-                        : position === "center"
+                        : resolvedPosition === "center"
                           ? "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
                           : "left-[-4px] top-1/2 -translate-y-1/2"
                 }`}

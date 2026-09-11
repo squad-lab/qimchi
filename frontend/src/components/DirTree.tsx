@@ -44,14 +44,12 @@ import {
   HardDrive,
   Table,
   SearchXIcon,
-  Lightbulb,
   X,
   NotebookPen,
   LoaderCircle,
   Download,
   MoveUp,
   MoveDown,
-  Radio,
   Eye,
   EyeOff,
   Heart,
@@ -106,7 +104,6 @@ interface DirTreeProps {
   onCycleDataset?: (direction: "prev" | "next") => void; // For cycling through datasets
   onStartLoadingAttributes?: (itemId: string) => void;
   onUpdateBasketItemAttributes?: (itemId: string, attributes: AttrData) => void;
-  onOpenHelp?: () => void; // For opening the Help modal
 }
 
 /**
@@ -123,6 +120,26 @@ interface DirTreeProps {
  * - Maintains smooth scrolling and interactions
  * - Reduces memory footprint for large tree structures
  */
+// Explorer layout mode. Rows gain a date column once the tree actually has
+// room for them -- reached either by dragging the sidebar wider or by the
+// full-window Explorer view. The switch is a class on the DirTree root plus a
+// CSS rule (see .qimchi-row-meta in index.css) rather than a context, so the
+// row component stays untouched by the width state.
+const WIDE_LAYOUT_MIN_WIDTH = 640;
+
+// Fixed-width, locale-independent stamp: the column is a scan-and-compare aid,
+// so a stable "2026-03-14 08:32" beats a localised string that changes length
+// with the month name and gets truncated mid-word.
+const pad = (value: number) => String(value).padStart(2, "0");
+
+const formatRowTimestamp = (timestamp?: Date) => {
+  if (!timestamp || Number.isNaN(timestamp.getTime())) return "";
+  const date = `${timestamp.getFullYear()}-${pad(timestamp.getMonth() + 1)}-${pad(
+    timestamp.getDate(),
+  )}`;
+  return `${date} ${pad(timestamp.getHours())}:${pad(timestamp.getMinutes())}`;
+};
+
 const DirTree = ({
   path,
   onSelectNode,
@@ -136,9 +153,23 @@ const DirTree = ({
   onCycleDataset,
   onStartLoadingAttributes,
   onUpdateBasketItemAttributes,
-  onOpenHelp,
 }: DirTreeProps) => {
   const { showToast } = useToast();
+
+  // Width-driven layout mode. A callback ref (rather than useRef) because the
+  // component returns early while loading/erroring, so the node identity has to
+  // re-trigger the observer when the real tree finally mounts.
+  const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
+  const [isWide, setIsWide] = useState(false);
+
+  useEffect(() => {
+    if (!rootEl) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setIsWide(entry.contentRect.width >= WIDE_LAYOUT_MIN_WIDTH);
+    });
+    observer.observe(rootEl);
+    return () => observer.disconnect();
+  }, [rootEl]);
 
   // Use Zustand store for persistent state
   const { componentStates, updateDirTreeState } = useSidebarStore();
@@ -149,9 +180,10 @@ const DirTree = ({
     sortDirection,
     filterBy,
     showFilters,
-    isExpanded,
+    lastPath,
     showLiveOnly,
     hiddenLiveMeasurementIds = [],
+    expandedNodeIds = [],
     // lastPath, // TODO: Use this to track the last loaded path
   } = componentStates.dirTree;
 
@@ -566,6 +598,33 @@ const DirTree = ({
     };
   }, [filterHiddenLiveMeasurements, showLiveOnly]);
 
+  // Held in a ref so the toolbar handlers can read the current set without
+  // making every expansion a dependency of the effects below.
+  const expandedNodeIdsRef = useRef<Set<string>>(new Set(expandedNodeIds));
+  useEffect(() => {
+    expandedNodeIdsRef.current = new Set(expandedNodeIds);
+  }, [expandedNodeIds]);
+
+  // Seeded once, when the tree is created: initialState is not re-read, and
+  // DirTree remounts per path anyway (Explorer keys it on the folder).
+  //
+  // Only replayed for the folder it was recorded in. Navigating elsewhere --
+  // double-clicking into a subfolder, or Back/Forward -- builds a different
+  // tree, where those ids mean nothing and would only make the toolbar think
+  // something was expanded.
+  const initialExpandedItems = useRef<string[]>(
+    lastPath === path ? ["root", ...expandedNodeIds] : ["root"],
+  );
+
+  useEffect(() => {
+    if (lastPath !== path) {
+      expandedNodeIdsRef.current = new Set();
+      updateDirTreeState({ lastPath: path, expandedNodeIds: [] });
+    }
+    // Once per mount; DirTree is remounted whenever the path changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Signature that changes only when a library filter is active AND the
   // relevant heart/trash state changes.
   const libFilterSignature = useMemo(() => {
@@ -577,86 +636,40 @@ const DirTree = ({
       .join("|");
   }, [libStatesByPath, filterHeartedOnly, hideTrashed, effectiveTagIds]);
 
-  // Process and filter data for headless-tree with sorting
-  const processedData = useMemo(() => {
-    const allNodes = new Map<string, TreeNode>();
-
-    // Helper function to collect all leaf nodes (files) from the tree
-    const collectLeafNodes = (nodes: TreeNode[]): TreeNode[] => {
-      const leaves: TreeNode[] = [];
-
-      const traverse = (node: TreeNode) => {
-        if (node.type === "file") {
-          leaves.push(node);
-        }
-        if (node.children) {
-          node.children.forEach(traverse);
-        }
-      };
-
-      nodes.forEach(traverse);
-      return leaves;
-    };
-
-    // Helper function to sort nodes
-    const sortNodes = (nodes: TreeNode[]): TreeNode[] => {
-      return [...nodes].sort((a, b) => {
-        let comparison = 0;
-
-        switch (sortBy) {
-          case "name": {
-            // Use natural sort for names to handle numeric sequences properly
-            comparison = a.name.localeCompare(b.name, undefined, {
-              numeric: true,
-              sensitivity: "base",
-            });
-            break;
-          }
-          case "timestamp": {
-            const aTime = a.timestamp?.getTime() || 0;
-            const bTime = b.timestamp?.getTime() || 0;
-            comparison = aTime - bTime;
-            break;
-          }
-          case "size": {
-            const aSize = a.size || 0;
-            const bSize = b.size || 0;
-            comparison = aSize - bSize;
-            break;
-          }
-          case "chrono": {
-            // Chronological sorting by timestamp for dataset files only
-            const aTime = a.timestamp?.getTime() || 0;
-            const bTime = b.timestamp?.getTime() || 0;
-            comparison = aTime - bTime;
-            break;
-          }
-        }
-
-        // Chrono sort is always descending (newest first)
-        const finalDirection = sortBy === "chrono" ? "desc" : sortDirection;
-        return finalDirection === "desc" ? -comparison : comparison;
+  // id -> node over the RAW tree, rebuilt only when the API data changes.
+  // Filtering and sorting read through this instead of allocating a parallel
+  // copy of every node on each pass.
+  const nodeIndex = useMemo(() => {
+    const index = new Map<string, TreeNode>();
+    const walk = (nodes: TreeNode[]) => {
+      nodes.forEach((node) => {
+        index.set(node.id, node);
+        if (node.children) walk(node.children);
       });
     };
+    walk(apiData);
+    return index;
+  }, [apiData]);
 
-    // Helper function to check if a node matches search
+  // Which nodes survive the current filters. Kept separate from ordering so
+  // changing the sort or its direction does not re-run every predicate over
+  // the whole tree, and so a keystroke sorts only the survivors.
+  const matchedIds = useMemo(() => {
     const matchesSearch = (node: TreeNode): boolean => {
       if (!searchText) return true;
-      return (
-        node.name.toLowerCase().includes(searchText.toLowerCase()) ||
-        node.path.toLowerCase().includes(searchText.toLowerCase())
-      );
+      const needle = searchText.toLowerCase();
+      return node.name.toLowerCase().includes(needle) || node.path.toLowerCase().includes(needle);
     };
 
-    // Helper function to check if a node should be included based on filter
     const libraryFilterActive =
       filterHeartedOnly ||
       hideTrashed ||
       effectiveTagIds.length > 0 ||
       unknownSearchTags.length > 0;
+
     const shouldIncludeNode = (node: TreeNode): boolean => {
       // Library (heart/trash/tag) filters apply to file nodes; folders are kept
-      // only when they contain matching descendants (via hasMatchingChildren).
+      // only when they contain matching descendants.
       if (node.type === "file") {
         // A "#name" that matches no known tag can never match a measurement.
         if (unknownSearchTags.length > 0) return false;
@@ -678,81 +691,31 @@ const DirTree = ({
       return true;
     };
 
-    // Helper function to check if a folder has any matching children (recursively)
-    const hasMatchingChildren = (node: TreeNode): boolean => {
-      if (!node.children) return false;
-
-      return node.children.some((child) => {
-        const childMatches = shouldIncludeNode(child) && matchesSearch(child);
-        if (childMatches) return true;
-        if (child.type === "folder") return hasMatchingChildren(child);
-        return false;
-      });
-    };
-
-    const processNodes = (nodes: TreeNode[]): TreeNode[] => {
-      // For chronological sorting, flatten to show only leaf nodes (dataset files)
-      if (sortBy === "chrono") {
-        const allLeaves = collectLeafNodes(nodes);
-        const filteredLeaves = allLeaves.filter((node) => {
-          const shouldInclude = shouldIncludeNode(node);
-          const nodeMatchesSearch = matchesSearch(node);
-          return shouldInclude && nodeMatchesSearch;
+    // Post-order: a folder is kept when it matches itself or any descendant
+    // survived. The previous code answered that with a second recursive walk
+    // of each subtree (hasMatchingChildren) on top of this one.
+    const matched = new Set<string>();
+    const visit = (node: TreeNode): boolean => {
+      let anyChildMatched = false;
+      if (node.children) {
+        node.children.forEach((child) => {
+          if (visit(child)) anyChildMatched = true;
         });
-        const sortedLeaves = sortNodes(filteredLeaves);
-
-        // Add all leaf nodes to the allNodes map, ensuring they have no children
-        sortedLeaves.forEach((leaf) => {
-          const leafWithoutChildren = { ...leaf, children: undefined };
-          allNodes.set(leaf.id, leafWithoutChildren);
-        });
-
-        return sortedLeaves.map((leaf) => ({ ...leaf, children: undefined }));
       }
-
-      // Regular hierarchical processing for other sort types
-      const sortedNodes = sortNodes(nodes);
-      const processedNodes: TreeNode[] = [];
-
-      sortedNodes.forEach((node) => {
-        const shouldInclude = shouldIncludeNode(node);
-        const nodeMatchesSearch = matchesSearch(node);
-        const isFolder = node.type === "folder";
-        const folderHasMatches = isFolder ? hasMatchingChildren(node) : false;
-
-        // Include node if:
-        // 1. It matches both the filter criteria AND search term, OR
-        // 2. It's a folder that contains matching children (to maintain hierarchy)
-        if ((shouldInclude && nodeMatchesSearch) || (isFolder && folderHasMatches)) {
-          let processedNode = { ...node };
-
-          // Process children if they exist
-          if (node.children) {
-            const processedChildren = processNodes(node.children);
-            processedNode = {
-              ...processedNode,
-              children: processedChildren,
-            };
-          }
-
-          allNodes.set(processedNode.id, processedNode);
-          processedNodes.push(processedNode);
-        }
-      });
-
-      return processedNodes;
+      const keep =
+        (shouldIncludeNode(node) && matchesSearch(node)) ||
+        (node.type === "folder" && anyChildMatched);
+      if (keep) matched.add(node.id);
+      return keep;
     };
-
-    const processedRootNodes = processNodes(apiData);
-    return { allNodes, rootNodes: processedRootNodes };
+    apiData.forEach(visit);
+    return matched;
     // libStatesByPath is read inside but intentionally gated by libFilterSignature
-    // (see above) so hearts don't re-derive the tree when no filter is active.
+    // so hearts don't re-derive the tree when no filter is active.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     apiData,
     filterBy,
-    sortBy,
-    sortDirection,
     searchText,
     filterHeartedOnly,
     hideTrashed,
@@ -761,20 +724,98 @@ const DirTree = ({
     libFilterSignature,
   ]);
 
-  // Get root level nodes for tree (now comes from processedData)
-  const rootNodes = useMemo(() => {
-    return processedData.rootNodes;
-  }, [processedData]);
+  // Structure and ordering, as id lists. Nothing here allocates a node.
+  const { rootIds, childrenById, visibleNodes } = useMemo(() => {
+    const compare = (a: TreeNode, b: TreeNode) => {
+      let comparison = 0;
+
+      switch (sortBy) {
+        case "name": {
+          // Natural sort so numeric sequences order the way they read.
+          comparison = a.name.localeCompare(b.name, undefined, {
+            numeric: true,
+            sensitivity: "base",
+          });
+          break;
+        }
+        case "timestamp":
+        case "chrono": {
+          comparison = (a.timestamp?.getTime() || 0) - (b.timestamp?.getTime() || 0);
+          break;
+        }
+        case "size": {
+          comparison = (a.size || 0) - (b.size || 0);
+          break;
+        }
+      }
+
+      // Chrono sort is always descending (newest first)
+      const finalDirection = sortBy === "chrono" ? "desc" : sortDirection;
+      return finalDirection === "desc" ? -comparison : comparison;
+    };
+
+    const children = new Map<string, string[]>();
+    const visible = new Map<string, TreeNode>();
+
+    // Chrono flattens to dataset leaves, so there is no hierarchy to build.
+    if (sortBy === "chrono") {
+      const leaves: TreeNode[] = [];
+      const collect = (nodes: TreeNode[]) => {
+        nodes.forEach((node) => {
+          if (node.type === "file" && matchedIds.has(node.id)) leaves.push(node);
+          if (node.children) collect(node.children);
+        });
+      };
+      collect(apiData);
+      leaves.sort(compare);
+      leaves.forEach((leaf) => visible.set(leaf.id, leaf));
+      return {
+        rootIds: leaves.map((leaf) => leaf.id),
+        childrenById: children,
+        visibleNodes: visible,
+      };
+    }
+
+    const buildLevel = (nodes: TreeNode[]): string[] => {
+      // filter() copies, so sorting here never mutates the source children.
+      const kept = nodes.filter((node) => matchedIds.has(node.id));
+      kept.sort(compare);
+      kept.forEach((node) => {
+        visible.set(node.id, node);
+        if (node.children) children.set(node.id, buildLevel(node.children));
+      });
+      return kept.map((node) => node.id);
+    };
+
+    return {
+      rootIds: buildLevel(apiData),
+      childrenById: children,
+      visibleNodes: visible,
+    };
+  }, [apiData, matchedIds, sortBy, sortDirection]);
+
+  // Root level nodes for the tree.
+  const rootNodes = useMemo(
+    () => rootIds.map((id) => nodeIndex.get(id)).filter((node): node is TreeNode => !!node),
+    [rootIds, nodeIndex],
+  );
 
   // Initialize headless-tree with search feature
   // Use a key that changes when switching between chrono and non-chrono modes
   // This forces the tree to completely re-initialize
-  const treeKey = `${sortBy}-${filterBy}-${searchText}-${filterHeartedOnly ? "h" : ""}${hideTrashed ? "t" : ""}-${effectiveTagIds.join(",")}-${unknownSearchTags.join(",")}`;
+  // Only the chrono/hierarchical switch changes the shape of an item (chrono
+  // flattens to leaves, so isItemFolder flips). Filters and search only change
+  // which ids getChildren returns, which the virtualiser already re-renders --
+  // keying on them remounted the whole container, and its scroll position, on
+  // every keystroke.
+  const treeKey = sortBy === "chrono" ? "flat" : "tree";
 
   const tree = useTree<TreeNode>({
     rootItemId: "root",
     initialState: {
-      expandedItems: ["root"], // NOTE: Always start with root expanded
+      // Root, plus whatever the user had open last time. Everything else loads
+      // collapsed, so only expanded subtrees are ever materialised.
+      expandedItems: initialExpandedItems.current,
     },
     // Use proxy instances for better performance with large datasets
     instanceBuilder: buildProxiedInstance,
@@ -798,7 +839,7 @@ const DirTree = ({
             type: "folder",
           } as TreeNode;
         }
-        const node = processedData.allNodes.get(itemId);
+        const node = visibleNodes.get(itemId);
         if (!node) {
           console.warn(`Node not found for id: ${itemId}, sortBy: ${sortBy}`);
           return {
@@ -812,15 +853,16 @@ const DirTree = ({
       },
       getChildren: (itemId: string) => {
         if (itemId === "root") {
-          return rootNodes.map((node: TreeNode) => node.id);
+          return rootIds;
         }
         // In chrono mode, all items are leaf nodes (files) with no children
         if (sortBy === "chrono") {
           return [];
         }
 
-        const node = processedData.allNodes.get(itemId);
-        return node?.children?.map((child: TreeNode) => child.id) || [];
+        // childrenById, not node.children: visibleNodes holds the raw nodes,
+        // whose children include the ones the current filter dropped.
+        return childrenById.get(itemId) ?? [];
       },
     },
     indent: 12,
@@ -832,49 +874,39 @@ const DirTree = ({
       propMemoizationFeature, // For better memoization of props
     ],
   });
-  // Force tree refresh when switching to/from chrono mode
+  // headless-tree caches the flattened item structure and only rebuilds it
+  // when asked. useTree calls rebuildTree() once on mount; later renders call
+  // setConfig(), which swaps the dataLoader but leaves that cache alone. Since
+  // the directory loads asynchronously, the structure built at mount is empty
+  // and nothing ever asks the loader again -- which is why the tree used to
+  // render nothing until something called collapseAll() (it ends with
+  // rebuildTree()). Rebuilding on the structure itself is the supported way,
+  // and it leaves expansion state alone, so collapsed folders stay collapsed
+  // and only expanded subtrees are materialised.
   useEffect(() => {
-    console.log("Sort mode changed to:", sortBy);
-    // Only force refresh when switching to/from chrono mode specifically
-    // For regular sorting, let the processedData memo handle the re-sorting
-    const timeoutId = setTimeout(() => {
-      if (sortBy === "chrono") {
-        // Switching to chrono mode - collapse everything since we show flat list
-        tree.collapseAll();
-        updateDirTreeState({ isExpanded: false });
+    tree.rebuildTree();
+  }, [tree, rootIds, childrenById]);
+
+  // Derived from the tree rather than stored: after navigating into a folder
+  // the new tree is collapsed, but a remembered flag still read "expanded" and
+  // left the button offering Collapse all. getItems() only returns what is
+  // materialised, so this is bounded by what is on screen.
+  const anyFolderExpanded = tree.getItems().some((item) => item.isFolder() && item.isExpanded());
+
+  // Persist which folders are open so a refresh restores them.
+  const updateExpandedNodeState = useCallback(
+    (nodeId: string, nextExpanded: boolean) => {
+      const next = new Set(expandedNodeIdsRef.current);
+      if (nextExpanded) {
+        next.add(nodeId);
+      } else {
+        next.delete(nodeId);
       }
-      // For other modes, don't interfere - let normal expansion logic handle it
-    }, 10);
-
-    return () => clearTimeout(timeoutId);
-  }, [sortBy, tree, updateDirTreeState]);
-
-  // Auto-expand tree when new data is loaded
-  useEffect(() => {
-    if (rootNodes.length > 0) {
-      // Small delay to ensure tree is fully initialized
-      const timeoutId = setTimeout(() => {
-        // Don't expand in chrono mode since we only have leaf nodes
-        if (sortBy !== "chrono") {
-          // Force a collapse/expand cycle to ensure tree shows items
-          tree.collapseAll();
-          setTimeout(() => {
-            tree.expandAll();
-            updateDirTreeState({ isExpanded: true });
-          }, 50);
-        } else {
-          // In chrono mode, we don't need expansion since all items are files
-          updateDirTreeState({ isExpanded: false });
-        }
-      }, 100); // Increase delay to 100ms to ensure tree is ready
-
-      return () => clearTimeout(timeoutId);
-    }
-  }, [rootNodes, tree, sortBy, updateDirTreeState]);
-  const updateExpandedNodeState = useCallback((nodeId: string, nextExpanded: boolean) => {
-    void nodeId;
-    void nextExpanded;
-  }, []);
+      expandedNodeIdsRef.current = next;
+      updateDirTreeState({ expandedNodeIds: [...next] });
+    },
+    [updateDirTreeState],
+  );
 
   const handleSort = (newSortBy: typeof sortBy) => {
     if (sortBy === newSortBy) {
@@ -998,7 +1030,7 @@ const DirTree = ({
   const getSelectedNodes = (): TreeNode[] => {
     const selectedItemIds = tree.getSelectedItems();
     return selectedItemIds
-      .map((item) => processedData.allNodes.get(item.getId()))
+      .map((item) => visibleNodes.get(item.getId()))
       .filter((node): node is TreeNode => node !== undefined);
   };
 
@@ -1167,7 +1199,7 @@ const DirTree = ({
     );
     if (!datasetItem) return -1;
 
-    const datasetNodes = Array.from(processedData.allNodes.values()).filter(
+    const datasetNodes = Array.from(visibleNodes.values()).filter(
       (node) => node.type === "file" && isDatasetPath(node.path),
     );
 
@@ -1176,7 +1208,7 @@ const DirTree = ({
 
   // Get total number of datasets
   const getTotalDatasets = (): number => {
-    const datasetNodes = Array.from(processedData.allNodes.values()).filter(
+    const datasetNodes = Array.from(visibleNodes.values()).filter(
       (node) => node.type === "file" && isDatasetPath(node.path),
     );
     return datasetNodes.length;
@@ -1186,7 +1218,7 @@ const DirTree = ({
   const handleCycleDataset = (direction: "prev" | "next") => {
     if (!isCyclingEnabled() || !onCycleDataset) return;
 
-    const datasetNodes = Array.from(processedData.allNodes.values()).filter(
+    const datasetNodes = Array.from(visibleNodes.values()).filter(
       (node) => node.type === "file" && isDatasetPath(node.path),
     );
 
@@ -1224,12 +1256,12 @@ const DirTree = ({
   useEffect(() => {
     const selectedItems = tree.getSelectedItems();
     if (selectedItems.length === 1) {
-      const selectedNode = processedData.allNodes.get(selectedItems[0].getId());
+      const selectedNode = visibleNodes.get(selectedItems[0].getId());
       if (selectedNode) {
         onSelectNode?.(selectedNode);
       }
     }
-  }, [tree, processedData.allNodes, onSelectNode]);
+  }, [tree, visibleNodes, onSelectNode]);
 
   // Global R keybind mapped to refresh-dir in useGlobalShortcuts
   useShortcut("refresh-dir", () => {
@@ -1259,8 +1291,11 @@ const DirTree = ({
     );
   }
 
-  // Show loading state
-  if (isLoading) {
+  // Show loading state, but only on a first load: once there is a tree on
+  // screen a refresh keeps it, and the spinning Refresh icon in the toolbar
+  // is the busy signal. Blanking the pane on every refresh cost the scroll
+  // position and a lot more space than a scan costs time.
+  if (isLoading && apiData.length === 0) {
     return (
       <div className="p-4 text-center text-gray-500">
         <div className="mb-2">
@@ -1275,7 +1310,10 @@ const DirTree = ({
   }
 
   return (
-    <div className="flex flex-col h-full w-full">
+    <div
+      ref={setRootEl}
+      className={`flex flex-col h-full w-full ${isWide ? "qimchi-dirtree-wide" : ""}`}
+    >
       {/* Fixed Toolbar Section */}
       <div className="shrink-0 space-y-2 mb-2 w-full">
         {/* Search Bar */}
@@ -1289,7 +1327,7 @@ const DirTree = ({
             placeholder="Search files and folders..."
             value={searchInput}
             onChange={(e) => updateDirTreeState({ searchInput: e.target.value })}
-            className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+            className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 text-sm"
           />
           {searchInput && (
             <button
@@ -1339,35 +1377,6 @@ const DirTree = ({
 
             {/* Row 2: Toolbar buttons */}
             <div className="flex items-center justify-center w-full gap-1">
-              {/* LIVE Toggle Button */}
-              <Tooltip
-                content={
-                  showLiveOnly
-                    ? "Showing only live measurements (refreshes every second)"
-                    : "Show only live measurements (refreshes every second)"
-                }
-                position="right"
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    updateDirTreeState({ showLiveOnly: !showLiveOnly });
-                  }}
-                  className={`px-2 py-1 rounded-md transition-all duration-200 ${
-                    showLiveOnly
-                      ? "bg-linear-to-r from-green-500 to-emerald-500 text-white shadow-md hover:shadow-lg hover:from-green-600 hover:to-emerald-600"
-                      : "qimchi-dark-hover-plain bg-blue-50 text-gray-600 hover:bg-blue-100 border border-blue-200"
-                  }`}
-                  title={
-                    showLiveOnly
-                      ? "Show all files"
-                      : "Show only live measurements (refreshes every second)"
-                  }
-                >
-                  <Radio size={16} className={showLiveOnly ? "animate-pulse" : ""} />
-                </button>
-              </Tooltip>
-
               {showLiveOnly && hiddenLiveMeasurementIds.length > 0 && (
                 <Tooltip
                   content={`Restore ${hiddenLiveMeasurementIds.length} hidden live measurement${
@@ -1394,18 +1403,6 @@ const DirTree = ({
                 </Tooltip>
               )}
 
-              {/* Help Modal Button */}
-              <Tooltip content="Help & Tips (Shift+H)" position="right">
-                <button
-                  type="button"
-                  onClick={() => onOpenHelp?.()}
-                  className="qimchi-dark-hover-plain px-2 py-1 flex items-center justify-center text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-md shadow-sm transition-all duration-200 group active:scale-95"
-                  title="Help & Tips"
-                >
-                  <Lightbulb size={16} className="group-hover:fill-amber-200 transition-colors" />
-                </button>
-              </Tooltip>
-
               {/* Refresh Button */}
               <Tooltip content="Refresh directory" position="top">
                 <button
@@ -1429,7 +1426,7 @@ const DirTree = ({
                 content={
                   sortBy === "chrono"
                     ? "Unavailable in chronological view"
-                    : isExpanded
+                    : anyFolderExpanded
                       ? "Collapse all"
                       : "Expand all"
                 }
@@ -1438,12 +1435,22 @@ const DirTree = ({
                 <button
                   type="button"
                   onClick={() => {
-                    if (isExpanded) {
+                    if (anyFolderExpanded) {
                       tree.collapseAll();
-                      updateDirTreeState({ isExpanded: false });
+                      expandedNodeIdsRef.current = new Set();
+                      updateDirTreeState({ expandedNodeIds: [] });
                     } else {
                       tree.expandAll();
-                      updateDirTreeState({ isExpanded: true });
+                      // expandAll resolves children as it goes, so read the
+                      // opened set back once it settles rather than guessing.
+                      setTimeout(() => {
+                        const opened = tree
+                          .getItems()
+                          .filter((item) => item.isFolder() && item.isExpanded())
+                          .map((item) => item.getId());
+                        expandedNodeIdsRef.current = new Set(opened);
+                        updateDirTreeState({ expandedNodeIds: opened });
+                      }, 50);
                     }
                   }}
                   disabled={sortBy === "chrono"}
@@ -1451,12 +1458,12 @@ const DirTree = ({
                   title={
                     sortBy === "chrono"
                       ? "Unavailable in chronological view"
-                      : isExpanded
+                      : anyFolderExpanded
                         ? "Collapse all"
                         : "Expand all"
                   }
                 >
-                  {isExpanded ? <Minimize size={16} /> : <Expand size={16} />}
+                  {anyFolderExpanded ? <Minimize size={16} /> : <Expand size={16} />}
                 </button>
               </Tooltip>
 
@@ -1769,7 +1776,7 @@ const DirTree = ({
       </div>
 
       {/* Scrollable Tree View - Always Virtualized */}
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0" aria-busy={isLoading}>
         <VirtualizedTreeView
           tree={tree}
           treeKey={treeKey}
@@ -2188,9 +2195,18 @@ const TreeItemComponent = ({
         </div>
       </div>
 
+      {/* Wide layout only: the modified date gets its own column instead of
+          being hidden behind the Metadata panel. Shown by CSS when the DirTree
+          root carries .qimchi-dirtree-wide. */}
+      <div className="qimchi-row-meta shrink-0 items-center pr-3 text-xs text-gray-500 tabular-nums">
+        <span className="w-40 whitespace-nowrap text-right">
+          {formatRowTimestamp(nodeData.timestamp)}
+        </span>
+      </div>
+
       {/* For Datasets */}
       {!isFolder && (
-        <div className="flex items-center px-1 py-0.5 rounded-md">
+        <div className="qimchi-row-actions flex items-center px-1 py-0.5 rounded-md">
           {/* className="flex items-center space-x-1 opacity-0 group-hover:backdrop-blur-md group-hover:bg-white/90 group-hover:opacity-100 transition-opacity px-1 py-0.5 rounded-md"> */}
           {showLiveOnly && nodeData.path.startsWith("memory://") && (
             <Tooltip content="Hide from Live Measurements" position="top">
@@ -2405,7 +2421,7 @@ const TreeItemComponent = ({
 
       {/* For Folders */}
       {isFolder && (
-        <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity mr-1">
+        <div className="qimchi-row-actions flex items-center opacity-0 group-hover:opacity-100 transition-opacity mr-1">
           {/* Copy folder name button */}
           <Tooltip content="Copy folder name" position="top">
             <button

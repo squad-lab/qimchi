@@ -1,8 +1,11 @@
 import { forwardRef, useState, useEffect, useImperativeHandle, useCallback } from "react";
-import { X, Play, Eye, EyeOff, ChevronDown, Grid, ChartLine, ListMusic } from "lucide-react";
+import { X, Play, Eye, EyeOff, Trash2, Grid, ChartLine, ListMusic } from "lucide-react";
 
 // Local imports
 import Tooltip from "./Tooltip";
+import SectionRibbon, { ribbonButtonClass } from "./SectionRibbon";
+import { useShortcut } from "../hooks/useGlobalShortcuts";
+import { useSidebarStore } from "../stores/sidebarStore";
 import { useToast } from "../hooks/useToast";
 
 export interface PlotField {
@@ -54,7 +57,16 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
     const [plotType, setPlotType] = useState<PlotType>("LinePlot");
     const [isPlotTypeDropdownOpen, setIsPlotTypeDropdownOpen] = useState(false);
     const [dragOverField, setDragOverField] = useState<"x" | "y" | "z" | null>(null);
-    const [isExpanded, setIsExpanded] = useState(true);
+    // Persisted, so a refresh keeps the Composer the way it was left.
+    const composerCollapsed = useSidebarStore((state) => state.composerCollapsed);
+    const setComposerCollapsed = useSidebarStore((state) => state.setComposerCollapsed);
+    const isExpanded = !composerCollapsed;
+    const toggleExpanded = useCallback(
+      () => setComposerCollapsed(!composerCollapsed),
+      [composerCollapsed, setComposerCollapsed],
+    );
+
+    useShortcut("toggle-composer", toggleExpanded);
     const [draggedFieldType, setDraggedFieldType] = useState<"independent" | "dependent" | null>(
       null,
     );
@@ -511,7 +523,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
           {isDisabled ? (
             <div
               className={`
-            min-h-16 p-2 border-2 border-dashed rounded-lg transition-all
+            flex h-full min-h-16 flex-col p-2 border-2 border-dashed rounded-lg transition-all
             ${getBorderClass()}
             opacity-50 cursor-not-allowed
           `}
@@ -519,7 +531,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
               <div className="flex items-center justify-between mb-2">
                 <span className="font-semibold text-gray-400">{label}:</span>
               </div>
-              <div className="text-sm text-gray-400 text-center">
+              <div className="flex flex-1 items-center justify-center text-sm text-gray-400 text-center">
                 {plotType === "LinePlot" ? "Only available for HeatMap" : "Disabled"}
               </div>
             </div>
@@ -527,7 +539,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
             <Tooltip content={invalidMessage} position="top">
               <div
                 className={`
-                min-h-16 p-2 border-2 border-dashed rounded-lg transition-all
+                flex h-full min-h-16 flex-col p-2 border-2 border-dashed rounded-lg transition-all
                 ${getBorderClass()}
                 ${fields.length === 0 ? "bg-gray-50" : bgColor}
                 cursor-not-allowed opacity-75
@@ -550,7 +562,9 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
                 </div>
 
                 {fields.length === 0 ? (
-                  <div className={`text-sm ${colorClasses.textMuted} text-center`}>
+                  <div
+                    className={`flex flex-1 items-center justify-center text-sm ${colorClasses.textMuted} text-center`}
+                  >
                     {field === "x"
                       ? "Drag any field here (max 1)"
                       : field === "y"
@@ -560,7 +574,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
                         : "Drag dependents here"}
                   </div>
                 ) : (
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-1 flex-wrap content-start gap-2">
                     {fields.map((plotField) => {
                       // Extract the source ID from the plotField ID (format: basketItemId-fieldName)
                       const sourceId = plotField.id.substring(0, plotField.id.lastIndexOf("-"));
@@ -599,7 +613,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
           ) : (
             <div
               className={`
-              min-h-16 p-2 border-2 border-dashed rounded-lg transition-all
+              flex h-full min-h-16 flex-col p-2 border-2 border-dashed rounded-lg transition-all
               ${getBorderClass()}
               ${fields.length === 0 ? "bg-gray-50" : bgColor}
             `}
@@ -621,7 +635,9 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
               </div>
 
               {fields.length === 0 ? (
-                <div className={`text-sm ${colorClasses.textMuted} text-center`}>
+                <div
+                  className={`flex flex-1 items-center justify-center text-sm ${colorClasses.textMuted} text-center`}
+                >
                   {field === "x"
                     ? "Drag any field here (max 1)"
                     : field === "y"
@@ -631,7 +647,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
                       : "Drag dependents here"}
                 </div>
               ) : (
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-1 flex-wrap content-start gap-2">
                   {fields.map((plotField) => {
                     // Extract the source ID from the plotField ID (format: basketItemId-fieldName)
                     const sourceId = plotField.id.substring(0, plotField.id.lastIndexOf("-"));
@@ -672,131 +688,22 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
     };
 
     return (
-      <div className="bg-white border border-gray-300 rounded-lg shadow-sm">
-        <div
-          className="p-2 border-b bg-gray-50 border-gray-200 rounded-lg cursor-pointer"
-          onClick={() => setIsExpanded(!isExpanded)}
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <h3 className="font-semibold text-gray-900 flex items-center">
-                <ListMusic size={18} className="mr-1.5 align-middle mb-0.5" />
-                Composer
-              </h3>
-
-              {selectionContextLabel && (
-                <span className="ml-2 text-xs text-slate-600 bg-slate-100 px-2 py-1 rounded">
+      <div
+        className={`bg-white border border-gray-300 rounded-lg shadow-sm ${
+          isExpanded ? "flex items-stretch" : ""
+        }`}
+      >
+        {isExpanded && (
+          <div className="flex min-w-0 flex-1 flex-col p-2">
+            {selectionContextLabel && (
+              <div className="mb-2 flex">
+                <span className="truncate rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-600">
                   {selectionContextLabel}
                 </span>
-              )}
-            </div>
-
-            <div className="flex items-center">
-              {/* Clear All button */}
-              {(xFields.length > 0 || yFields.length > 0 || zFields.length > 0) && (
-                <div className="mr-2">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      clearAllFields();
-                    }}
-                    className="p-2 text-sm text-gray-600 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                  >
-                    Clear All
-                  </button>
-                </div>
-              )}
-
-              {/* Plot Type Dropdown */}
-              <div className="relative mr-2">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsPlotTypeDropdownOpen(!isPlotTypeDropdownOpen);
-                  }}
-                  className="flex items-center space-x-1 px-3 py-2 text-sm font-medium bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                >
-                  {getPlotTypeIcon(plotType)}
-                  <span>{plotType}</span>
-                  <ChevronDown
-                    size={16}
-                    className={`transition-transform ${isPlotTypeDropdownOpen ? "rotate-180" : ""}`}
-                  />
-                </button>
-
-                {isPlotTypeDropdownOpen && (
-                  <div className="absolute right-0 mt-1 w-36 bg-white border border-gray-300 rounded-lg shadow-lg z-10">
-                    <div className="py-1">
-                      {(["HeatMap", "LinePlot"] as PlotType[]).map((type) => (
-                        <button
-                          key={type}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPlotType(type);
-                            setIsPlotTypeDropdownOpen(false);
-                          }}
-                          className={`w-full flex items-center space-x-2 px-3 py-2 text-sm transition-colors ${
-                            plotType === type
-                              ? "bg-blue-100 text-blue-900"
-                              : "hover:bg-gray-100 text-gray-700"
-                          }`}
-                        >
-                          {getPlotTypeIcon(type)}
-                          <span>{type}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
-
-              {/* Create Plot button */}
-              <div className="mr-2">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleCreatePlot();
-                  }}
-                  disabled={!canCreatePlot}
-                  className={`
-                  flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors
-                  ${
-                    canCreatePlot
-                      ? "bg-blue-600 text-white hover:bg-blue-700"
-                      : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                  }
-                `}
-                >
-                  <Play size={16} />
-                  <span>Plot</span>
-                </button>
-              </div>
-
-              <div>
-                <Tooltip
-                  content={isExpanded ? "Collapse composer" : "Expand composer"}
-                  position="left"
-                >
-                  <button
-                    className="p-1 rounded"
-                    aria-label={isExpanded ? "Collapse composer" : "Expand composer"}
-                  >
-                    {isExpanded ? (
-                      <EyeOff size={16} className="text-red-600" />
-                    ) : (
-                      <Eye size={16} className="text-green-600" />
-                    )}
-                  </button>
-                </Tooltip>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {isExpanded && (
-          <div className="p-2">
+            )}
             {/* X, Y, Z Axes - Side by side layout */}
-            <div className="flex gap-4">
+            <div className="flex min-h-0 flex-1 gap-3">
               {/* X Axis */}
               {renderDropZone("x", xFields, "X-Axis", "blue", "bg-blue-50")}
 
@@ -808,6 +715,102 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
             </div>
           </div>
         )}
+        <SectionRibbon
+          label="Composer"
+          Icon={ListMusic}
+          orientation={isExpanded ? "vertical" : "horizontal"}
+          onToggle={toggleExpanded}
+        >
+          {/* Plot type: icon-only in the ribbon, dropdown opens to the left */}
+          <div className="relative">
+            <Tooltip content={`Plot type: ${plotType}`} position="left">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsPlotTypeDropdownOpen(!isPlotTypeDropdownOpen);
+                }}
+                className={ribbonButtonClass}
+                aria-label={`Plot type: ${plotType}`}
+              >
+                {getPlotTypeIcon(plotType)}
+              </button>
+            </Tooltip>
+
+            {isPlotTypeDropdownOpen && (
+              <div className="absolute right-full top-0 mr-1 w-36 bg-white border border-gray-300 rounded-lg shadow-lg z-20">
+                <div className="py-1">
+                  {(["HeatMap", "LinePlot"] as PlotType[]).map((type) => (
+                    <button
+                      key={type}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPlotType(type);
+                        setIsPlotTypeDropdownOpen(false);
+                      }}
+                      className={`w-full flex items-center space-x-2 px-3 py-2 text-sm transition-colors ${
+                        plotType === type
+                          ? "bg-blue-100 text-blue-900"
+                          : "hover:bg-gray-100 text-gray-700"
+                      }`}
+                    >
+                      {getPlotTypeIcon(type)}
+                      <span>{type}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <Tooltip content="Plot" position="left">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleCreatePlot();
+              }}
+              disabled={!canCreatePlot}
+              className={`flex h-7 w-7 items-center justify-center rounded transition-colors ${
+                canCreatePlot
+                  ? "bg-blue-600 text-white hover:bg-blue-700"
+                  : "bg-gray-300 text-gray-500 cursor-not-allowed"
+              }`}
+              aria-label="Plot"
+            >
+              <Play size={16} />
+            </button>
+          </Tooltip>
+
+          <Tooltip content="Clear all axes (Alt+Shift+C)" position="left">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                clearAllFields();
+              }}
+              disabled={xFields.length === 0 && yFields.length === 0 && zFields.length === 0}
+              className={`${ribbonButtonClass} text-red-600 hover:text-red-800`}
+              aria-label="Clear all axes"
+            >
+              <Trash2 size={16} />
+            </button>
+          </Tooltip>
+
+          <Tooltip
+            content={`${isExpanded ? "Collapse composer" : "Expand composer"} (Alt+C)`}
+            position="left"
+          >
+            <button
+              onClick={toggleExpanded}
+              className={ribbonButtonClass}
+              aria-label={isExpanded ? "Collapse composer" : "Expand composer"}
+            >
+              {isExpanded ? (
+                <EyeOff size={16} className="text-red-600" />
+              ) : (
+                <Eye size={16} className="text-green-600" />
+              )}
+            </button>
+          </Tooltip>
+        </SectionRibbon>
       </div>
     );
   },

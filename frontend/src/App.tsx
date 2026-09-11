@@ -5,6 +5,7 @@ import { PROD_BACKEND_URL } from "./config";
 // Local imports
 import BaseLayout from "./components/BaseLayout";
 import Sidebar from "./components/Sidebar";
+import SidebarRail from "./components/SidebarRail";
 import Viewer from "./components/Viewer";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ToastProvider } from "./components/Toast";
@@ -17,6 +18,9 @@ import HelpModal from "./components/HelpModal";
 import { useShortcut } from "./hooks/useGlobalShortcuts";
 import { isDatasetPath, detectDatasetKind } from "./utils/datasetPaths";
 
+// Browser default, and what the rem-based Tailwind scales assume at 100%.
+const BASE_FONT_SIZE_PX = 16;
+
 const App: React.FC = () => {
   const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
@@ -25,6 +29,7 @@ const App: React.FC = () => {
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const { setSidebarCollapsed, setNotesCollapsed, updateExplorerState } = useSidebarStore();
   const theme = useThemeStore((state) => state.theme);
+  const zoomLevel = useSidebarStore((state) => state.zoomLevel);
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -37,6 +42,21 @@ const App: React.FC = () => {
     void root.offsetWidth;
     root.classList.remove("qimchi-theme-switching");
   }, [theme]);
+
+  // App zoom, as root font size rather than CSS `zoom`.
+  //
+  // `zoom` puts layout into a scaled coordinate space while pointer events and
+  // getBoundingClientRect stay in the viewport's, so anything that mixes the
+  // two lands in the wrong place: our tooltips, react-rnd's drag maths, and
+  // Plotly's hover labels. Only the first is ours to fix.
+  //
+  // Root font size has no second coordinate space. Tailwind's spacing and type
+  // scales are rem-based, so the UI scales and every pointer position stays
+  // exactly where the browser says it is. The trade-off is that arbitrary
+  // pixel values (h-[166px] and friends) keep their size.
+  useLayoutEffect(() => {
+    document.documentElement.style.fontSize = `${BASE_FONT_SIZE_PX * zoomLevel}px`;
+  }, [zoomLevel]);
 
   const datasetKeys = useMemo(
     () =>
@@ -276,6 +296,7 @@ const App: React.FC = () => {
     <ToastProvider>
       <ErrorBoundary>
         <BaseLayout
+          rail={<SidebarRail onOpenHelp={() => setIsHelpOpen(true)} />}
           sidebar={
             <ErrorBoundary>
               <Sidebar
@@ -291,7 +312,6 @@ const App: React.FC = () => {
                 notesSelectedItemId={notesSelectedItemId}
                 onNotesSelectedItemChange={handleNotesSelectedItemChange}
                 onCycleDataset={handleCycleDataset}
-                onOpenHelp={() => setIsHelpOpen(true)}
               />
             </ErrorBoundary>
           }

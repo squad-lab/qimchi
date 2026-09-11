@@ -14,6 +14,7 @@ All DB work runs off the event loop via ``asyncio.to_thread`` (repo convention).
 
 import asyncio
 import json
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -213,6 +214,76 @@ async def _resolve(
         attrs = _lean_attrs(ds)
     uuid, origin = await asyncio.to_thread(resolve_identity, attrs, ds)
     return uuid, origin, attrs
+
+
+def library_metadata(dataset_path: Path, dataset_uuid: str | None = None) -> dict:
+    """
+    Collect what the library knows about a measurement, for a file leaving Qimchi.
+
+    An exported image or a downloaded dataset otherwise leaves its annotations
+    behind: which tags it carried, whether it was hearted. The library database
+    is optional, so a failure here degrades to the identifiers alone rather
+    than failing the export or the download.
+
+    ``session_scope`` is imported inside the function, not at module level, so
+    the lookup is reached lazily and can be substituted in tests.
+
+    Args:
+        dataset_path (Path): Dataset the plots were made from.
+        dataset_uuid (str | None): Identifier to look up; defaults to the
+            filename stem, which is the measurement UUID for qanary datasets.
+
+    Returns:
+        dict: Metadata for a sidecar file, and for PNG text chunks.
+
+    """
+    if dataset_uuid is None:
+        dataset_uuid = dataset_path.stem
+
+    meta: dict = {
+        "dataset_uuid": dataset_uuid,
+        "dataset_path": str(dataset_path),
+        "exported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "exported_by": "Qimchi",
+    }
+    try:
+        from sqlmodel import select
+
+        from .db_models import (
+            LOCAL_USER_ID,
+            Measurement,
+            MeasurementState,
+            MeasurementTag,
+            Tag,
+        )
+        from .shared.db import session_scope
+
+        with session_scope() as session:
+            # The filename stem is the canonical measurement UUID. Prefer it
+            # over the node-local path, while retaining the path lookup for
+            # legacy records whose filename was not their identity.
+            measurement = session.get(Measurement, dataset_uuid)
+            if measurement is None:
+                measurement = session.exec(
+                    select(Measurement).where(Measurement.abs_path == str(dataset_path))
+                ).first()
+            measurement_uuid = measurement.uuid if measurement else dataset_uuid
+            meta["measurement_uuid"] = measurement_uuid
+            if measurement is not None:
+                meta["uuid_origin"] = measurement.uuid_origin
+            state = session.get(MeasurementState, (measurement_uuid, LOCAL_USER_ID))
+            meta["hearted"] = bool(state.hearted) if state else False
+            meta["trashed"] = bool(state.trashed) if state else False
+            meta["tags"] = sorted(
+                session.exec(
+                    select(Tag.name)
+                    .join(MeasurementTag, MeasurementTag.tag_id == Tag.id)
+                    .where(MeasurementTag.uuid == measurement_uuid)
+                ).all()
+            )
+    except Exception as exc:
+        logger.info("Export metadata unavailable for %s: %s", dataset_uuid, exc)
+    return meta
 
 
 # --------------------------------------------------------------------------- #

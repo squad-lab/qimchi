@@ -2,6 +2,9 @@ import React from "react";
 import MDEditor from "@uiw/react-md-editor";
 import rehypeSanitize from "rehype-sanitize";
 
+// Local imports
+import { useThemeStore } from "../stores/themeStore";
+
 interface MarkdownEditorProps {
   value?: string;
   onChange?: (value: string) => void;
@@ -19,6 +22,10 @@ export default function MarkdownEditor({
   initialContent = "",
   height = "100%",
 }: MarkdownEditorProps) {
+  // @uiw/react-md-editor themes itself from data-color-mode; it was pinned to
+  // "light", which left the editor a white slab in dark mode.
+  const theme = useThemeStore((state) => state.theme);
+
   const [internalValue, setInternalValue] = React.useState(initialContent);
 
   // Use controlled value if provided, otherwise use internal state
@@ -48,7 +55,7 @@ export default function MarkdownEditor({
           placeholder,
           disabled,
         }}
-        data-color-mode="light" // TODOLATER: THEME:
+        data-color-mode={theme}
         tabSize={4}
         height={height}
         className="w-full h-full notes-markdown-editor" // Custom class for additional styling

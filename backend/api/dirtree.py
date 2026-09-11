@@ -5,8 +5,11 @@ FastAPI endpoint for many Explorer/DirTree related operations.
 
 import asyncio
 import hashlib
+import json
 import os
+import stat as stat_module
 import subprocess  # Windows compat
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
@@ -63,25 +66,35 @@ def _extract_measurement_id(memory_path: str) -> str:
     return extract_measurement_id(memory_path)
 
 
-def _get_dataset_last_modified(path: Path) -> float:
+def _get_dataset_last_modified(path: Path, store_mtime: float | None = None) -> float:
     """
     Get the last modification time of a zarr dataset.
 
+    Reads the store directory's own mtime plus its metadata file, instead of
+    walking the store. A zarr store holds one file per chunk, so the previous
+    rglob cost thousands of stat calls *per dataset* -- on a tree of a few
+    thousand measurements that dominated the whole scan. Writing to a store
+    rewrites its metadata, so the metadata mtime tracks appends without the
+    walk.
+
     Args:
         path (Path): Path to the zarr dataset
+        store_mtime (float | None): Already-known mtime of the store directory,
+            to avoid re-stat-ing it.
 
     Returns:
         float: Unix timestamp of last modification
 
     """
     try:
-        latest_mtime = path.stat().st_mtime
+        latest_mtime = path.stat().st_mtime if store_mtime is None else store_mtime
 
-        # Check all files and subdirectories for the most recent modification
-        for item in path.rglob("*"):
-            if item.is_file():
-                item_mtime = item.stat().st_mtime
-                latest_mtime = max(latest_mtime, item_mtime)
+        # v3 writes zarr.json; v2 consolidated metadata writes .zmetadata.
+        for meta_name in ("zarr.json", ".zmetadata"):
+            try:
+                latest_mtime = max(latest_mtime, (path / meta_name).stat().st_mtime)
+            except OSError:
+                continue
 
         return latest_mtime
 
@@ -114,6 +127,29 @@ def _get_folder_size(path: Path) -> int:
         return 0
 
 
+def _close_dataset(dataset) -> None:
+    """
+    Release a loaded dataset, tolerating the ones that cannot be closed.
+
+    A dataset read out of a DataTree node is a ``DatasetView``, and xarray
+    raises AttributeError rather than closing it ("close the associated
+    DataTree node instead"). Raising from a ``finally`` replaced the response
+    with a 500 for every DataTree reference, so the close is best-effort.
+
+    """
+    try:
+        dataset.close()
+    except Exception as exc:  # noqa: BLE001 - releasing must never fail a request
+        logger.debug(f"_close_dataset | could not close dataset: {exc}")
+
+
+def _iso_from_mtime(mtime: float) -> str:
+    """Format an already-read mtime as an ISO string, avoiding a second stat."""
+    import datetime
+
+    return datetime.datetime.fromtimestamp(mtime).isoformat()
+
+
 def _get_file_timestamp(path: Path) -> str:
     """
     Helper function to get file modification timestamp as ISO string.
@@ -137,6 +173,78 @@ def _get_file_timestamp(path: Path) -> str:
     except (OSError, IOError):
         logger.error(f"_get_file_timestamp | Failed to stat path for timestamp: {path}")
         raise OSError(f"Failed to stat path {path}")
+
+
+def _store_fingerprint(st: os.stat_result) -> str:
+    """Stat signature of a zarr store directory, matching library.py's form."""
+    return f"{st.st_mtime_ns}:{st.st_size}"
+
+
+def _read_scan_cache(paths: list[str]) -> Dict[str, tuple]:
+    """
+    Look up cached (fingerprint, size, last_modified) for the given stores.
+
+    A DB failure is not fatal here: the cache only saves work, so a miss just
+    means the scan computes the values itself (see shared/db.py's degradation
+    contract -- the Explorer must keep working without the database).
+
+    """
+    if not paths:
+        return {}
+
+    try:
+        from sqlmodel import select
+
+        from .db_models import DatasetScanCache
+        from .shared.db import session_scope
+
+        found: Dict[str, tuple] = {}
+        with session_scope() as session:
+            # SQLite caps variables per statement; chunk well under the limit.
+            for start in range(0, len(paths), 500):
+                chunk = paths[start : start + 500]
+                rows = session.exec(
+                    select(DatasetScanCache).where(DatasetScanCache.abs_path.in_(chunk))
+                ).all()
+                for row in rows:
+                    found[row.abs_path] = (
+                        row.fingerprint,
+                        row.size_bytes,
+                        row.last_modified,
+                    )
+        return found
+    except Exception as exc:
+        logger.debug(f"_read_scan_cache | cache unavailable, computing instead: {exc}")
+        return {}
+
+
+def _write_scan_cache(entries: list[tuple]) -> None:
+    """Upsert (abs_path, fingerprint, size, last_modified) rows; best-effort."""
+    if not entries:
+        return
+
+    try:
+        from .db_models import DatasetScanCache
+        from .shared.db import session_scope
+
+        with session_scope() as session:
+            for abs_path, fingerprint, size_bytes, last_modified in entries:
+                row = session.get(DatasetScanCache, abs_path)
+                if row is None:
+                    session.add(
+                        DatasetScanCache(
+                            abs_path=abs_path,
+                            fingerprint=fingerprint,
+                            size_bytes=size_bytes,
+                            last_modified=last_modified,
+                        )
+                    )
+                else:
+                    row.fingerprint = fingerprint
+                    row.size_bytes = size_bytes
+                    row.last_modified = last_modified
+    except Exception as exc:
+        logger.debug(f"_write_scan_cache | could not persist scan cache: {exc}")
 
 
 # Simple TTL cache for zarr sizes
@@ -170,6 +278,27 @@ async def _run_subprocess(cmd, input_data: bytes = None):
 
 
 async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
+    """
+    Build a dataset directory tree, off the event loop.
+
+    The scan is `fd` subprocesses plus a stat-heavy pass over every dataset --
+    all of it blocking. Qimchi runs a single uvicorn worker (plot_ref context is
+    per-worker, see CURRENT_ISSUES.md), so doing that work inline froze every
+    other request -- /health, plots, notes -- for the whole scan. This matches
+    the `asyncio.to_thread` convention already used by library.py and notes.py.
+
+    Args:
+        path: str or Path-like root directory to scan.
+        max_depth: maximum recursion depth to request from fd.
+
+    Returns:
+        Dict: TreeNode-style dict describing the directory tree.
+
+    """
+    return await asyncio.to_thread(_build_directory_tree_zarr, path, max_depth)
+
+
+def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
     """
     Build a dataset directory tree using the `fd` utility for fast traversal.
 
@@ -288,8 +417,14 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
         str(path),
     ]
 
-    result_dirs = _run_fd_capture(cmd_zarr_dirs)
-    result_files = _run_fd_capture(cmd_dataset_files)
+    # The two passes are independent and were ~46% of scan time once the
+    # per-dataset work was fixed, so overlap them rather than paying both in
+    # series. Two threads, since _run_fd_capture blocks on a subprocess.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        future_dirs = pool.submit(_run_fd_capture, cmd_zarr_dirs)
+        future_files = pool.submit(_run_fd_capture, cmd_dataset_files)
+        result_dirs = future_dirs.result()
+        result_files = future_files.result()
 
     if result_dirs.returncode != 0:
         err = result_dirs.stderr.decode("utf-8", errors="replace")
@@ -343,9 +478,15 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
             item = Path(p)
             item.relative_to(path)  # Ensure path is under root
 
-            if item.is_dir() and item.name.endswith(".zarr"):
-                dataset_items.append(item)
-            elif item.is_file() and item.suffix.lower() in {
+            # One stat per entry: is_dir()/is_file() plus the later size,
+            # mtime and timestamp lookups each stat-ed the same path again, so
+            # a scan cost 3-4 syscalls per dataset instead of one.
+            st = item.stat()
+            is_directory = stat_module.S_ISDIR(st.st_mode)
+
+            if is_directory and item.name.endswith(".zarr"):
+                dataset_items.append((item, st))
+            elif not is_directory and item.suffix.lower() in {
                 ".nc",
                 ".h5",
                 ".hdf5",
@@ -355,7 +496,7 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
                 ".txt",
                 ".dat",
             }:
-                dataset_items.append(item)
+                dataset_items.append((item, st))
             else:
                 continue
 
@@ -383,13 +524,29 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
         except Exception:
             continue
 
+    # Zarr stores are the only entries whose size and mtime cost more than the
+    # stat we already have, so they are the only ones worth caching.
+    zarr_paths = [
+        str(item) for item, st in dataset_items if stat_module.S_ISDIR(st.st_mode)
+    ]
+    scan_cache = _read_scan_cache(zarr_paths)
+    cache_writes: list[tuple] = []
+
     # Create dataset nodes
-    for item in dataset_items:
+    for item, st in dataset_items:
         try:
-            if item.is_dir():
+            if stat_module.S_ISDIR(st.st_mode):
                 fmt = "zarr"
-                size = _get_folder_size(item)
-                last_modified = _get_dataset_last_modified(item)
+                # Size still ships because the Basket displays it.
+                item_str = str(item)
+                fingerprint = _store_fingerprint(st)
+                cached = scan_cache.get(item_str)
+                if cached is not None and cached[0] == fingerprint:
+                    size, last_modified = cached[1], cached[2]
+                else:
+                    size = _get_folder_size(item)
+                    last_modified = _get_dataset_last_modified(item, st.st_mtime)
+                    cache_writes.append((item_str, fingerprint, size, last_modified))
             else:
                 suffix = item.suffix.lower()
                 if suffix == ".nc":
@@ -402,8 +559,8 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
                     fmt = "csv"  # CONCERN: Or, we could use "flat" ?
                 else:
                     continue
-                size = item.stat().st_size
-                last_modified = item.stat().st_mtime
+                size = st.st_size
+                last_modified = st.st_mtime
 
             dataset_node = {
                 "id": f"file-{hash(str(item)) % 100000}",
@@ -411,7 +568,7 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
                 "path": str(item),
                 "type": "file",
                 "size": size,
-                "timestamp": _get_file_timestamp(item),
+                "timestamp": _iso_from_mtime(st.st_mtime),
                 "tags": [fmt],
                 "lastModified": last_modified,
             }
@@ -419,7 +576,13 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
         except Exception:
             continue
 
-    # Build parent-child relationships
+    _write_scan_cache(cache_writes)
+
+    # Build parent-child relationships. The duplicate check is a per-parent set
+    # rather than a scan of the children list, which made attaching a folder of
+    # N siblings O(N^2) -- ~12M comparisons for a folder of 5k measurements.
+    seen_child_paths: Dict[str, set] = {}
+
     for p_str, node in list(nodes.items()):
         if p_str == str(path):  # Skip root
             continue
@@ -435,9 +598,12 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
                 if parent_node.get("children") is None:
                     parent_node["children"] = []
 
-                if not any(
-                    ch.get("path") == node.get("path") for ch in parent_node["children"]
-                ):
+                seen = seen_child_paths.setdefault(
+                    parent_str, {ch.get("path") for ch in parent_node["children"]}
+                )
+                node_path = node.get("path")
+                if node_path not in seen:
+                    seen.add(node_path)
                     parent_node["children"].append(node)
 
         except Exception:
@@ -453,7 +619,9 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
 
     sort_children(nodes[str(path)])
 
-    logger.debug(f"Directory tree built with these nodes:\n{nodes}")
+    # Serialising every node here cost a full string build -- and a multi-MB
+    # write, since the file handler runs at DEBUG -- on every single scan.
+    # logger.debug(f"Directory tree built with these nodes:\n{nodes}")
     # print(f"Directory tree built with these nodes:\n{nodes}")  # DEBUG:
 
     # TODOLATER: Re-enable size computation using du/xargs if windows compat is ever resolved.
@@ -1005,6 +1173,90 @@ async def _load_dataset_for_metadata(path_ref: str) -> xr.Dataset:
         raise HTTPException(status_code=400, detail=msg) from exc
 
 
+# Attrs the loader injects to record how Qimchi read the file.
+INTERNAL_META_KEYS: frozenset = frozenset(
+    {
+        "path",
+        "actual_path",
+        "loaded_from",
+        "grid_2d",
+        "qimchi_all_columns",
+        "qimchi_tabular",
+        "qimchi_tabular_row_dim",
+        "qimchi_quantify_gridded",
+        "qimchi_connect",
+        "qimchi_connect_rows",
+        "qimchi_connect_source",
+    }
+)
+
+# qanary's own sections. Listed first when present.
+# Other measurement utilities may not write them
+PREFERRED_META_KEYS: list = [
+    "Sweeps",
+    "Parameters Snapshot",
+    "Extra Metadata",
+    "Instruments Snapshot",
+]
+
+
+# Metadata is rendered as an interactive tree in the browser.
+METADATA_MAX_NODES: int = int(os.getenv("QIMCHI_METADATA_MAX_NODES", "100"))
+
+# Marks a section replaced by a size report rather than its own contents.
+METADATA_TOO_LARGE_KEY: str = "__qimchi_metadata_too_large__"
+
+
+def _expand_json_string(text: str) -> object | None:
+    """
+    Parse a value that is a JSON document stored as a string, else None.
+
+    Args:
+        text (str): The string to parse as JSON.
+
+    Returns:
+        object | None: The parsed JSON object if it's a dict or list, else None.
+
+    """
+    stripped = text.lstrip()
+    if not stripped.startswith(("{", "[")):
+        return None
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    # Only containers: anything else would just be re-counted as a scalar.
+    return parsed if isinstance(parsed, (dict, list)) else None
+
+
+def _count_nodes(value: object) -> int:
+    """
+    Count every container entry, expanding JSON held in strings.
+
+    Args:
+        value (object): The value to count nodes in.
+
+    Returns:
+        int: The total count of nodes in the value, including nested containers.
+
+    """
+    total = 0
+    stack = [value]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, str):
+            expanded = _expand_json_string(current)
+            if expanded is not None:
+                stack.append(expanded)
+        elif isinstance(current, dict):
+            total += len(current)
+            stack.extend(current.values())
+        elif isinstance(current, (list, tuple)):
+            total += len(current)
+            stack.extend(current)
+    return total
+
+
 # The attrs surfaced by /load-attrs/ (the Explorer's metadata strip).
 ATTR_KEYS: list = [
     "Timestamp",
@@ -1015,6 +1267,20 @@ ATTR_KEYS: list = [
     "Experiment Name",
     "Measurement ID",  # CONCERN: Already present in filename
     # "Instruments Snapshot"
+]
+
+# Identity and context attrs written by the other acquisition tools.
+NON_QANARY_ATTR_KEYS: list = [
+    # QCoDeS
+    "run_id",
+    "guid",
+    "exp_name",
+    "sample_name",
+    "run_timestamp",
+    "completed_timestamp",
+    # Quantify
+    "tuid",
+    "name",
 ]
 
 
@@ -1054,6 +1320,15 @@ def build_attrs_payload(data: xr.Dataset) -> Dict:
             if isinstance(value, (str, int, float, bool, list, dict))
             else str(value)
         )
+
+    # Scalars only: this payload is rendered as a flat key/value strip, so a
+    # nested snapshot would either break the render or bury it.
+    for key in NON_QANARY_ATTR_KEYS:
+        if key in attr_json:
+            continue
+        value = metadata.get(key)
+        if isinstance(value, (str, int, float, bool)):
+            attr_json[key] = value
 
     attr_json["independents"] = indeps
     attr_json["dependents"] = deps
@@ -1106,7 +1381,7 @@ async def get_meta_attrs(path: PathData) -> Dict:
 
     finally:
         if data is not None:
-            data.close()
+            _close_dataset(data)
 
 
 @router.post("/load-meta/")
@@ -1135,14 +1410,29 @@ async def get_metadata(path: PathData) -> Dict:
         if not isinstance(metadata, dict):
             metadata = dict(metadata)
 
-        meta_keys: list = [
-            "Sweeps",
-            "Parameters Snapshot",
-            "Extra Metadata",
-            "Instruments Snapshot",
-        ]
+        ordered_keys: list = [key for key in PREFERRED_META_KEYS if key in metadata]
+        ordered_keys += sorted(
+            key
+            for key in metadata
+            if key not in PREFERRED_META_KEYS and key not in INTERNAL_META_KEYS
+        )
 
-        meta_dict: dict = {key: metadata.get(key, "N/A") for key in meta_keys}
+        meta_dict: dict = {key: metadata[key] for key in ordered_keys}
+
+        # Budget each section on its own.
+        for key, value in list(meta_dict.items()):
+            node_count = _count_nodes(value)
+            if node_count > METADATA_MAX_NODES:
+                logger.info(
+                    f"get_metadata | {raw_path}: section {key!r} has "
+                    f"{node_count} nodes (limit {METADATA_MAX_NODES}); "
+                    "sending a size report instead"
+                )
+                meta_dict[key] = {
+                    METADATA_TOO_LARGE_KEY: True,
+                    "nodeCount": node_count,
+                    "nodeLimit": METADATA_MAX_NODES,
+                }
 
         # Ensure metadata is JSON serializable
         meta_json = {}
@@ -1162,7 +1452,7 @@ async def get_metadata(path: PathData) -> Dict:
         raise HTTPException(status_code=500, detail=f"Error loading metadata: {str(e)}")
     finally:
         if data is not None:
-            data.close()
+            _close_dataset(data)
 
 
 @router.post("/dataset-status/")

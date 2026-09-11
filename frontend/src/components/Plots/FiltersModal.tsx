@@ -277,10 +277,10 @@ const DEFAULT_FILTER_OPTIONS = {
 
 // z-index manager shared across modals
 const getNextGlobalModalZ = (): number => {
-  if (typeof window === "undefined") return 1000;
+  if (typeof window === "undefined") return 2000;
   const w = window as unknown as { __qimchi_modal_z?: number };
-  if (!w.__qimchi_modal_z) w.__qimchi_modal_z = 1000;
-  w.__qimchi_modal_z = (w.__qimchi_modal_z || 1000) + 1;
+  if (!w.__qimchi_modal_z) w.__qimchi_modal_z = 2000;
+  w.__qimchi_modal_z = (w.__qimchi_modal_z || 2000) + 1;
   return w.__qimchi_modal_z;
 };
 

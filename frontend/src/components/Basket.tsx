@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { PROD_BACKEND_URL } from "../config";
 import axios from "axios";
@@ -25,6 +25,9 @@ import {
 
 // Local imports
 import Tooltip from "./Tooltip";
+import SectionRibbon, { ribbonButtonClass } from "./SectionRibbon";
+import { useShortcut } from "../hooks/useGlobalShortcuts";
+import { useSidebarStore } from "../stores/sidebarStore";
 import { useToast } from "../hooks/useToast";
 import { SharedFieldResult, isFieldShared } from "../utils/datasetFieldSelectors";
 import { detectDatasetKind, isDatasetPath, isSqliteContainerPath } from "../utils/datasetPaths";
@@ -66,124 +69,155 @@ interface BasketProps {
   onOpenNotesItem?: (item: BasketItem) => void;
 }
 
+// One ResizeObserver for every field row. Each row used to construct its own,
+// so a basket of ~90 datasets meant ~180 observers all waking on the same
+// layout pass -- a large part of why a full basket slowed the whole app
+// (gitlab#12). One observer with a per-element callback does the same work.
+const rowResizeCallbacks = new WeakMap<Element, () => void>();
+let sharedRowObserver: ResizeObserver | null = null;
+
+const observeRowResize = (element: Element, onResize: () => void): (() => void) => {
+  rowResizeCallbacks.set(element, onResize);
+
+  if (!sharedRowObserver) {
+    sharedRowObserver = new ResizeObserver((entries) => {
+      entries.forEach((entry) => rowResizeCallbacks.get(entry.target)?.());
+    });
+  }
+
+  sharedRowObserver.observe(element);
+
+  return () => {
+    rowResizeCallbacks.delete(element);
+    sharedRowObserver?.unobserve(element);
+  };
+};
+
 // Component to display the independents and dependents as draggable items with unified styling
-const FieldItem = ({
-  item,
-  basketItemId,
-  basketItemPath,
-  type,
-  selectedItems,
-  onToggleSelect,
-  isDisabled = false,
-  isHighlighted = false,
-  onAutofillComposerField,
-}: {
-  item: string;
-  basketItemId: string;
-  basketItemPath: string;
-  type: "independent" | "dependent";
-  selectedItems?: Set<string>;
-  onToggleSelect?: (itemId: string, ctrlPressed: boolean) => void;
-  isDisabled?: boolean;
-  isHighlighted?: boolean;
-  onAutofillComposerField?: (field: BasketFieldSelection) => void;
-}) => {
-  const itemId = `${basketItemId}-${item}`;
-  const isSelected = selectedItems?.has(itemId) || false;
+const FieldItem = memo(
+  ({
+    item,
+    basketItemId,
+    basketItemPath,
+    type,
+    isSelected = false,
+    getSelectedItems,
+    onToggleSelect,
+    isDisabled = false,
+    isHighlighted = false,
+    onAutofillComposerField,
+  }: {
+    item: string;
+    basketItemId: string;
+    basketItemPath: string;
+    type: "independent" | "dependent";
+    // A boolean rather than the selection Set: the Set changes identity on every
+    // selection, which would re-render every chip in the basket through memo.
+    isSelected?: boolean;
+    // Ctrl-drag needs the whole selection, but only at drag time -- a stable
+    // getter keeps it out of the props that decide whether to re-render.
+    getSelectedItems?: () => Set<string>;
+    onToggleSelect?: (itemId: string, ctrlPressed: boolean) => void;
+    isDisabled?: boolean;
+    isHighlighted?: boolean;
+    onAutofillComposerField?: (field: BasketFieldSelection) => void;
+  }) => {
+    const itemId = `${basketItemId}-${item}`;
 
-  const handleDragStart = (e: React.DragEvent) => {
-    if (isDisabled) {
-      e.preventDefault();
-      return;
-    }
+    const handleDragStart = (e: React.DragEvent) => {
+      if (isDisabled) {
+        e.preventDefault();
+        return;
+      }
 
-    const ctrlPressed = e.ctrlKey || e.metaKey;
+      const ctrlPressed = e.ctrlKey || e.metaKey;
 
-    // If ctrl is pressed and item is not selected, add it to selection
-    if (ctrlPressed && !isSelected) {
-      onToggleSelect?.(itemId, true);
-    }
+      // If ctrl is pressed and item is not selected, add it to selection
+      if (ctrlPressed && !isSelected) {
+        onToggleSelect?.(itemId, true);
+      }
 
-    // Determine which items to drag
-    const itemsToDrag =
-      ctrlPressed && selectedItems && selectedItems.size > 0
-        ? Array.from(selectedItems)
-            .filter((id) => id.includes(`${basketItemId}-`)) // Only items from same basket item
-            .map((id) => {
-              const fieldName = id.split("-").pop() || "";
-              return {
-                id,
-                name: fieldName,
+      // Determine which items to drag
+      const selection = getSelectedItems?.();
+      const itemsToDrag =
+        ctrlPressed && selection && selection.size > 0
+          ? Array.from(selection)
+              .filter((id) => id.includes(`${basketItemId}-`)) // Only items from same basket item
+              .map((id) => {
+                const fieldName = id.split("-").pop() || "";
+                return {
+                  id,
+                  name: fieldName,
+                  type: type,
+                  source: basketItemPath,
+                };
+              })
+          : [
+              {
+                id: itemId,
+                name: item,
                 type: type,
                 source: basketItemPath,
-              };
-            })
-        : [
-            {
-              id: itemId,
-              name: item,
-              type: type,
-              source: basketItemPath,
-            },
-          ];
+              },
+            ];
 
-    e.dataTransfer.setData("application/plot-fields", JSON.stringify(itemsToDrag));
-    e.dataTransfer.effectAllowed = "copy";
-  };
+      e.dataTransfer.setData("application/plot-fields", JSON.stringify(itemsToDrag));
+      e.dataTransfer.effectAllowed = "copy";
+    };
 
-  const handleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (isDisabled) {
-      return;
-    }
-    const ctrlPressed = e.ctrlKey || e.metaKey;
-    onToggleSelect?.(itemId, ctrlPressed);
-  };
+    const handleClick = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (isDisabled) {
+        return;
+      }
+      const ctrlPressed = e.ctrlKey || e.metaKey;
+      onToggleSelect?.(itemId, ctrlPressed);
+    };
 
-  const handleDoubleClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (isDisabled) {
-      return;
-    }
-    onAutofillComposerField?.({
-      id: itemId,
-      source: basketItemPath,
-      name: item,
-      type,
-    });
-  };
+    const handleDoubleClick = (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (isDisabled) {
+        return;
+      }
+      onAutofillComposerField?.({
+        id: itemId,
+        source: basketItemPath,
+        name: item,
+        type,
+      });
+    };
 
-  // Compact styling with better width handling and consistent sizing
-  const maxDisplayLength = 8; // Reduced for more compact display
-  const displayName =
-    item.length > maxDisplayLength ? `${item.substring(0, maxDisplayLength)}...` : item;
-  const shouldShowTooltip = item.length > maxDisplayLength;
+    // Compact styling with better width handling and consistent sizing
+    const maxDisplayLength = 8; // Reduced for more compact display
+    const displayName =
+      item.length > maxDisplayLength ? `${item.substring(0, maxDisplayLength)}...` : item;
+    const shouldShowTooltip = item.length > maxDisplayLength;
 
-  // Style configuration based on type
-  const styleConfig = {
-    independent: {
-      bgColor: isSelected ? "bg-blue-200" : "bg-blue-100",
-      hoverColor: "hover:bg-blue-300",
-      ringColor: "ring-blue-400",
-      textColor: "text-blue-900",
-      icon: Variable,
-    },
-    dependent: {
-      bgColor: isSelected ? "bg-red-200" : "bg-red-100",
-      hoverColor: "hover:bg-red-300",
-      ringColor: "ring-red-400",
-      textColor: "text-red-900",
-      icon: SquareFunction,
-    },
-  };
+    // Style configuration based on type
+    const styleConfig = {
+      independent: {
+        bgColor: isSelected ? "bg-blue-200" : "bg-blue-100",
+        hoverColor: "hover:bg-blue-300",
+        ringColor: "ring-blue-400",
+        textColor: "text-blue-900",
+        icon: Variable,
+      },
+      dependent: {
+        bgColor: isSelected ? "bg-red-200" : "bg-red-100",
+        hoverColor: "hover:bg-red-300",
+        ringColor: "ring-red-400",
+        textColor: "text-red-900",
+        icon: SquareFunction,
+      },
+    };
 
-  const config = styleConfig[type];
-  const IconComponent = config.icon;
+    const config = styleConfig[type];
+    const IconComponent = config.icon;
 
-  const content = (
-    <div
-      className={`
+    const content = (
+      <div
+        className={`
         flex items-center space-x-1 rounded p-1.5 cursor-grab active:cursor-grabbing 
         transition-all duration-200 min-w-[70px] max-w-[90px]
         ${config.bgColor} ${config.hoverColor}
@@ -191,173 +225,179 @@ const FieldItem = ({
         ${isDisabled ? "opacity-45 cursor-not-allowed hover:bg-gray-200" : ""}
         ${isHighlighted ? "ring-2 ring-yellow-400 shadow-lg" : ""}
       `}
-      draggable={!isDisabled}
-      onDragStart={handleDragStart}
-      onClick={handleClick}
-      onDoubleClick={handleDoubleClick}
-    >
-      <IconComponent size={15} className={`${config.textColor} shrink-0`} />
-      <span className={`text-xs ${config.textColor} truncate font-medium`}>{displayName}</span>
-    </div>
-  );
+        draggable={!isDisabled}
+        onDragStart={handleDragStart}
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+      >
+        <IconComponent size={15} className={`${config.textColor} shrink-0`} />
+        <span className={`text-xs ${config.textColor} truncate font-medium`}>{displayName}</span>
+      </div>
+    );
 
-  return shouldShowTooltip ? (
-    <Tooltip content={item} position="top">
-      {content}
-    </Tooltip>
-  ) : (
-    content
-  );
-};
+    return shouldShowTooltip ? (
+      <Tooltip content={item} position="top">
+        {content}
+      </Tooltip>
+    ) : (
+      content
+    );
+  },
+);
+FieldItem.displayName = "FieldItem";
 
 // A horizontal, scrollable row of independent/dependent field chips. When the
 // chips overflow the panel width, a dropdown button appears; hovering it shows
 // the FULL list in a wrapped popup (portaled to <body> so it escapes the
 // basket's overflow-clipping ancestors). Horizontal scroll is kept as-is.
-const FieldsRow = ({
-  type,
-  loading,
-  fields,
-  itemName,
-  itemPath,
-  selectedItems,
-  onToggleSelect,
-  onAutofillComposerField,
-  isChipEnabled,
-  highlightedFields,
-}: {
-  type: "independent" | "dependent";
-  loading: boolean;
-  fields: string[];
-  itemName: string;
-  itemPath: string;
-  selectedItems?: Set<string>;
-  onToggleSelect?: (itemId: string, ctrlPressed: boolean) => void;
-  onAutofillComposerField?: (field: BasketFieldSelection) => void;
-  isChipEnabled: (field: string) => boolean;
-  highlightedFields: Set<string>;
-}) => {
-  const sectionRef = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const closeTimer = useRef<number | undefined>(undefined);
-  const [overflowing, setOverflowing] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-  const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
+const FieldsRow = memo(
+  ({
+    type,
+    loading,
+    fields,
+    itemName,
+    itemPath,
+    selectedItems,
+    getSelectedItems,
+    onToggleSelect,
+    onAutofillComposerField,
+    isChipEnabled,
+    highlightedFields,
+  }: {
+    type: "independent" | "dependent";
+    loading: boolean;
+    fields: string[];
+    itemName: string;
+    itemPath: string;
+    selectedItems?: Set<string>;
+    getSelectedItems?: () => Set<string>;
+    onToggleSelect?: (itemId: string, ctrlPressed: boolean) => void;
+    onAutofillComposerField?: (field: BasketFieldSelection) => void;
+    isChipEnabled: (field: string) => boolean;
+    highlightedFields: Set<string>;
+  }) => {
+    const sectionRef = useRef<HTMLDivElement>(null);
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const closeTimer = useRef<number | undefined>(undefined);
+    const [overflowing, setOverflowing] = useState(false);
+    const [expanded, setExpanded] = useState(false);
+    const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
 
-  // Detect horizontal overflow (re-checks on resize and when fields change).
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const check = () => setOverflowing(el.scrollWidth > el.clientWidth + 1);
-    check();
-    const ro = new ResizeObserver(check);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [fields, loading]);
+    // Detect horizontal overflow (re-checks on resize and when fields change).
+    useEffect(() => {
+      const el = scrollRef.current;
+      if (!el) return;
+      const check = () => setOverflowing(el.scrollWidth > el.clientWidth + 1);
+      check();
+      return observeRowResize(el, check);
+    }, [fields, loading]);
 
-  const isIndep = type === "independent";
-  const palette = isIndep ? "bg-blue-50 border-blue-200" : "bg-red-50 border-red-200";
-  const placeholderBg = isIndep ? "bg-blue-200" : "bg-red-200";
-  const emptyText = isIndep ? "text-blue-400" : "text-red-400";
-  // Right-edge fade so the cut-off chips look intentional, plus a soft pill
-  // button. The stops come from tokens: `from-blue-50` is not remapped for
-  // dark mode the way `bg-blue-50` is, so a literal left a pale band sitting
-  // over the dark panel.
-  const fadeVar = isIndep ? "--qimchi-basket-fade-indep" : "--qimchi-basket-fade-dep";
+    const isIndep = type === "independent";
+    const palette = isIndep ? "bg-blue-50 border-blue-200" : "bg-red-50 border-red-200";
+    const placeholderBg = isIndep ? "bg-blue-200" : "bg-red-200";
+    const emptyText = isIndep ? "text-blue-400" : "text-red-400";
+    // Right-edge fade so the cut-off chips look intentional, plus a soft pill
+    // button. The stops come from tokens: `from-blue-50` is not remapped for
+    // dark mode the way `bg-blue-50` is, so a literal left a pale band sitting
+    // over the dark panel.
+    const fadeVar = isIndep ? "--qimchi-basket-fade-indep" : "--qimchi-basket-fade-dep";
 
-  const renderChip = (f: string) => (
-    <FieldItem
-      key={f}
-      item={f}
-      basketItemId={itemName}
-      basketItemPath={itemPath}
-      type={type}
-      selectedItems={selectedItems}
-      onToggleSelect={onToggleSelect}
-      isDisabled={!isChipEnabled(f)}
-      isHighlighted={highlightedFields.has(`${itemName}-${f}`)}
-      onAutofillComposerField={onAutofillComposerField}
-    />
-  );
+    const renderChip = (f: string) => (
+      <FieldItem
+        key={f}
+        item={f}
+        basketItemId={itemName}
+        basketItemPath={itemPath}
+        type={type}
+        getSelectedItems={getSelectedItems}
+        onToggleSelect={onToggleSelect}
+        isDisabled={!isChipEnabled(f)}
+        isSelected={selectedItems?.has(`${itemName}-${f}`) ?? false}
+        isHighlighted={highlightedFields.has(`${itemName}-${f}`)}
+        onAutofillComposerField={onAutofillComposerField}
+      />
+    );
 
-  const expand = () => {
-    window.clearTimeout(closeTimer.current);
-    const el = sectionRef.current;
-    if (el) {
-      const r = el.getBoundingClientRect();
-      setRect({ top: r.top, left: r.left, width: r.width });
-    }
-    setExpanded(true);
-  };
-  const scheduleCollapse = () => {
-    closeTimer.current = window.setTimeout(() => setExpanded(false), 100);
-  };
+    const expand = () => {
+      window.clearTimeout(closeTimer.current);
+      const el = sectionRef.current;
+      if (el) {
+        const r = el.getBoundingClientRect();
+        setRect({ top: r.top, left: r.left, width: r.width });
+      }
+      setExpanded(true);
+    };
+    const scheduleCollapse = () => {
+      closeTimer.current = window.setTimeout(() => setExpanded(false), 100);
+    };
 
-  const canExpand = !loading && fields.length > 0 && overflowing;
+    const canExpand = !loading && fields.length > 0 && overflowing;
 
-  return (
-    <div
-      ref={sectionRef}
-      className={`relative max-h-[64px] p-1 rounded border ${palette}`}
-      onMouseEnter={canExpand ? expand : undefined}
-      onMouseLeave={canExpand ? scheduleCollapse : undefined}
-    >
+    return (
       <div
-        ref={scrollRef}
-        className="overflow-x-auto overflow-y-hidden scrollbar-thin scrollbar-track-gray-100 scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400"
+        ref={sectionRef}
+        className={`relative max-h-[64px] p-1 rounded border ${palette}`}
+        onMouseEnter={canExpand ? expand : undefined}
+        onMouseLeave={canExpand ? scheduleCollapse : undefined}
       >
-        <div className="flex flex-nowrap gap-1 w-max h-[32px] items-center">
-          {loading ? (
-            <>
-              <div className={`h-5 w-12 ${placeholderBg} rounded animate-pulse shrink-0`}></div>
-              <div className={`h-5 w-16 ${placeholderBg} rounded animate-pulse shrink-0`}></div>
-              <div className={`h-5 w-10 ${placeholderBg} rounded animate-pulse shrink-0`}></div>
-            </>
-          ) : fields.length > 0 ? (
-            fields.map(renderChip)
-          ) : (
-            <div className={`text-xs ${emptyText} flex items-center w-full h-5`}>
-              No {type} variables
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Overflow hint: right-edge opacity fade (hidden once expanded). */}
-      {canExpand && !expanded && (
         <div
-          className="pointer-events-none absolute inset-y-0 right-0 w-10 rounded-r"
-          style={{
-            backgroundImage: `linear-gradient(to left, var(${fadeVar}), color-mix(in srgb, var(${fadeVar}) 90%, transparent), transparent)`,
-          }}
-        />
-      )}
+          ref={scrollRef}
+          className="overflow-x-auto overflow-y-hidden scrollbar-thin scrollbar-track-gray-100 scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400"
+        >
+          <div className="flex flex-nowrap gap-1 w-max h-[32px] items-center">
+            {loading ? (
+              <>
+                <div className={`h-5 w-12 ${placeholderBg} rounded animate-pulse shrink-0`}></div>
+                <div className={`h-5 w-16 ${placeholderBg} rounded animate-pulse shrink-0`}></div>
+                <div className={`h-5 w-10 ${placeholderBg} rounded animate-pulse shrink-0`}></div>
+              </>
+            ) : fields.length > 0 ? (
+              fields.map(renderChip)
+            ) : (
+              <div className={`text-xs ${emptyText} flex items-center w-full h-5`}>
+                No {type} variables
+              </div>
+            )}
+          </div>
+        </div>
 
-      {/* On hover, the row "extends" into a wrapped overlay showing every chip.
+        {/* Overflow hint: right-edge opacity fade (hidden once expanded). */}
+        {canExpand && !expanded && (
+          <div
+            className="pointer-events-none absolute inset-y-0 right-0 w-10 rounded-r"
+            style={{
+              backgroundImage: `linear-gradient(to left, var(${fadeVar}), color-mix(in srgb, var(${fadeVar}) 90%, transparent), transparent)`,
+            }}
+          />
+        )}
+
+        {/* On hover, the row "extends" into a wrapped overlay showing every chip.
           Portaled to <body> so it escapes the basket's overflow-clipping
           ancestors; same width/background/border/position as the row, so it
           reads as the same container simply growing taller. */}
-      {expanded &&
-        rect &&
-        createPortal(
-          <div
-            onMouseEnter={expand}
-            onMouseLeave={scheduleCollapse}
-            style={{
-              position: "fixed",
-              top: rect.top,
-              left: rect.left,
-              width: rect.width,
-            }}
-            className={`qimchi-fade-in z-[9999] p-1 rounded border shadow-lg ${palette}`}
-          >
-            <div className="flex flex-wrap gap-1">{fields.map(renderChip)}</div>
-          </div>,
-          document.body,
-        )}
-    </div>
-  );
-};
+        {expanded &&
+          rect &&
+          createPortal(
+            <div
+              onMouseEnter={expand}
+              onMouseLeave={scheduleCollapse}
+              style={{
+                position: "fixed",
+                top: rect.top,
+                left: rect.left,
+                width: rect.width,
+              }}
+              className={`qimchi-fade-in z-[9999] p-1 rounded border shadow-lg ${palette}`}
+            >
+              <div className="flex flex-wrap gap-1">{fields.map(renderChip)}</div>
+            </div>,
+            document.body,
+          )}
+      </div>
+    );
+  },
+);
+FieldsRow.displayName = "FieldsRow";
 
 const Basket = ({
   items,
@@ -375,7 +415,16 @@ const Basket = ({
   onOpenNotesItem,
 }: BasketProps) => {
   const { showToast } = useToast();
-  const [isExpanded, setIsExpanded] = useState(true);
+  // Persisted, so a refresh keeps the Basket the way it was left.
+  const basketCollapsed = useSidebarStore((state) => state.basketCollapsed);
+  const setBasketCollapsed = useSidebarStore((state) => state.setBasketCollapsed);
+  const isExpanded = !basketCollapsed;
+  const toggleExpanded = useCallback(
+    () => setBasketCollapsed(!basketCollapsed),
+    [basketCollapsed, setBasketCollapsed],
+  );
+
+  useShortcut("toggle-basket", toggleExpanded);
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [copiedItems, setCopiedItems] = useState<{
@@ -423,7 +472,15 @@ const Basket = ({
     }
   };
 
-  const handleToggleSelect = (itemId: string, ctrlPressed: boolean) => {
+  // Mirrored in a ref so FieldItem can read the selection at drag time
+  // without taking it as a prop.
+  const selectedItemsRef = useRef(selectedItems);
+  useEffect(() => {
+    selectedItemsRef.current = selectedItems;
+  }, [selectedItems]);
+  const getSelectedItems = useCallback(() => selectedItemsRef.current, []);
+
+  const handleToggleSelect = useCallback((itemId: string, ctrlPressed: boolean) => {
     setSelectedItems((prev) => {
       const newSet = new Set(prev);
 
@@ -442,15 +499,30 @@ const Basket = ({
 
       return newSet;
     });
-  };
+  }, []);
 
-  const isSharedChipEnabled = (fieldName: string, type: "independent" | "dependent") => {
-    if (!enforceSharedGating || selectedDatasetIds.size <= 1) {
-      return true;
-    }
+  // Stable per-type predicates: an inline arrow here was a new function on
+  // every render, which defeated FieldsRow's memo for every card.
+  const isSharedChipEnabled = useCallback(
+    (fieldName: string, type: "independent" | "dependent") => {
+      if (!enforceSharedGating || selectedDatasetIds.size <= 1) {
+        return true;
+      }
 
-    return isFieldShared(fieldName, type, sharedFields);
-  };
+      return isFieldShared(fieldName, type, sharedFields);
+    },
+    [enforceSharedGating, selectedDatasetIds, sharedFields],
+  );
+
+  const isIndepChipEnabled = useCallback(
+    (field: string) => isSharedChipEnabled(field, "independent"),
+    [isSharedChipEnabled],
+  );
+
+  const isDepChipEnabled = useCallback(
+    (field: string) => isSharedChipEnabled(field, "dependent"),
+    [isSharedChipEnabled],
+  );
 
   // Get attribute tooltip content for display
   const getAttr = (item: BasketItem) => {
@@ -618,82 +690,21 @@ const Basket = ({
       {/* Basket */}
       <div
         className={`bg-white border border-gray-300 rounded-lg shadow-sm transition-all ${
-          isDragOver ? "border-blue-500 bg-blue-50 shadow-lg" : ""
-        }`}
+          isExpanded ? "flex items-stretch" : ""
+        } ${isDragOver ? "border-blue-500 bg-blue-50 shadow-lg" : ""}`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDragEnter={handleDragEnter}
         onDrop={handleDrop}
       >
-        <div
-          className="flex items-center justify-between p-2 bg-gray-50 border-b border-gray-200 rounded-lg cursor-pointer"
-          onClick={() => setIsExpanded(!isExpanded)}
-        >
-          <h3 className="font-semibold text-gray-900 flex items-center">
-            <ShoppingBasket size={16} className="mr-1.5 align-middle mb-0.5" />{" "}
-            <span>
-              Basket<span className="ml-[1.5px]">({items.length})</span>
-              {isDragOver && <span className="ml-2 text-blue-600 text-sm">Drop items here!</span>}
-            </span>
-          </h3>
-          <div className="flex items-center">
-            {items.length > 0 && (
-              <>
-                {onDownload && (
-                  <div className="mr-2">
-                    <Tooltip content="Download basket" position="bottom">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDownload(items);
-                        }}
-                        className="qimchi-dark-hover-plain p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded"
-                        aria-label="Download basket"
-                      >
-                        <Download size={16} />
-                      </button>
-                    </Tooltip>
-                  </div>
-                )}
-                <div className="mr-2">
-                  <Tooltip content="Clear basket" position="bottom">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onClearAll();
-                      }}
-                      className="qimchi-dark-hover-plain p-1 text-red-600 hover:text-red-800 hover:bg-red-100 rounded"
-                      aria-label="Clear basket"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </Tooltip>
-                </div>
-              </>
-            )}
-            <Tooltip content={isExpanded ? "Collapse basket" : "Expand basket"} position="left">
-              <button
-                className="p-1 rounded"
-                aria-label={isExpanded ? "Collapse basket" : "Expand basket"}
-              >
-                {isExpanded ? (
-                  <EyeOff size={16} className="text-red-600" />
-                ) : (
-                  <Eye size={16} className="text-green-600" />
-                )}
-              </button>
-            </Tooltip>
-          </div>
-        </div>
-
         {/* Basket Items - Horizontal scrolling container */}
         {isExpanded && (
           // TODOLATER: This fine? 166px is a bit arbitrary.
-          <div className="h-[166px] overflow-x-auto overflow-y-hidden scrollbar-thin scrollbar-track-gray-100 scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 relative">
+          <div className="h-[166px] min-w-0 flex-1 overflow-x-auto overflow-y-hidden scrollbar-thin scrollbar-track-gray-100 scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 relative">
             {items.length === 0 ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500">
                 <ShoppingBasket size={48} className="mb-2 text-gray-400" />
-                <p>No items selected</p>
+                <p>{isDragOver ? "Drop items here!" : "No items selected"}</p>
                 <p className="text-sm mt-1">Add datasets from the explorer</p>
               </div>
             ) : (
@@ -864,9 +875,10 @@ const Basket = ({
                         itemName={item.name}
                         itemPath={item.path}
                         selectedItems={selectedItems}
+                        getSelectedItems={getSelectedItems}
                         onToggleSelect={handleToggleSelect}
                         onAutofillComposerField={onAutofillComposerField}
-                        isChipEnabled={(f) => isSharedChipEnabled(f, "independent")}
+                        isChipEnabled={isIndepChipEnabled}
                         highlightedFields={highlightedFields}
                       />
 
@@ -878,9 +890,10 @@ const Basket = ({
                         itemName={item.name}
                         itemPath={item.path}
                         selectedItems={selectedItems}
+                        getSelectedItems={getSelectedItems}
                         onToggleSelect={handleToggleSelect}
                         onAutofillComposerField={onAutofillComposerField}
-                        isChipEnabled={(f) => isSharedChipEnabled(f, "dependent")}
+                        isChipEnabled={isDepChipEnabled}
                         highlightedFields={highlightedFields}
                       />
                     </div>
@@ -890,6 +903,59 @@ const Basket = ({
             )}
           </div>
         )}
+
+        <SectionRibbon
+          label="Basket"
+          Icon={ShoppingBasket}
+          count={items.length}
+          orientation={isExpanded ? "vertical" : "horizontal"}
+          onToggle={toggleExpanded}
+        >
+          {onDownload && (
+            <Tooltip content="Download basket" position="left">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDownload(items);
+                }}
+                disabled={items.length === 0}
+                className={`${ribbonButtonClass} text-blue-600 hover:text-blue-800`}
+                aria-label="Download basket"
+              >
+                <Download size={16} />
+              </button>
+            </Tooltip>
+          )}
+          <Tooltip content="Clear basket (Alt+Shift+B)" position="left">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onClearAll();
+              }}
+              disabled={items.length === 0}
+              className={`${ribbonButtonClass} text-red-600 hover:text-red-800`}
+              aria-label="Clear basket"
+            >
+              <Trash2 size={16} />
+            </button>
+          </Tooltip>
+          <Tooltip
+            content={`${isExpanded ? "Collapse basket" : "Expand basket"} (Alt+B)`}
+            position="left"
+          >
+            <button
+              onClick={toggleExpanded}
+              className={ribbonButtonClass}
+              aria-label={isExpanded ? "Collapse basket" : "Expand basket"}
+            >
+              {isExpanded ? (
+                <EyeOff size={16} className="text-red-600" />
+              ) : (
+                <Eye size={16} className="text-green-600" />
+              )}
+            </button>
+          </Tooltip>
+        </SectionRibbon>
       </div>
     </div>
   );

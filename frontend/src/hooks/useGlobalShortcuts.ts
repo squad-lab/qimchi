@@ -34,6 +34,13 @@ export type ShortcutAction =
   | "toggle-sidebar"
   | "toggle-metadata"
   | "toggle-notes"
+  | "show-explorer"
+  | "show-metadata"
+  | "show-notes"
+  | "show-live"
+  | "toggle-basket"
+  | "toggle-composer"
+  | "toggle-explorer-expanded"
   | "clear-composer"
   | "clear-basket"
   | "clear-viewer"
@@ -72,18 +79,23 @@ export const KEYBOARD_SHORTCUTS: Record<string, ShortcutConfig | ShortcutConfig[
   esc: { action: "escape" },
   p: { action: "plot" },
   l: { action: "lineplot" },
-  f: { action: "selected-open-filters" },
+  f: [
+    { action: "selected-open-filters" },
+    { action: "toggle-explorer-expanded", shift: true }, // Shift+F
+  ],
   a: { action: "selected-open-appearance" },
   b: [
     { action: "selected-toggle-bgcorr" },
+    { action: "toggle-basket", alt: true }, // Alt+B
     { action: "clear-basket", alt: true, shift: true }, // Alt+Shift+B
   ],
   s: { action: "selected-swap-axes" },
   x: { action: "selected-enter-linecut", shift: true },
-  "1": { action: "select-plot-1" },
-  "2": { action: "select-plot-2" },
-  "3": { action: "select-plot-3" },
-  "4": { action: "select-plot-4" },
+  // Bare digits pick a plot; Alt+digit opens the matching sidebar pane.
+  "1": [{ action: "select-plot-1" }, { action: "show-explorer", alt: true }],
+  "2": [{ action: "select-plot-2" }, { action: "show-metadata", alt: true }],
+  "3": [{ action: "select-plot-3" }, { action: "show-notes", alt: true }],
+  "4": [{ action: "select-plot-4" }, { action: "show-live", alt: true }],
   "5": { action: "select-plot-5" },
   "6": { action: "select-plot-6" },
   "7": { action: "select-plot-7" },
@@ -93,7 +105,10 @@ export const KEYBOARD_SHORTCUTS: Record<string, ShortcutConfig | ShortcutConfig[
   e: [{ action: "selected-export-images" }, { action: "toggle-sidebar", shift: true }],
   n: [{ action: "selected-send-to-notes" }, { action: "toggle-notes", shift: true }],
   r: [{ action: "selected-reset-plot" }, { action: "refresh-dir", shift: true }],
-  c: { action: "clear-composer", alt: true, shift: true }, // Alt+Shift+C
+  c: [
+    { action: "toggle-composer", alt: true }, // Alt+C
+    { action: "clear-composer", alt: true, shift: true }, // Alt+Shift+C
+  ],
   v: { action: "clear-viewer", alt: true, shift: true }, // Alt+Shift+V
   h: [
     { action: "heatmap" },
