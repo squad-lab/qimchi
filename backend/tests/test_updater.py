@@ -2,6 +2,9 @@ from types import SimpleNamespace
 
 from api import updater
 
+# Captured before any test patches it, for the stamp test below.
+_REAL_CURRENT_VERSION = updater.current_version
+
 
 class _Response:
     def __init__(self, payload):
@@ -248,3 +251,113 @@ def test_an_unknown_platform_matches_nothing(monkeypatch):
     monkeypatch.setattr(updater.sys, "platform", "sunos5")
 
     assert updater._platform_asset_match("qimchi-setup.exe", "https://x/s.exe") is None
+
+
+def test_a_preview_install_is_offered_the_next_preview(monkeypatch):
+    """Preview users stay on the preview channel instead of stalling on an rc."""
+    payload = [_release("v0.7.0-rc.2", _WIN_ASSET), _release("v0.7.0-rc.1", _WIN_ASSET)]
+    _install_fake_requests(monkeypatch, payload)
+    monkeypatch.setattr(updater, "current_version", lambda: "v0.7.0-rc.1")
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+
+    result = updater.check_for_update()
+
+    assert result is not None and result["tag"] == "v0.7.0-rc.2"
+
+
+def test_a_preview_install_prefers_the_stable_over_a_newer_preview(monkeypatch):
+    """
+    Once the stable of this version ships, that is where an rc user belongs.
+
+    A later rc of the SAME version is a candidate for a release that already
+    exists, so it must not outrank it.
+    """
+    payload = [
+        _release("v0.7.0-rc.6", _WIN_ASSET),
+        _release("v0.7.0", _WIN_ASSET),
+        _release("v0.7.0-rc.5", _WIN_ASSET),
+    ]
+    _install_fake_requests(monkeypatch, payload)
+    monkeypatch.setattr(updater, "current_version", lambda: "v0.7.0-rc.5")
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+
+    result = updater.check_for_update()
+
+    assert result is not None and result["tag"] == "v0.7.0"
+
+
+def test_a_stable_install_is_still_never_offered_a_preview(monkeypatch):
+    payload = [_release("v0.8.0-rc.1", _WIN_ASSET), _release("v0.7.0", _WIN_ASSET)]
+    _install_fake_requests(monkeypatch, payload)
+    monkeypatch.setattr(updater, "current_version", lambda: "0.7.0")
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+
+    assert updater.check_for_update() is None
+
+
+def _stamp_build_version(monkeypatch, value):
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "api._build_version",
+        SimpleNamespace(BUILD_VERSION=value),
+    )
+
+
+def test_the_build_stamp_outranks_package_metadata(monkeypatch):
+    """
+    pyproject.toml carries the base version, so an rc build reports the stable
+    one and would never see the stable release as newer. The build scripts
+    stamp the real tag; it must win.
+    """
+    import importlib.metadata as metadata
+
+    monkeypatch.setattr(metadata, "version", lambda _name: "0.7.0")
+    _stamp_build_version(monkeypatch, "v0.7.0-rc.5")
+
+    assert updater.current_version() == "v0.7.0-rc.5"
+    assert updater.is_prerelease(updater.current_version())
+
+
+def test_an_empty_stamp_falls_back_to_package_metadata(monkeypatch):
+    import importlib.metadata as metadata
+
+    monkeypatch.setattr(metadata, "version", lambda _name: "0.7.0")
+    _stamp_build_version(monkeypatch, "")
+
+    assert updater.current_version() == "0.7.0"
+
+
+def test_a_stamped_preview_build_is_offered_the_stable_release(monkeypatch):
+    """The end-to-end path: an rc install reaches stable without a manual step."""
+    import importlib.metadata as metadata
+
+    monkeypatch.setattr(metadata, "version", lambda _name: "0.7.0")
+    _stamp_build_version(monkeypatch, "v0.7.0-rc.5")
+    _install_fake_requests(monkeypatch, [_release("v0.7.0", _WIN_ASSET)])
+    # The helper pins current_version; here the stamp is the thing under test.
+    monkeypatch.setattr(updater, "current_version", _REAL_CURRENT_VERSION)
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+
+    result = updater.check_for_update()
+
+    assert result is not None and result["tag"] == "v0.7.0"
+
+
+def test_every_build_script_stamps_the_version(monkeypatch):
+    """
+    The stamp is invisible in a dev checkout, so nothing else would catch a
+    build script that stopped writing it -- the app would silently go back to
+    reporting the base version.
+    """
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2]
+    scripts = [
+        repo_root / "build_local.ps1",
+        repo_root / "scripts" / "build_linux.sh",
+        repo_root / "scripts" / "build_macos.sh",
+    ]
+
+    for script in scripts:
+        assert script.exists(), script
+        assert "_build_version.py" in script.read_text(encoding="utf-8"), script

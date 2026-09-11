@@ -11,7 +11,8 @@ Public API:
         platform, else None.
 
     current_version() -> str
-        The running version string (from importlib.metadata).
+        The running version string (the build tag when stamped, else
+        importlib.metadata).
 
 """
 
@@ -60,9 +61,23 @@ def _platform_asset_match(name: str, url: str) -> tuple[str, str] | None:
 
 def current_version() -> str:
     """
-    Return the running version from package metadata, or '0.0.0' if unknown.
+    Return the running version, preferring the tag this build was cut from.
+
+    Package metadata carries the BASE version only -- the -rc.N suffix is
+    minted by CI and never written into pyproject.toml -- so a preview install
+    reports the same "0.7.0" as the stable release it is a candidate for, and
+    the comparison below finds nothing newer. The build scripts stamp the real
+    tag into ``api/_build_version.py``; it is absent in a dev checkout.
 
     """
+    try:
+        from ._build_version import BUILD_VERSION
+
+        if BUILD_VERSION:
+            return BUILD_VERSION
+    except Exception:
+        pass
+
     try:
         from importlib.metadata import version
 
@@ -75,8 +90,8 @@ def is_prerelease(tag: str) -> bool:
     """
     True for a preview tag such as ``v0.6.4-rc.1``.
 
-    Preview builds are download-only: the updater must never offer one, so the
-    channel is decided purely by the tag shape.
+    The tag shape decides the channel: a stable install is never offered a
+    preview, while a preview install is offered both channels.
 
     """
     return bool(_PRERELEASE_RE.match(tag or ""))
@@ -84,19 +99,25 @@ def is_prerelease(tag: str) -> bool:
 
 def _parse_ver(tag: str) -> tuple[int, ...]:
     """
-    Version tuple for ordering. ``'v0.5.3'`` -> ``(0, 5, 3, 1)``.
+    Version tuple for ordering. ``'v0.5.3'`` -> ``(0, 5, 3, 1, 0)``.
 
-    A trailing element marks stability: 1 for a release, 0 for a prerelease, so
-    ``v0.6.4-rc.1`` (0,6,4,0) sorts *below* ``v0.6.4`` (0,6,4,1) but still above
-    ``v0.6.3``. Without that, a user running an rc would be offered the older
-    stable build as an "update" -- a silent downgrade.
+    The last two elements are stability then preview number. Stability is 1 for
+    a release and 0 for a prerelease, so ``v0.6.4-rc.1`` (0,6,4,0,1) sorts
+    *below* ``v0.6.4`` (0,6,4,1,0) but still above ``v0.6.3``. Without that, a
+    user running an rc would be offered the previous stable build as an
+    "update" -- a silent downgrade.
+
+    The preview number orders one rc against another; without it rc.1 and rc.2
+    compare equal and a preview install is never offered the next preview.
 
     """
     cleaned = (tag or "").lstrip("v")
-    prerelease = 0 if _PRERELEASE_RE.match(tag or "") else 1
+    match = _PRERELEASE_RE.match(tag or "")
+    prerelease = 0 if match else 1
+    preview_number = int(cleaned.rsplit(".", 1)[-1]) if match else 0
     base = cleaned.split("-", 1)[0]
     try:
-        return tuple(int(x) for x in base.split(".")) + (prerelease,)
+        return tuple(int(x) for x in base.split(".")) + (prerelease, preview_number)
     except ValueError:
         return (0,)
 
@@ -125,26 +146,33 @@ def check_for_update() -> dict | None:
     if not releases:
         return None
 
-    # Pick the newest STABLE release, scanning the whole list.
+    # Pick the newest release on this install's channel, scanning the whole
+    # list rather than taking releases[0]: GitLab orders by creation date, so a
+    # back-dated or re-cut release could otherwise mask a newer one.
     #
-    # Two reasons not to just take releases[0]: preview builds are
-    # download-only, so a prerelease at the top must be skipped rather than
-    # ending the search; and GitLab's ordering is by creation date, so a
-    # back-dated or re-cut release could otherwise mask a newer one. Taking
-    # releases[0] blindly meant that publishing a single preview release
-    # silently stopped ALL stable users from being offered updates.
-    stable = [
+    # A stable install is offered stable releases only -- publishing a preview
+    # must not push everyone onto it. A preview install follows the preview
+    # channel, so it is offered both the next preview and the stable release it
+    # was a candidate for; _parse_ver ranks v0.7.0 above v0.7.0-rc.5, so an rc
+    # user lands on stable as soon as it ships instead of being stranded.
+    running = current_version()
+    on_preview = is_prerelease(running)
+    candidates = [
         rel
         for rel in releases
-        if rel.get("tag_name") and not is_prerelease(rel["tag_name"])
+        if rel.get("tag_name") and (on_preview or not is_prerelease(rel["tag_name"]))
     ]
-    if not stable:
-        _log.info("[updater] no stable release found (%d prereleases)", len(releases))
+    if not candidates:
+        _log.info(
+            "[updater] no release on this channel (%d entries, preview=%s)",
+            len(releases),
+            on_preview,
+        )
         return None
 
-    latest = max(stable, key=lambda rel: _parse_ver(rel["tag_name"]))
+    latest = max(candidates, key=lambda rel: _parse_ver(rel["tag_name"]))
     tag = latest["tag_name"]
-    if _parse_ver(tag) <= _parse_ver(current_version()):
+    if _parse_ver(tag) <= _parse_ver(running):
         return None
 
     notes: str = latest.get("description", "")

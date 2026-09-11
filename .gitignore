@@ -29,3 +29,6 @@ qanary/
 coverage.xml
 report.xml
 .coverage
+
+# Build-time version stamp written into the staged backend by the build scripts.
+backend/api/_build_version.py
