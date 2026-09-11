@@ -98,8 +98,8 @@ const PlotContainer: React.FC<PlotContainerProps> = ({
               key={config.id}
               className={`flex-grow rounded-lg transition-shadow ${
                 selectedPlotId === config.id
-                  ? "ring-2 ring-blue-500 shadow-md"
-                  : "ring-1 ring-transparent"
+                  ? "ring-2 ring-inset ring-blue-500 shadow-md"
+                  : "ring-1 ring-inset ring-transparent"
               }`}
               onClick={() => onSelectPlot?.(config.id)}
               style={{
