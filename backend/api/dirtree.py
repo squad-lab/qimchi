@@ -17,10 +17,10 @@ from typing import Dict, Optional
 import xarray as xr
 from fastapi import APIRouter, HTTPException
 
+from . import live_measurements
 
 # Local tool execs
 from .config import FD_EXEC, MAX_DEPTH  #  DU_EXEC, XARGS_EXEC | Windows compat
-from . import live_measurements
 from .data_loader import (
     MEMORY_PROTOCOL,
     extract_measurement_id,
@@ -869,7 +869,7 @@ def _build_sqlite_tree(db_path: Path) -> Dict[str, object]:
             day_key = "Unknown Date"
 
         run_ref = f"{db_path}#run_id={run_id}"
-        run_label = f"run_id={run_id} | {run_name}"
+        run_label = f"{run_id} | {run_name}"
         child: Dict[str, object] = {
             "id": _sqlite_node_id("file-sqlite-run", run_ref),
             "name": run_label,
@@ -1199,6 +1199,19 @@ PREFERRED_META_KEYS: list = [
     "Instruments Snapshot",
 ]
 
+# QCoDeS writes many implementation attrs into its xarray conversion.  The
+# Metadata pane intentionally exposes the stable, user-facing subset only and
+# packages it as one JSON document, matching qanary's structured sections.
+QCODES_META_SECTION: str = "QCoDeS Metadata"
+QCODES_META_KEYS: tuple[str, ...] = (
+    "ds_name",
+    "exp_name",
+    "guid",
+    "run_timestamp",
+    "sample_name",
+    "snapshot",
+)
+
 
 # Metadata is rendered as an interactive tree in the browser.
 METADATA_MAX_NODES: int = int(os.getenv("QIMCHI_METADATA_MAX_NODES", "100"))
@@ -1410,17 +1423,43 @@ async def get_metadata(path: PathData) -> Dict:
         if not isinstance(metadata, dict):
             metadata = dict(metadata)
 
-        ordered_keys: list = [key for key in PREFERRED_META_KEYS if key in metadata]
-        ordered_keys += sorted(
-            key
-            for key in metadata
-            if key not in PREFERRED_META_KEYS and key not in INTERNAL_META_KEYS
+        is_qcodes = bool(metadata.get("guid")) and any(
+            key in metadata for key in ("run_id", "ds_name", "qcodes_db_path")
         )
-
-        meta_dict: dict = {key: metadata[key] for key in ordered_keys}
+        if is_qcodes:
+            qcodes_meta: dict = {}
+            for key in QCODES_META_KEYS:
+                if key not in metadata:
+                    continue
+                value = metadata[key]
+                if key == "snapshot" and isinstance(value, str):
+                    parsed_snapshot = _expand_json_string(value)
+                    if parsed_snapshot is not None:
+                        value = parsed_snapshot
+                node_count = _count_nodes(value)
+                if node_count > METADATA_MAX_NODES:
+                    value = {
+                        METADATA_TOO_LARGE_KEY: True,
+                        "nodeCount": node_count,
+                        "nodeLimit": METADATA_MAX_NODES,
+                    }
+                qcodes_meta[key] = value
+            meta_dict: dict = {QCODES_META_SECTION: qcodes_meta}
+        else:
+            ordered_keys: list = [key for key in PREFERRED_META_KEYS if key in metadata]
+            ordered_keys += sorted(
+                key
+                for key in metadata
+                if key not in PREFERRED_META_KEYS and key not in INTERNAL_META_KEYS
+            )
+            meta_dict = {key: metadata[key] for key in ordered_keys}
 
         # Budget each section on its own.
         for key, value in list(meta_dict.items()):
+            # QCoDeS fields were budgeted individually above, so a large
+            # snapshot cannot hide the run name, GUID, timestamp, or sample.
+            if key == QCODES_META_SECTION:
+                continue
             node_count = _count_nodes(value)
             if node_count > METADATA_MAX_NODES:
                 logger.info(

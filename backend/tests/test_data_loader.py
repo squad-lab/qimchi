@@ -1,6 +1,8 @@
 import sqlite3
 import threading
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -41,6 +43,27 @@ async def test_load_data_async_zarr_runs_off_the_event_loop(tmp_path, monkeypatc
     assert loaded.format == "zarr"
     # asyncio.to_thread runs on a worker, never the thread the loop is on.
     assert opened_on and opened_on[0] != threading.current_thread().name
+
+
+def test_qcodes_loader_decodes_the_station_snapshot(tmp_path, monkeypatch):
+    import qcodes.dataset
+
+    db_path = tmp_path / "runs.db"
+    db_path.write_bytes(b"qcodes")
+    qcodes_dataset = SimpleNamespace(
+        to_xarray_dataset=lambda: xr.Dataset(
+            attrs={"snapshot": '{"station": {"temperature": 0.02}}'}
+        )
+    )
+    monkeypatch.setattr(
+        qcodes.dataset, "initialised_database_at", lambda _path: nullcontext()
+    )
+    monkeypatch.setattr(qcodes.dataset, "load_by_id", lambda _run_id: qcodes_dataset)
+
+    loaded = data_loader._load_qcodes_xarray_dataset(db_path, 7)
+
+    assert loaded.attrs["snapshot"] == {"station": {"temperature": 0.02}}
+    assert loaded.attrs["run_id"] == 7
 
 
 def test_load_data_sync_zarr(tmp_path, monkeypatch):

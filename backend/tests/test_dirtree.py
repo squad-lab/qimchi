@@ -234,6 +234,8 @@ async def test_load_directory_sqlite_file_returns_virtual_run_tree(
     run_children_1 = date_folders[1]["children"]
     assert run_children_0[0]["path"] == f"{db_file}#run_id=11"
     assert run_children_1[0]["path"] == f"{db_file}#run_id=9"
+    assert run_children_0[0]["name"] == "11 | r11"
+    assert "run_id=" not in run_children_0[0]["name"]
     assert run_children_0[0]["tags"] == ["qcodes", "qcodes-run", "sqlite"]
 
 

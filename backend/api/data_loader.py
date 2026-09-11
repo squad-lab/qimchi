@@ -15,6 +15,7 @@ for the rest of the application.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import sqlite3
 from dataclasses import dataclass, field
@@ -954,6 +955,21 @@ def _load_qcodes_xarray_dataset(db_path: Path, run_id: int) -> xr.Dataset:
 
     dataset.attrs.setdefault("run_id", run_id)
     dataset.attrs.setdefault("qcodes_db_path", str(db_path))
+
+    # QCoDeS persists the station snapshot as JSON text.  Keeping that text in
+    # xarray attrs makes the Metadata pane treat the whole station as a single
+    # string; decode it at the provider boundary so every consumer sees the
+    # actual object.  A malformed/legacy snapshot remains visible as its raw
+    # value rather than making the run unloadable.
+    snapshot = dataset.attrs.get("snapshot")
+    if isinstance(snapshot, str):
+        try:
+            dataset.attrs["snapshot"] = json.loads(snapshot)
+        except (TypeError, ValueError):
+            logger.warning(
+                "QCoDeS run_id=%s has an invalid JSON snapshot; keeping raw text",
+                run_id,
+            )
 
     return dataset
 
