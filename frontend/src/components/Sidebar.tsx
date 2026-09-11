@@ -92,7 +92,10 @@ const Sidebar = ({
         <div className="flex flex-col h-screen">
           <div className="flex-1 overflow-hidden bg-gray-100">
             <div
-              className={explorerExpanded ? "fixed inset-0 z-40 bg-gray-100" : "h-full"}
+              // z-[1500]: above Plotly's modebar (1000), which otherwise paints
+              // through the covered plots, and below the modals (2001+). The
+              // full stack is documented in index.css.
+              className={explorerExpanded ? "fixed inset-0 z-[1500] bg-gray-100" : "h-full"}
               style={explorerStyle}
             >
               <Explorer
