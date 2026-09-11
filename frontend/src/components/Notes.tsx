@@ -21,10 +21,12 @@ interface DroppedItem {
 
 interface SampleGroup {
   key: string;
+  kind: "sample" | "qcodes";
   sampleName: string;
   samplePath: string;
   cryostatName: string;
   pooledFilename: string;
+  databaseUuid?: string;
   items: BasketItem[];
 }
 
@@ -37,6 +39,36 @@ interface NotesProps {
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 type NoteScope = "measurement" | "sample";
+
+interface NoteTarget {
+  scope: NoteScope;
+  path: string;
+  uuid?: string;
+  runId?: number;
+  samplePath?: string;
+  sampleName?: string;
+  cryostatName?: string;
+  displayName: string;
+  readOnly?: boolean;
+}
+
+function requestErrorMessage(error: unknown, fallback: string): string {
+  if (!axios.isAxiosError(error)) return fallback;
+
+  const detail: unknown = error.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((entry) => {
+        if (!entry || typeof entry !== "object") return null;
+        const message = (entry as { msg?: unknown }).msg;
+        return typeof message === "string" ? message : null;
+      })
+      .filter((message): message is string => Boolean(message));
+    if (messages.length) return messages.join("; ");
+  }
+  return error.message || fallback;
+}
 
 export default function Notes({
   basketItems,
@@ -141,6 +173,33 @@ export default function Notes({
     const groups = new Map<string, SampleGroup>();
 
     datasetItems.forEach((item) => {
+      const qcodesRun = /\.(db|sqlite)#run_id=\d+$/i.test(item.path);
+      if (qcodesRun) {
+        const databasePath = item.path.split("#", 1)[0];
+        const normalizedDatabasePath = normalizePath(databasePath);
+        const databasePathParts = normalizedDatabasePath.split("/").filter(Boolean);
+        const databaseName = databasePathParts[databasePathParts.length - 1] || "QCoDeS";
+        const key = `qcodes:${normalizedDatabasePath.toLowerCase()}`;
+        const databaseUuid = getAttrValue(item, "qimchi_db_uuid", "qimchi_db_uuid");
+        const existing = groups.get(key);
+        if (existing) {
+          existing.items.push(item);
+          existing.databaseUuid ||= databaseUuid;
+          return;
+        }
+        groups.set(key, {
+          key,
+          kind: "qcodes",
+          sampleName: databaseName,
+          samplePath: databasePath,
+          cryostatName: "QCoDeS",
+          pooledFilename: "Overall database notes",
+          databaseUuid,
+          items: [item],
+        });
+        return;
+      }
+
       const samplePath = inferSamplePath(item.path);
       const samplePathParts = samplePath.split("/").filter(Boolean);
 
@@ -162,6 +221,7 @@ export default function Notes({
 
       groups.set(key, {
         key,
+        kind: "sample",
         sampleName,
         samplePath,
         cryostatName,
@@ -171,7 +231,7 @@ export default function Notes({
     });
 
     return Array.from(groups.values()).sort((a, b) => a.sampleName.localeCompare(b.sampleName));
-  }, [datasetItems, getAttrValue, inferSamplePath]);
+  }, [datasetItems, getAttrValue, inferSamplePath, normalizePath]);
 
   const selectedSample = sampleGroups.find((group) => group.key === selectedSampleKey);
 
@@ -180,13 +240,13 @@ export default function Notes({
       ? datasetItems.find((item) => item.id === selectedItemId) || null
       : null;
 
-  const selectedTarget = useMemo(() => {
+  const selectedTarget = useMemo<NoteTarget | null>(() => {
     if (selectedScope === "measurement" && selectedMeasurement) {
       const group = sampleGroups.find((sample) =>
         sample.items.some((item) => item.id === selectedMeasurement.id),
       );
       const qcodesRun = /\.(db|sqlite)#run_id=\d+$/i.test(selectedMeasurement.path);
-      const qcodesUuid = getAttrValue(selectedMeasurement, "guid", "guid");
+      const qcodesUuid = getAttrValue(selectedMeasurement, "qimchi_db_uuid", "qimchi_db_uuid");
       if (qcodesRun && !qcodesUuid) return null;
       return {
         scope: "measurement" as NoteScope,
@@ -202,6 +262,16 @@ export default function Notes({
 
     if (selectedScope === "sample" && selectedSample) {
       const fallbackMeasurement = selectedSample.items[0];
+      if (selectedSample.kind === "qcodes") {
+        if (!selectedSample.databaseUuid) return null;
+        return {
+          scope: "measurement" as NoteScope,
+          path: selectedSample.samplePath,
+          uuid: selectedSample.databaseUuid,
+          displayName: selectedSample.pooledFilename,
+          readOnly: true,
+        };
+      }
       return {
         scope: "sample" as NoteScope,
         path: fallbackMeasurement?.path || selectedSample.samplePath,
@@ -233,10 +303,13 @@ export default function Notes({
     const selected = datasetItems.find((item) => item.id === selectedItemId);
     if (!selected) return;
 
-    const samplePath = inferSamplePath(selected.path).toLowerCase();
-    setSelectedSampleKey(samplePath);
+    const group = sampleGroups.find((sample) =>
+      sample.items.some((item) => item.id === selected.id),
+    );
+    if (!group) return;
+    setSelectedSampleKey(group.key);
     setSelectedScope("measurement");
-  }, [selectedItemId, datasetItems, inferSamplePath]);
+  }, [selectedItemId, datasetItems, sampleGroups]);
 
   // Initialize sample + measurement selection when basket changes.
   useEffect(() => {
@@ -351,11 +424,7 @@ export default function Notes({
           return;
         }
 
-        setError(
-          axios.isAxiosError(err)
-            ? err.response?.data?.detail || err.message
-            : "Failed to load notes",
-        );
+        setError(requestErrorMessage(err, "Failed to load notes"));
         setNotes("");
       } finally {
         setLoading(false);
@@ -478,11 +547,7 @@ export default function Notes({
       }
 
       setSaveStatus("error");
-      setError(
-        axios.isAxiosError(err)
-          ? err.response?.data?.detail || err.message
-          : "Failed to save notes",
-      );
+      setError(requestErrorMessage(err, "Failed to save notes"));
 
       setTimeout(() => {
         setSaveStatus("idle");
@@ -614,7 +679,7 @@ export default function Notes({
     e.preventDefault();
     setIsDragOver(false);
 
-    if (!selectedTarget) return;
+    if (!selectedTarget || selectedTarget.readOnly) return;
 
     try {
       const dragData = e.dataTransfer.getData("application/json");
@@ -636,7 +701,8 @@ export default function Notes({
     return null;
   }
 
-  const canEdit = Boolean(selectedTarget);
+  const hasTarget = Boolean(selectedTarget);
+  const canEdit = hasTarget && !selectedTarget?.readOnly;
 
   const getSaveIconAndText = () => {
     const formatTimeAgo = (date: Date) => {
@@ -696,7 +762,7 @@ export default function Notes({
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-[11px] text-[var(--qimchi-panel-title-fg)] opacity-80 mb-1">
-                Sample
+                Sample / Database
               </label>
               <select
                 value={selectedSampleKey || ""}
@@ -750,7 +816,11 @@ export default function Notes({
                   <option value="">Select sample first</option>
                 ) : (
                   <>
-                    <option value="__sample__">Pooled sample notes</option>
+                    <option value="__sample__">
+                      {selectedSample.kind === "qcodes"
+                        ? "Overall database notes"
+                        : "Pooled sample notes"}
+                    </option>
                     {measurementItemsForSample.map((item) => (
                       <option key={item.id} value={item.id}>
                         {item.name}
@@ -765,7 +835,9 @@ export default function Notes({
           {selectedTarget && (
             <div className="text-[11px] text-[var(--qimchi-panel-title-fg)] opacity-75 truncate">
               {selectedScope === "sample"
-                ? `${selectedSample?.cryostatName}/${selectedSample?.sampleName} -> ${selectedSample?.pooledFilename}`
+                ? selectedSample?.kind === "qcodes"
+                  ? `${selectedSample.sampleName} -> Overall database notes`
+                  : `${selectedSample?.cryostatName}/${selectedSample?.sampleName} -> ${selectedSample?.pooledFilename}`
                 : selectedTarget.path}
             </div>
           )}
@@ -836,7 +908,7 @@ export default function Notes({
               <p className="text-gray-600">Loading notes...</p>
             </div>
           </div>
-        ) : canEdit ? (
+        ) : hasTarget ? (
           <div
             className={`h-full bg-white m-2 rounded-lg border shadow-sm relative ${
               isDragOver
@@ -859,7 +931,7 @@ export default function Notes({
               value={notes}
               onChange={handleNotesChange}
               placeholder="Start typing your notes here... Auto-save is enabled. You can also drag and drop dataset paths from the explorer."
-              disabled={loading}
+              disabled={loading || !canEdit}
             />
           </div>
         ) : (

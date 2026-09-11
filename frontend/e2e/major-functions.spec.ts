@@ -49,6 +49,7 @@ const datasets = [
 
 interface ApiState {
   loadRequests: Request[];
+  loadNotesRequests: Request[];
   plotRequests: Request[];
   exportRequests: Request[];
   saveNotesRequests: Request[];
@@ -57,6 +58,7 @@ interface ApiState {
 async function mockApplicationApi(page: Page): Promise<ApiState> {
   const state: ApiState = {
     loadRequests: [],
+    loadNotesRequests: [],
     plotRequests: [],
     exportRequests: [],
     saveNotesRequests: [],
@@ -80,6 +82,7 @@ async function mockApplicationApi(page: Page): Promise<ApiState> {
             ds_name: "transport",
             exp_name: "device test",
             guid: "qcodes-guid-7",
+            qimchi_db_uuid: "qimchi-qcodes-db-uid",
             run_id: 7,
             run_timestamp: "2026-09-11 10:00:00+0000",
             sample_name: "sample-a",
@@ -107,6 +110,16 @@ async function mockApplicationApi(page: Page): Promise<ApiState> {
         json: { general: { operator: "Alice", temperature: "20 mK" } },
       });
     } else if (path === "/load-notes/") {
+      state.loadNotesRequests.push(request);
+      if (request.postDataJSON()?.path === "C:\\measurements\\runs.db") {
+        await route.fulfill({
+          json: {
+            notes: "## Run 7\n_Last saved: 2026-09-09T09:00 UTC_\n\nRun seven note",
+            last_saved: "2026-09-09T09:00:00Z",
+          },
+        });
+        return;
+      }
       await route.fulfill({
         json: { notes: "Initial measurement note", last_saved: "2026-09-09T09:00:00Z" },
       });
@@ -316,7 +329,7 @@ test("loads searchable metadata and saves measurement notes", async ({ page }) =
   });
 });
 
-test("saves QCoDeS notes against the Qimchi UID and run integer", async ({ page }) => {
+test("saves QCoDeS run notes and loads their overall database rollup", async ({ page }) => {
   const state = await mockApplicationApi(page);
   await loadExplorer(page);
   await addDatasetToBasket(page, "7 | transport");
@@ -330,11 +343,26 @@ test("saves QCoDeS notes against the Qimchi UID and run integer", async ({ page 
   await expect.poll(() => state.saveNotesRequests.length).toBe(1);
   expect(state.saveNotesRequests[0].postDataJSON()).toMatchObject({
     path: "C:\\measurements\\runs.db#run_id=7",
-    uuid: "qcodes-guid-7",
+    uuid: "qimchi-qcodes-db-uid",
     run_id: 7,
     notes: "Run seven note",
     note_scope: "measurement",
   });
+
+  await page.getByLabel("Select measurement notes").selectOption("__sample__");
+  await expect(page.getByLabel("Select measurement notes")).toHaveValue("__sample__");
+  await expect(page.getByRole("option", { name: "Overall database notes" })).toBeAttached();
+  await expect(editor).toHaveValue(/Run seven note/);
+  const overallLoad = state.loadNotesRequests
+    .map((request) => request.postDataJSON())
+    .find((body) => body.path === "C:\\measurements\\runs.db");
+  expect(overallLoad).toMatchObject({
+    path: "C:\\measurements\\runs.db",
+    uuid: "qimchi-qcodes-db-uid",
+    note_scope: "measurement",
+  });
+  expect(overallLoad).not.toHaveProperty("run_id");
+  await expect(editor).toBeDisabled();
 });
 
 test("opens help by shortcut but ignores shortcuts in editable fields", async ({ page }) => {
