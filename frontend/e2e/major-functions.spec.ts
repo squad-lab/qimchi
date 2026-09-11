@@ -163,10 +163,14 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("loads the major application panels", async ({ page }) => {
-  await expect(page.getByRole("heading", { name: "Explorer" })).toBeVisible();
-  await expect(page.getByText("Basket(0)")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Composer" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /Viewer\s*\(0\)/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Explorer" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByRole("button", { name: "Clear basket" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Plot type: LinePlot" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Clear All Plots" })).toBeVisible();
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(0);
   await expect(page.getByRole("status", { name: /connected/i })).toBeVisible();
 });
 
@@ -174,7 +178,7 @@ test("switches theme and restores it after reload", async ({ page }) => {
   await page.getByRole("button", { name: "Switch to dark theme" }).click();
   await expect(page.locator("html")).toHaveClass(/dark/);
 
-  await page.reload();
+  await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.locator("html")).toHaveClass(/dark/);
   await expect(page.getByRole("button", { name: "Switch to light theme" })).toBeVisible();
 });
@@ -211,8 +215,8 @@ test("adds a measurement, creates default plots and clears the workspace", async
   await loadExplorer(page);
 
   await addDatasetToBasket(page, "run.nc");
-  await expect(page.getByText("Basket(1)")).toBeVisible();
-  await expect(page.getByRole("heading", { name: /Viewer\s*\(2\)/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Clear basket" })).toBeEnabled();
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(2);
   await expect.poll(() => state.plotRequests.length).toBe(2);
 
   const statusBadge = page.getByRole("status", { name: "Status: Completed" }).first();
@@ -237,9 +241,9 @@ test("adds a measurement, creates default plots and clears the workspace", async
   });
 
   await page.getByRole("button", { name: "Clear All Plots" }).click();
-  await expect(page.getByRole("heading", { name: /Viewer\s*\(0\)/ })).toBeVisible();
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(0);
   await page.getByRole("button", { name: "Clear basket" }).click();
-  await expect(page.getByText("Basket(0)")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Clear basket" })).toBeDisabled();
 });
 
 test("edits MathJax X and Y axis titles inline", async ({ page }) => {
@@ -270,13 +274,13 @@ test("loads searchable metadata and saves measurement notes", async ({ page }) =
   await loadExplorer(page);
   await addDatasetToBasket(page, "run.nc");
 
-  await page.getByTitle("Expand Metadata").click();
+  await page.getByRole("button", { name: "Metadata" }).click();
   await expect(page.getByText("1 file in basket")).toBeVisible();
   await page.getByPlaceholder("Search metadata...").fill("Alice");
   await expect(page.getByText(/Found 1 file with matches/)).toBeVisible();
   await expect(page.getByText("Alice", { exact: true })).toBeVisible();
 
-  await page.getByTitle("Expand Notes").click();
+  await page.getByRole("button", { name: "Notes", exact: true }).click();
   const editor = page.getByPlaceholder(/Start typing your notes here/);
   await expect(editor).toHaveValue("Initial measurement note");
   await editor.fill("Updated from Playwright");

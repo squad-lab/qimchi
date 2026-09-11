@@ -120,7 +120,7 @@ test("downloads one measurement from its Basket action", async ({ page }) => {
 test("downloads every measurement in the Basket", async ({ page }) => {
   await page.getByRole("button", { name: "Add to basket" }).nth(0).click();
   await page.getByRole("button", { name: "Add to basket" }).nth(0).click();
-  await expect(page.getByText("Basket(2)")).toBeVisible();
+  await expect(page.getByTitle("Remove")).toHaveCount(2);
 
   const { browserDownload, request } = await expectPostDownload(page, "/download-selected/", () =>
     page.getByRole("button", { name: "Download basket" }).click(),
