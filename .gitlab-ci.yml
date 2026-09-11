@@ -470,13 +470,13 @@ release:
   # the asset links actually attach.
   script:
     - |
-      # Preview (-rc) tags get a clearly-labelled release. The in-app updater
-      # ignores prereleases entirely (api/updater.py::is_prerelease), so these
-      # are download-only and are never offered to stable installs.
+      # Preview (-rc) tags get a clearly-labelled release. Stable installs are
+      # never offered one (api/updater.py::check_for_update), but a preview
+      # install follows the preview channel and is offered both.
       case "$CI_COMMIT_TAG" in
         *-rc.*)
           RELEASE_NAME="Qimchi $CI_COMMIT_TAG (preview)"
-          PREVIEW_BANNER="**Preview build -- not a stable release.** Expect rough edges. The in-app updater ignores preview builds, so you will not be offered this automatically, nor updated away from it: install stable releases manually."
+          PREVIEW_BANNER="**Preview build -- not a stable release.** Expect rough edges. Stable installs are never offered preview builds. Once you are on a preview, Qimchi keeps you on the preview channel: it offers the next preview, and the stable release of this version as soon as it ships."
           ;;
         *)
           RELEASE_NAME="Qimchi $CI_COMMIT_TAG"
@@ -492,6 +492,8 @@ release:
       ## Windows
       1. Download qimchi-setup.exe below.
       2. Run the installer -- no administrator rights needed for a per-user install. It creates a Start Menu entry and an optional desktop shortcut.
+      3. Windows SmartScreen will warn that the publisher is unrecognised. Click "More info", then "Run anyway", and Qimchi opens.
+      - Step 3 happens once per version you install: Qimchi is not code-signed yet.
       - Requires Windows 11 (x64) with the Edge WebView2 runtime (preinstalled).
 
       ## Linux
@@ -507,7 +509,9 @@ release:
       ## macOS
       1. Download qimchi.dmg below.
       2. Open the DMG and drag Qimchi.app to Applications.
-      3. On first launch, macOS may require opening it via Control-click -> Open because the app is not notarized yet.
+      3. Double-click Qimchi in Applications. macOS warns that the app cannot be opened because it is from an unidentified developer.
+      4. Open System Settings -> Privacy and Security, scroll down to Security, and click "Open Anyway" next to Qimchi. Confirm "Open Anyway" and enter your account credentials, and Qimchi opens.
+      - Steps 3 and 4 happen once per version you install: Qimchi is not notarized yet.
       - Requires Apple Silicon macOS. The current DMG is built on the GitLab macOS M2 Pro runner.
 
       ## Image export (all platforms)
@@ -529,6 +533,6 @@ release:
     # Stable release.
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
       when: on_success
-    # Preview release (download-only; the updater never offers prereleases).
+    # Preview release (offered only to installs already on the preview channel).
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-rc\.\d+$/
       when: on_success
