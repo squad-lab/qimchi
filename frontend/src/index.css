@@ -759,6 +759,28 @@ select {
   border-color: #3a2d45;
 }
 
+/* cyan / fuchsia (Explorer format tags: Quantify, xarray DataTree) */
+.dark .bg-cyan-50,
+.dark .bg-cyan-50\/50 {
+  background-color: #16292e;
+}
+.dark .border-cyan-100 {
+  border-color: #23404a;
+}
+.dark .text-cyan-600 {
+  color: #62c2d4;
+}
+.dark .bg-fuchsia-50,
+.dark .bg-fuchsia-50\/50 {
+  background-color: #2e2133;
+}
+.dark .border-fuchsia-100 {
+  border-color: #472f4e;
+}
+.dark .text-fuchsia-600 {
+  color: #d18ade;
+}
+
 /* red */
 .dark .bg-red-50 {
   background-color: #2c1e20;
@@ -858,8 +880,14 @@ select {
 .dark .bg-teal-50\/50 {
   background-color: #1c333a;
 }
-.dark .border-teal-200 {
+.dark .border-teal-100 {
   border-color: #24424b;
+}
+.dark .border-teal-200 {
+  border-color: #2c505b;
+}
+.dark .text-teal-600 {
+  color: #62c2d4;
 }
 .dark .text-teal-700 {
   color: #7cc9d2;

@@ -3446,6 +3446,24 @@ const PlotWrapper: React.FC<Props> = ({
     showToast,
   ]);
 
+  // Maximized puts the measurement name in its own header bar, so the Plotly
+  // title would say it twice and keep the top margin it was given for it.
+  // Non-maximized cards have no header, so they keep the title.
+  const maximizedPlotJson = useMemo(() => {
+    if (!isMaximized) return plotWithLineCutGuide;
+
+    const layout = { ...(plotWithLineCutGuide.layout ?? {}) } as Record<string, unknown>;
+    delete layout.title;
+
+    const margin = layout.margin as Record<string, number> | undefined;
+    if (margin?.t !== undefined) {
+      // Reclaim the space the title was occupying (backend sets t: 40).
+      layout.margin = { ...margin, t: 16 };
+    }
+
+    return { ...plotWithLineCutGuide, layout } as typeof plotWithLineCutGuide;
+  }, [isMaximized, plotWithLineCutGuide]);
+
   // When maximized, render as a modal overlay
   if (isMaximized) {
     return (
@@ -3577,7 +3595,7 @@ const PlotWrapper: React.FC<Props> = ({
 
                 <PlotComponent
                   key={plotKey}
-                  plotJson={plotWithLineCutGuide}
+                  plotJson={maximizedPlotJson}
                   onRelayout={handleRelayout}
                   onHover={handlePlotHover}
                   onClick={
