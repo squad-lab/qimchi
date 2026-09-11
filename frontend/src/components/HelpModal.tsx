@@ -1094,9 +1094,9 @@ const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
     <div ref={wrapperRef} className="fixed inset-0 pointer-events-none">
       <Rnd
         default={{
-          x: window.innerWidth / 2 - 350,
+          x: window.innerWidth / 2 - 455,
           y: window.innerHeight / 2 - 260,
-          width: 700,
+          width: 910,
           height: 520,
         }}
         minWidth={500}
