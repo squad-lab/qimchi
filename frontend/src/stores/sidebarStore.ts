@@ -31,7 +31,6 @@ interface ComponentStates {
     sortDirection: "asc" | "desc";
     filterBy: "all" | "folder" | "dataset" | "zarr";
     showFilters: boolean;
-    isExpanded: boolean;
     lastPath: string; // Track the last loaded path
     showLiveOnly: boolean; // Show only live measurements
     hiddenLiveMeasurementIds: string[]; // Locally dismissed while still live
@@ -112,7 +111,6 @@ const initialComponentStates: ComponentStates = {
     sortDirection: "asc",
     filterBy: "all",
     showFilters: false,
-    isExpanded: true,
     lastPath: "",
     showLiveOnly: false,
     hiddenLiveMeasurementIds: [],

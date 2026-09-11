@@ -180,7 +180,7 @@ const DirTree = ({
     sortDirection,
     filterBy,
     showFilters,
-    isExpanded,
+    lastPath,
     showLiveOnly,
     hiddenLiveMeasurementIds = [],
     expandedNodeIds = [],
@@ -607,7 +607,23 @@ const DirTree = ({
 
   // Seeded once, when the tree is created: initialState is not re-read, and
   // DirTree remounts per path anyway (Explorer keys it on the folder).
-  const initialExpandedItems = useRef<string[]>(["root", ...expandedNodeIds]);
+  //
+  // Only replayed for the folder it was recorded in. Navigating elsewhere --
+  // double-clicking into a subfolder, or Back/Forward -- builds a different
+  // tree, where those ids mean nothing and would only make the toolbar think
+  // something was expanded.
+  const initialExpandedItems = useRef<string[]>(
+    lastPath === path ? ["root", ...expandedNodeIds] : ["root"],
+  );
+
+  useEffect(() => {
+    if (lastPath !== path) {
+      expandedNodeIdsRef.current = new Set();
+      updateDirTreeState({ lastPath: path, expandedNodeIds: [] });
+    }
+    // Once per mount; DirTree is remounted whenever the path changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Signature that changes only when a library filter is active AND the
   // relevant heart/trash state changes.
@@ -870,6 +886,12 @@ const DirTree = ({
   useEffect(() => {
     tree.rebuildTree();
   }, [tree, rootIds, childrenById]);
+
+  // Derived from the tree rather than stored: after navigating into a folder
+  // the new tree is collapsed, but a remembered flag still read "expanded" and
+  // left the button offering Collapse all. getItems() only returns what is
+  // materialised, so this is bounded by what is on screen.
+  const anyFolderExpanded = tree.getItems().some((item) => item.isFolder() && item.isExpanded());
 
   // Persist which folders are open so a refresh restores them.
   const updateExpandedNodeState = useCallback(
@@ -1401,7 +1423,7 @@ const DirTree = ({
                 content={
                   sortBy === "chrono"
                     ? "Unavailable in chronological view"
-                    : isExpanded
+                    : anyFolderExpanded
                       ? "Collapse all"
                       : "Expand all"
                 }
@@ -1410,10 +1432,10 @@ const DirTree = ({
                 <button
                   type="button"
                   onClick={() => {
-                    if (isExpanded) {
+                    if (anyFolderExpanded) {
                       tree.collapseAll();
                       expandedNodeIdsRef.current = new Set();
-                      updateDirTreeState({ isExpanded: false, expandedNodeIds: [] });
+                      updateDirTreeState({ expandedNodeIds: [] });
                     } else {
                       tree.expandAll();
                       // expandAll resolves children as it goes, so read the
@@ -1424,7 +1446,7 @@ const DirTree = ({
                           .filter((item) => item.isFolder() && item.isExpanded())
                           .map((item) => item.getId());
                         expandedNodeIdsRef.current = new Set(opened);
-                        updateDirTreeState({ isExpanded: true, expandedNodeIds: opened });
+                        updateDirTreeState({ expandedNodeIds: opened });
                       }, 50);
                     }
                   }}
@@ -1433,12 +1455,12 @@ const DirTree = ({
                   title={
                     sortBy === "chrono"
                       ? "Unavailable in chronological view"
-                      : isExpanded
+                      : anyFolderExpanded
                         ? "Collapse all"
                         : "Expand all"
                   }
                 >
-                  {isExpanded ? <Minimize size={16} /> : <Expand size={16} />}
+                  {anyFolderExpanded ? <Minimize size={16} /> : <Expand size={16} />}
                 </button>
               </Tooltip>
 
