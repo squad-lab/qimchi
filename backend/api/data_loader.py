@@ -14,6 +14,7 @@ for the rest of the application.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import sqlite3
 from dataclasses import dataclass, field
@@ -1439,7 +1440,10 @@ class NetcdfHdf5Provider:
         return self._load(ref)
 
     async def load_async(self, ref: str) -> LoadedData:
-        return self._load(ref)
+        # Opening a dataset is blocking file I/O. Awaiting it inline pinned the
+        # event loop for the whole read, which is what makes a basket of ~90
+        # datasets stall unrelated requests while the Metadata tab loads.
+        return await asyncio.to_thread(self._load, ref)
 
 
 class DataTreeProvider:
@@ -1560,7 +1564,10 @@ class FilesystemXarrayProvider:
         return self._load(ref)
 
     async def load_async(self, ref: str) -> LoadedData:
-        return self._load(ref)
+        # Opening a dataset is blocking file I/O. Awaiting it inline pinned the
+        # event loop for the whole read, which is what makes a basket of ~90
+        # datasets stall unrelated requests while the Metadata tab loads.
+        return await asyncio.to_thread(self._load, ref)
 
 
 class QcodesSqliteProvider:

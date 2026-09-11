@@ -8,6 +8,7 @@ import hashlib
 import os
 import stat as stat_module
 import subprocess  # Windows compat
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
@@ -189,6 +190,27 @@ async def _run_subprocess(cmd, input_data: bytes = None):
 
 async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
     """
+    Build a dataset directory tree, off the event loop.
+
+    The scan is `fd` subprocesses plus a stat-heavy pass over every dataset --
+    all of it blocking. Qimchi runs a single uvicorn worker (plot_ref context is
+    per-worker, see CURRENT_ISSUES.md), so doing that work inline froze every
+    other request -- /health, plots, notes -- for the whole scan. This matches
+    the `asyncio.to_thread` convention already used by library.py and notes.py.
+
+    Args:
+        path: str or Path-like root directory to scan.
+        max_depth: maximum recursion depth to request from fd.
+
+    Returns:
+        Dict: TreeNode-style dict describing the directory tree.
+
+    """
+    return await asyncio.to_thread(_build_directory_tree_zarr, path, max_depth)
+
+
+def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
+    """
     Build a dataset directory tree using the `fd` utility for fast traversal.
 
     Supported dataset items:
@@ -306,8 +328,14 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
         str(path),
     ]
 
-    result_dirs = _run_fd_capture(cmd_zarr_dirs)
-    result_files = _run_fd_capture(cmd_dataset_files)
+    # The two passes are independent and were ~46% of scan time once the
+    # per-dataset work was fixed, so overlap them rather than paying both in
+    # series. Two threads, since _run_fd_capture blocks on a subprocess.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        future_dirs = pool.submit(_run_fd_capture, cmd_zarr_dirs)
+        future_files = pool.submit(_run_fd_capture, cmd_dataset_files)
+        result_dirs = future_dirs.result()
+        result_files = future_files.result()
 
     if result_dirs.returncode != 0:
         err = result_dirs.stderr.decode("utf-8", errors="replace")
