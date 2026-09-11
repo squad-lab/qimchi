@@ -909,6 +909,7 @@ const Basket = ({
           Icon={ShoppingBasket}
           count={items.length}
           orientation={isExpanded ? "vertical" : "horizontal"}
+          onToggle={toggleExpanded}
         >
           {onDownload && (
             <Tooltip content="Download basket" position="left">

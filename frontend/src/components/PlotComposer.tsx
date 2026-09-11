@@ -719,6 +719,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
           label="Composer"
           Icon={ListMusic}
           orientation={isExpanded ? "vertical" : "horizontal"}
+          onToggle={toggleExpanded}
         >
           {/* Plot type: icon-only in the ribbon, dropdown opens to the left */}
           <div className="relative">
