@@ -482,6 +482,7 @@ def _export_plot_images_sync(
 
     # Prepare output paths for light and dark variants
     saved_paths = {}
+    write_errors: list[str] = []
     outs = []
     for variant in ("light", "dark"):
         for fmt in ("png", "svg"):
@@ -592,6 +593,7 @@ def _export_plot_images_sync(
             except Exception as e:
                 logger.error(f"Failed to write {variant} {fmt} via process pool: {e}")
                 timings[f"{fmt}_{variant}"] = None
+                write_errors.append(f"{variant} {fmt}: {e}")
     else:
         # Fallback to ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=min(6, (os.cpu_count() or 1))) as ex:
@@ -612,6 +614,14 @@ def _export_plot_images_sync(
                         f"Failed to write {variant} {fmt} via thread pool: {e}"
                     )
                     timings[f"{fmt}_{variant}"] = None
+                    write_errors.append(f"{variant} {fmt}: {e}")
+
+    # Every variant failed. Zipping timings.json and metadata.json alone yields
+    # an archive that looks like a successful export but contains no plot, and
+    # the task would report success -- so fail the task instead.
+    if not saved_paths:
+        detail = "; ".join(write_errors) or "no writer produced a file"
+        raise RuntimeError(f"Plot image export produced no images: {detail}")
 
     # Create a zip archive
     tmp_zip = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")

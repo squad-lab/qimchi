@@ -316,6 +316,67 @@ def test_export_plot_images_sync_writes_variants_and_archive(tmp_path, monkeypat
     Path(result["zip_path"]).unlink()
 
 
+def test_export_fails_rather_than_zipping_an_archive_with_no_images(
+    tmp_path, monkeypatch
+):
+    """
+    Every writer failing must fail the export, not produce a metadata-only zip.
+
+    A broken orjson install once made all four image writes raise while the task
+    still reported success, handing the user an archive containing only
+    timings.json and metadata.json -- a failure that looked exactly like a
+    working export.
+    """
+    dataset = tmp_path / "run.zarr"
+    dataset.mkdir()
+
+    def always_fails(_figure, _path, **_kwargs):
+        raise RuntimeError("module 'orjson' has no attribute 'dumps'")
+
+    monkeypatch.setattr(export, "_write_plotly_image", always_fails)
+    plot = {
+        "data": [{"type": "scatter", "x": [0, 1], "y": [2, 3]}],
+        "layout": {"xaxis": {}, "yaxis": {}},
+    }
+
+    with pytest.raises(RuntimeError) as excinfo:
+        export._export_plot_images_sync(plot, str(dataset))
+
+    # The per-variant reason travels with the error, so the task's recorded
+    # message says what actually broke.
+    assert "produced no images" in str(excinfo.value)
+    assert "orjson" in str(excinfo.value)
+
+
+def test_export_survives_a_partially_failed_write(tmp_path, monkeypatch):
+    """One failed variant is reported in timings but still yields an archive."""
+    dataset = tmp_path / "run.zarr"
+    dataset.mkdir()
+
+    def fail_svg_only(_figure, path, **_kwargs):
+        target = Path(path)
+        if target.suffix == ".svg":
+            raise RuntimeError("svg writer unavailable")
+        Image.new("RGB", (2, 2), "white").save(target)
+
+    monkeypatch.setattr(export, "_write_plotly_image", fail_svg_only)
+    plot = {
+        "data": [{"type": "scatter", "x": [0, 1], "y": [2, 3]}],
+        "layout": {"xaxis": {}, "yaxis": {}},
+    }
+
+    result = export._export_plot_images_sync(plot, str(dataset))
+
+    assert set(result["saved_paths"]) == {"png_light", "png_dark"}
+    assert result["timings"]["svg_light"] is None
+    assert result["timings"]["svg_dark"] is None
+    with zipfile.ZipFile(result["zip_path"]) as archive:
+        names = set(archive.namelist())
+        assert {"metadata.json", "timings.json"} <= names
+        assert any(name.endswith(".png") for name in names)
+    Path(result["zip_path"]).unlink()
+
+
 def test_save_light_dark_pngs_supports_one_or_both_variants(tmp_path, monkeypatch):
     dataset = tmp_path / "run.zarr"
     footer_texts = []
