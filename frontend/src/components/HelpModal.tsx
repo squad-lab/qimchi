@@ -55,8 +55,8 @@ const ExplorerHelp = memo(() => (
         Explorer
       </h3>
       <p className="text-gray-600 mb-4">
-        Browse and navigate your file system to find datasets. The following formats are supported
-        and highlighted with specific icons in the tree:
+        Browse and navigate your file system to find datasets. Built-in formats and measurement
+        sources include:
       </p>
 
       <div className="space-y-2 mb-4">
@@ -69,8 +69,8 @@ const ExplorerHelp = memo(() => (
           </li>
           <li className="flex gap-2">
             <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-            Clicking the icon of the section that is already open collapses the sidebar; the button
-            at the bottom of the rail collapses and re-opens it too
+            Clicking the section that is already open leaves it open. Use the button at the bottom
+            of the rail (or Shift+E) to collapse and re-open the whole sidebar
           </li>
           <li className="flex gap-2">
             <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
@@ -102,6 +102,10 @@ const ExplorerHelp = memo(() => (
           <Database size={16} className="text-teal-600" />
           <span className="text-xs font-semibold">QCoDeS</span>
         </div>
+        <div className="flex items-center gap-2 p-2 bg-cyan-50/50 rounded-lg border border-cyan-100">
+          <HardDrive size={16} className="text-cyan-600" />
+          <span className="text-xs font-semibold">Quantify</span>
+        </div>
         <div className="flex items-center gap-2 p-2 bg-emerald-50/50 rounded-lg border border-emerald-100">
           <Database size={16} className="text-emerald-600" />
           <span className="text-xs font-semibold">SQLite</span>
@@ -110,7 +114,15 @@ const ExplorerHelp = memo(() => (
           <Table size={16} className="text-orange-600" />
           <span className="text-xs font-semibold">CSV / TXT / DAT</span>
         </div>
+        <div className="flex items-center gap-2 p-2 bg-fuchsia-50/50 rounded-lg border border-fuchsia-100">
+          <FileArchive size={16} className="text-fuchsia-600" />
+          <span className="text-xs font-semibold">xarray DataTree</span>
+        </div>
       </div>
+      <p className="text-xs text-gray-500">
+        Quantify runs are recognized inside their HDF5 datasets and can also be streamed live with
+        qimchi-connect. DataTree nodes can be browsed inside Zarr, NetCDF, and HDF5 containers.
+      </p>
     </div>
 
     <div className="space-y-2">
@@ -374,6 +386,10 @@ const BasketHelp = memo(() => (
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          Click the Basket ribbon outside its action buttons to collapse or expand the pane
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Use the Trash icon to clear all datasets from the Basket
         </li>
         <li className="flex gap-2">
@@ -517,6 +533,10 @@ const ComposerHelp = memo(() => (
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          Click the Composer ribbon outside its action buttons to collapse or expand the pane
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Use the X button on individual fields to remove them
         </li>
         <li className="flex gap-2">
@@ -578,8 +598,7 @@ const ViewerHelp = memo(() => (
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>Reset (R):</strong> Reset plot to original state, removing filters and
-          customizations
+          <strong>Reset (R):</strong> Restore the original data, axes, filters, appearance, and zoom
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
@@ -597,7 +616,8 @@ const ViewerHelp = memo(() => (
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Hold Shift while hovering Filters or Appearance to activate Paint mode
+          Hold Shift and click a plot&apos;s Filters or Appearance button to choose it as the Paint
+          source
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
@@ -613,6 +633,10 @@ const ViewerHelp = memo(() => (
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Layout Controls</h4>
       <ul className="space-y-1.5 text-gray-600">
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          Pin a plot to keep it on its current measurement while Next/Prev updates the other plots
+        </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Use the 33 / 50 / 66 / 100 buttons to set plot width for all plots
@@ -642,8 +666,9 @@ const NotesHelp = memo(() => (
         Notes
       </h3>
       <p className="text-gray-600 mb-3">
-        A markdown-based note-taking panel linked to your datasets. Notes are saved as{" "}
-        <span className="font-mono bg-gray-100 px-1 rounded">.md</span> files alongside the dataset.
+        A markdown-based note-taking panel linked to your datasets. Notes are stored in
+        Qimchi&apos;s local library so every supported dataset type, including QCoDeS runs, can have
+        notes.
       </p>
     </div>
 
@@ -664,7 +689,16 @@ const NotesHelp = memo(() => (
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Notes use frontmatter (YAML header) to store metadata
+          Changes auto-save after two seconds; Ctrl/Cmd+S saves immediately
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          Choose Pooled sample notes to keep a shared rolling note for all measurements in a sample
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          Existing Markdown sidecars are imported automatically; when sidecar mirroring is enabled,
+          Qimchi also writes an updated .md copy with YAML frontmatter
         </li>
       </ul>
     </div>
@@ -793,8 +827,15 @@ const DesktopHelp = memo(() => (
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <span>
-            <span className="font-mono bg-gray-100 px-1 rounded">qimchi_debug.log</span> — startup
-            &amp; runtime log for troubleshooting
+            <span className="font-mono bg-gray-100 px-1 rounded">logs/</span> — backend and desktop
+            startup/runtime logs for troubleshooting
+          </span>
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          <span>
+            <span className="font-mono bg-gray-100 px-1 rounded">qimchi.db</span> — library marks,
+            tags, notes, and cached metadata
           </span>
         </li>
         <li className="flex gap-2">
@@ -873,7 +914,7 @@ const KeyboardHelp = memo(() => (
           ["B", "Toggle BG Correction"],
           ["S", "Swap X/Y axes"],
           ["Shift+X", "Enter LineCut mode (HeatMap)"],
-          ["R", "Reset plot zoom/pan"],
+          ["R", "Reset plot data, filters, appearance and zoom"],
           ["N", "Send plot to Notes"],
           ["E", "Export plot images"],
           ["Del", "Remove selected plot"],
@@ -1095,9 +1136,9 @@ const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
       <Rnd
         default={{
           x: window.innerWidth / 2 - 455,
-          y: window.innerHeight / 2 - 260,
+          y: window.innerHeight / 2 - 325,
           width: 910,
-          height: 520,
+          height: 670,
         }}
         minWidth={500}
         minHeight={400}
