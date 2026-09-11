@@ -1239,7 +1239,7 @@ const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
                       No help matches &ldquo;{query}&rdquo;
                     </div>
                   ) : (
-                    <div className="space-y-1">
+                    <div className="space-y-1" role="group" aria-label="Help search results">
                       <p className="mb-2 text-xs text-gray-500">
                         {results.length} result{results.length === 1 ? "" : "s"} -- Enter to open,
                         arrows to move
