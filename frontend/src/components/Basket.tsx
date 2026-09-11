@@ -25,6 +25,8 @@ import {
 
 // Local imports
 import Tooltip from "./Tooltip";
+import SectionRibbon, { ribbonButtonClass } from "./SectionRibbon";
+import { useShortcut } from "../hooks/useGlobalShortcuts";
 import { useToast } from "../hooks/useToast";
 import { SharedFieldResult, isFieldShared } from "../utils/datasetFieldSelectors";
 import { detectDatasetKind, isDatasetPath, isSqliteContainerPath } from "../utils/datasetPaths";
@@ -376,6 +378,8 @@ const Basket = ({
 }: BasketProps) => {
   const { showToast } = useToast();
   const [isExpanded, setIsExpanded] = useState(true);
+
+  useShortcut("toggle-basket", () => setIsExpanded((expanded) => !expanded));
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [copiedItems, setCopiedItems] = useState<{
@@ -618,82 +622,21 @@ const Basket = ({
       {/* Basket */}
       <div
         className={`bg-white border border-gray-300 rounded-lg shadow-sm transition-all ${
-          isDragOver ? "border-blue-500 bg-blue-50 shadow-lg" : ""
-        }`}
+          isExpanded ? "flex items-stretch" : ""
+        } ${isDragOver ? "border-blue-500 bg-blue-50 shadow-lg" : ""}`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDragEnter={handleDragEnter}
         onDrop={handleDrop}
       >
-        <div
-          className="flex items-center justify-between p-2 bg-gray-50 border-b border-gray-200 rounded-lg cursor-pointer"
-          onClick={() => setIsExpanded(!isExpanded)}
-        >
-          <h3 className="font-semibold text-gray-900 flex items-center">
-            <ShoppingBasket size={16} className="mr-1.5 align-middle mb-0.5" />{" "}
-            <span>
-              Basket<span className="ml-[1.5px]">({items.length})</span>
-              {isDragOver && <span className="ml-2 text-blue-600 text-sm">Drop items here!</span>}
-            </span>
-          </h3>
-          <div className="flex items-center">
-            {items.length > 0 && (
-              <>
-                {onDownload && (
-                  <div className="mr-2">
-                    <Tooltip content="Download basket" position="bottom">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDownload(items);
-                        }}
-                        className="qimchi-dark-hover-plain p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded"
-                        aria-label="Download basket"
-                      >
-                        <Download size={16} />
-                      </button>
-                    </Tooltip>
-                  </div>
-                )}
-                <div className="mr-2">
-                  <Tooltip content="Clear basket" position="bottom">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onClearAll();
-                      }}
-                      className="qimchi-dark-hover-plain p-1 text-red-600 hover:text-red-800 hover:bg-red-100 rounded"
-                      aria-label="Clear basket"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </Tooltip>
-                </div>
-              </>
-            )}
-            <Tooltip content={isExpanded ? "Collapse basket" : "Expand basket"} position="left">
-              <button
-                className="p-1 rounded"
-                aria-label={isExpanded ? "Collapse basket" : "Expand basket"}
-              >
-                {isExpanded ? (
-                  <EyeOff size={16} className="text-red-600" />
-                ) : (
-                  <Eye size={16} className="text-green-600" />
-                )}
-              </button>
-            </Tooltip>
-          </div>
-        </div>
-
         {/* Basket Items - Horizontal scrolling container */}
         {isExpanded && (
           // TODOLATER: This fine? 166px is a bit arbitrary.
-          <div className="h-[166px] overflow-x-auto overflow-y-hidden scrollbar-thin scrollbar-track-gray-100 scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 relative">
+          <div className="h-[166px] min-w-0 flex-1 overflow-x-auto overflow-y-hidden scrollbar-thin scrollbar-track-gray-100 scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 relative">
             {items.length === 0 ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500">
                 <ShoppingBasket size={48} className="mb-2 text-gray-400" />
-                <p>No items selected</p>
+                <p>{isDragOver ? "Drop items here!" : "No items selected"}</p>
                 <p className="text-sm mt-1">Add datasets from the explorer</p>
               </div>
             ) : (
@@ -890,6 +833,58 @@ const Basket = ({
             )}
           </div>
         )}
+
+        <SectionRibbon
+          label="Basket"
+          Icon={ShoppingBasket}
+          count={items.length}
+          orientation={isExpanded ? "vertical" : "horizontal"}
+        >
+          {onDownload && (
+            <Tooltip content="Download basket" position="left">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDownload(items);
+                }}
+                disabled={items.length === 0}
+                className={`${ribbonButtonClass} text-blue-600 hover:text-blue-800`}
+                aria-label="Download basket"
+              >
+                <Download size={16} />
+              </button>
+            </Tooltip>
+          )}
+          <Tooltip content="Clear basket (Alt+Shift+B)" position="left">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onClearAll();
+              }}
+              disabled={items.length === 0}
+              className={`${ribbonButtonClass} text-red-600 hover:text-red-800`}
+              aria-label="Clear basket"
+            >
+              <Trash2 size={16} />
+            </button>
+          </Tooltip>
+          <Tooltip
+            content={`${isExpanded ? "Collapse basket" : "Expand basket"} (Alt+B)`}
+            position="left"
+          >
+            <button
+              onClick={() => setIsExpanded(!isExpanded)}
+              className={ribbonButtonClass}
+              aria-label={isExpanded ? "Collapse basket" : "Expand basket"}
+            >
+              {isExpanded ? (
+                <EyeOff size={16} className="text-red-600" />
+              ) : (
+                <Eye size={16} className="text-green-600" />
+              )}
+            </button>
+          </Tooltip>
+        </SectionRibbon>
       </div>
     </div>
   );

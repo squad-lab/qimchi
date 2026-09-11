@@ -17,6 +17,7 @@ import PlotContainer from "./PlotContainer";
 import { usePlotCollection } from "../hooks/usePlotCollection";
 import { usePlotStore } from "../stores/plotStore";
 import { useSidebarStore } from "../stores/sidebarStore";
+import SectionRibbon, { ribbonButtonClass } from "./SectionRibbon";
 import { useToast } from "../hooks/useToast";
 import Tooltip from "./Tooltip";
 import {
@@ -694,104 +695,10 @@ const Viewer = ({
 
           {/* Main Content Area - Plots Viewer */}
           <div
-            className="flex-1 bg-white rounded-lg border border-gray-300 flex flex-col"
+            className="flex-1 bg-white rounded-lg border border-gray-300 flex items-stretch"
             style={{ maxHeight: viewerHeight }}
           >
-            <div className="flex items-center justify-between shrink-0 bg-gray-50 border-b border-gray-200 rounded-t-lg p-2">
-              <h3 className="font-semibold text-gray-900 flex items-center">
-                <ChartScatter size={16} className="mr-1.5 align-middle mb-0.5" /> Viewer
-                <span className="ml-[1.5px]">({plotConfigs.length})</span>
-              </h3>
-              <div className="flex items-center space-x-2">
-                {/* Squarify toggle - applies to all plots */}
-                <Tooltip
-                  content={isSquareModeGlobal ? "Unsquarify all plots" : "Squarify all plots"}
-                  position="left"
-                >
-                  <button
-                    title={isSquareModeGlobal ? "Unsquarify all" : "Squarify all"}
-                    onClick={() => {
-                      // Toggle local state and broadcast
-                      const next = !isSquareModeGlobal;
-                      setIsSquareModeGlobal(next);
-                      try {
-                        window.dispatchEvent(
-                          new CustomEvent("plot-squarify", {
-                            detail: { enabled: next },
-                          }),
-                        );
-                      } catch {
-                        /* ignore */
-                      }
-                    }}
-                    className={`p-1.5 rounded transition-colors duration-150 ${
-                      isSquareModeGlobal
-                        ? "bg-blue-50"
-                        : "qimchi-dark-hover-plain hover:bg-gray-200"
-                    }`}
-                  >
-                    <svg
-                      className={`w-4 h-4 ${
-                        isSquareModeGlobal ? "text-blue-600" : "text-gray-600"
-                      }`}
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                      <rect x="8" y="8" width="8" height="8" rx="1" ry="1"></rect>
-                    </svg>
-                  </button>
-                </Tooltip>
-
-                {/* Size preset ButtonGroup - affects all plots by default */}
-                <div className="inline-flex items-center bg-white border border-gray-200 rounded">
-                  {[33, 50, 66, 100].map((pct, idx) => (
-                    <Tooltip key={pct} content={`${pct}% width (all plots)`} position="left">
-                      <button
-                        onClick={() => {
-                          // When applying globally, clear per-plot overrides
-                          setPlotWidthPercent(pct);
-                          setPerPlotWidthMap({});
-                          try {
-                            window.dispatchEvent(
-                              new CustomEvent("plot-size-preset", {
-                                detail: { id: null, percent: pct },
-                              }),
-                            );
-                          } catch {
-                            /* ignore */
-                          }
-                        }}
-                        title={`${pct}% width`}
-                        className={`px-2 py-1 text-xs font-medium ${
-                          plotWidthPercent === pct
-                            ? "bg-gray-100"
-                            : "qimchi-dark-hover-plain hover:bg-gray-50"
-                        } ${idx > 0 ? "-ml-px" : ""}`}
-                      >
-                        {pct}
-                      </button>
-                    </Tooltip>
-                  ))}
-                </div>
-
-                <Tooltip content="Clear All Plots" position="left">
-                  <button
-                    onClick={clearPlots}
-                    type="button"
-                    aria-label="Clear All Plots"
-                    className="p-1.5 text-red-600 hover:bg-gray-300 rounded transition-colors"
-                  >
-                    <Trash2 size={16} aria-hidden="true" />
-                  </button>
-                </Tooltip>
-              </div>
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+            <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
               {plotConfigs.length > 0 ? (
                 <div className="p-2">
                   <PlotContainer
@@ -816,6 +723,90 @@ const Viewer = ({
                 </div>
               )}
             </div>
+            <SectionRibbon label="Viewer" Icon={ChartScatter} count={plotConfigs.length}>
+              {/* Squarify toggle - applies to all plots */}
+              <Tooltip
+                content={isSquareModeGlobal ? "Unsquarify all plots" : "Squarify all plots"}
+                position="left"
+              >
+                <button
+                  onClick={() => {
+                    // Toggle local state and broadcast
+                    const next = !isSquareModeGlobal;
+                    setIsSquareModeGlobal(next);
+                    try {
+                      window.dispatchEvent(
+                        new CustomEvent("plot-squarify", {
+                          detail: { enabled: next },
+                        }),
+                      );
+                    } catch {
+                      /* ignore */
+                    }
+                  }}
+                  className={`flex h-7 w-7 items-center justify-center rounded transition-colors duration-150 ${
+                    isSquareModeGlobal ? "bg-blue-50" : "qimchi-dark-hover-plain hover:bg-gray-200"
+                  }`}
+                  aria-label={isSquareModeGlobal ? "Unsquarify all" : "Squarify all"}
+                >
+                  <svg
+                    className={`w-4 h-4 ${isSquareModeGlobal ? "text-blue-600" : "text-gray-600"}`}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <rect x="8" y="8" width="8" height="8" rx="1" ry="1"></rect>
+                  </svg>
+                </button>
+              </Tooltip>
+
+              {/* Size presets - stacked, since the ribbon has no room for a row */}
+              <div className="flex flex-col items-center overflow-hidden rounded border border-gray-200 bg-white">
+                {[33, 50, 66, 100].map((pct, idx) => (
+                  <Tooltip key={pct} content={`${pct}% width (all plots)`} position="left">
+                    <button
+                      onClick={() => {
+                        // When applying globally, clear per-plot overrides
+                        setPlotWidthPercent(pct);
+                        setPerPlotWidthMap({});
+                        try {
+                          window.dispatchEvent(
+                            new CustomEvent("plot-size-preset", {
+                              detail: { id: null, percent: pct },
+                            }),
+                          );
+                        } catch {
+                          /* ignore */
+                        }
+                      }}
+                      aria-label={`${pct}% width`}
+                      className={`w-7 px-1 py-0.5 text-[10px] font-medium ${
+                        plotWidthPercent === pct
+                          ? "bg-gray-200"
+                          : "qimchi-dark-hover-plain hover:bg-gray-50"
+                      } ${idx > 0 ? "-mt-px border-t border-gray-200" : ""}`}
+                    >
+                      {pct}
+                    </button>
+                  </Tooltip>
+                ))}
+              </div>
+
+              <Tooltip content="Clear All Plots (Alt+Shift+V)" position="left">
+                <button
+                  onClick={clearPlots}
+                  type="button"
+                  aria-label="Clear All Plots"
+                  className={`${ribbonButtonClass} text-red-600`}
+                >
+                  <Trash2 size={16} aria-hidden="true" />
+                </button>
+              </Tooltip>
+            </SectionRibbon>
           </div>
         </div>
       </div>
