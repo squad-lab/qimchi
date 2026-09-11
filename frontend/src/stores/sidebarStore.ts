@@ -77,7 +77,6 @@ interface SidebarState {
   // Actions for panel states
   setSidebarCollapsed: (collapsed: boolean) => void;
   setActiveSection: (section: SidebarSection | null) => void;
-  toggleSection: (section: SidebarSection) => void;
   setExplorerCollapsed: (collapsed: boolean) => void;
   setMetadataCollapsed: (collapsed: boolean) => void;
   setNotesCollapsed: (collapsed: boolean) => void;
@@ -207,19 +206,6 @@ export const useSidebarStore = create<SidebarState>()(
           // Opening a section implies the sidebar body is showing.
           ...(section ? { sidebarCollapsed: false } : {}),
         })),
-
-      toggleSection: (section) =>
-        set((state) => {
-          // Clicking the open section's rail icon collapses the body; clicking
-          // any other icon swaps to it (and re-opens a collapsed body).
-          const next = state.activeSection === section && !state.sidebarCollapsed ? null : section;
-          return {
-            activeSection: next,
-            ...sectionFlags(next),
-            ...liveModePatch(state, next),
-            ...(next ? { sidebarCollapsed: false } : {}),
-          };
-        }),
 
       // Back-compat shims: a section is "collapsed" when it is not the active
       // one, so setting one open is the same as making it active.
