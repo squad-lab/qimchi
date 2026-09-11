@@ -220,6 +220,8 @@ docker:
   script:
     - VERSION=$(grep '^[[:space:]]*version[[:space:]]*=' backend/pyproject.toml | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')
     - update-binfmts --enable
+    # -f: the Dockerfile lives in docker/, but the build context stays the
+    # repository root because the image builds backend/ and frontend/.
     # Preview (-rc) tags publish a VERSIONED image only. `:latest` must keep
     # pointing at the newest stable, or `docker pull qimchi` would silently
     # hand people a preview build.
@@ -231,7 +233,7 @@ docker:
       esac
       echo "Image tags: $TAG_ARGS"
       docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull \
-        --build-arg QIMCHI_VERSION="$CI_COMMIT_TAG" $TAG_ARGS --push .
+        -f docker/Dockerfile --build-arg QIMCHI_VERSION="$CI_COMMIT_TAG" $TAG_ARGS --push .
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
       when: on_success

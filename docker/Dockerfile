@@ -45,8 +45,10 @@ RUN uv sync --locked --no-dev --extra datasets
 
 COPY --from=frontend-builder /frontend/dist/ /app/frontend/dist/
 
-COPY nginx.conf /etc/nginx/sites-available/default
-COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+# Paths are relative to the build context, which is the repository root
+# (the image needs backend/ and frontend/), not this file's directory.
+COPY docker/nginx.conf /etc/nginx/sites-available/default
+COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 RUN rm -f /etc/nginx/sites-enabled/default \
     && ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/ \

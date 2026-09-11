@@ -1,6 +1,10 @@
 services:
   qimchi:
-    build: .
+    build:
+      # The image needs backend/ and frontend/, so the context is the
+      # repository root rather than this directory.
+      context: ..
+      dockerfile: docker/Dockerfile
     image: qimchi:latest
     container_name: qimchi
     restart: unless-stopped
@@ -11,7 +15,7 @@ services:
       ENABLE_KALEIDO_WARMUP: "${ENABLE_KALEIDO_WARMUP:-0}"
       SERVE_STATIC_FILES: "true"
     volumes:
-      - ./data:/data:rw
+      - ../data:/data:rw
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
       interval: 30s
