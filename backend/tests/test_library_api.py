@@ -54,8 +54,8 @@ def test_source_format_detection(path, expected):
 
 
 @pytest.mark.asyncio
-async def test_loading_qcodes_attrs_attaches_its_guid_to_the_qimchi_db(tmp_path):
-    from api.db_models import Measurement
+async def test_loading_qcodes_attrs_attaches_a_shared_database_uid(tmp_path):
+    from api.db_models import Measurement, Note, _utcnow
     from api.shared import db as db_mod
 
     db_path = tmp_path / "runs.db"
@@ -65,12 +65,45 @@ async def test_loading_qcodes_attrs_attaches_its_guid_to_the_qimchi_db(tmp_path)
     attrs = {"guid": "qcodes-guid", "run_id": 4, "independents": [], "dependents": []}
 
     await library.store_cached_attrs(ref, attrs, dataset)
+    database_uuid = attrs["qimchi_db_uuid"]
 
     with Session(db_mod.get_engine()) as session:
-        measurement = session.get(Measurement, "qcodes-guid")
-        assert measurement is not None
-        assert measurement.abs_path == ref
-        assert measurement.source_format == "qcodes"
+        run_measurement = session.get(Measurement, "qcodes-guid")
+        assert run_measurement is not None
+        assert run_measurement.abs_path == ref
+        database = session.get(Measurement, database_uuid)
+        assert database is not None
+        assert database.abs_path == str(db_path)
+        assert database.uuid_origin == "qimchi-qcodes-db"
+        session.add(
+            Note(
+                uuid="qcodes-guid",
+                user_id=1,
+                run_id=4,
+                body="legacy run note",
+                updated_at=_utcnow(),
+            )
+        )
+        session.commit()
+
+    second_attrs = {
+        "guid": "another-qcodes-guid",
+        "run_id": 5,
+        "independents": [],
+        "dependents": [],
+    }
+    await library.store_cached_attrs(
+        f"{db_path}#run_id=5",
+        second_attrs,
+        xr.Dataset(attrs={"guid": "another-qcodes-guid", "run_id": 5}),
+    )
+
+    assert second_attrs["qimchi_db_uuid"] == database_uuid
+    with Session(db_mod.get_engine()) as session:
+        assert session.get(Note, ("qcodes-guid", 1, 4)) is None
+        migrated = session.get(Note, (database_uuid, 1, 4))
+        assert migrated is not None
+        assert migrated.body == "legacy run note"
 
 
 @pytest.mark.asyncio

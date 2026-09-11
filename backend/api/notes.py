@@ -12,6 +12,7 @@ from typing import Dict, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlmodel import select
 
 # Local imports
 from .data_loader import _detect_filesystem_format, load_xarray_dataset
@@ -53,6 +54,36 @@ def _db_get_note(uuid: str, run_id: int = 0) -> Tuple[str, datetime] | None:
         if note is None:
             return None
         return note.body, note.updated_at
+
+
+def _db_get_qcodes_rollup(uuid: str) -> Tuple[str, datetime | None]:
+    """Build the overall QCoDeS view from the current notes for every run."""
+    with session_scope() as session:
+        run_notes = session.exec(
+            select(Note.run_id, Note.body, Note.updated_at)
+            .where(
+                Note.uuid == uuid,
+                Note.user_id == LOCAL_USER_ID,
+                Note.run_id > 0,
+            )
+            .order_by(Note.run_id)
+        ).all()
+
+    entries: list[str] = []
+    latest: datetime | None = None
+    for run_id, note_body, updated_at in run_notes:
+        body = (note_body or "").rstrip()
+        if not body:
+            continue
+        timestamp = updated_at
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        stamp = timestamp.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M")
+        entries.append(f"## Run {run_id}\n_Last saved: {stamp} UTC_\n\n{body}")
+        if latest is None or updated_at > latest:
+            latest = updated_at
+
+    return "\n\n---\n\n".join(entries), latest
 
 
 def _db_upsert_note(
@@ -546,6 +577,16 @@ async def load_notes(path: PathData) -> Dict:
     # the legacy .md sidecar (then served from the DB).
     if path.note_scope != "sample":
         try:
+            if _is_qcodes_reference(path.path) and note_run_id == 0:
+                body, updated = await asyncio.to_thread(
+                    _db_get_qcodes_rollup, note_uuid
+                )
+                return {
+                    "notes": body,
+                    "last_saved": updated.isoformat() if updated else None,
+                    "filename": frontmatter_filename,
+                    "note_scope": "measurement",
+                }
             db = await asyncio.to_thread(_db_get_note, note_uuid, note_run_id)
             if db is not None:
                 body, updated = db

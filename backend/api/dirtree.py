@@ -1213,13 +1213,6 @@ QCODES_META_KEYS: tuple[str, ...] = (
 )
 
 
-# Metadata is rendered as an interactive tree in the browser.
-METADATA_MAX_NODES: int = int(os.getenv("QIMCHI_METADATA_MAX_NODES", "100"))
-
-# Marks a section replaced by a size report rather than its own contents.
-METADATA_TOO_LARGE_KEY: str = "__qimchi_metadata_too_large__"
-
-
 def _expand_json_string(text: str) -> object | None:
     """
     Parse a value that is a JSON document stored as a string, else None.
@@ -1240,34 +1233,6 @@ def _expand_json_string(text: str) -> object | None:
         return None
     # Only containers: anything else would just be re-counted as a scalar.
     return parsed if isinstance(parsed, (dict, list)) else None
-
-
-def _count_nodes(value: object) -> int:
-    """
-    Count every container entry, expanding JSON held in strings.
-
-    Args:
-        value (object): The value to count nodes in.
-
-    Returns:
-        int: The total count of nodes in the value, including nested containers.
-
-    """
-    total = 0
-    stack = [value]
-    while stack:
-        current = stack.pop()
-        if isinstance(current, str):
-            expanded = _expand_json_string(current)
-            if expanded is not None:
-                stack.append(expanded)
-        elif isinstance(current, dict):
-            total += len(current)
-            stack.extend(current.values())
-        elif isinstance(current, (list, tuple)):
-            total += len(current)
-            stack.extend(current)
-    return total
 
 
 # The attrs surfaced by /load-attrs/ (the Explorer's metadata strip).
@@ -1291,6 +1256,7 @@ NON_QANARY_ATTR_KEYS: list = [
     "sample_name",
     "run_timestamp",
     "completed_timestamp",
+    "qimchi_db_uuid",
     # Quantify
     "tuid",
     "name",
@@ -1436,13 +1402,6 @@ async def get_metadata(path: PathData) -> Dict:
                     parsed_snapshot = _expand_json_string(value)
                     if parsed_snapshot is not None:
                         value = parsed_snapshot
-                node_count = _count_nodes(value)
-                if node_count > METADATA_MAX_NODES:
-                    value = {
-                        METADATA_TOO_LARGE_KEY: True,
-                        "nodeCount": node_count,
-                        "nodeLimit": METADATA_MAX_NODES,
-                    }
                 qcodes_meta[key] = value
             meta_dict: dict = {QCODES_META_SECTION: qcodes_meta}
         else:
@@ -1453,25 +1412,6 @@ async def get_metadata(path: PathData) -> Dict:
                 if key not in PREFERRED_META_KEYS and key not in INTERNAL_META_KEYS
             )
             meta_dict = {key: metadata[key] for key in ordered_keys}
-
-        # Budget each section on its own.
-        for key, value in list(meta_dict.items()):
-            # QCoDeS fields were budgeted individually above, so a large
-            # snapshot cannot hide the run name, GUID, timestamp, or sample.
-            if key == QCODES_META_SECTION:
-                continue
-            node_count = _count_nodes(value)
-            if node_count > METADATA_MAX_NODES:
-                logger.info(
-                    f"get_metadata | {raw_path}: section {key!r} has "
-                    f"{node_count} nodes (limit {METADATA_MAX_NODES}); "
-                    "sending a size report instead"
-                )
-                meta_dict[key] = {
-                    METADATA_TOO_LARGE_KEY: True,
-                    "nodeCount": node_count,
-                    "nodeLimit": METADATA_MAX_NODES,
-                }
 
         # Ensure metadata is JSON serializable
         meta_json = {}

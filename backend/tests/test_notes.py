@@ -281,6 +281,13 @@ async def test_qcodes_notes_are_keyed_by_qimchi_uuid_and_run(tmp_path, monkeypat
             PathData(path=f"{db_path}#run_id=7", uuid="qimchi-uid", run_id=7)
         )
     )["notes"] == "run seven"
+    pooled = await notes.load_notes(PathData(path=str(db_path), uuid="qimchi-uid"))
+    assert "## Run 7" in pooled["notes"]
+    assert "run seven" in pooled["notes"]
+    assert "## Run 8" in pooled["notes"]
+    assert "run eight" in pooled["notes"]
+    assert "database note" not in pooled["notes"]
+    assert pooled["last_saved"] is not None
     # QCoDeS notes stay in Qimchi's DB even when markdown export is enabled.
     assert list(tmp_path.rglob("*.md")) == []
 

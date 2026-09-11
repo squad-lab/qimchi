@@ -16,6 +16,7 @@ import asyncio
 import json
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -27,6 +28,7 @@ from .db_models import (
     Measurement,
     MeasurementState,
     MeasurementTag,
+    Note,
     Tag,
     _utcnow,
 )
@@ -133,6 +135,74 @@ def _source_format(path: str) -> str | None:
         ".csv": "csv",
         ".txt": "csv",
     }.get(suffix)
+
+
+def _qcodes_database_path(path: str) -> str | None:
+    """Return the database part of a QCoDeS run reference."""
+    disk_path, separator, fragment = path.partition("#")
+    if (
+        not separator
+        or not fragment.startswith("run_id=")
+        or Path(disk_path).suffix.lower() not in {".db", ".sqlite"}
+    ):
+        return None
+    return str(Path(disk_path))
+
+
+def _migrate_qcodes_run_notes(session: Session, db_path: str, db_uuid: str) -> None:
+    """Move notes keyed by per-run GUIDs onto the database UID."""
+    run_prefix = f"{db_path}#run_id="
+    run_rows = session.exec(
+        select(Measurement).where(Measurement.abs_path.startswith(run_prefix))
+    ).all()
+    for run_row in run_rows:
+        try:
+            path_run_id = int((run_row.abs_path or "").removeprefix(run_prefix))
+        except ValueError:
+            continue
+        legacy_notes = session.exec(select(Note).where(Note.uuid == run_row.uuid)).all()
+        for legacy in legacy_notes:
+            run_id = legacy.run_id or path_run_id
+            current = session.get(Note, (db_uuid, legacy.user_id, run_id))
+            if current is None:
+                session.add(
+                    Note(
+                        uuid=db_uuid,
+                        user_id=legacy.user_id,
+                        run_id=run_id,
+                        body=legacy.body,
+                        updated_at=legacy.updated_at,
+                    )
+                )
+            elif legacy.updated_at > current.updated_at:
+                current.body = legacy.body
+                current.updated_at = legacy.updated_at
+            session.delete(legacy)
+
+
+def _ensure_qcodes_database(path: str, attrs: dict) -> str | None:
+    """Return the persistent Qimchi UID shared by every run in one QCoDeS DB."""
+    db_path = _qcodes_database_path(path)
+    if db_path is None:
+        return None
+    with session_scope() as session:
+        measurement = session.exec(
+            select(Measurement).where(
+                Measurement.abs_path == db_path,
+                Measurement.uuid_origin == "qimchi-qcodes-db",
+            )
+        ).first()
+        if measurement is None:
+            measurement = Measurement(
+                uuid=str(uuid4()),
+                abs_path=db_path,
+                source_format="qcodes",
+                uuid_origin="qimchi-qcodes-db",
+            )
+            session.add(measurement)
+        measurement.last_opened = _utcnow()
+        _migrate_qcodes_run_notes(session, db_path, measurement.uuid)
+        return measurement.uuid
 
 
 def _upsert_measurement(
@@ -414,6 +484,11 @@ async def store_cached_attrs(path: str, attrs: dict, dataset=None) -> None:
     if not attrs:
         return
     try:
+        database_uuid = await asyncio.to_thread(_ensure_qcodes_database, path, attrs)
+        if database_uuid:
+            # Returned with /load-attrs/ so Notes can use one stable database
+            # identity plus the run integer, rather than each run's own GUID.
+            attrs["qimchi_db_uuid"] = database_uuid
         cacheable = _is_cacheable(path)
         # Already registered? Cheap indexed update, no identity work. QCoDeS
         # runs are deliberately not cacheable because their shared database
