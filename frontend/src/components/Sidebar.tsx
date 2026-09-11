@@ -89,7 +89,7 @@ const Sidebar = ({
         className={`${sidebarCollapsed ? "max-w-0" : ""}`}
         style={{ display: sidebarCollapsed ? "none" : "block" }}
       >
-        <div className="flex flex-col h-screen">
+        <div className="flex flex-col h-full">
           <div className="flex-1 overflow-hidden bg-gray-100">
             <div
               // z-[1500]: above Plotly's modebar (1000), which otherwise paints

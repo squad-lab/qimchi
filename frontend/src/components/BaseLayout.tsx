@@ -13,7 +13,7 @@ const BaseLayout = ({ rail, sidebar, viewer }: BaseLayoutProps) => {
     // The rail sits outside the PanelGroup: react-resizable-panels sizes panels
     // as percentages of the group's own width, so a non-Panel child throws that
     // maths off and the resize handle drifts (and eventually inverts).
-    <div className="flex h-screen w-full">
+    <div className="flex h-full w-full">
       {rail}
       <PanelGroup
         direction="horizontal"
