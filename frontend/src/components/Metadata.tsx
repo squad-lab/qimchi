@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, memo } from "react";
 import { PROD_BACKEND_URL } from "../config";
-import { Eye, EyeOff, Expand, Minimize, Search, X, BadgeInfo } from "lucide-react";
+import { Eye, EyeOff, Expand, Minimize, Search, X, BadgeInfo, TriangleAlert } from "lucide-react";
 import axios from "axios";
 import JsonView from "@uiw/react-json-view";
 import { BasketItem } from "./Basket";
@@ -10,13 +10,34 @@ import Tooltip from "./Tooltip";
 import { useToast } from "../hooks/useToast";
 import { parseMetadataValue } from "../utils/parseMetadataValue";
 
-// Type definitions for metadata
-interface Metadata {
-  Sweeps: Record<string, unknown>;
-  "Parameters Snapshot": Record<string, unknown>;
-  "Extra Metadata": Record<string, unknown>;
-  "Instruments Snapshot": Record<string, unknown>;
+// Whatever attrs the dataset carries. Not a fixed four keys: those are
+// qanary's sections, and a QCoDeS or Quantify run has its own entirely.
+// The backend orders them, qanary's first when present.
+type Metadata = Record<string, unknown>;
+
+// The backend refuses to ship metadata past a node budget and sends this size
+// report instead -- a QCoDeS station snapshot can be large enough to lock the
+// JSON view. Keep the key in step with METADATA_TOO_LARGE_KEY in dirtree.py.
+const METADATA_TOO_LARGE_KEY = "__qimchi_metadata_too_large__";
+
+interface MetadataSizeReport {
+  nodeCount: number;
+  nodeLimit: number;
 }
+
+const asSizeReport = (value: unknown): MetadataSizeReport | null => {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (record[METADATA_TOO_LARGE_KEY] !== true) return null;
+  return {
+    nodeCount: Number(record.nodeCount ?? 0),
+    nodeLimit: Number(record.nodeLimit ?? 0),
+  };
+};
+
+// Sections that are habitually huge, so they open collapsed regardless of
+// which acquisition tool wrote them.
+const BULKY_META_KEYS = new Set(["Instruments Snapshot", "snapshot", "Snapshot", "instruments"]);
 
 // The custom theme for the metadata JSON view
 const metadataCustomTheme = {
@@ -223,6 +244,9 @@ const Metadata = ({ basketItems }: MetadataProps) => {
       const parsedMetadata: Record<string, unknown> = {};
 
       for (const [sectionKey, sectionValue] of Object.entries(metadata)) {
+        // A withheld section has no contents to search, and indexing its size
+        // report would surface those keys as matches.
+        if (asSizeReport(sectionValue)) continue;
         parsedMetadata[sectionKey] = parseMetadataValue(sectionValue);
       }
 
@@ -745,20 +769,57 @@ const MetadataCard = memo(
             )}
             {metadata &&
               Object.entries(metadata).map(([key, value]) => {
+                const sectionReport = asSizeReport(value);
+
+                if (sectionReport) {
+                  return (
+                    <div key={key} className="mb-3">
+                      <strong className="text-sm">{key}:</strong>
+                      <div className="mt-1 rounded-md border border-amber-300 bg-amber-50 p-2">
+                        <div className="flex items-start gap-2">
+                          <TriangleAlert size={14} className="mt-0.5 shrink-0 text-amber-600" />
+                          <p className="text-xs text-gray-700">
+                            Cannot load -- Too many entries{" "}
+                            <span className="font-mono">
+                              {sectionReport.nodeCount.toLocaleString()}
+                            </span>{" "}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
                 const parsedValue = parseMetadataValue(value);
+                // JsonView enumerates whatever it is given, so handing it a
+                // string spells that string out one character per row, and a
+                // number shows as "{} 0 items". Only trees go to the tree view;
+                // scalars are printed. This only began to matter once every
+                // attr was returned -- qanary's four sections are all objects.
+                const isTree = typeof parsedValue === "object" && parsedValue !== null;
 
                 return (
                   <div key={key} className="mb-3">
                     <strong className="text-sm">{key}:</strong>
-                    <JsonView
-                      value={parsedValue as object}
-                      style={jsonTheme as React.CSSProperties}
-                      indentWidth={10}
-                      displayDataTypes={false}
-                      enableClipboard={true}
-                      displayObjectSize={true}
-                      collapsed={key === "Instruments Snapshot" ? 0 : 2}
-                    />
+                    {isTree ? (
+                      <JsonView
+                        value={parsedValue as object}
+                        style={jsonTheme as React.CSSProperties}
+                        indentWidth={10}
+                        displayDataTypes={false}
+                        enableClipboard={true}
+                        displayObjectSize={true}
+                        collapsed={BULKY_META_KEYS.has(key) ? 0 : 2}
+                      />
+                    ) : (
+                      <div className="mt-0.5 font-mono text-xs break-all text-gray-700">
+                        {parsedValue === "" || parsedValue === null ? (
+                          <span className="text-gray-400">empty</span>
+                        ) : (
+                          String(parsedValue)
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}

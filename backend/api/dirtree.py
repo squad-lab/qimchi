@@ -5,6 +5,7 @@ FastAPI endpoint for many Explorer/DirTree related operations.
 
 import asyncio
 import hashlib
+import json
 import os
 import stat as stat_module
 import subprocess  # Windows compat
@@ -1156,6 +1157,90 @@ async def _load_dataset_for_metadata(path_ref: str) -> xr.Dataset:
         raise HTTPException(status_code=400, detail=msg) from exc
 
 
+# Attrs the loader injects to record how Qimchi read the file.
+INTERNAL_META_KEYS: frozenset = frozenset(
+    {
+        "path",
+        "actual_path",
+        "loaded_from",
+        "grid_2d",
+        "qimchi_all_columns",
+        "qimchi_tabular",
+        "qimchi_tabular_row_dim",
+        "qimchi_quantify_gridded",
+        "qimchi_connect",
+        "qimchi_connect_rows",
+        "qimchi_connect_source",
+    }
+)
+
+# qanary's own sections. Listed first when present.
+# Other measurement utilities may not write them
+PREFERRED_META_KEYS: list = [
+    "Sweeps",
+    "Parameters Snapshot",
+    "Extra Metadata",
+    "Instruments Snapshot",
+]
+
+
+# Metadata is rendered as an interactive tree in the browser.
+METADATA_MAX_NODES: int = int(os.getenv("QIMCHI_METADATA_MAX_NODES", "100"))
+
+# Marks a section replaced by a size report rather than its own contents.
+METADATA_TOO_LARGE_KEY: str = "__qimchi_metadata_too_large__"
+
+
+def _expand_json_string(text: str) -> object | None:
+    """
+    Parse a value that is a JSON document stored as a string, else None.
+
+    Args:
+        text (str): The string to parse as JSON.
+
+    Returns:
+        object | None: The parsed JSON object if it's a dict or list, else None.
+
+    """
+    stripped = text.lstrip()
+    if not stripped.startswith(("{", "[")):
+        return None
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    # Only containers: anything else would just be re-counted as a scalar.
+    return parsed if isinstance(parsed, (dict, list)) else None
+
+
+def _count_nodes(value: object) -> int:
+    """
+    Count every container entry, expanding JSON held in strings.
+
+    Args:
+        value (object): The value to count nodes in.
+
+    Returns:
+        int: The total count of nodes in the value, including nested containers.
+
+    """
+    total = 0
+    stack = [value]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, str):
+            expanded = _expand_json_string(current)
+            if expanded is not None:
+                stack.append(expanded)
+        elif isinstance(current, dict):
+            total += len(current)
+            stack.extend(current.values())
+        elif isinstance(current, (list, tuple)):
+            total += len(current)
+            stack.extend(current)
+    return total
+
+
 # The attrs surfaced by /load-attrs/ (the Explorer's metadata strip).
 ATTR_KEYS: list = [
     "Timestamp",
@@ -1166,6 +1251,20 @@ ATTR_KEYS: list = [
     "Experiment Name",
     "Measurement ID",  # CONCERN: Already present in filename
     # "Instruments Snapshot"
+]
+
+# Identity and context attrs written by the other acquisition tools.
+NON_QANARY_ATTR_KEYS: list = [
+    # QCoDeS
+    "run_id",
+    "guid",
+    "exp_name",
+    "sample_name",
+    "run_timestamp",
+    "completed_timestamp",
+    # Quantify
+    "tuid",
+    "name",
 ]
 
 
@@ -1205,6 +1304,15 @@ def build_attrs_payload(data: xr.Dataset) -> Dict:
             if isinstance(value, (str, int, float, bool, list, dict))
             else str(value)
         )
+
+    # Scalars only: this payload is rendered as a flat key/value strip, so a
+    # nested snapshot would either break the render or bury it.
+    for key in NON_QANARY_ATTR_KEYS:
+        if key in attr_json:
+            continue
+        value = metadata.get(key)
+        if isinstance(value, (str, int, float, bool)):
+            attr_json[key] = value
 
     attr_json["independents"] = indeps
     attr_json["dependents"] = deps
@@ -1286,14 +1394,29 @@ async def get_metadata(path: PathData) -> Dict:
         if not isinstance(metadata, dict):
             metadata = dict(metadata)
 
-        meta_keys: list = [
-            "Sweeps",
-            "Parameters Snapshot",
-            "Extra Metadata",
-            "Instruments Snapshot",
-        ]
+        ordered_keys: list = [key for key in PREFERRED_META_KEYS if key in metadata]
+        ordered_keys += sorted(
+            key
+            for key in metadata
+            if key not in PREFERRED_META_KEYS and key not in INTERNAL_META_KEYS
+        )
 
-        meta_dict: dict = {key: metadata.get(key, "N/A") for key in meta_keys}
+        meta_dict: dict = {key: metadata[key] for key in ordered_keys}
+
+        # Budget each section on its own.
+        for key, value in list(meta_dict.items()):
+            node_count = _count_nodes(value)
+            if node_count > METADATA_MAX_NODES:
+                logger.info(
+                    f"get_metadata | {raw_path}: section {key!r} has "
+                    f"{node_count} nodes (limit {METADATA_MAX_NODES}); "
+                    "sending a size report instead"
+                )
+                meta_dict[key] = {
+                    METADATA_TOO_LARGE_KEY: True,
+                    "nodeCount": node_count,
+                    "nodeLimit": METADATA_MAX_NODES,
+                }
 
         # Ensure metadata is JSON serializable
         meta_json = {}
