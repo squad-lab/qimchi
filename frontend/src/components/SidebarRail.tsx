@@ -41,7 +41,7 @@ const railSections: {
 ];
 
 const railButtonBaseClass =
-  "relative flex h-9 w-9 shrink-0 items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8cc63e] focus-visible:ring-inset";
+  "relative flex h-9 w-full shrink-0 items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8cc63e] focus-visible:ring-inset";
 
 // Plain rail buttons opt into the dark hover remap; the active tab does not,
 // because it carries its own themed hover (see --qimchi-panel-title-*).
@@ -79,7 +79,7 @@ const SidebarRail = ({ onOpenHelp }: SidebarRailProps) => {
 
   return (
     // Always visible, even when the sidebar body is collapsed.
-    <div className="flex h-full w-9 shrink-0 flex-col overflow-y-auto border-r border-gray-300 bg-gray-100">
+    <div className="flex h-full w-9 shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-gray-300 bg-gray-100">
       {railSections.map(({ id, label, Icon, size, shortcut }) => {
         const isActive = activeSection === id && !sidebarCollapsed;
         return (
