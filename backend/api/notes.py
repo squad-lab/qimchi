@@ -46,31 +46,62 @@ def _parse_iso(ts: str | None) -> datetime:
     return _utcnow()
 
 
-def _db_get_note(uuid: str) -> Tuple[str, datetime] | None:
+def _db_get_note(uuid: str, run_id: int = 0) -> Tuple[str, datetime] | None:
     """Return (body, updated_at) for a measurement note, or None if absent."""
     with session_scope() as session:
-        note = session.get(Note, (uuid, LOCAL_USER_ID))
+        note = session.get(Note, (uuid, LOCAL_USER_ID, run_id))
         if note is None:
             return None
         return note.body, note.updated_at
 
 
-def _db_upsert_note(uuid: str, body: str, when: datetime | None = None) -> datetime:
+def _db_upsert_note(
+    uuid: str, body: str, when: datetime | None = None, run_id: int = 0
+) -> datetime:
     """Insert or update a measurement note; returns the stored timestamp."""
     ts = when or _utcnow()
     statement = sqlite_insert(Note).values(
         uuid=uuid,
         user_id=LOCAL_USER_ID,
+        run_id=run_id,
         body=body,
         updated_at=ts,
     )
     statement = statement.on_conflict_do_update(
-        index_elements=["uuid", "user_id"],
+        index_elements=["uuid", "user_id", "run_id"],
         set_={"body": body, "updated_at": ts},
     )
     with session_scope() as session:
         session.exec(statement)
     return ts
+
+
+def _note_db_identity(
+    path_ref: str, uuid: str | None = None, run_id: int | None = None
+) -> tuple[str, int]:
+    """Resolve the Qimchi UUID and optional QCoDeS run key for a note."""
+    clean_uuid = (uuid or "").strip()
+    if _is_qcodes_reference(path_ref):
+        match = re.search(r"(?:^|&)run_id=(\d+)(?:&|$)", path_ref.partition("#")[2])
+        path_run_id = int(match.group(1)) if match else None
+        if run_id is not None and path_run_id is not None and run_id != path_run_id:
+            raise HTTPException(
+                status_code=400,
+                detail="QCoDeS note run_id does not match the dataset path",
+            )
+        if not clean_uuid:
+            raise HTTPException(
+                status_code=400,
+                detail="QCoDeS notes require the measurement UUID registered in Qimchi",
+            )
+        return clean_uuid, run_id or path_run_id or 0
+    return clean_uuid or Path(path_ref).stem, run_id or 0
+
+
+def _is_qcodes_reference(path: str) -> bool:
+    """Return whether a note target is a QCoDeS database or one of its runs."""
+    disk_path = path.split("#", 1)[0]
+    return Path(disk_path).suffix.lower() in {".db", ".sqlite"}
 
 
 FRONTMATTER_TEMPLATE = '---\nLast Saved: "{timestamp}"\nFilename: "{filename}"\n\n---\n'
@@ -505,6 +536,7 @@ async def load_notes(path: PathData) -> Dict:
         sample_dir = None
         dataset_uuid, _, notes_path = _measurement_notes_paths(resolved_path)
         frontmatter_filename = dataset_uuid
+        note_uuid, note_run_id = _note_db_identity(path.path, path.uuid, path.run_id)
 
     logger.debug(
         f"load_notes | POST scope={path.note_scope} path={resolved_path}, notes_path={notes_path}"
@@ -514,13 +546,13 @@ async def load_notes(path: PathData) -> Dict:
     # the legacy .md sidecar (then served from the DB).
     if path.note_scope != "sample":
         try:
-            db = await asyncio.to_thread(_db_get_note, dataset_uuid)
+            db = await asyncio.to_thread(_db_get_note, note_uuid, note_run_id)
             if db is not None:
                 body, updated = db
                 return {
                     "notes": body,
                     "last_saved": updated.isoformat(),
-                    "filename": dataset_uuid,
+                    "filename": frontmatter_filename,
                 }
             # Import an existing sidecar once, if present.
             if notes_path.exists() and notes_path.is_file():
@@ -528,20 +560,22 @@ async def load_notes(path: PathData) -> Dict:
                     file_text = f.read()
                 body, last_saved, filename = _parse_frontmatter(file_text)
                 await asyncio.to_thread(
-                    _db_upsert_note, dataset_uuid, body or "", _parse_iso(last_saved)
+                    _db_upsert_note,
+                    note_uuid,
+                    body or "",
+                    _parse_iso(last_saved),
+                    note_run_id,
                 )
-                logger.debug(
-                    f"load_notes | imported sidecar into DB for {dataset_uuid}"
-                )
+                logger.debug(f"load_notes | imported sidecar into DB for {note_uuid}")
                 return {
                     "notes": body,
                     "last_saved": last_saved,
-                    "filename": filename or dataset_uuid,
+                    "filename": filename or frontmatter_filename,
                 }
             # No note yet. Optionally seed an empty .md mirror (file workflow).
-            if _MD_EXPORT_ENABLED:
+            if _MD_EXPORT_ENABLED and not _is_qcodes_reference(path.path):
                 try:
-                    _ensure_notes_file(notes_path, dataset_uuid)
+                    _ensure_notes_file(notes_path, frontmatter_filename)
                 except Exception:
                     logger.debug(
                         "load_notes | could not seed .md sidecar (DB-only ok)",
@@ -550,7 +584,7 @@ async def load_notes(path: PathData) -> Dict:
             return {
                 "notes": "",
                 "last_saved": None,
-                "filename": dataset_uuid,
+                "filename": frontmatter_filename,
                 "note_scope": "measurement",
                 "notes_path": str(notes_path),
             }
@@ -621,6 +655,7 @@ async def save_notes(data: NotesData) -> Dict:
     else:
         dataset_uuid, notes_dir, notes_path = _measurement_notes_paths(resolved_path)
         frontmatter_filename = dataset_uuid
+        note_uuid, note_run_id = _note_db_identity(data.path, data.uuid, data.run_id)
 
     logger.debug(
         f"save_notes | POST scope={data.note_scope} path={resolved_path}, notes_path={notes_path}"
@@ -631,16 +666,22 @@ async def save_notes(data: NotesData) -> Dict:
     if data.note_scope != "sample":
         now = datetime.now(timezone.utc)
         try:
-            prev = await asyncio.to_thread(_db_get_note, dataset_uuid)
+            prev = await asyncio.to_thread(_db_get_note, note_uuid, note_run_id)
             previous_measurement_body = prev[0].rstrip() if prev else None
-            await asyncio.to_thread(_db_upsert_note, dataset_uuid, data.notes or "", now)
+            await asyncio.to_thread(
+                _db_upsert_note,
+                note_uuid,
+                data.notes or "",
+                now,
+                note_run_id,
+            )
         except Exception as e:
             logger.error(f"save_notes | DB error: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Error saving notes: {str(e)}")
 
         frontmatter = _make_frontmatter(dataset_uuid, now)
         sample_rollup = None
-        if _MD_EXPORT_ENABLED:
+        if _MD_EXPORT_ENABLED and not _is_qcodes_reference(data.path):
             try:
                 notes_dir.mkdir(parents=True, exist_ok=True)
                 with open(notes_path, "w", encoding="utf-8") as f:
@@ -660,12 +701,14 @@ async def save_notes(data: NotesData) -> Dict:
                     exc_info=True,
                 )
 
-        logger.debug(f"save_notes | Saved notes to DB for {dataset_uuid}")
+        logger.debug(
+            f"save_notes | Saved notes to DB for {note_uuid}, run {note_run_id}"
+        )
         return {
             "message": "Notes saved successfully.",
             "path": str(notes_path),
             "last_saved": now.isoformat(),
-            "filename": dataset_uuid,
+            "filename": frontmatter_filename,
             "note_scope": "measurement",
             "frontmatter": frontmatter,
             "sample_rollup": sample_rollup,

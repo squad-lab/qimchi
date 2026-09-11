@@ -7,6 +7,7 @@ import MarkdownEditor from "./MarkdownEditor";
 import { BasketItem } from "./Basket";
 import { PROD_BACKEND_URL } from "../config";
 import { themeClasses } from "../theme";
+import { isDatasetPath, isSqliteContainerPath } from "../utils/datasetPaths";
 
 interface DroppedItem {
   id: string;
@@ -76,6 +77,14 @@ export default function Notes({
     [],
   );
 
+  const getRunId = useCallback((item: BasketItem): number | undefined => {
+    const value = (item.attributes as Record<string, unknown> | undefined)?.run_id;
+    if (typeof value === "number" && Number.isInteger(value) && value > 0) return value;
+    if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+    const match = item.path.match(/#run_id=(\d+)$/i);
+    return match ? Number(match[1]) : undefined;
+  }, []);
+
   const inferSamplePath = useCallback(
     (measurementPath: string): string => {
       const normalized = normalizePath(measurementPath);
@@ -122,7 +131,8 @@ export default function Notes({
   const datasetItems = useMemo(
     () =>
       basketItems.filter(
-        (item) => item.type === "file" && /\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i.test(item.path),
+        (item) =>
+          item.type === "file" && isDatasetPath(item.path) && !isSqliteContainerPath(item.path),
       ),
     [basketItems],
   );
@@ -175,9 +185,14 @@ export default function Notes({
       const group = sampleGroups.find((sample) =>
         sample.items.some((item) => item.id === selectedMeasurement.id),
       );
+      const qcodesRun = /\.(db|sqlite)#run_id=\d+$/i.test(selectedMeasurement.path);
+      const qcodesUuid = getAttrValue(selectedMeasurement, "guid", "guid");
+      if (qcodesRun && !qcodesUuid) return null;
       return {
         scope: "measurement" as NoteScope,
         path: selectedMeasurement.path,
+        uuid: qcodesUuid,
+        runId: getRunId(selectedMeasurement),
         samplePath: group?.samplePath,
         sampleName: group?.sampleName,
         cryostatName: group?.cryostatName,
@@ -198,7 +213,7 @@ export default function Notes({
     }
 
     return null;
-  }, [selectedScope, selectedMeasurement, selectedSample, sampleGroups]);
+  }, [selectedScope, selectedMeasurement, selectedSample, sampleGroups, getAttrValue, getRunId]);
 
   const handleSelectionChange = useCallback(
     (itemId: string | null) => {
@@ -291,6 +306,8 @@ export default function Notes({
       samplePath?: string,
       sampleName?: string,
       cryostatName?: string,
+      uuid?: string,
+      runId?: number,
     ) => {
       setLoading(true);
       setError(null);
@@ -309,6 +326,8 @@ export default function Notes({
           {
             path,
             note_scope: scope,
+            uuid,
+            run_id: runId,
             sample_path: samplePath,
             sample_name: sampleName,
             cryostat_name: cryostatName,
@@ -388,6 +407,8 @@ export default function Notes({
         selectedTarget.samplePath,
         selectedTarget.sampleName,
         selectedTarget.cryostatName,
+        selectedTarget.uuid,
+        selectedTarget.runId,
       );
     };
 
@@ -424,6 +445,8 @@ export default function Notes({
           path: selectedTarget.path,
           notes,
           note_scope: selectedTarget.scope,
+          uuid: selectedTarget.uuid,
+          run_id: selectedTarget.runId,
           sample_path: selectedTarget.samplePath,
           sample_name: selectedTarget.sampleName,
           cryostat_name: selectedTarget.cryostatName,
@@ -502,6 +525,8 @@ export default function Notes({
         selectedTarget.samplePath,
         selectedTarget.sampleName,
         selectedTarget.cryostatName,
+        selectedTarget.uuid,
+        selectedTarget.runId,
       );
     } else {
       setNotes("");

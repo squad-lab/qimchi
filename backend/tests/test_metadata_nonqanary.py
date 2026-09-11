@@ -69,21 +69,31 @@ async def test_qcodes_run_surfaces_its_own_attrs(monkeypatch):
         _dataset(
             {
                 "run_id": 7,
+                "ds_name": "sweep",
+                "exp_name": "transport",
                 "guid": "aaaa-bbbb",
+                "run_timestamp": "2026-09-11 10:00:00+0000",
+                "sample_name": "device-a",
                 "qcodes_db_path": "/data/experiments.db",
-                "snapshot": {"station": {"instruments": {}}},
+                "snapshot": json.dumps({"station": {"instruments": {}}}),
+                "completed_timestamp": "not requested",
             }
         ),
     )
 
     out = await dirtree.get_metadata(PathData(path="/tmp/experiments.db#run_id=7"))
 
-    assert out["run_id"] == 7
-    assert out["guid"] == "aaaa-bbbb"
-    assert out["snapshot"] == {"station": {"instruments": {}}}
+    assert set(out) == {dirtree.QCODES_META_SECTION}
+    qcodes = out[dirtree.QCODES_META_SECTION]
+    assert list(qcodes) == list(dirtree.QCODES_META_KEYS)
+    assert qcodes["ds_name"] == "sweep"
+    assert qcodes["guid"] == "aaaa-bbbb"
+    assert qcodes["snapshot"] == {"station": {"instruments": {}}}
+    assert "run_id" not in qcodes
+    assert "completed_timestamp" not in qcodes
     # No placeholder rows for sections this dataset never had.
     assert "Sweeps" not in out
-    assert "N/A" not in out.values()
+    assert "N/A" not in qcodes.values()
 
 
 @pytest.mark.asyncio
@@ -233,18 +243,26 @@ async def test_only_the_oversized_section_is_withheld(monkeypatch):
     )
     _patch_loader(
         monkeypatch,
-        _dataset({"run_id": 8, "guid": "aaaa-bbbb", "snapshot": snapshot}),
+        _dataset(
+            {
+                "run_id": 8,
+                "ds_name": "sweep",
+                "guid": "aaaa-bbbb",
+                "snapshot": snapshot,
+            }
+        ),
     )
     monkeypatch.setattr(dirtree, "METADATA_MAX_NODES", 100)
 
     out = await dirtree.get_metadata(PathData(path="/tmp/experiments.db#run_id=8"))
 
     # The small sections come through untouched.
-    assert out["run_id"] == 8
-    assert out["guid"] == "aaaa-bbbb"
+    qcodes = out[dirtree.QCODES_META_SECTION]
+    assert qcodes["ds_name"] == "sweep"
+    assert qcodes["guid"] == "aaaa-bbbb"
 
     # Only the snapshot is replaced, and by a report of its real size.
-    report = out["snapshot"]
+    report = qcodes["snapshot"]
     assert report[dirtree.METADATA_TOO_LARGE_KEY] is True
     assert report["nodeCount"] > 100
     assert report["nodeLimit"] == 100

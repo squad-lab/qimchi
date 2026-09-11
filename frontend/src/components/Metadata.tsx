@@ -37,7 +37,13 @@ const asSizeReport = (value: unknown): MetadataSizeReport | null => {
 
 // Sections that are habitually huge, so they open collapsed regardless of
 // which acquisition tool wrote them.
-const BULKY_META_KEYS = new Set(["Instruments Snapshot", "snapshot", "Snapshot", "instruments"]);
+const BULKY_META_KEYS = new Set([
+  "Instruments Snapshot",
+  "QCoDeS Metadata",
+  "snapshot",
+  "Snapshot",
+  "instruments",
+]);
 
 // The custom theme for the metadata JSON view
 const metadataCustomTheme = {

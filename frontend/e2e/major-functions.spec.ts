@@ -32,6 +32,13 @@ const datasets = [
     tags: ["netcdf"],
   },
   {
+    id: "dataset-qcodes-run",
+    name: "7 | transport",
+    path: "C:\\measurements\\runs.db#run_id=7",
+    type: "file",
+    tags: ["qcodes", "qcodes-run", "sqlite"],
+  },
+  {
     id: "sample-folder",
     name: "sample-a",
     path: "C:\\measurements\\sample-a",
@@ -66,6 +73,22 @@ async function mockApplicationApi(page: Page): Promise<ApiState> {
       state.loadRequests.push(request);
       await route.fulfill({ json: datasets });
     } else if (path === "/load-attrs/") {
+      const requestPath = request.postDataJSON()?.path as string;
+      if (requestPath?.includes("#run_id=7")) {
+        await route.fulfill({
+          json: {
+            ds_name: "transport",
+            exp_name: "device test",
+            guid: "qcodes-guid-7",
+            run_id: 7,
+            run_timestamp: "2026-09-11 10:00:00+0000",
+            sample_name: "sample-a",
+            independents: ["gate"],
+            dependents: ["signal"],
+          },
+        });
+        return;
+      }
       await route.fulfill({
         json: {
           Timestamp: "2025-04-09T19:25:34.311282",
@@ -289,6 +312,27 @@ test("loads searchable metadata and saves measurement notes", async ({ page }) =
   expect(state.saveNotesRequests[0].postDataJSON()).toMatchObject({
     path: "C:\\measurements\\run.nc",
     notes: "Updated from Playwright",
+    note_scope: "measurement",
+  });
+});
+
+test("saves QCoDeS notes against the Qimchi UID and run integer", async ({ page }) => {
+  const state = await mockApplicationApi(page);
+  await loadExplorer(page);
+  await addDatasetToBasket(page, "7 | transport");
+
+  await page.getByRole("button", { name: "Notes", exact: true }).click();
+  const editor = page.getByPlaceholder(/Start typing your notes here/);
+  await expect(editor).toHaveValue("Initial measurement note");
+  await editor.fill("Run seven note");
+  await editor.press("Control+s");
+
+  await expect.poll(() => state.saveNotesRequests.length).toBe(1);
+  expect(state.saveNotesRequests[0].postDataJSON()).toMatchObject({
+    path: "C:\\measurements\\runs.db#run_id=7",
+    uuid: "qcodes-guid-7",
+    run_id: 7,
+    notes: "Run seven note",
     note_scope: "measurement",
   });
 });
