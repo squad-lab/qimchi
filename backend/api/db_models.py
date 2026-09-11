@@ -3,7 +3,7 @@ SQLModel table definitions for the Qimchi database (``~/.qimchi/qimchi.db``).
 
 Tables: ``users``, ``measurements``, ``measurement_state`` (hearts/trash),
 ``notes``, ``tags`` and ``measurement_tags``. Alembic owns the schema
-(``backend/migrations``, head ``0004_metadata_cache``) -- changing a model
+(``backend/migrations``, head ``0006_dataset_scan_cache``) -- changing a model
 here needs a matching migration, or an existing database will not match.
 
 - Everything keys on the measurement UUID, never on ``abs_path`` -- so future
@@ -130,3 +130,28 @@ class MeasurementTag(SQLModel, table=True):
 
     uuid: str = Field(primary_key=True)
     tag_id: int = Field(primary_key=True, foreign_key="tags.id", index=True)
+
+
+class DatasetScanCache(SQLModel, table=True):
+    """
+    Per-dataset values that a directory scan would otherwise recompute.
+
+    Keyed on ``abs_path`` rather than the measurement UUID, on purpose: this is
+    a node-local scratch cache for the Explorer, and resolving a UUID means
+    opening the dataset -- the very cost the cache exists to avoid. Nothing
+    user-owned lives here, so losing the table only costs a slower scan.
+
+    ``fingerprint`` is the store directory's stat signature. A zarr store is
+    thousands of chunk files, so computing its size and modification time is
+    the dominant per-dataset cost of a scan; both are reused while the
+    fingerprint matches, and recomputed the moment it does not.
+
+    """
+
+    __tablename__ = "dataset_scan_cache"
+
+    abs_path: str = Field(primary_key=True)
+    fingerprint: str
+    size_bytes: int = 0
+    last_modified: float = 0.0
+    updated_at: datetime = Field(default_factory=_utcnow)
