@@ -670,7 +670,9 @@ export default function Notes({
           {/* Row 1: Sample + Measurement selectors */}
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="block text-[11px] text-gray-600 mb-1">Sample</label>
+              <label className="block text-[11px] text-[var(--qimchi-panel-title-fg)] opacity-80 mb-1">
+                Sample
+              </label>
               <select
                 value={selectedSampleKey || ""}
                 aria-label="Select sample notes"
@@ -698,7 +700,9 @@ export default function Notes({
             </div>
 
             <div>
-              <label className="block text-[11px] text-gray-600 mb-1">Measurement</label>
+              <label className="block text-[11px] text-[var(--qimchi-panel-title-fg)] opacity-80 mb-1">
+                Measurement
+              </label>
               <select
                 value={selectedScope === "sample" ? "__sample__" : selectedItemId || ""}
                 aria-label="Select measurement notes"
@@ -734,7 +738,7 @@ export default function Notes({
           </div>
 
           {selectedTarget && (
-            <div className="text-[11px] text-gray-500 truncate">
+            <div className="text-[11px] text-[var(--qimchi-panel-title-fg)] opacity-75 truncate">
               {selectedScope === "sample"
                 ? `${selectedSample?.cryostatName}/${selectedSample?.sampleName} -> ${selectedSample?.pooledFilename}`
                 : selectedTarget.path}
@@ -744,14 +748,20 @@ export default function Notes({
           {/* Row 2: Left Last Saved, Right Autosave indicator */}
           <div className="flex items-center justify-between">
             {datasetItems.length > 0 && (
-              <div className="text-xs text-gray-600">
+              <div className="text-xs text-[var(--qimchi-panel-title-fg)]">
                 {lastSavedAt ? (
                   <span>
-                    <span className="font-medium text-gray-700 mr-2">Last Saved:</span>
-                    <span className="text-gray-500">{formatLastSaved(lastSavedAt)}</span>
+                    <span className="font-medium text-[var(--qimchi-panel-title-fg)] mr-2">
+                      Last Saved:
+                    </span>
+                    <span className="text-[var(--qimchi-panel-title-fg)] opacity-75">
+                      {formatLastSaved(lastSavedAt)}
+                    </span>
                   </span>
                 ) : (
-                  <span className="text-gray-500">Last Saved: -</span>
+                  <span className="text-[var(--qimchi-panel-title-fg)] opacity-75">
+                    Last Saved: -
+                  </span>
                 )}
               </div>
             )}
@@ -759,7 +769,7 @@ export default function Notes({
             <div>
               {canEdit && (
                 <div className="flex items-center space-x-3">
-                  <div className="flex items-center space-x-1 text-xs text-gray-600 bg-white/50 px-2 py-1 rounded-md">
+                  <div className="flex items-center space-x-1 text-xs text-[var(--qimchi-panel-title-fg)] bg-white/50 dark:bg-black/20 px-2 py-1 rounded-md">
                     {(() => {
                       const { icon, text } = getSaveIconAndText();
                       return (
@@ -771,7 +781,9 @@ export default function Notes({
                     })()}
                   </div>
                   {isSwitchingSelection && (
-                    <span className="text-[10px] text-gray-500">saving before switch...</span>
+                    <span className="text-[10px] text-[var(--qimchi-panel-title-fg)] opacity-75">
+                      saving before switch...
+                    </span>
                   )}
                 </div>
               )}
