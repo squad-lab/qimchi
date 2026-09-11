@@ -46,20 +46,14 @@ const railButtonBaseClass =
 const railPlainButtonClass =
   "qimchi-dark-hover-plain text-gray-500 hover:bg-gray-200 hover:text-gray-700";
 
-// The accordion rail. It lives OUTSIDE the resizable PanelGroup on purpose:
-// react-resizable-panels converts drag pixels to percentages against the
-// group's own width, so any non-Panel child silently skews that maths and the
-// resize handle drifts -- eventually inverting direction.
 const SidebarRail = ({ onOpenHelp }: SidebarRailProps) => {
-  const { sidebarCollapsed, activeSection, setSidebarCollapsed, toggleSection, setActiveSection } =
+  const { sidebarCollapsed, activeSection, setSidebarCollapsed, setActiveSection } =
     useSidebarStore();
   const { theme, toggleTheme } = useThemeStore();
   const { openLogModal } = useToast();
   const isDark = theme === "dark";
 
-  // Alt+1..4 open a pane directly, in rail order. Unlike clicking the rail
-  // these never collapse: pressing the shortcut for the pane you are on is a
-  // no-op rather than a surprise.
+  // Alt+1..4 open a pane directly, in rail order.
   useShortcut("show-explorer", () => setActiveSection("explorer"));
   useShortcut("show-metadata", () => setActiveSection("metadata"));
   useShortcut("show-notes", () => setActiveSection("notes"));
@@ -71,11 +65,10 @@ const SidebarRail = ({ onOpenHelp }: SidebarRailProps) => {
       {railSections.map(({ id, label, Icon, size, shortcut }) => {
         const isActive = activeSection === id && !sidebarCollapsed;
         return (
-          // The rail is icon-only, so the tooltip carries the section name and
-          // nothing else -- the toggle behaviour is documented in Help.
+          // The rail is icon-only, so the tooltip carries the section name.
           <Tooltip key={id} content={`${label} (${shortcut})`} position="right">
             <button
-              onClick={() => toggleSection(id)}
+              onClick={() => setActiveSection(id)}
               className={`${railButtonBaseClass} ${
                 isActive
                   ? "bg-[var(--qimchi-panel-title-bg)] text-[var(--qimchi-panel-title-fg)] hover:bg-[var(--qimchi-panel-title-bg-hover)]"
