@@ -5,6 +5,7 @@ import { X, Play, Eye, EyeOff, Trash2, Grid, ChartLine, ListMusic } from "lucide
 import Tooltip from "./Tooltip";
 import SectionRibbon, { ribbonButtonClass } from "./SectionRibbon";
 import { useShortcut } from "../hooks/useGlobalShortcuts";
+import { useSidebarStore } from "../stores/sidebarStore";
 import { useToast } from "../hooks/useToast";
 
 export interface PlotField {
@@ -56,9 +57,16 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
     const [plotType, setPlotType] = useState<PlotType>("LinePlot");
     const [isPlotTypeDropdownOpen, setIsPlotTypeDropdownOpen] = useState(false);
     const [dragOverField, setDragOverField] = useState<"x" | "y" | "z" | null>(null);
-    const [isExpanded, setIsExpanded] = useState(true);
+    // Persisted, so a refresh keeps the Composer the way it was left.
+    const composerCollapsed = useSidebarStore((state) => state.composerCollapsed);
+    const setComposerCollapsed = useSidebarStore((state) => state.setComposerCollapsed);
+    const isExpanded = !composerCollapsed;
+    const toggleExpanded = useCallback(
+      () => setComposerCollapsed(!composerCollapsed),
+      [composerCollapsed, setComposerCollapsed],
+    );
 
-    useShortcut("toggle-composer", () => setIsExpanded((expanded) => !expanded));
+    useShortcut("toggle-composer", toggleExpanded);
     const [draggedFieldType, setDraggedFieldType] = useState<"independent" | "dependent" | null>(
       null,
     );
@@ -790,7 +798,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
             position="left"
           >
             <button
-              onClick={() => setIsExpanded(!isExpanded)}
+              onClick={toggleExpanded}
               className={ribbonButtonClass}
               aria-label={isExpanded ? "Collapse composer" : "Expand composer"}
             >
