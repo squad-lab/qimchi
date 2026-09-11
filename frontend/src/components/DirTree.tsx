@@ -1291,8 +1291,11 @@ const DirTree = ({
     );
   }
 
-  // Show loading state
-  if (isLoading) {
+  // Show loading state, but only on a first load: once there is a tree on
+  // screen a refresh keeps it, and the spinning Refresh icon in the toolbar
+  // is the busy signal. Blanking the pane on every refresh cost the scroll
+  // position and a lot more space than a scan costs time.
+  if (isLoading && apiData.length === 0) {
     return (
       <div className="p-4 text-center text-gray-500">
         <div className="mb-2">
@@ -1773,7 +1776,7 @@ const DirTree = ({
       </div>
 
       {/* Scrollable Tree View - Always Virtualized */}
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0" aria-busy={isLoading}>
         <VirtualizedTreeView
           tree={tree}
           treeKey={treeKey}
