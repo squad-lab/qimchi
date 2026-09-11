@@ -183,7 +183,7 @@ const DirTree = ({
     isExpanded,
     showLiveOnly,
     hiddenLiveMeasurementIds = [],
-    collapsedNodeIds = [],
+    expandedNodeIds = [],
     // lastPath, // TODO: Use this to track the last loaded path
   } = componentStates.dirTree;
 
@@ -598,12 +598,16 @@ const DirTree = ({
     };
   }, [filterHiddenLiveMeasurements, showLiveOnly]);
 
-  // Read through a ref so the expand effect does not re-run (and re-expand)
-  // every time the user collapses a folder.
-  const collapsedNodeIdsRef = useRef<Set<string>>(new Set(collapsedNodeIds));
+  // Held in a ref so the toolbar handlers can read the current set without
+  // making every expansion a dependency of the effects below.
+  const expandedNodeIdsRef = useRef<Set<string>>(new Set(expandedNodeIds));
   useEffect(() => {
-    collapsedNodeIdsRef.current = new Set(collapsedNodeIds);
-  }, [collapsedNodeIds]);
+    expandedNodeIdsRef.current = new Set(expandedNodeIds);
+  }, [expandedNodeIds]);
+
+  // Seeded once, when the tree is created: initialState is not re-read, and
+  // DirTree remounts per path anyway (Explorer keys it on the folder).
+  const initialExpandedItems = useRef<string[]>(["root", ...expandedNodeIds]);
 
   // Signature that changes only when a library filter is active AND the
   // relevant heart/trash state changes.
@@ -793,7 +797,9 @@ const DirTree = ({
   const tree = useTree<TreeNode>({
     rootItemId: "root",
     initialState: {
-      expandedItems: ["root"], // NOTE: Always start with root expanded
+      // Root, plus whatever the user had open last time. Everything else loads
+      // collapsed, so only expanded subtrees are ever materialised.
+      expandedItems: initialExpandedItems.current,
     },
     // Use proxy instances for better performance with large datasets
     instanceBuilder: buildProxiedInstance,
@@ -852,67 +858,30 @@ const DirTree = ({
       propMemoizationFeature, // For better memoization of props
     ],
   });
-  // Force tree refresh when switching to/from chrono mode
+  // headless-tree caches the flattened item structure and only rebuilds it
+  // when asked. useTree calls rebuildTree() once on mount; later renders call
+  // setConfig(), which swaps the dataLoader but leaves that cache alone. Since
+  // the directory loads asynchronously, the structure built at mount is empty
+  // and nothing ever asks the loader again -- which is why the tree used to
+  // render nothing until something called collapseAll() (it ends with
+  // rebuildTree()). Rebuilding on the structure itself is the supported way,
+  // and it leaves expansion state alone, so collapsed folders stay collapsed
+  // and only expanded subtrees are materialised.
   useEffect(() => {
-    console.log("Sort mode changed to:", sortBy);
-    // Only force refresh when switching to/from chrono mode specifically
-    // For regular sorting, let the processedData memo handle the re-sorting
-    const timeoutId = setTimeout(() => {
-      if (sortBy === "chrono") {
-        // Switching to chrono mode - collapse everything since we show flat list
-        tree.collapseAll();
-        updateDirTreeState({ isExpanded: false });
-      }
-      // For other modes, don't interfere - let normal expansion logic handle it
-    }, 10);
+    tree.rebuildTree();
+  }, [tree, rootIds, childrenById]);
 
-    return () => clearTimeout(timeoutId);
-  }, [sortBy, tree, updateDirTreeState]);
-
-  // Auto-expand tree when new data is loaded
-  useEffect(() => {
-    if (rootNodes.length > 0) {
-      // Small delay to ensure tree is fully initialized
-      const timeoutId = setTimeout(() => {
-        // Don't expand in chrono mode since we only have leaf nodes
-        if (sortBy !== "chrono") {
-          // Force a collapse/expand cycle to ensure tree shows items
-          tree.collapseAll();
-          setTimeout(() => {
-            tree.expandAll();
-            // expandAll is what makes the tree materialise at all, so the
-            // folders the user had collapsed are re-collapsed afterwards
-            // rather than never expanded. Snapshot the items first: collapsing
-            // changes the list being walked.
-            const remembered = collapsedNodeIdsRef.current;
-            if (remembered.size > 0) {
-              tree
-                .getItems()
-                .filter((item) => remembered.has(item.getId()))
-                .forEach((item) => item.collapse());
-            }
-            updateDirTreeState({ isExpanded: true });
-          }, 50);
-        } else {
-          // In chrono mode, we don't need expansion since all items are files
-          updateDirTreeState({ isExpanded: false });
-        }
-      }, 100); // Increase delay to 100ms to ensure tree is ready
-
-      return () => clearTimeout(timeoutId);
-    }
-  }, [rootNodes, tree, sortBy, updateDirTreeState]);
-  // Persist per-folder collapse so a refresh does not re-open everything.
+  // Persist which folders are open so a refresh restores them.
   const updateExpandedNodeState = useCallback(
     (nodeId: string, nextExpanded: boolean) => {
-      const next = new Set(collapsedNodeIdsRef.current);
+      const next = new Set(expandedNodeIdsRef.current);
       if (nextExpanded) {
-        next.delete(nodeId);
-      } else {
         next.add(nodeId);
+      } else {
+        next.delete(nodeId);
       }
-      collapsedNodeIdsRef.current = next;
-      updateDirTreeState({ collapsedNodeIds: [...next] });
+      expandedNodeIdsRef.current = next;
+      updateDirTreeState({ expandedNodeIds: [...next] });
     },
     [updateDirTreeState],
   );
@@ -1443,19 +1412,20 @@ const DirTree = ({
                   onClick={() => {
                     if (isExpanded) {
                       tree.collapseAll();
-                      const allFolderIds = tree
-                        .getItems()
-                        .filter((item) => item.isFolder())
-                        .map((item) => item.getId());
-                      collapsedNodeIdsRef.current = new Set(allFolderIds);
-                      updateDirTreeState({
-                        isExpanded: false,
-                        collapsedNodeIds: allFolderIds,
-                      });
+                      expandedNodeIdsRef.current = new Set();
+                      updateDirTreeState({ isExpanded: false, expandedNodeIds: [] });
                     } else {
                       tree.expandAll();
-                      collapsedNodeIdsRef.current = new Set();
-                      updateDirTreeState({ isExpanded: true, collapsedNodeIds: [] });
+                      // expandAll resolves children as it goes, so read the
+                      // opened set back once it settles rather than guessing.
+                      setTimeout(() => {
+                        const opened = tree
+                          .getItems()
+                          .filter((item) => item.isFolder() && item.isExpanded())
+                          .map((item) => item.getId());
+                        expandedNodeIdsRef.current = new Set(opened);
+                        updateDirTreeState({ isExpanded: true, expandedNodeIds: opened });
+                      }, 50);
                     }
                   }}
                   disabled={sortBy === "chrono"}
