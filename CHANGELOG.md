@@ -48,6 +48,8 @@
 - [Fix] Long colorbar labels are no longer cut off at the edge of the plot, on screen or in exports. The space reserved for the label now follows its length, and a very long one is set slightly smaller instead of taking the plot with it.
 - [Fix] Hovering a point shows plain axis labels instead of the raw LaTeX behind them.
 - [Fix] The colorbar of a running measurement no longer shifts the plot sideways as values grow, and Plotly's "Click to enter Colorscale title" placeholder no longer sits behind the real label.
+- [Misc] Release-candidate builds are no longer a dead end. A preview install is now offered the next preview and, as soon as it ships, the stable release of that version. Stable installs are still never offered previews.
+- [Misc] Installation instructions now cover the desktop app on all three platforms, including the one-time Windows SmartScreen and macOS "Open Anyway" prompts that appear because Qimchi is not code-signed or notarized yet. The old Windows clone-and-build scripts have been removed in favour of the installer; the Linux/macOS install script is unchanged.
 
 ### v0.6.2 - 2026-06-23
 

@@ -58,23 +58,31 @@ Qimchi supports multiple installation methods, including executable scripts, Doc
 > [!tip]
 > Easiest method for Windows users.
 
-Download the latest `qimchi.exe` from the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases) and run it. The executable will:
-- Automatically install all required dependencies (Git, Python, Node.js, fd-find)
-- Set up the application in `%USERPROFILE%\.qimchi`
-- Clone and configure Qimchi (Qanary is optional and not installed by the Windows installer)
-- Build the frontend and start the server
-- Open the web interface in your browser
+Download `qimchi-setup.exe` from the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases) and run it. It installs per user, so no administrator rights are needed, and it creates a Start Menu entry plus an optional desktop shortcut. Qimchi runs as a desktop app and bundles everything it needs -- no Git, Python or Node.js required.
 
-Simply double-click `qimchi.exe` and follow the prompts. The web interface will be available at http://localhost:8001.
+Windows SmartScreen will warn that the publisher is unrecognised: click **More info**, then **Run anyway**. Qimchi is not code-signed yet, so this appears once per version you install.
 
-Note: The Windows installer no longer clones or installs `qanary` (formerly, `qcutils`) by default. If you need `qanary`, please install it manually from its [repository](https://gitlab.com/squad-lab/qanary).
+Requires Windows 11 (x64) with the Edge WebView2 runtime (preinstalled).
+
+`qanary` is not installed with Qimchi. If you need it, install it from its [repository](https://gitlab.com/squad-lab/qanary).
 
 ### Linux/macOS
 
 > [!tip]
-> Recommended for Linux and macOS users.
+> Easiest method: the desktop app, from the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases).
 
-Run the following command in your terminal:
+**macOS** -- download `qimchi.dmg`, open it, and drag Qimchi to Applications. Double-click Qimchi there; macOS reports that the app is from an unidentified developer. Open **System Settings -> Privacy and Security**, scroll down to **Security**, click **Open Anyway** next to Qimchi, confirm, and enter your account credentials. Qimchi is not notarized yet, so this happens once per version you install. Requires Apple Silicon.
+
+**Linux** -- download `qimchi-x86_64.AppImage`, then:
+
+```bash
+chmod +x qimchi-x86_64.AppImage
+./qimchi-x86_64.AppImage
+```
+
+Requires the WebKit2GTK runtime (`sudo apt-get install libwebkit2gtk-4.0-37` on Ubuntu/Debian, `webkit2gtk4.0` on Fedora, `webkit2gtk` on Arch).
+
+Alternatively, to build from source and run Qimchi as a local server instead:
 
 ```bash
 bash -c "$(curl -fsSL https://gitlab.com/squad-lab/qimchi/-/raw/main/qimchi-install.sh)"
@@ -85,9 +93,9 @@ After installation, either restart your shell, or run:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Note: The Linux/macOS installer (`qimchi-install.sh`) no longer clones or installs `qanary` (formerly, `qcutils`) by default. If you need `qanary`, please install it manually from its [repository](https://gitlab.com/squad-lab/qanary).
+Then start Qimchi with `qimchi`; the web interface will be available at http://localhost:8001.
 
-Then simply start qimchi with `qimchi`. The web interface will be available at http://localhost:8001.
+`qanary` is not installed with Qimchi. If you need it, install it from its [repository](https://gitlab.com/squad-lab/qanary).
 
 ### Docker Installation
 
