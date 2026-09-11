@@ -39,7 +39,12 @@ const railSections: {
 ];
 
 const railButtonBaseClass =
-  "qimchi-dark-hover-plain relative flex h-9 w-9 items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8cc63e] focus-visible:ring-inset";
+  "relative flex h-9 w-9 items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8cc63e] focus-visible:ring-inset";
+
+// Plain rail buttons opt into the dark hover remap; the active tab does not,
+// because it carries its own themed hover (see --qimchi-panel-title-*).
+const railPlainButtonClass =
+  "qimchi-dark-hover-plain text-gray-500 hover:bg-gray-200 hover:text-gray-700";
 
 // The accordion rail. It lives OUTSIDE the resizable PanelGroup on purpose:
 // react-resizable-panels converts drag pixels to percentages against the
@@ -73,8 +78,8 @@ const SidebarRail = ({ onOpenHelp }: SidebarRailProps) => {
               onClick={() => toggleSection(id)}
               className={`${railButtonBaseClass} ${
                 isActive
-                  ? "bg-[var(--qimchi-panel-title-bg)] text-[var(--qimchi-accent-text)]"
-                  : "text-gray-500 hover:bg-gray-200 hover:text-gray-700"
+                  ? "bg-[var(--qimchi-panel-title-bg)] text-[var(--qimchi-panel-title-fg)] hover:bg-[var(--qimchi-panel-title-bg-hover)]"
+                  : railPlainButtonClass
               }`}
               aria-label={label}
               aria-pressed={isActive}
@@ -92,7 +97,7 @@ const SidebarRail = ({ onOpenHelp }: SidebarRailProps) => {
       <Tooltip content="Help & Tips (Shift+H)" position="right">
         <button
           onClick={() => onOpenHelp?.()}
-          className={`${railButtonBaseClass} group text-amber-600 hover:bg-amber-100 hover:text-amber-700`}
+          className={`${railButtonBaseClass} qimchi-dark-hover-plain group text-amber-600 hover:bg-amber-100 hover:text-amber-700`}
           aria-label="Help and tips"
         >
           <Lightbulb size={17} className="transition-colors group-hover:fill-amber-200" />
@@ -103,7 +108,7 @@ const SidebarRail = ({ onOpenHelp }: SidebarRailProps) => {
       <Tooltip content={isDark ? "Switch to light theme" : "Switch to dark theme"} position="right">
         <button
           onClick={toggleTheme}
-          className={`${railButtonBaseClass} text-gray-500 hover:bg-gray-200 hover:text-gray-700`}
+          className={`${railButtonBaseClass} ${railPlainButtonClass}`}
           aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
         >
           {isDark ? <Sun size={17} /> : <Moon size={17} />}
@@ -113,7 +118,7 @@ const SidebarRail = ({ onOpenHelp }: SidebarRailProps) => {
       <Tooltip content="Notifications log" position="right">
         <button
           onClick={openLogModal}
-          className={`${railButtonBaseClass} text-gray-500 hover:bg-gray-200 hover:text-gray-700`}
+          className={`${railButtonBaseClass} ${railPlainButtonClass}`}
           aria-label="View notifications log"
         >
           <History size={17} />
@@ -127,7 +132,7 @@ const SidebarRail = ({ onOpenHelp }: SidebarRailProps) => {
       >
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className={`${railButtonBaseClass} text-gray-500 hover:bg-gray-200 hover:text-gray-700`}
+          className={`${railButtonBaseClass} ${railPlainButtonClass}`}
           aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
