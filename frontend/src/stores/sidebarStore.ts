@@ -119,8 +119,8 @@ const initialComponentStates: ComponentStates = {
   dirTree: {
     searchInput: "",
     searchTerm: "",
-    sortBy: "name",
-    sortDirection: "asc",
+    sortBy: "timestamp",
+    sortDirection: "desc",
     filterBy: "all",
     showFilters: false,
     lastPath: "",
@@ -279,7 +279,7 @@ export const useSidebarStore = create<SidebarState>()(
     }),
     {
       name: "sidebar-store",
-      version: 10, // DirTree loads collapsed, so persisted expansion inverted
+      version: 11, // DirTree defaults to newest-first
     },
   ),
 );
