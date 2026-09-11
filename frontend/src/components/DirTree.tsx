@@ -616,86 +616,40 @@ const DirTree = ({
       .join("|");
   }, [libStatesByPath, filterHeartedOnly, hideTrashed, effectiveTagIds]);
 
-  // Process and filter data for headless-tree with sorting
-  const processedData = useMemo(() => {
-    const allNodes = new Map<string, TreeNode>();
-
-    // Helper function to collect all leaf nodes (files) from the tree
-    const collectLeafNodes = (nodes: TreeNode[]): TreeNode[] => {
-      const leaves: TreeNode[] = [];
-
-      const traverse = (node: TreeNode) => {
-        if (node.type === "file") {
-          leaves.push(node);
-        }
-        if (node.children) {
-          node.children.forEach(traverse);
-        }
-      };
-
-      nodes.forEach(traverse);
-      return leaves;
-    };
-
-    // Helper function to sort nodes
-    const sortNodes = (nodes: TreeNode[]): TreeNode[] => {
-      return [...nodes].sort((a, b) => {
-        let comparison = 0;
-
-        switch (sortBy) {
-          case "name": {
-            // Use natural sort for names to handle numeric sequences properly
-            comparison = a.name.localeCompare(b.name, undefined, {
-              numeric: true,
-              sensitivity: "base",
-            });
-            break;
-          }
-          case "timestamp": {
-            const aTime = a.timestamp?.getTime() || 0;
-            const bTime = b.timestamp?.getTime() || 0;
-            comparison = aTime - bTime;
-            break;
-          }
-          case "size": {
-            const aSize = a.size || 0;
-            const bSize = b.size || 0;
-            comparison = aSize - bSize;
-            break;
-          }
-          case "chrono": {
-            // Chronological sorting by timestamp for dataset files only
-            const aTime = a.timestamp?.getTime() || 0;
-            const bTime = b.timestamp?.getTime() || 0;
-            comparison = aTime - bTime;
-            break;
-          }
-        }
-
-        // Chrono sort is always descending (newest first)
-        const finalDirection = sortBy === "chrono" ? "desc" : sortDirection;
-        return finalDirection === "desc" ? -comparison : comparison;
+  // id -> node over the RAW tree, rebuilt only when the API data changes.
+  // Filtering and sorting read through this instead of allocating a parallel
+  // copy of every node on each pass.
+  const nodeIndex = useMemo(() => {
+    const index = new Map<string, TreeNode>();
+    const walk = (nodes: TreeNode[]) => {
+      nodes.forEach((node) => {
+        index.set(node.id, node);
+        if (node.children) walk(node.children);
       });
     };
+    walk(apiData);
+    return index;
+  }, [apiData]);
 
-    // Helper function to check if a node matches search
+  // Which nodes survive the current filters. Kept separate from ordering so
+  // changing the sort or its direction does not re-run every predicate over
+  // the whole tree, and so a keystroke sorts only the survivors.
+  const matchedIds = useMemo(() => {
     const matchesSearch = (node: TreeNode): boolean => {
       if (!searchText) return true;
-      return (
-        node.name.toLowerCase().includes(searchText.toLowerCase()) ||
-        node.path.toLowerCase().includes(searchText.toLowerCase())
-      );
+      const needle = searchText.toLowerCase();
+      return node.name.toLowerCase().includes(needle) || node.path.toLowerCase().includes(needle);
     };
 
-    // Helper function to check if a node should be included based on filter
     const libraryFilterActive =
       filterHeartedOnly ||
       hideTrashed ||
       effectiveTagIds.length > 0 ||
       unknownSearchTags.length > 0;
+
     const shouldIncludeNode = (node: TreeNode): boolean => {
       // Library (heart/trash/tag) filters apply to file nodes; folders are kept
-      // only when they contain matching descendants (via hasMatchingChildren).
+      // only when they contain matching descendants.
       if (node.type === "file") {
         // A "#name" that matches no known tag can never match a measurement.
         if (unknownSearchTags.length > 0) return false;
@@ -717,70 +671,31 @@ const DirTree = ({
       return true;
     };
 
-    const processNodes = (nodes: TreeNode[]): TreeNode[] => {
-      // For chronological sorting, flatten to show only leaf nodes (dataset files)
-      if (sortBy === "chrono") {
-        const allLeaves = collectLeafNodes(nodes);
-        const filteredLeaves = allLeaves.filter((node) => {
-          const shouldInclude = shouldIncludeNode(node);
-          const nodeMatchesSearch = matchesSearch(node);
-          return shouldInclude && nodeMatchesSearch;
+    // Post-order: a folder is kept when it matches itself or any descendant
+    // survived. The previous code answered that with a second recursive walk
+    // of each subtree (hasMatchingChildren) on top of this one.
+    const matched = new Set<string>();
+    const visit = (node: TreeNode): boolean => {
+      let anyChildMatched = false;
+      if (node.children) {
+        node.children.forEach((child) => {
+          if (visit(child)) anyChildMatched = true;
         });
-        const sortedLeaves = sortNodes(filteredLeaves);
-
-        // Add all leaf nodes to the allNodes map, ensuring they have no children
-        sortedLeaves.forEach((leaf) => {
-          const leafWithoutChildren = { ...leaf, children: undefined };
-          allNodes.set(leaf.id, leafWithoutChildren);
-        });
-
-        return sortedLeaves.map((leaf) => ({ ...leaf, children: undefined }));
       }
-
-      // Regular hierarchical processing for other sort types
-      const sortedNodes = sortNodes(nodes);
-      const processedNodes: TreeNode[] = [];
-
-      sortedNodes.forEach((node) => {
-        const isFolder = node.type === "folder";
-
-        // Children are processed first so a folder is kept when any survived,
-        // which is what the separate recursive hasMatchingChildren() used to
-        // answer -- it walked each subtree a second time to do it.
-        const processedChildren = node.children ? processNodes(node.children) : undefined;
-        const keep =
-          (shouldIncludeNode(node) && matchesSearch(node)) ||
-          (isFolder && (processedChildren?.length ?? 0) > 0);
-
-        if (!keep) return;
-
-        // Reuse the node object when nothing about it changed. Copying every
-        // node on every pass allocated the whole tree per keystroke and handed
-        // React a fresh identity for rows that had not moved.
-        const childrenChanged =
-          processedChildren !== undefined &&
-          (processedChildren.length !== node.children!.length ||
-            processedChildren.some((child, index) => child !== node.children![index]));
-
-        const processedNode = childrenChanged ? { ...node, children: processedChildren } : node;
-
-        allNodes.set(processedNode.id, processedNode);
-        processedNodes.push(processedNode);
-      });
-
-      return processedNodes;
+      const keep =
+        (shouldIncludeNode(node) && matchesSearch(node)) ||
+        (node.type === "folder" && anyChildMatched);
+      if (keep) matched.add(node.id);
+      return keep;
     };
-
-    const processedRootNodes = processNodes(apiData);
-    return { allNodes, rootNodes: processedRootNodes };
+    apiData.forEach(visit);
+    return matched;
     // libStatesByPath is read inside but intentionally gated by libFilterSignature
-    // (see above) so hearts don't re-derive the tree when no filter is active.
+    // so hearts don't re-derive the tree when no filter is active.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     apiData,
     filterBy,
-    sortBy,
-    sortDirection,
     searchText,
     filterHeartedOnly,
     hideTrashed,
@@ -789,10 +704,81 @@ const DirTree = ({
     libFilterSignature,
   ]);
 
-  // Get root level nodes for tree (now comes from processedData)
-  const rootNodes = useMemo(() => {
-    return processedData.rootNodes;
-  }, [processedData]);
+  // Structure and ordering, as id lists. Nothing here allocates a node.
+  const { rootIds, childrenById, visibleNodes } = useMemo(() => {
+    const compare = (a: TreeNode, b: TreeNode) => {
+      let comparison = 0;
+
+      switch (sortBy) {
+        case "name": {
+          // Natural sort so numeric sequences order the way they read.
+          comparison = a.name.localeCompare(b.name, undefined, {
+            numeric: true,
+            sensitivity: "base",
+          });
+          break;
+        }
+        case "timestamp":
+        case "chrono": {
+          comparison = (a.timestamp?.getTime() || 0) - (b.timestamp?.getTime() || 0);
+          break;
+        }
+        case "size": {
+          comparison = (a.size || 0) - (b.size || 0);
+          break;
+        }
+      }
+
+      // Chrono sort is always descending (newest first)
+      const finalDirection = sortBy === "chrono" ? "desc" : sortDirection;
+      return finalDirection === "desc" ? -comparison : comparison;
+    };
+
+    const children = new Map<string, string[]>();
+    const visible = new Map<string, TreeNode>();
+
+    // Chrono flattens to dataset leaves, so there is no hierarchy to build.
+    if (sortBy === "chrono") {
+      const leaves: TreeNode[] = [];
+      const collect = (nodes: TreeNode[]) => {
+        nodes.forEach((node) => {
+          if (node.type === "file" && matchedIds.has(node.id)) leaves.push(node);
+          if (node.children) collect(node.children);
+        });
+      };
+      collect(apiData);
+      leaves.sort(compare);
+      leaves.forEach((leaf) => visible.set(leaf.id, leaf));
+      return {
+        rootIds: leaves.map((leaf) => leaf.id),
+        childrenById: children,
+        visibleNodes: visible,
+      };
+    }
+
+    const buildLevel = (nodes: TreeNode[]): string[] => {
+      // filter() copies, so sorting here never mutates the source children.
+      const kept = nodes.filter((node) => matchedIds.has(node.id));
+      kept.sort(compare);
+      kept.forEach((node) => {
+        visible.set(node.id, node);
+        if (node.children) children.set(node.id, buildLevel(node.children));
+      });
+      return kept.map((node) => node.id);
+    };
+
+    return {
+      rootIds: buildLevel(apiData),
+      childrenById: children,
+      visibleNodes: visible,
+    };
+  }, [apiData, matchedIds, sortBy, sortDirection]);
+
+  // Root level nodes for the tree.
+  const rootNodes = useMemo(
+    () => rootIds.map((id) => nodeIndex.get(id)).filter((node): node is TreeNode => !!node),
+    [rootIds, nodeIndex],
+  );
 
   // Initialize headless-tree with search feature
   // Use a key that changes when switching between chrono and non-chrono modes
@@ -831,7 +817,7 @@ const DirTree = ({
             type: "folder",
           } as TreeNode;
         }
-        const node = processedData.allNodes.get(itemId);
+        const node = visibleNodes.get(itemId);
         if (!node) {
           console.warn(`Node not found for id: ${itemId}, sortBy: ${sortBy}`);
           return {
@@ -845,15 +831,16 @@ const DirTree = ({
       },
       getChildren: (itemId: string) => {
         if (itemId === "root") {
-          return rootNodes.map((node: TreeNode) => node.id);
+          return rootIds;
         }
         // In chrono mode, all items are leaf nodes (files) with no children
         if (sortBy === "chrono") {
           return [];
         }
 
-        const node = processedData.allNodes.get(itemId);
-        return node?.children?.map((child: TreeNode) => child.id) || [];
+        // childrenById, not node.children: visibleNodes holds the raw nodes,
+        // whose children include the ones the current filter dropped.
+        return childrenById.get(itemId) ?? [];
       },
     },
     indent: 12,
@@ -1052,7 +1039,7 @@ const DirTree = ({
   const getSelectedNodes = (): TreeNode[] => {
     const selectedItemIds = tree.getSelectedItems();
     return selectedItemIds
-      .map((item) => processedData.allNodes.get(item.getId()))
+      .map((item) => visibleNodes.get(item.getId()))
       .filter((node): node is TreeNode => node !== undefined);
   };
 
@@ -1221,7 +1208,7 @@ const DirTree = ({
     );
     if (!datasetItem) return -1;
 
-    const datasetNodes = Array.from(processedData.allNodes.values()).filter(
+    const datasetNodes = Array.from(visibleNodes.values()).filter(
       (node) => node.type === "file" && isDatasetPath(node.path),
     );
 
@@ -1230,7 +1217,7 @@ const DirTree = ({
 
   // Get total number of datasets
   const getTotalDatasets = (): number => {
-    const datasetNodes = Array.from(processedData.allNodes.values()).filter(
+    const datasetNodes = Array.from(visibleNodes.values()).filter(
       (node) => node.type === "file" && isDatasetPath(node.path),
     );
     return datasetNodes.length;
@@ -1240,7 +1227,7 @@ const DirTree = ({
   const handleCycleDataset = (direction: "prev" | "next") => {
     if (!isCyclingEnabled() || !onCycleDataset) return;
 
-    const datasetNodes = Array.from(processedData.allNodes.values()).filter(
+    const datasetNodes = Array.from(visibleNodes.values()).filter(
       (node) => node.type === "file" && isDatasetPath(node.path),
     );
 
@@ -1278,12 +1265,12 @@ const DirTree = ({
   useEffect(() => {
     const selectedItems = tree.getSelectedItems();
     if (selectedItems.length === 1) {
-      const selectedNode = processedData.allNodes.get(selectedItems[0].getId());
+      const selectedNode = visibleNodes.get(selectedItems[0].getId());
       if (selectedNode) {
         onSelectNode?.(selectedNode);
       }
     }
-  }, [tree, processedData.allNodes, onSelectNode]);
+  }, [tree, visibleNodes, onSelectNode]);
 
   // Global R keybind mapped to refresh-dir in useGlobalShortcuts
   useShortcut("refresh-dir", () => {
