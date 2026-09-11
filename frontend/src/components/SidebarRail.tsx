@@ -15,6 +15,7 @@ import {
 // Local imports
 import Tooltip from "./Tooltip";
 import { useSidebarStore, SidebarSection } from "../stores/sidebarStore";
+import { useShortcut } from "../hooks/useGlobalShortcuts";
 import { useThemeStore } from "../stores/themeStore";
 import { useToast } from "../hooks/useToast";
 
@@ -24,35 +25,50 @@ interface SidebarRailProps {
 
 // Rail tabs. Icon-only by design -- the labels live in the tooltips and the
 // Help modal, so the rail stays as narrow as the old collapse button.
-const railSections: { id: SidebarSection; label: string; Icon: LucideIcon; size: number }[] = [
-  { id: "explorer", label: "Explorer", Icon: FolderTree, size: 18 },
-  { id: "metadata", label: "Metadata", Icon: BadgeInfo, size: 19 },
-  { id: "notes", label: "Notes", Icon: NotebookPen, size: 18 },
-  { id: "live", label: "Live Measurements", Icon: Radio, size: 18 },
+const railSections: {
+  id: SidebarSection;
+  label: string;
+  Icon: LucideIcon;
+  size: number;
+  shortcut: string;
+}[] = [
+  { id: "explorer", label: "Explorer", Icon: FolderTree, size: 18, shortcut: "Alt+1" },
+  { id: "metadata", label: "Metadata", Icon: BadgeInfo, size: 19, shortcut: "Alt+2" },
+  { id: "notes", label: "Notes", Icon: NotebookPen, size: 18, shortcut: "Alt+3" },
+  { id: "live", label: "Live Measurements", Icon: Radio, size: 18, shortcut: "Alt+4" },
 ];
 
 const railButtonBaseClass =
-  "relative flex h-9 w-9 items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8cc63e] focus-visible:ring-inset";
+  "qimchi-dark-hover-plain relative flex h-9 w-9 items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8cc63e] focus-visible:ring-inset";
 
 // The accordion rail. It lives OUTSIDE the resizable PanelGroup on purpose:
 // react-resizable-panels converts drag pixels to percentages against the
 // group's own width, so any non-Panel child silently skews that maths and the
 // resize handle drifts -- eventually inverting direction.
 const SidebarRail = ({ onOpenHelp }: SidebarRailProps) => {
-  const { sidebarCollapsed, activeSection, setSidebarCollapsed, toggleSection } = useSidebarStore();
+  const { sidebarCollapsed, activeSection, setSidebarCollapsed, toggleSection, setActiveSection } =
+    useSidebarStore();
   const { theme, toggleTheme } = useThemeStore();
   const { openLogModal } = useToast();
   const isDark = theme === "dark";
 
+  // Alt+1..4 open a pane directly, in rail order. Unlike clicking the rail
+  // these never collapse: pressing the shortcut for the pane you are on is a
+  // no-op rather than a surprise.
+  useShortcut("show-explorer", () => setActiveSection("explorer"));
+  useShortcut("show-metadata", () => setActiveSection("metadata"));
+  useShortcut("show-notes", () => setActiveSection("notes"));
+  useShortcut("show-live", () => setActiveSection("live"));
+
   return (
     // Always visible, even when the sidebar body is collapsed.
     <div className="flex h-screen w-9 shrink-0 flex-col border-r border-gray-300 bg-gray-100">
-      {railSections.map(({ id, label, Icon, size }) => {
+      {railSections.map(({ id, label, Icon, size, shortcut }) => {
         const isActive = activeSection === id && !sidebarCollapsed;
         return (
           // The rail is icon-only, so the tooltip carries the section name and
           // nothing else -- the toggle behaviour is documented in Help.
-          <Tooltip key={id} content={label} position="right">
+          <Tooltip key={id} content={`${label} (${shortcut})`} position="right">
             <button
               onClick={() => toggleSection(id)}
               className={`${railButtonBaseClass} ${
@@ -105,7 +121,10 @@ const SidebarRail = ({ onOpenHelp }: SidebarRailProps) => {
       </Tooltip>
 
       {/* Sidebar collapse toggle -- bottom of the rail */}
-      <Tooltip content={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} position="right">
+      <Tooltip
+        content={`${sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} (Shift+E)`}
+        position="right"
+      >
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
           className={`${railButtonBaseClass} text-gray-500 hover:bg-gray-200 hover:text-gray-700`}
