@@ -11,6 +11,7 @@ interface SectionRibbonProps {
   // A collapsed section is far shorter than the stack of controls, so it lays
   // the same ribbon out as a slim strip instead of clipping it.
   orientation?: "vertical" | "horizontal";
+  onToggle?: () => void;
   children?: ReactNode; // Control buttons, in order
 }
 
@@ -27,19 +28,30 @@ const SectionRibbon = ({
   Icon,
   count,
   orientation = "vertical",
+  onToggle,
   children,
 }: SectionRibbonProps) => {
   const isVertical = orientation === "vertical";
 
   return (
     <div
-      className={
+      className={`${
         isVertical
           ? "flex w-11 shrink-0 flex-col items-center gap-1 rounded-r-lg border-l border-gray-200 bg-gray-50 py-2"
           : "flex w-full flex-row items-center gap-1 rounded-lg bg-gray-50 px-2 py-1"
-      }
+      } ${onToggle ? "cursor-pointer" : ""}`}
+      onClick={(event) => {
+        // Controls in the ribbon keep their own behaviour; the surrounding
+        // title, spacer and empty ribbon area toggle the section.
+        if (onToggle && !(event.target as Element).closest("button")) onToggle();
+      }}
     >
-      <Tooltip content={count === undefined ? label : `${label} (${count})`} position="left">
+      <Tooltip
+        content={`${count === undefined ? label : `${label} (${count})`}${
+          onToggle ? ` — click to ${isVertical ? "collapse" : "expand"}` : ""
+        }`}
+        position="left"
+      >
         <div className="relative flex h-7 w-7 items-center justify-center text-gray-700">
           <Icon size={18} />
           {count !== undefined && count > 0 && (
