@@ -6,6 +6,7 @@ FastAPI endpoint for many Explorer/DirTree related operations.
 import asyncio
 import hashlib
 import os
+import stat as stat_module
 import subprocess  # Windows compat
 from datetime import datetime, timezone
 from pathlib import Path
@@ -63,25 +64,35 @@ def _extract_measurement_id(memory_path: str) -> str:
     return extract_measurement_id(memory_path)
 
 
-def _get_dataset_last_modified(path: Path) -> float:
+def _get_dataset_last_modified(path: Path, store_mtime: float | None = None) -> float:
     """
     Get the last modification time of a zarr dataset.
 
+    Reads the store directory's own mtime plus its metadata file, instead of
+    walking the store. A zarr store holds one file per chunk, so the previous
+    rglob cost thousands of stat calls *per dataset* -- on a tree of a few
+    thousand measurements that dominated the whole scan. Writing to a store
+    rewrites its metadata, so the metadata mtime tracks appends without the
+    walk.
+
     Args:
         path (Path): Path to the zarr dataset
+        store_mtime (float | None): Already-known mtime of the store directory,
+            to avoid re-stat-ing it.
 
     Returns:
         float: Unix timestamp of last modification
 
     """
     try:
-        latest_mtime = path.stat().st_mtime
+        latest_mtime = path.stat().st_mtime if store_mtime is None else store_mtime
 
-        # Check all files and subdirectories for the most recent modification
-        for item in path.rglob("*"):
-            if item.is_file():
-                item_mtime = item.stat().st_mtime
-                latest_mtime = max(latest_mtime, item_mtime)
+        # v3 writes zarr.json; v2 consolidated metadata writes .zmetadata.
+        for meta_name in ("zarr.json", ".zmetadata"):
+            try:
+                latest_mtime = max(latest_mtime, (path / meta_name).stat().st_mtime)
+            except OSError:
+                continue
 
         return latest_mtime
 
@@ -112,6 +123,13 @@ def _get_folder_size(path: Path) -> int:
 
     except (OSError, IOError):
         return 0
+
+
+def _iso_from_mtime(mtime: float) -> str:
+    """Format an already-read mtime as an ISO string, avoiding a second stat."""
+    import datetime
+
+    return datetime.datetime.fromtimestamp(mtime).isoformat()
 
 
 def _get_file_timestamp(path: Path) -> str:
@@ -343,9 +361,15 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
             item = Path(p)
             item.relative_to(path)  # Ensure path is under root
 
-            if item.is_dir() and item.name.endswith(".zarr"):
-                dataset_items.append(item)
-            elif item.is_file() and item.suffix.lower() in {
+            # One stat per entry: is_dir()/is_file() plus the later size,
+            # mtime and timestamp lookups each stat-ed the same path again, so
+            # a scan cost 3-4 syscalls per dataset instead of one.
+            st = item.stat()
+            is_directory = stat_module.S_ISDIR(st.st_mode)
+
+            if is_directory and item.name.endswith(".zarr"):
+                dataset_items.append((item, st))
+            elif not is_directory and item.suffix.lower() in {
                 ".nc",
                 ".h5",
                 ".hdf5",
@@ -355,7 +379,7 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
                 ".txt",
                 ".dat",
             }:
-                dataset_items.append(item)
+                dataset_items.append((item, st))
             else:
                 continue
 
@@ -384,12 +408,13 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
             continue
 
     # Create dataset nodes
-    for item in dataset_items:
+    for item, st in dataset_items:
         try:
-            if item.is_dir():
+            if stat_module.S_ISDIR(st.st_mode):
                 fmt = "zarr"
+                # Size still ships because the Basket displays it.
                 size = _get_folder_size(item)
-                last_modified = _get_dataset_last_modified(item)
+                last_modified = _get_dataset_last_modified(item, st.st_mtime)
             else:
                 suffix = item.suffix.lower()
                 if suffix == ".nc":
@@ -402,8 +427,8 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
                     fmt = "csv"  # CONCERN: Or, we could use "flat" ?
                 else:
                     continue
-                size = item.stat().st_size
-                last_modified = item.stat().st_mtime
+                size = st.st_size
+                last_modified = st.st_mtime
 
             dataset_node = {
                 "id": f"file-{hash(str(item)) % 100000}",
@@ -411,7 +436,7 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
                 "path": str(item),
                 "type": "file",
                 "size": size,
-                "timestamp": _get_file_timestamp(item),
+                "timestamp": _iso_from_mtime(st.st_mtime),
                 "tags": [fmt],
                 "lastModified": last_modified,
             }
@@ -419,7 +444,11 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
         except Exception:
             continue
 
-    # Build parent-child relationships
+    # Build parent-child relationships. The duplicate check is a per-parent set
+    # rather than a scan of the children list, which made attaching a folder of
+    # N siblings O(N^2) -- ~12M comparisons for a folder of 5k measurements.
+    seen_child_paths: Dict[str, set] = {}
+
     for p_str, node in list(nodes.items()):
         if p_str == str(path):  # Skip root
             continue
@@ -435,9 +464,12 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
                 if parent_node.get("children") is None:
                     parent_node["children"] = []
 
-                if not any(
-                    ch.get("path") == node.get("path") for ch in parent_node["children"]
-                ):
+                seen = seen_child_paths.setdefault(
+                    parent_str, {ch.get("path") for ch in parent_node["children"]}
+                )
+                node_path = node.get("path")
+                if node_path not in seen:
+                    seen.add(node_path)
                     parent_node["children"].append(node)
 
         except Exception:
@@ -453,7 +485,9 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
 
     sort_children(nodes[str(path)])
 
-    logger.debug(f"Directory tree built with these nodes:\n{nodes}")
+    # Serialising every node here cost a full string build -- and a multi-MB
+    # write, since the file handler runs at DEBUG -- on every single scan.
+    # logger.debug(f"Directory tree built with these nodes:\n{nodes}")
     # print(f"Directory tree built with these nodes:\n{nodes}")  # DEBUG:
 
     # TODOLATER: Re-enable size computation using du/xargs if windows compat is ever resolved.
