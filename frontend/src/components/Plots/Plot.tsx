@@ -277,6 +277,42 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
       await Plotly.react(plotRef.current, deferredPlotJson.data, enhancedLayout, enhancedConfig);
       enableMathAxisTitleEditing(plotRef.current);
 
+      // Register interaction listeners as soon as Plotly is ready. MathJax's
+      // optional follow-up typesetting can wait indefinitely when one of its
+      // external workers fails, but that must never disable plot interaction.
+      if (!relayoutListenerRef.current) {
+        const plotEl = plotRef.current as any;
+        if (typeof plotEl.on === "function") {
+          const handler = (event: Plotly.PlotRelayoutEvent) => {
+            onRelayoutRef.current?.(event as Record<string, unknown>);
+          };
+          relayoutListenerRef.current = handler;
+          plotEl.on("plotly_relayout", handler);
+        }
+      }
+
+      if (!clickListenerRef.current) {
+        const plotEl = plotRef.current as any;
+        if (typeof plotEl.on === "function") {
+          const handler = (event: Plotly.PlotMouseEvent) => {
+            onClickRef.current?.(event);
+          };
+          clickListenerRef.current = handler;
+          plotEl.on("plotly_click", handler);
+        }
+      }
+
+      if (!hoverListenerRef.current) {
+        const plotEl = plotRef.current as any;
+        if (typeof plotEl.on === "function") {
+          const handler = (event: Plotly.PlotMouseEvent) => {
+            onHoverRef.current?.(event);
+          };
+          hoverListenerRef.current = handler;
+          plotEl.on("plotly_hover", handler);
+        }
+      }
+
       // Explicitly typeset dynamic Plotly content after every react/update.
       // Plotly handles its own math, while this pass catches any labels or
       // annotations inserted during the update cycle.
@@ -293,44 +329,6 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
       }
 
       enableMathAxisTitleEditing(plotRef.current);
-
-      // Attach the plotly_relayout listener the first time the plot is ready.
-      // Guard prevents duplicate registration across multiple updatePlot calls.
-      if (!relayoutListenerRef.current) {
-        const plotEl = plotRef.current as any;
-        if (typeof plotEl.on === "function") {
-          const handler = (event: Plotly.PlotRelayoutEvent) => {
-            onRelayoutRef.current?.(event as Record<string, unknown>);
-          };
-          relayoutListenerRef.current = handler;
-          plotEl.on("plotly_relayout", handler);
-        }
-      }
-
-      // Attach the plotly_click listener
-      if (!clickListenerRef.current) {
-        const plotEl = plotRef.current as any;
-        if (typeof plotEl.on === "function") {
-          const handler = (event: Plotly.PlotMouseEvent) => {
-            onClickRef.current?.(event);
-          };
-          clickListenerRef.current = handler;
-          plotEl.on("plotly_click", handler);
-        }
-      }
-
-      // Attach the plotly_hover listener
-      if (!hoverListenerRef.current) {
-        const plotEl = plotRef.current as any;
-        if (typeof plotEl.on === "function") {
-          const handler = (event: Plotly.PlotMouseEvent) => {
-            onHoverRef.current?.(event);
-          };
-          hoverListenerRef.current = handler;
-          plotEl.on("plotly_hover", handler);
-        }
-      }
-
       return true;
     } catch (error) {
       console.error("[Plot] Error updating plot:", error);
