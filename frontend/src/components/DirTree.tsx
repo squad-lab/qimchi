@@ -2185,12 +2185,14 @@ const TreeItemComponent = ({
           being hidden behind the Metadata panel. Shown by CSS when the DirTree
           root carries .qimchi-dirtree-wide. */}
       <div className="qimchi-row-meta shrink-0 items-center pr-3 text-xs text-gray-500 tabular-nums">
-        <span className="w-32 text-right">{formatRowTimestamp(nodeData.timestamp)}</span>
+        <span className="w-40 whitespace-nowrap text-right">
+          {formatRowTimestamp(nodeData.timestamp)}
+        </span>
       </div>
 
       {/* For Datasets */}
       {!isFolder && (
-        <div className="flex items-center px-1 py-0.5 rounded-md">
+        <div className="qimchi-row-actions flex items-center px-1 py-0.5 rounded-md">
           {/* className="flex items-center space-x-1 opacity-0 group-hover:backdrop-blur-md group-hover:bg-white/90 group-hover:opacity-100 transition-opacity px-1 py-0.5 rounded-md"> */}
           {showLiveOnly && nodeData.path.startsWith("memory://") && (
             <Tooltip content="Hide from Live Measurements" position="top">
@@ -2405,7 +2407,7 @@ const TreeItemComponent = ({
 
       {/* For Folders */}
       {isFolder && (
-        <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity mr-1">
+        <div className="qimchi-row-actions flex items-center opacity-0 group-hover:opacity-100 transition-opacity mr-1">
           {/* Copy folder name button */}
           <Tooltip content="Copy folder name" position="top">
             <button

@@ -11,6 +11,7 @@ import DirTree from "./DirTree";
 import { TreeNode } from "./treeUtils";
 import Tooltip from "./Tooltip";
 import { useSidebarStore } from "../stores/sidebarStore";
+import { useShortcut } from "../hooks/useGlobalShortcuts";
 import { finishArchiveDownload } from "../utils/download";
 // window.pywebview types: see src/pywebview.d.ts
 
@@ -78,6 +79,8 @@ const Explorer = ({
     historyRef.current = [initial];
     setHistoryIndex(0);
   }, [submittedPath]);
+
+  useShortcut("toggle-explorer-expanded", () => setExplorerExpanded(!explorerExpanded));
 
   // Esc leaves the full-window Explorer; harmless while it is not expanded.
   useEffect(() => {
@@ -261,16 +264,19 @@ const Explorer = ({
           </button>
         </Tooltip>
         {/* Wide "desktop" view: the Explorer takes over the whole window. */}
-        <Tooltip content={explorerExpanded ? "Exit full window (Esc)" : "Expand to full window"}>
+        <Tooltip
+          content={explorerExpanded ? "Exit full window (Esc)" : "Expand to full window (Shift+F)"}
+          className="flex"
+        >
           <button
             type="button"
             onClick={() => setExplorerExpanded(!explorerExpanded)}
-            className="ml-2 border border-gray-300 px-2 py-2 rounded shadow-sm bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-800 transition-colors"
-            title={explorerExpanded ? "Exit full window" : "Expand to full window"}
+            className="ml-2 border border-gray-300 bg-white text-gray-600 px-4 py-2 rounded shadow-sm transition-colors focus:outline-none focus:ring focus:ring-[#8DC63F] hover:bg-gray-50 hover:text-gray-800 flex items-center justify-center"
+            title={explorerExpanded ? "Exit full window (Esc)" : "Expand to full window (Shift+F)"}
             aria-label={explorerExpanded ? "Exit full window" : "Expand to full window"}
             aria-pressed={explorerExpanded}
           >
-            {explorerExpanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+            {explorerExpanded ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
           </button>
         </Tooltip>
       </div>
