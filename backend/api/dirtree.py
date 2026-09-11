@@ -158,6 +158,78 @@ def _get_file_timestamp(path: Path) -> str:
         raise OSError(f"Failed to stat path {path}")
 
 
+def _store_fingerprint(st: os.stat_result) -> str:
+    """Stat signature of a zarr store directory, matching library.py's form."""
+    return f"{st.st_mtime_ns}:{st.st_size}"
+
+
+def _read_scan_cache(paths: list[str]) -> Dict[str, tuple]:
+    """
+    Look up cached (fingerprint, size, last_modified) for the given stores.
+
+    A DB failure is not fatal here: the cache only saves work, so a miss just
+    means the scan computes the values itself (see shared/db.py's degradation
+    contract -- the Explorer must keep working without the database).
+
+    """
+    if not paths:
+        return {}
+
+    try:
+        from sqlmodel import select
+
+        from .db_models import DatasetScanCache
+        from .shared.db import session_scope
+
+        found: Dict[str, tuple] = {}
+        with session_scope() as session:
+            # SQLite caps variables per statement; chunk well under the limit.
+            for start in range(0, len(paths), 500):
+                chunk = paths[start : start + 500]
+                rows = session.exec(
+                    select(DatasetScanCache).where(DatasetScanCache.abs_path.in_(chunk))
+                ).all()
+                for row in rows:
+                    found[row.abs_path] = (
+                        row.fingerprint,
+                        row.size_bytes,
+                        row.last_modified,
+                    )
+        return found
+    except Exception as exc:
+        logger.debug(f"_read_scan_cache | cache unavailable, computing instead: {exc}")
+        return {}
+
+
+def _write_scan_cache(entries: list[tuple]) -> None:
+    """Upsert (abs_path, fingerprint, size, last_modified) rows; best-effort."""
+    if not entries:
+        return
+
+    try:
+        from .db_models import DatasetScanCache
+        from .shared.db import session_scope
+
+        with session_scope() as session:
+            for abs_path, fingerprint, size_bytes, last_modified in entries:
+                row = session.get(DatasetScanCache, abs_path)
+                if row is None:
+                    session.add(
+                        DatasetScanCache(
+                            abs_path=abs_path,
+                            fingerprint=fingerprint,
+                            size_bytes=size_bytes,
+                            last_modified=last_modified,
+                        )
+                    )
+                else:
+                    row.fingerprint = fingerprint
+                    row.size_bytes = size_bytes
+                    row.last_modified = last_modified
+    except Exception as exc:
+        logger.debug(f"_write_scan_cache | could not persist scan cache: {exc}")
+
+
 # Simple TTL cache for zarr sizes
 _SIZE_CACHE: Dict[str, Dict] = {}
 # cache entry: { 'value': int, 'expires_at': float }
@@ -435,14 +507,29 @@ def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
         except Exception:
             continue
 
+    # Zarr stores are the only entries whose size and mtime cost more than the
+    # stat we already have, so they are the only ones worth caching.
+    zarr_paths = [
+        str(item) for item, st in dataset_items if stat_module.S_ISDIR(st.st_mode)
+    ]
+    scan_cache = _read_scan_cache(zarr_paths)
+    cache_writes: list[tuple] = []
+
     # Create dataset nodes
     for item, st in dataset_items:
         try:
             if stat_module.S_ISDIR(st.st_mode):
                 fmt = "zarr"
                 # Size still ships because the Basket displays it.
-                size = _get_folder_size(item)
-                last_modified = _get_dataset_last_modified(item, st.st_mtime)
+                item_str = str(item)
+                fingerprint = _store_fingerprint(st)
+                cached = scan_cache.get(item_str)
+                if cached is not None and cached[0] == fingerprint:
+                    size, last_modified = cached[1], cached[2]
+                else:
+                    size = _get_folder_size(item)
+                    last_modified = _get_dataset_last_modified(item, st.st_mtime)
+                    cache_writes.append((item_str, fingerprint, size, last_modified))
             else:
                 suffix = item.suffix.lower()
                 if suffix == ".nc":
@@ -471,6 +558,8 @@ def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
             nodes[str(item)] = dataset_node
         except Exception:
             continue
+
+    _write_scan_cache(cache_writes)
 
     # Build parent-child relationships. The duplicate check is a per-parent set
     # rather than a scan of the children list, which made attaching a folder of
