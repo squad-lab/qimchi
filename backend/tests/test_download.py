@@ -31,6 +31,15 @@ def _members(response) -> set[str]:
         return set(archive.namelist())
 
 
+def _data_members(response) -> set[str]:
+    """Archive contents minus the library sidecars, which every download adds."""
+    return {
+        name
+        for name in _members(response)
+        if not name.endswith(download.LIBRARY_SIDECAR_SUFFIX)
+    }
+
+
 @pytest.mark.asyncio
 async def test_download_dataset_archives_directory_and_sidecar(tmp_path):
     dataset = tmp_path / "run.zarr"
@@ -43,7 +52,8 @@ async def test_download_dataset_archives_directory_and_sidecar(tmp_path):
     response = await download.download_dataset(PathData(path=str(dataset)))
 
     assert response.filename == "run.zip"
-    assert _members(response) == {"run.zarr/nested/data.bin", "run/run.md"}
+    assert _data_members(response) == {"run.zarr/nested/data.bin", "run/run.md"}
+    assert "run/run.qimchi.json" in _members(response)
 
 
 @pytest.mark.asyncio
@@ -53,7 +63,7 @@ async def test_download_dataset_archives_single_file(tmp_path):
 
     response = await download.download_dataset(PathData(path=str(dataset)))
 
-    assert _members(response) == {"run.nc"}
+    assert _data_members(response) == {"run.nc"}
 
 
 @pytest.mark.asyncio
@@ -114,7 +124,7 @@ async def test_download_selected_skips_missing_and_includes_notes(tmp_path):
     )
 
     assert response.filename == "selected_datasets_2_files.zip"
-    assert _members(response) == {"one.zarr/zarr.json", "one/one.md", "two.nc"}
+    assert _data_members(response) == {"one.zarr/zarr.json", "one/one.md", "two.nc"}
 
 
 @pytest.mark.asyncio
