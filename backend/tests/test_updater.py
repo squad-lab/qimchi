@@ -353,7 +353,7 @@ def test_every_build_script_stamps_the_version(monkeypatch):
 
     repo_root = Path(__file__).resolve().parents[2]
     scripts = [
-        repo_root / "build_local.ps1",
+        repo_root / "scripts" / "build_windows.ps1",
         repo_root / "scripts" / "build_linux.sh",
         repo_root / "scripts" / "build_macos.sh",
     ]

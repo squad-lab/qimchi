@@ -3,7 +3,7 @@
 ; Packages the PyInstaller onedir output (packaging\build\qimchi\) into a
 ; signed Windows installer with desktop shortcut and Start Menu entry.
 ;
-; Build via build_local.ps1 (recommended) or directly:
+; Build via scripts/build_windows.ps1 (recommended) or directly:
 ;   ISCC.exe /DAppVersion=0.5.3 /Q packaging\setup.iss
 ;
 ; Per-user install is the default (no UAC prompt).  Pass /ALLUSERS on the

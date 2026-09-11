@@ -14,7 +14,7 @@ sys._MEIPASS inside a frozen build points to _internal/, so config.py finds
 fd via  os.path.join(sys._MEIPASS, "fd[.exe]")  in both modes.
 
 Build:
-    Windows:  build_local.ps1
+    Windows:  scripts/build_windows.ps1
     macOS:    scripts/build_macos.sh
     Direct:   pyinstaller --clean --noconfirm \
                   --distpath packaging/build \
@@ -60,7 +60,7 @@ _use_upx = sys.platform != "darwin"
 
 # fd binary: vendor/<platform>/fd[.exe]
 # Only Windows is packaged today; Linux/macOS stubs are for future use.
-# build_local.ps1 / CI download the binary before invoking PyInstaller.
+# build_windows.ps1 / CI download the binary before invoking PyInstaller.
 _fd_by_platform = {
     "win32":  os.path.join(_repo_root, "vendor", "fd-windows", "fd.exe"),
     "linux":  os.path.join(_repo_root, "vendor", "fd-linux",   "fd"),

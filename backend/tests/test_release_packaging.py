@@ -30,7 +30,9 @@ def test_docker_image_uses_the_lock_and_bundles_database_migrations():
 
 
 def test_pywebview_builds_embed_the_release_version_in_the_frontend():
-    windows = (_REPOSITORY_ROOT / "build_local.ps1").read_text(encoding="utf-8")
+    windows = (_REPOSITORY_ROOT / "scripts" / "build_windows.ps1").read_text(
+        encoding="utf-8"
+    )
     linux = (_REPOSITORY_ROOT / "scripts" / "build_linux.sh").read_text(
         encoding="utf-8"
     )

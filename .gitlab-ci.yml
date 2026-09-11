@@ -241,7 +241,7 @@ docker:
       when: on_success
 
 # Builds the self-contained Windows desktop app (PyInstaller + pywebview) via
-# build_local.ps1 -- a single qimchi.exe that bundles the backend and serves the
+# scripts/build_windows.ps1 -- a single qimchi.exe that bundles the backend and
 # built SPA in a native window. Replaces the old qimchi.bat-wrapper exe.
 build-windows:
   stage: build
@@ -285,14 +285,14 @@ build-windows:
   script:
     - $VERSION = (Select-String -Path "backend/pyproject.toml" -Pattern 'version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
     - echo "Building Qimchi v$VERSION (pywebview desktop) for Windows"
-    # build_local.ps1 handles everything:
+    # build_windows.ps1 handles everything:
     #   1. Frontend build (npm)
     #   2. Backend staging
     #   3. fd.exe download → vendor/fd-windows/fd.exe
     #   4. backend/.venv setup (datasets extra + PyInstaller + pywebview + pythonnet)
     #   5. PyInstaller onedir build → packaging/build/qimchi/
     #   6. Inno Setup installer → packaging/build/qimchi-setup.exe
-    - ./build_local.ps1
+    - ./scripts/build_windows.ps1
     - if (!(Test-Path "packaging/build/qimchi-setup.exe")) { throw "Installer build failed" }
     # This runner has no interactive Windows desktop. Exercise the actual
     # packaged exe in headless smoke mode: backend, bundled SPA and downloads.

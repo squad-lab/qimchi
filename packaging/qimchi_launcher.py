@@ -8,7 +8,7 @@ Responsibilities:
 4. Guards multiprocessing so export workers (ProcessPoolExecutor) don't re-launch the whole app on Windows.
 5. Best-effort ensure a Chrome/Chromium is available for Kaleido image export on first run.
 
-This file is the source of truth. `build_local.ps1` copies it into the bundle.
+This file is the source of truth. `build_windows.ps1` copies it into the bundle.
 
 """
 
