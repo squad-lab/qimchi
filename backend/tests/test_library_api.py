@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import pytest
+import xarray as xr
 from fastapi import HTTPException
+from sqlmodel import Session
 
 from api import library
 
@@ -40,13 +42,35 @@ def test_na_normalization(value, expected):
         ("run.nc", "netcdf"),
         ("run.hdf5", "hdf5"),
         ("run.db", "qcodes"),
+        ("run.db#run_id=3", "qcodes"),
         ("run.sqlite", "container"),
+        ("run.sqlite#run_id=3", "qcodes"),
         ("run.csv", "csv"),
         ("run.unknown", None),
     ],
 )
 def test_source_format_detection(path, expected):
     assert library._source_format(path) == expected
+
+
+@pytest.mark.asyncio
+async def test_loading_qcodes_attrs_attaches_its_guid_to_the_qimchi_db(tmp_path):
+    from api.db_models import Measurement
+    from api.shared import db as db_mod
+
+    db_path = tmp_path / "runs.db"
+    db_path.write_bytes(b"qcodes")
+    ref = f"{db_path}#run_id=4"
+    dataset = xr.Dataset(attrs={"guid": "qcodes-guid", "run_id": 4})
+    attrs = {"guid": "qcodes-guid", "run_id": 4, "independents": [], "dependents": []}
+
+    await library.store_cached_attrs(ref, attrs, dataset)
+
+    with Session(db_mod.get_engine()) as session:
+        measurement = session.get(Measurement, "qcodes-guid")
+        assert measurement is not None
+        assert measurement.abs_path == ref
+        assert measurement.source_format == "qcodes"
 
 
 @pytest.mark.asyncio

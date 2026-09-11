@@ -72,7 +72,7 @@ def test_concurrent_first_writes_upsert_instead_of_colliding(monkeypatch):
             future.result(timeout=10)
 
     with Session(db_mod.get_engine()) as session:
-        stored = session.get(Note, ("same-uuid", LOCAL_USER_ID))
+        stored = session.get(Note, ("same-uuid", LOCAL_USER_ID, 0))
 
     assert stored is not None
     assert stored.body in {"body-0", "body-1"}
@@ -236,7 +236,9 @@ async def test_measurement_note_load_save_and_sidecar_import(tmp_path, monkeypat
 async def test_measurement_note_db_errors_are_reported(tmp_path, monkeypatch):
     path = str(tmp_path / "run.zarr")
     monkeypatch.setattr(
-        notes, "_db_get_note", lambda _uuid: (_ for _ in ()).throw(OSError("db down"))
+        notes,
+        "_db_get_note",
+        lambda _uuid, _run_id=0: (_ for _ in ()).throw(OSError("db down")),
     )
     result = await notes.load_notes(PathData(path=path))
     assert "db down" in result["error"]
@@ -244,6 +246,62 @@ async def test_measurement_note_db_errors_are_reported(tmp_path, monkeypatch):
     with pytest.raises(HTTPException) as exc:
         await notes.save_notes(NotesData(path=path, notes="text"))
     assert exc.value.status_code == 500
+
+
+@pytest.mark.asyncio
+async def test_qcodes_notes_are_keyed_by_qimchi_uuid_and_run(tmp_path, monkeypatch):
+    """Runs share a measurement UID without overwriting each other's notes."""
+    monkeypatch.setattr(notes, "_MD_EXPORT_ENABLED", True)
+    db_path = tmp_path / "measurements.db"
+    db_path.write_bytes(b"qcodes")
+
+    overall = NotesData(path=str(db_path), uuid="qimchi-uid", notes="database note")
+    run_7 = NotesData(
+        path=f"{db_path}#run_id=7",
+        uuid="qimchi-uid",
+        run_id=7,
+        notes="run seven",
+    )
+    run_8 = NotesData(
+        path=f"{db_path}#run_id=8",
+        uuid="qimchi-uid",
+        run_id=8,
+        notes="run eight",
+    )
+
+    await notes.save_notes(overall)
+    await notes.save_notes(run_7)
+    await notes.save_notes(run_8)
+
+    assert notes._db_get_note("qimchi-uid", 0)[0] == "database note"
+    assert notes._db_get_note("qimchi-uid", 7)[0] == "run seven"
+    assert notes._db_get_note("qimchi-uid", 8)[0] == "run eight"
+    assert (
+        await notes.load_notes(
+            PathData(path=f"{db_path}#run_id=7", uuid="qimchi-uid", run_id=7)
+        )
+    )["notes"] == "run seven"
+    # QCoDeS notes stay in Qimchi's DB even when markdown export is enabled.
+    assert list(tmp_path.rglob("*.md")) == []
+
+
+@pytest.mark.asyncio
+async def test_qcodes_notes_reject_missing_or_mismatched_identity(tmp_path):
+    db_path = tmp_path / "measurements.db"
+    db_path.write_bytes(b"qcodes")
+
+    with pytest.raises(HTTPException, match="require the measurement UUID"):
+        await notes.load_notes(PathData(path=f"{db_path}#run_id=7"))
+
+    with pytest.raises(HTTPException, match="does not match"):
+        await notes.save_notes(
+            NotesData(
+                path=f"{db_path}#run_id=7",
+                uuid="qimchi-uid",
+                run_id=8,
+                notes="wrong run",
+            )
+        )
 
 
 @pytest.mark.asyncio

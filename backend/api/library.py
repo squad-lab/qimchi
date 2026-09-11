@@ -119,14 +119,17 @@ def _na(value) -> str | None:
 
 
 def _source_format(path: str) -> str | None:
-    suffix = Path(path).suffix.lower()
+    disk_path, separator, _fragment = path.partition("#")
+    suffix = Path(disk_path).suffix.lower()
+    if suffix == ".db":
+        return "qcodes"
+    if suffix == ".sqlite":
+        return "qcodes" if separator else "container"
     return {
         ".zarr": "zarr",
         ".nc": "netcdf",
         ".h5": "hdf5",
         ".hdf5": "hdf5",
-        ".db": "qcodes",
-        ".sqlite": "container",
         ".csv": "csv",
         ".txt": "csv",
     }.get(suffix)
@@ -408,11 +411,17 @@ async def store_cached_attrs(path: str, attrs: dict, dataset=None) -> None:
     UUID can be derived without re-reading the file.
 
     """
-    if not _is_cacheable(path) or not attrs:
+    if not attrs:
         return
     try:
-        # Already registered? Cheap indexed update, no identity work.
-        if await asyncio.to_thread(_update_existing_cached_attrs, path, attrs):
+        cacheable = _is_cacheable(path)
+        # Already registered? Cheap indexed update, no identity work. QCoDeS
+        # runs are deliberately not cacheable because their shared database
+        # changes as other runs are added, but they still need registration so
+        # notes can use the Qimchi UUID instead of a filename-derived key.
+        if cacheable and await asyncio.to_thread(
+            _update_existing_cached_attrs, path, attrs
+        ):
             return
         # First time this measurement has been opened -- resolve its identity
         # and create the row, so the cache works without waiting for the user

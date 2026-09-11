@@ -94,12 +94,10 @@ class Note(SQLModel, table=True):
     """
     Per-user measurement notes (the DB is the source of truth).
 
-    ``uuid`` is the measurement key (the dataset filename stem, matching the
-    legacy ``.md`` sidecar naming). It is intentionally NOT a foreign key to
-    ``measurements`` so notes work for datasets that were never registered via
-    the library (e.g. QCoDeS/sqlite runs and artefacts, which have no writable
-    sidecar location). A ``.md`` mirror + the pooled sample rollup are still
-    written when ``QIMCHI_NOTES_MD_EXPORT`` is enabled.
+    ``uuid`` is the Qimchi measurement identity. ``run_id`` is zero for the
+    overall measurement note and the QCoDeS run integer for a run-wise note.
+    It is intentionally NOT foreign-keyed to ``measurements`` so legacy notes
+    can still be imported before their measurement is registered.
 
     """
 
@@ -107,6 +105,7 @@ class Note(SQLModel, table=True):
 
     uuid: str = Field(primary_key=True)
     user_id: int = Field(primary_key=True, foreign_key="users.id")
+    run_id: int = Field(default=0, primary_key=True)
     body: str = ""
     updated_at: datetime = Field(default_factory=_utcnow)
 

@@ -5,12 +5,15 @@ structures used for type safety and validation in the request and response bodie
 """
 
 from typing import Dict, List, Literal, Optional
+
 from pydantic import BaseModel, Field
 
 
 class PathData(BaseModel):
     path: str
     note_scope: Literal["measurement", "sample"] = "measurement"
+    uuid: Optional[str] = None
+    run_id: Optional[int] = Field(default=None, ge=1)
     sample_path: Optional[str] = None
     sample_name: Optional[str] = None
     cryostat_name: Optional[str] = None
@@ -29,6 +32,8 @@ class NotesData(BaseModel):
     path: str
     notes: str
     note_scope: Literal["measurement", "sample"] = "measurement"
+    uuid: Optional[str] = None
+    run_id: Optional[int] = Field(default=None, ge=1)
     sample_path: Optional[str] = None
     sample_name: Optional[str] = None
     cryostat_name: Optional[str] = None
