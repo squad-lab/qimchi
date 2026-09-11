@@ -70,6 +70,11 @@ interface SidebarState {
   // Explorer takes over the whole window (wide "desktop" view) instead of
   // living in the sidebar column.
   explorerExpanded: boolean;
+  // App-level zoom, applied as the root font size (see App.tsx). Not the
+  // browser's own zoom, which no web API can set, and not CSS `zoom`, which
+  // misplaces anything reading pointer coordinates. Persists across restarts,
+  // which browser zoom in the desktop build would not.
+  zoomLevel: number;
 
   // Component states
   componentStates: ComponentStates;
@@ -84,6 +89,7 @@ interface SidebarState {
   setBasketCollapsed: (collapsed: boolean) => void;
   setComposerCollapsed: (collapsed: boolean) => void;
   setExplorerExpanded: (expanded: boolean) => void;
+  setZoomLevel: (zoom: number) => void;
 
   // Actions for component states
   updateExplorerState: (state: Partial<ComponentStates["explorer"]>) => void;
@@ -184,6 +190,7 @@ export const useSidebarStore = create<SidebarState>()(
       basketCollapsed: false,
       composerCollapsed: false,
       explorerExpanded: false,
+      zoomLevel: 1,
 
       // Initial component states
       componentStates: initialComponentStates,
@@ -219,6 +226,8 @@ export const useSidebarStore = create<SidebarState>()(
       // Expanding always implies the Explorer is the visible section.
       // Expanding keeps whichever Explorer-backed tab is open (Explorer or
       // Live) and falls back to Explorer from anywhere else.
+      setZoomLevel: (zoom) => set({ zoomLevel: zoom }),
+
       setExplorerExpanded: (expanded) =>
         set((state) => {
           if (!expanded) return { explorerExpanded: false };

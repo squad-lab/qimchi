@@ -6,6 +6,8 @@ import {
   PanelLeftOpen,
   Radio,
   Lightbulb,
+  ZoomIn,
+  ZoomOut,
   History,
   Sun,
   Moon,
@@ -39,16 +41,32 @@ const railSections: {
 ];
 
 const railButtonBaseClass =
-  "relative flex h-9 w-9 items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8cc63e] focus-visible:ring-inset";
+  "relative flex h-9 w-9 shrink-0 items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8cc63e] focus-visible:ring-inset";
 
 // Plain rail buttons opt into the dark hover remap; the active tab does not,
 // because it carries its own themed hover (see --qimchi-panel-title-*).
 const railPlainButtonClass =
   "qimchi-dark-hover-plain text-gray-500 hover:bg-gray-200 hover:text-gray-700";
 
+// The ladder Chromium uses for Ctrl+/Ctrl-, so the steps feel like the
+// browser's own zoom rather than an arbitrary percentage.
+const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2] as const;
+
+const nextZoom = (current: number, direction: 1 | -1): number => {
+  // Snap to the nearest rung first, so a persisted off-ladder value still
+  // steps predictably.
+  const index = ZOOM_STEPS.reduce(
+    (best, step, i) => (Math.abs(step - current) < Math.abs(ZOOM_STEPS[best] - current) ? i : best),
+    0,
+  );
+  return ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, Math.max(0, index + direction))];
+};
+
 const SidebarRail = ({ onOpenHelp }: SidebarRailProps) => {
   const { sidebarCollapsed, activeSection, setSidebarCollapsed, setActiveSection } =
     useSidebarStore();
+  const zoomLevel = useSidebarStore((state) => state.zoomLevel);
+  const setZoomLevel = useSidebarStore((state) => state.setZoomLevel);
   const { theme, toggleTheme } = useThemeStore();
   const { openLogModal } = useToast();
   const isDark = theme === "dark";
@@ -61,7 +79,7 @@ const SidebarRail = ({ onOpenHelp }: SidebarRailProps) => {
 
   return (
     // Always visible, even when the sidebar body is collapsed.
-    <div className="flex h-screen w-9 shrink-0 flex-col border-r border-gray-300 bg-gray-100">
+    <div className="flex h-full w-9 shrink-0 flex-col overflow-y-auto border-r border-gray-300 bg-gray-100">
       {railSections.map(({ id, label, Icon, size, shortcut }) => {
         const isActive = activeSection === id && !sidebarCollapsed;
         return (
@@ -85,6 +103,39 @@ const SidebarRail = ({ onOpenHelp }: SidebarRailProps) => {
       })}
 
       <div className="flex-1" />
+
+      {/* App zoom -- the desktop build has no browser chrome to zoom from */}
+      <Tooltip content="Zoom in" position="right">
+        <button
+          onClick={() => setZoomLevel(nextZoom(zoomLevel, 1))}
+          disabled={zoomLevel >= ZOOM_STEPS[ZOOM_STEPS.length - 1]}
+          className={`${railButtonBaseClass} ${railPlainButtonClass} disabled:opacity-40 disabled:cursor-not-allowed`}
+          aria-label="Zoom in"
+        >
+          <ZoomIn size={16} />
+        </button>
+      </Tooltip>
+
+      <Tooltip content="Reset zoom to 100%" position="right">
+        <button
+          onClick={() => setZoomLevel(1)}
+          className={`${railButtonBaseClass} ${railPlainButtonClass} text-[10px] font-medium tabular-nums`}
+          aria-label={`Zoom ${Math.round(zoomLevel * 100)} percent, reset to 100 percent`}
+        >
+          {Math.round(zoomLevel * 100)}
+        </button>
+      </Tooltip>
+
+      <Tooltip content="Zoom out" position="right">
+        <button
+          onClick={() => setZoomLevel(nextZoom(zoomLevel, -1))}
+          disabled={zoomLevel <= ZOOM_STEPS[0]}
+          className={`${railButtonBaseClass} ${railPlainButtonClass} disabled:opacity-40 disabled:cursor-not-allowed`}
+          aria-label="Zoom out"
+        >
+          <ZoomOut size={16} />
+        </button>
+      </Tooltip>
 
       {/* Help -- sits directly above the collapse toggle at the foot of the rail */}
       <Tooltip content="Help & Tips (Shift+H)" position="right">
