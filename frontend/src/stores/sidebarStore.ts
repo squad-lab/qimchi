@@ -35,6 +35,11 @@ interface ComponentStates {
     lastPath: string; // Track the last loaded path
     showLiveOnly: boolean; // Show only live measurements
     hiddenLiveMeasurementIds: string[]; // Locally dismissed while still live
+    // Folder nodes the user collapsed, so a refresh does not re-open them.
+    // Stored as the collapsed set rather than the expanded one: the tree is
+    // expanded by default, so this stays small and an unseen folder is
+    // correctly treated as expanded.
+    collapsedNodeIds: string[];
   };
 }
 
@@ -112,6 +117,7 @@ const initialComponentStates: ComponentStates = {
     lastPath: "",
     showLiveOnly: false,
     hiddenLiveMeasurementIds: [],
+    collapsedNodeIds: [],
   },
 };
 

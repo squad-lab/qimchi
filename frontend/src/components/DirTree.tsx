@@ -183,6 +183,7 @@ const DirTree = ({
     isExpanded,
     showLiveOnly,
     hiddenLiveMeasurementIds = [],
+    collapsedNodeIds = [],
     // lastPath, // TODO: Use this to track the last loaded path
   } = componentStates.dirTree;
 
@@ -597,6 +598,13 @@ const DirTree = ({
     };
   }, [filterHiddenLiveMeasurements, showLiveOnly]);
 
+  // Read through a ref so the expand effect does not re-run (and re-expand)
+  // every time the user collapses a folder.
+  const collapsedNodeIdsRef = useRef<Set<string>>(new Set(collapsedNodeIds));
+  useEffect(() => {
+    collapsedNodeIdsRef.current = new Set(collapsedNodeIds);
+  }, [collapsedNodeIds]);
+
   // Signature that changes only when a library filter is active AND the
   // relevant heart/trash state changes.
   const libFilterSignature = useMemo(() => {
@@ -709,18 +717,6 @@ const DirTree = ({
       return true;
     };
 
-    // Helper function to check if a folder has any matching children (recursively)
-    const hasMatchingChildren = (node: TreeNode): boolean => {
-      if (!node.children) return false;
-
-      return node.children.some((child) => {
-        const childMatches = shouldIncludeNode(child) && matchesSearch(child);
-        if (childMatches) return true;
-        if (child.type === "folder") return hasMatchingChildren(child);
-        return false;
-      });
-    };
-
     const processNodes = (nodes: TreeNode[]): TreeNode[] => {
       // For chronological sorting, flatten to show only leaf nodes (dataset files)
       if (sortBy === "chrono") {
@@ -746,29 +742,30 @@ const DirTree = ({
       const processedNodes: TreeNode[] = [];
 
       sortedNodes.forEach((node) => {
-        const shouldInclude = shouldIncludeNode(node);
-        const nodeMatchesSearch = matchesSearch(node);
         const isFolder = node.type === "folder";
-        const folderHasMatches = isFolder ? hasMatchingChildren(node) : false;
 
-        // Include node if:
-        // 1. It matches both the filter criteria AND search term, OR
-        // 2. It's a folder that contains matching children (to maintain hierarchy)
-        if ((shouldInclude && nodeMatchesSearch) || (isFolder && folderHasMatches)) {
-          let processedNode = { ...node };
+        // Children are processed first so a folder is kept when any survived,
+        // which is what the separate recursive hasMatchingChildren() used to
+        // answer -- it walked each subtree a second time to do it.
+        const processedChildren = node.children ? processNodes(node.children) : undefined;
+        const keep =
+          (shouldIncludeNode(node) && matchesSearch(node)) ||
+          (isFolder && (processedChildren?.length ?? 0) > 0);
 
-          // Process children if they exist
-          if (node.children) {
-            const processedChildren = processNodes(node.children);
-            processedNode = {
-              ...processedNode,
-              children: processedChildren,
-            };
-          }
+        if (!keep) return;
 
-          allNodes.set(processedNode.id, processedNode);
-          processedNodes.push(processedNode);
-        }
+        // Reuse the node object when nothing about it changed. Copying every
+        // node on every pass allocated the whole tree per keystroke and handed
+        // React a fresh identity for rows that had not moved.
+        const childrenChanged =
+          processedChildren !== undefined &&
+          (processedChildren.length !== node.children!.length ||
+            processedChildren.some((child, index) => child !== node.children![index]));
+
+        const processedNode = childrenChanged ? { ...node, children: processedChildren } : node;
+
+        allNodes.set(processedNode.id, processedNode);
+        processedNodes.push(processedNode);
       });
 
       return processedNodes;
@@ -800,7 +797,12 @@ const DirTree = ({
   // Initialize headless-tree with search feature
   // Use a key that changes when switching between chrono and non-chrono modes
   // This forces the tree to completely re-initialize
-  const treeKey = `${sortBy}-${filterBy}-${searchText}-${filterHeartedOnly ? "h" : ""}${hideTrashed ? "t" : ""}-${effectiveTagIds.join(",")}-${unknownSearchTags.join(",")}`;
+  // Only the chrono/hierarchical switch changes the shape of an item (chrono
+  // flattens to leaves, so isItemFolder flips). Filters and search only change
+  // which ids getChildren returns, which the virtualiser already re-renders --
+  // keying on them remounted the whole container, and its scroll position, on
+  // every keystroke.
+  const treeKey = sortBy === "chrono" ? "flat" : "tree";
 
   const tree = useTree<TreeNode>({
     rootItemId: "root",
@@ -891,6 +893,17 @@ const DirTree = ({
           tree.collapseAll();
           setTimeout(() => {
             tree.expandAll();
+            // expandAll is what makes the tree materialise at all, so the
+            // folders the user had collapsed are re-collapsed afterwards
+            // rather than never expanded. Snapshot the items first: collapsing
+            // changes the list being walked.
+            const remembered = collapsedNodeIdsRef.current;
+            if (remembered.size > 0) {
+              tree
+                .getItems()
+                .filter((item) => remembered.has(item.getId()))
+                .forEach((item) => item.collapse());
+            }
             updateDirTreeState({ isExpanded: true });
           }, 50);
         } else {
@@ -902,10 +915,20 @@ const DirTree = ({
       return () => clearTimeout(timeoutId);
     }
   }, [rootNodes, tree, sortBy, updateDirTreeState]);
-  const updateExpandedNodeState = useCallback((nodeId: string, nextExpanded: boolean) => {
-    void nodeId;
-    void nextExpanded;
-  }, []);
+  // Persist per-folder collapse so a refresh does not re-open everything.
+  const updateExpandedNodeState = useCallback(
+    (nodeId: string, nextExpanded: boolean) => {
+      const next = new Set(collapsedNodeIdsRef.current);
+      if (nextExpanded) {
+        next.delete(nodeId);
+      } else {
+        next.add(nodeId);
+      }
+      collapsedNodeIdsRef.current = next;
+      updateDirTreeState({ collapsedNodeIds: [...next] });
+    },
+    [updateDirTreeState],
+  );
 
   const handleSort = (newSortBy: typeof sortBy) => {
     if (sortBy === newSortBy) {
@@ -1433,10 +1456,19 @@ const DirTree = ({
                   onClick={() => {
                     if (isExpanded) {
                       tree.collapseAll();
-                      updateDirTreeState({ isExpanded: false });
+                      const allFolderIds = tree
+                        .getItems()
+                        .filter((item) => item.isFolder())
+                        .map((item) => item.getId());
+                      collapsedNodeIdsRef.current = new Set(allFolderIds);
+                      updateDirTreeState({
+                        isExpanded: false,
+                        collapsedNodeIds: allFolderIds,
+                      });
                     } else {
                       tree.expandAll();
-                      updateDirTreeState({ isExpanded: true });
+                      collapsedNodeIdsRef.current = new Set();
+                      updateDirTreeState({ isExpanded: true, collapsedNodeIds: [] });
                     }
                   }}
                   disabled={sortBy === "chrono"}
