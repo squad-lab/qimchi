@@ -35,11 +35,10 @@ interface ComponentStates {
     lastPath: string; // Track the last loaded path
     showLiveOnly: boolean; // Show only live measurements
     hiddenLiveMeasurementIds: string[]; // Locally dismissed while still live
-    // Folder nodes the user collapsed, so a refresh does not re-open them.
-    // Stored as the collapsed set rather than the expanded one: the tree is
-    // expanded by default, so this stays small and an unseen folder is
-    // correctly treated as expanded.
-    collapsedNodeIds: string[];
+    // Folder nodes the user opened, so a refresh restores them. The tree now
+    // loads collapsed, so the expanded set is the small one and an unseen
+    // folder is correctly treated as collapsed.
+    expandedNodeIds: string[];
   };
 }
 
@@ -117,7 +116,7 @@ const initialComponentStates: ComponentStates = {
     lastPath: "",
     showLiveOnly: false,
     hiddenLiveMeasurementIds: [],
-    collapsedNodeIds: [],
+    expandedNodeIds: [],
   },
 };
 
@@ -276,7 +275,7 @@ export const useSidebarStore = create<SidebarState>()(
     }),
     {
       name: "sidebar-store",
-      version: 9, // Live is now an accordion section rather than a DirTree toolbar toggle
+      version: 10, // DirTree loads collapsed, so persisted expansion inverted
     },
   ),
 );
