@@ -411,6 +411,91 @@ def test_save_light_dark_pngs_supports_one_or_both_variants(tmp_path, monkeypatc
     assert all("<b>Custom Tags:</b> notes-tag" in text for text in footer_texts)
 
 
+def test_save_light_dark_pngs_writes_beside_the_dataset(tmp_path, monkeypatch):
+    """
+    The PNGs land in the dataset's own extras folder, named by uuid and time.
+
+    That folder is what the Notes panel and the download endpoints look in, so
+    the location is part of the contract, not an implementation detail.
+
+    """
+    dataset = tmp_path / "run.zarr"
+
+    monkeypatch.setattr(export, "_resolve_fpath_to_disk", lambda _path: str(dataset))
+    monkeypatch.setattr(export, "_library_metadata", lambda _path, _uuid: {"tags": []})
+    monkeypatch.setattr(
+        export,
+        "_write_plotly_image",
+        lambda _fig, path, **_k: Path(path).write_bytes(b"png"),
+    )
+
+    saved = export._save_light_dark_pngs(
+        {"data": [{"x": [0], "y": [0]}], "layout": {}}, str(dataset), ts="stamp"
+    )
+
+    light = Path(saved["png_light"])
+    assert light.parent == tmp_path / "run"
+    assert light.name == "run__stamp__plot_light.png"
+    assert Path(saved["png_dark"]).name == "run__stamp__plot_dark.png"
+
+
+def test_save_light_dark_pngs_stamps_a_timestamp_when_none_is_given(
+    tmp_path, monkeypatch
+):
+    dataset = tmp_path / "run.zarr"
+    monkeypatch.setattr(export, "_resolve_fpath_to_disk", lambda _path: str(dataset))
+    monkeypatch.setattr(export, "_library_metadata", lambda _path, _uuid: {"tags": []})
+    monkeypatch.setattr(
+        export,
+        "_write_plotly_image",
+        lambda _fig, path, **_k: Path(path).write_bytes(b"png"),
+    )
+
+    saved = export._save_light_dark_pngs(
+        {"data": [{"x": [0], "y": [0]}], "layout": {}}, str(dataset)
+    )
+
+    # Two exports of one dataset must not overwrite each other.
+    assert "__plot_light.png" in saved["png_light"]
+    assert Path(saved["png_light"]).name.count("__") == 2
+
+
+def test_find_fira_sans_fonts_prefers_the_built_assets(tmp_path, monkeypatch):
+    """
+    The export embeds the same fonts the app renders with.
+
+    Several roots are searched -- dev, Docker, frozen -- and a root only counts
+    when it has every weight, or an export would mix typefaces.
+
+    """
+    assets = tmp_path / "frontend" / "dist" / "assets"
+    assets.mkdir(parents=True)
+    for weight in export._FIRA_SANS_WEIGHTS:
+        (assets / f"fira-sans-latin-{weight}-normal-hash.woff2").write_bytes(b"font")
+
+    monkeypatch.setattr(
+        export, "__file__", str(tmp_path / "backend" / "api" / "export.py")
+    )
+    found = export._find_fira_sans_fonts()
+
+    assert set(found) == set(export._FIRA_SANS_WEIGHTS)
+
+
+def test_find_fira_sans_fonts_rejects_an_incomplete_set(tmp_path, monkeypatch):
+    assets = tmp_path / "frontend" / "dist" / "assets"
+    assets.mkdir(parents=True)
+    # One weight short: mixing weights is worse than embedding none.
+    for weight in export._FIRA_SANS_WEIGHTS[:-1]:
+        (assets / f"fira-sans-latin-{weight}-normal-hash.woff2").write_bytes(b"font")
+
+    monkeypatch.setattr(
+        export, "__file__", str(tmp_path / "backend" / "api" / "export.py")
+    )
+    found = export._find_fira_sans_fonts()
+
+    assert found == {} or set(found) != set(export._FIRA_SANS_WEIGHTS)
+
+
 @pytest.mark.asyncio
 async def test_run_export_task_completes_and_copies_for_desktop(tmp_path, monkeypatch):
     archive = tmp_path / "result.zip"

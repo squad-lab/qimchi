@@ -98,7 +98,9 @@ async def test_library_route_workflow_preserves_state_and_tags(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_library_routes_report_unknown_measurements_and_register_failures(monkeypatch):
+async def test_library_routes_report_unknown_measurements_and_register_failures(
+    monkeypatch,
+):
     with pytest.raises(HTTPException) as heart:
         await library.heart(library.HeartRequest(uuid="missing", hearted=True))
     assert heart.value.status_code == 404

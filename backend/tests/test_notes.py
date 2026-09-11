@@ -212,9 +212,7 @@ async def test_measurement_note_load_save_and_sidecar_import(tmp_path, monkeypat
     blank = await notes.load_notes(PathData(path=str(measurement)))
     assert blank["notes"] == ""
 
-    saved = await notes.save_notes(
-        NotesData(path=str(measurement), notes="saved text")
-    )
+    saved = await notes.save_notes(NotesData(path=str(measurement), notes="saved text"))
     loaded = await notes.load_notes(PathData(path=str(measurement)))
     assert saved["message"] == "Notes saved successfully."
     assert loaded["notes"] == "saved text"
