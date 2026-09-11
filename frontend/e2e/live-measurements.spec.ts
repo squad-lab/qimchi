@@ -56,7 +56,7 @@ test("hides, restores, and eventually forgets live measurement dismissals", asyn
   await page.getByPlaceholder("Enter folder path").fill("C:\\measurements");
   await page.getByTitle("Load folder").click();
   await expect(page.getByText("saved-run.zarr", { exact: true })).toBeVisible();
-  await page.getByTitle("Show only live measurements (refreshes every second)").click();
+  await page.getByRole("button", { name: "Live Measurements" }).click();
   await expect(page.getByText("live-one", { exact: true })).toBeVisible();
   await expect(page.getByText("live-two", { exact: true })).toBeVisible();
 
@@ -73,7 +73,7 @@ test("hides, restores, and eventually forgets live measurement dismissals", asyn
   // Polling and a full reload must not bring an ignored ongoing run back.
   await page.waitForTimeout(1_100);
   await expect(page.getByText("live-one", { exact: true })).toBeHidden();
-  await page.reload();
+  await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.getByText("live-one", { exact: true })).toBeHidden();
 
   await page.getByRole("button", { name: "Restore hidden live measurements" }).click();
