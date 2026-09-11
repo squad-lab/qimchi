@@ -148,6 +148,14 @@ select {
 }
 
 /* Modebar positioning - bottom middle horizontal */
+/* Layer stack, in paint order. These are the only values that matter across
+   component boundaries; anything local to a card stays well below them.
+     1000  Plotly modebar (below)
+     1500  full-window Explorer (Explorer.tsx)
+     2001+ modals, incrementing per open (getNextGlobalModalZ)
+     9999  tooltip portal
+   The Explorer needs a slot above the modebar: it covers the viewport, and a
+   modebar painting through a covered plot is the giveaway that it had none. */
 .modebar-container {
   position: absolute !important;
   top: 0% !important;
