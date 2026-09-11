@@ -27,6 +27,7 @@ import {
 import Tooltip from "./Tooltip";
 import SectionRibbon, { ribbonButtonClass } from "./SectionRibbon";
 import { useShortcut } from "../hooks/useGlobalShortcuts";
+import { useSidebarStore } from "../stores/sidebarStore";
 import { useToast } from "../hooks/useToast";
 import { SharedFieldResult, isFieldShared } from "../utils/datasetFieldSelectors";
 import { detectDatasetKind, isDatasetPath, isSqliteContainerPath } from "../utils/datasetPaths";
@@ -414,9 +415,16 @@ const Basket = ({
   onOpenNotesItem,
 }: BasketProps) => {
   const { showToast } = useToast();
-  const [isExpanded, setIsExpanded] = useState(true);
+  // Persisted, so a refresh keeps the Basket the way it was left.
+  const basketCollapsed = useSidebarStore((state) => state.basketCollapsed);
+  const setBasketCollapsed = useSidebarStore((state) => state.setBasketCollapsed);
+  const isExpanded = !basketCollapsed;
+  const toggleExpanded = useCallback(
+    () => setBasketCollapsed(!basketCollapsed),
+    [basketCollapsed, setBasketCollapsed],
+  );
 
-  useShortcut("toggle-basket", () => setIsExpanded((expanded) => !expanded));
+  useShortcut("toggle-basket", toggleExpanded);
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [copiedItems, setCopiedItems] = useState<{
@@ -935,7 +943,7 @@ const Basket = ({
             position="left"
           >
             <button
-              onClick={() => setIsExpanded(!isExpanded)}
+              onClick={toggleExpanded}
               className={ribbonButtonClass}
               aria-label={isExpanded ? "Collapse basket" : "Expand basket"}
             >

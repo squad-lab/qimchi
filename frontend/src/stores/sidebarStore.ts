@@ -62,6 +62,11 @@ interface SidebarState {
   metadataCollapsed: boolean;
   notesCollapsed: boolean;
   brandingCollapsed: boolean;
+  // Basket and Composer collapse independently of the accordion -- they live
+  // in the Viewer column, not the sidebar -- so they carry their own flags
+  // rather than going through activeSection.
+  basketCollapsed: boolean;
+  composerCollapsed: boolean;
   // Explorer takes over the whole window (wide "desktop" view) instead of
   // living in the sidebar column.
   explorerExpanded: boolean;
@@ -77,6 +82,8 @@ interface SidebarState {
   setMetadataCollapsed: (collapsed: boolean) => void;
   setNotesCollapsed: (collapsed: boolean) => void;
   setBrandingCollapsed: (collapsed: boolean) => void;
+  setBasketCollapsed: (collapsed: boolean) => void;
+  setComposerCollapsed: (collapsed: boolean) => void;
   setExplorerExpanded: (expanded: boolean) => void;
 
   // Actions for component states
@@ -175,6 +182,8 @@ export const useSidebarStore = create<SidebarState>()(
       activeSection: "explorer", // Explorer should be open by default
       ...sectionFlags("explorer"),
       brandingCollapsed: false,
+      basketCollapsed: false,
+      composerCollapsed: false,
       explorerExpanded: false,
 
       // Initial component states
@@ -218,6 +227,8 @@ export const useSidebarStore = create<SidebarState>()(
       setMetadataCollapsed: (collapsed) => set(setSection("metadata", collapsed)),
       setNotesCollapsed: (collapsed) => set(setSection("notes", collapsed)),
       setBrandingCollapsed: (collapsed) => set({ brandingCollapsed: collapsed }),
+      setBasketCollapsed: (collapsed) => set({ basketCollapsed: collapsed }),
+      setComposerCollapsed: (collapsed) => set({ composerCollapsed: collapsed }),
 
       // Expanding always implies the Explorer is the visible section.
       // Expanding keeps whichever Explorer-backed tab is open (Explorer or
