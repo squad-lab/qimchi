@@ -1,10 +1,10 @@
 # <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.7.0
 
-Plotly based data visualization tool for `xarray` data. Optimized to work with the optional [`qanary`](https://gitlab.com/squad-lab/qanary) package (the installer no longer installs `qanary` by default). Qimchi supports any dataset format convertible to `xarray` (see [Supported Dataset Types](#supported-dataset-types) below). Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html).
+Plotly based data visualization tool for `xarray` data. Optimized to work with the optional [`qanary`](https://gitlab.com/squad-lab/qanary) package. Qimchi supports any dataset format convertible to `xarray` (see [Supported Dataset Types](#supported-dataset-types) below). Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html).
 
 This repository contains a unified FastAPI application that serves a React-based frontend for the Qimchi plotter.
 
-## v0.7.x Highlights
+## What's new in 0.7.0
 
 > [!TIP]
 > 🖥️ **Desktop app:** a self-contained build that runs Qimchi in a native window, with no separate Git/Python/Node install. Per-OS installers -- Windows (`qimchi-setup.exe`), Linux AppImage, macOS DMG -- on the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases). The app checks for updates on startup and offers a one-click "Update now".
@@ -12,27 +12,23 @@ This repository contains a unified FastAPI application that serves a React-based
 - **Library:** heart, trash and tag your measurements. Marks are saved locally and shown in the Explorer, with filters for hearted-only, hiding trash, and tags. Select several measurements and apply any of them at once.
 - **Tags work like labels** -- a measurement can carry several. Filter from the searchable Tags dropdown, or type `#tag` (or `#"two words"`) in the Explorer search alongside an ordinary name search.
 - **Marks follow a measurement** even if you rename or move its file. Qimchi identifies it by its qanary ID, a QCoDeS run GUID, or -- failing both -- a signature derived from the data itself. Nothing is written next to your files.
-- **Notes** live in the library instead of `.md` sidecars, so QCoDeS runs and artefacts can have notes too. Existing sidecar notes are imported automatically.
-- **Dark mode**, with a toggle in the footer. Follows your system preference by default; plots, metadata and filters all follow the theme.
+- **Notes** live in the library instead of `.md` sidecars, so QCoDeS runs and artefacts can have notes too. Existing sidecar notes are imported automatically, and the runs of a QCoDeS database share one overall view.
+- **Dark mode**, with a toggle in the sidebar rail. Follows your system preference by default; plots, metadata and filters all follow the theme.
 - **Plot pinning:** hold a plot on its measurement while Next/Prev moves the others, to compare two datasets side by side. Adding a measurement also reproduces your custom plots for it, with the same variables and filters.
+- **Accordion sidebar:** Explorer, Metadata, Notes and Live Measurements open one at a time from an icon rail, with `Alt+1`--`Alt+4` to switch between them. The Explorer can take over the whole window with `Shift+F`, and the Basket, Composer and Viewer get control ribbons of their own.
+- **Searchable help** (fuzzy, across every section) and **app zoom** from the rail, both remembered between sessions.
+- **QCoDeS and Quantify metadata** is shown as the run actually carries it, instead of the four qanary sections reading "N/A".
+- **A much faster Explorer:** scanning a folder of 210 measurements went from 1.06s to 0.19s, and a large basket no longer slows the rest of the app down.
 
-## Earlier highlights (v0.5.x -- v0.6.x)
+Everything in this release is listed in the [changelog on `preview`](https://gitlab.com/squad-lab/qimchi/-/blob/preview/CHANGELOG.md).
 
-- **Load any `xarray`-convertible dataset:** one loader handles Zarr (v2 and v3), `xarray` DataTrees, NetCDF/HDF5, QCoDeS DBs, flat CSV/TXT and SQLite-backed containers. Custom formats via loader templates -- see [docs/custom_datasets.md](docs/custom_datasets.md).
-- **Create LineCuts:** interactive horizontal/vertical slicing with live preview.
-- **Perform Background correction:** LinePlots (constant, linear) and HeatMaps (constant, row/col mean, plane).
-- **Explorer and Viewer:** path history, dataset cycling across formats, robust filter handling, and a persistent layout (sidebar width and section heights survive reloads).
-- **Keyboard shortcuts** throughout -- Filters, Appearance, Maximized view, Notes, Export -- with a Help & Tips modal documenting each component.
-- Plot titles name the variables (`Y vs X`) rather than "Line Plot"/"Heat Map"; the Basket shows newest first and reveals overflowing variable lists on hover.
-
-
+<!-- TODO: -->
 <!-- Full API documentation and more can be found [here](https://qimchi.squad-lab.org) -->
 
 ## Table of Contents
 
 - [ Qimchi v0.7.0](#-qimchi-v070)
-  - [v0.7.x Highlights](#v07x-highlights)
-  - [Earlier highlights (v0.5.x -- v0.6.x)](#earlier-highlights-v05x----v06x)
+  - [What's new in 0.7.0](#whats-new-in-070)
   - [Table of Contents](#table-of-contents)
   - [Installation](#installation)
     - [Windows](#windows)
@@ -51,7 +47,10 @@ This repository contains a unified FastAPI application that serves a React-based
 
 ## Installation
 
-Qimchi supports multiple installation methods, including executable scripts, Docker, and expert manual installation. Choose the method that best suits your use case.
+> [!TIP]
+> **Download the latest build from the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases):** `qimchi-setup.exe` (Windows), `qimchi.dmg` (macOS) or `qimchi-x86_64.AppImage` (Linux).
+
+The desktop app is the recommended install on all three platforms. Qimchi can also be built from source and run as a local server, deployed with Docker, or installed manually -- choose the method that best suits your use case.
 
 ### Windows
 
