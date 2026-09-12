@@ -15,10 +15,9 @@ This repository contains a unified FastAPI application that serves a React-based
 - **Notes** live in the library instead of `.md` sidecars, so QCoDeS runs and artefacts can have notes too. Existing sidecar notes are imported automatically, and the runs of a QCoDeS database share one overall view.
 - **Dark mode**, with a toggle in the sidebar rail. Follows your system preference by default; plots, metadata and filters all follow the theme.
 - **Plot pinning:** hold a plot on its measurement while Next/Prev moves the others, to compare two datasets side by side. Adding a measurement also reproduces your custom plots for it, with the same variables and filters.
-- **Accordion sidebar:** Explorer, Metadata, Notes and Live Measurements open one at a time from an icon rail, with `Alt+1`--`Alt+4` to switch between them. The Explorer can take over the whole window with `Shift+F`, and the Basket, Composer and Viewer get control ribbons of their own.
+- **UI improvements:** Explorer, Metadata, Notes and Live Measurements open one at a time from an icon rail, with `Alt+1`--`Alt+4` to switch between them. The Explorer can take over the whole window with `Shift+F`, and the Basket, Composer and Viewer get control ribbons of their own. The Explorer has also been rewritten to be faster and more responsive.
 - **Searchable help** (fuzzy, across every section) and **app zoom** from the rail, both remembered between sessions.
 - **QCoDeS and Quantify metadata** is shown as the run actually carries it, instead of the four qanary sections reading "N/A".
-- **A much faster Explorer:** scanning a folder of 210 measurements went from 1.06s to 0.19s, and a large basket no longer slows the rest of the app down.
 
 Everything in this release is listed in the [changelog on `preview`](https://gitlab.com/squad-lab/qimchi/-/blob/preview/CHANGELOG.md).
 
@@ -120,17 +119,16 @@ services:
   qimchi:
     image: registry.gitlab.com/squad-lab/qimchi:latest
     container_name: qimchi
-    profiles: ["webdev"]
     restart: unless-stopped
     ports:
-      - 80:80
+      # The container serves on 8001; the left-hand side is the port you visit.
+      - 80:8001
     volumes:
       - ./qimchi/data:/root/.qimchi/
       - /your/data/:/data/
     networks:
       - squad
     environment:
-      - NUM_WORKERS=8
       - EXPORT_MAX_WORKERS=4
       - QIMCHI_MAX_DEPTH=6
       - SERVE_STATIC_FILES=true
@@ -142,7 +140,8 @@ This setup exposes Qimchi on `localhost:80`.
 
 **Start the service:**
 ```bash
-docker compose up --build -d
+docker compose pull
+docker compose up -d
 ```
 
 **Access:**
@@ -216,7 +215,7 @@ Example NGINX configuration (`./nginx/conf.d/default.conf`):
 ```nginx
 server {
     listen 80;
-    server_name example.domain.org;
+    server_name plot.domain.org;
 
     # Redirect all HTTP traffic to HTTPS
     location / {
@@ -232,7 +231,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/domain.org/privkey.pem;
 
     location / {
-        proxy_pass http://qimchi:80;
+        proxy_pass http://qimchi:8001;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -275,12 +274,16 @@ For manual installation with full control over the setup process, follow these s
    # Install Node.js
    winget install OpenJS.NodeJS
    
-   # Install fd-find (optional, for better directory tree performance)
+   # Install fd (REQUIRED: the Explorer's directory tree is built with it)
    winget install sharkdp.fd
    ```
 
    > [!tip]
    > **Restart your PowerShell terminal to ensure all `PATH` changes take effect**.
+
+   > [!important]
+   > The frontend build needs Node `^20.19` or `>=22.12`. On Node 21.x npm skips a
+   > native dependency and the build then fails.
 
 3. **Set up Python virtual environment:**
    ```powershell
@@ -292,12 +295,16 @@ For manual installation with full control over the setup process, follow these s
 4. **Install backend dependencies:**
    ```powershell
    cd qimchi\backend
-   uv pip install .
+   # The datasets extra carries the readers for NetCDF, HDF5, CSV/TXT and
+   # zarr v2. Without it those formats fail to open.
+   uv pip install ".[datasets]"
    ```
 
-5. **Install Plotly Chrome support:**
+5. **Provide a browser for image export:**
    ```powershell
-   echo y | python -c "import plotly; plotly.io.kaleido.scope.chromium.config.set_executable('chrome')"
+   # Kaleido v1 does not bundle Chrome. Skip this if Chrome or Chromium is
+   # already installed; PNG/SVG export needs one of them.
+   echo y | plotly_get_chrome
    ```
 
 6. **Build the frontend:**
@@ -339,11 +346,11 @@ For manual installation with full control over the setup process, follow these s
    # Reload shell configuration
    export NVM_DIR="$HOME/.nvm"
    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-   # Install latest Node.js LTS version
+   # Install Node.js LTS (needs ^20.19 or >=22.12; Node 21.x cannot build the frontend)
    nvm install --lts
    nvm use --lts
    
-   # Install fd-find (optional, for better performance)
+   # Install fd (REQUIRED: the Explorer's directory tree is built with it)
    sudo apt install fd-find
    ```
    
@@ -362,7 +369,7 @@ For manual installation with full control over the setup process, follow these s
    # Reload shell configuration
    export NVM_DIR="$HOME/.nvm"
    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-   # Install latest Node.js LTS version
+   # Install Node.js LTS (needs ^20.19 or >=22.12; Node 21.x cannot build the frontend)
    nvm install --lts
    nvm use --lts
    ```
@@ -377,12 +384,16 @@ For manual installation with full control over the setup process, follow these s
 4. **Install backend dependencies:**
    ```bash
    cd qimchi/backend
-   uv pip install .
+   # The datasets extra carries the readers for NetCDF, HDF5, CSV/TXT and
+   # zarr v2. Without it those formats fail to open.
+   uv pip install ".[datasets]"
    ```
 
-5. **Install Plotly Chrome support:**
+5. **Provide a browser for image export:**
    ```bash
-   echo "y" | python -c "import plotly; plotly.io.kaleido.scope.chromium.config.set_executable('chrome')"
+   # Kaleido v1 does not bundle Chrome. Skip this if Chrome or Chromium is
+   # already installed; PNG/SVG export needs one of them.
+   echo "y" | plotly_get_chrome
    ```
 
 6. **Build the frontend:**
@@ -397,7 +408,8 @@ For manual installation with full control over the setup process, follow these s
    cd ../backend
    export PYTHONPATH="$PWD"
    export SERVE_STATIC_FILES="true"
-   uvicorn main:app --host 0.0.0.0 --port 8001 --workers 1 --log-level info --ws-max-size 200000000 --ws-ping-interval 20 --ws-ping-timeout 20
+   # Use --host 0.0.0.0 instead to reach it from another machine on the network.
+   uvicorn main:app --host 127.0.0.1 --port 8001 --workers 1 --log-level info --ws-max-size 200000000 --ws-ping-interval 20 --ws-ping-timeout 20
    ```
 
 **Access the application:**
@@ -409,25 +421,30 @@ For manual installation with full control over the setup process, follow these s
 
 Set these in `backend/.env` or via Docker environment:
 
-- `NUM_WORKERS`: Number of uvicorn worker processes to spawn (default: 8)
-- `EXPORT_MAX_WORKERS`: Max number of worker processes spawned for export image rendering per uvicorn worker. Set to an integer or leave blank to auto-detect (defaults to min(8, cpu_count))
+- `EXPORT_MAX_WORKERS`: Max number of worker processes spawned for export image rendering. Set to an integer or leave blank to auto-detect (defaults to min(4, cpu_count))
 - `EXPORT_TIMING_LOG`: Enable more verbose export timing logs (default: false)
-- `ENABLE_KALEIDO_WARMUP`: Enable Plotly Kaleido warm-up on startup. Set to `1`, `true`, or `yes` to enable (default: 0/off)
+- `ENABLE_KALEIDO_WARMUP`: Warm the export workers on startup (default: true). Set to `0` to opt out
+- `ENABLE_KALEIDO_SYNC_SERVER`: Manage the Kaleido sync server lifecycle, a performance workaround (default: true)
 - `QIMCHI_MAX_DEPTH`: Max depth for directory traversal (default: 6)
-- `SERVE_STATIC_FILES`: Serve static files via FastAPI/uvicorn (default: true)
+- `SERVE_STATIC_FILES`: Serve static files via FastAPI/uvicorn (default: true). Set to false when a separate web server serves the built frontend
+- `QIMCHI_HOME`: Application home holding the library database, logs and caches (default: `~/.qimchi`)
+- `QIMCHI_DB_PATH`: Exact path to the library database, for a mounted volume (default: `<QIMCHI_HOME>/qimchi.db`)
+- `QIMCHI_LOG_PATH`: Exact path to the application log
+- `QIMCHI_NOTES_MD_EXPORT`: Also mirror notes to `.md` files next to the measurements (default: on)
+
+> [!note]
+> Qimchi runs as a single uvicorn worker.
 
 Example `backend/.env`:
 ```bash
-# Number of uvicorn worker processes to spawn (default: 8)
-NUM_WORKERS=8
-
-# Max number of worker processes spawned for export image rendering (default: 4)
+# Max number of worker processes spawned for export image rendering
+# (default: min(4, cpu_count))
 EXPORT_MAX_WORKERS=4
 
 # Optional: enable more verbose export timing logs
 EXPORT_TIMING_LOG=true
 
-# Enable Kaleido warm-up on startup (default: 0/off). Set to 1/true/yes to enable.
+# Warm the export workers on startup (default: true). Set to 0 to opt out.
 ENABLE_KALEIDO_WARMUP=1
 
 # Max depth for directory traversal (default: 6)
@@ -435,14 +452,18 @@ QIMCHI_MAX_DEPTH=6
 
 # Serve static files via FastAPI/uvicorn (default: true)
 SERVE_STATIC_FILES=true
+
+# Optional: application home for the library database, logs and caches
+# QIMCHI_HOME=/data/qimchi
 ```
 
 ## Supported Dataset Types
 Qimchi's backend supports loading datasets in any format that can be converted to an `xarray` DataArray or Dataset. This includes:
 - Zarr (v2 and v3)
+- QCoDeS databases (via `load_by_id()`)
+- Quantify databases
 - NetCDF
 - HDF5
-- QCoDeS databases (via `load_by_id()`)
 - Flat files (CSV, TXT, DAT) - requires `polars` dependency
 - `xarray` DataTrees (hierarchical datasets)
 - SQLite-backed containers with `xarray`-compatible structure

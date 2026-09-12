@@ -208,7 +208,9 @@ uv venv --python 3.13 --seed --clear "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
 
 cd "$QIMCHI_DIR/qimchi/backend"
-uv pip install .
+# The datasets extra carries the readers for NetCDF, HDF5, CSV/TXT and
+# zarr v2. Without it those formats fail to open.
+uv pip install ".[datasets]"
 
 # ----------------------------------------
 # Setup frontend
