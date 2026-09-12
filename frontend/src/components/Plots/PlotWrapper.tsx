@@ -2397,7 +2397,7 @@ const PlotWrapper: React.FC<Props> = ({
               }
             }, 200);
           } else {
-            // Filters but no sliders - use filter API
+            // Filters changed, sliders did not.
             if (!activePlotRef) {
               throw new Error("Plot reference not available for transform operation");
             }
@@ -2407,7 +2407,7 @@ const PlotWrapper: React.FC<Props> = ({
               plot_ref: activePlotRef,
               filters_order: filtersOrder,
               filters_opts: filtersOpts,
-              slider: {},
+              slider: sliders || sliderConfig,
               swap_xy: shouldSwapAxes,
             });
             console.log("[PlotWrapper] Filter API call completed successfully");

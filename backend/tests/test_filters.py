@@ -686,3 +686,76 @@ def test_scaled_colorbar_title_keeps_the_plain_font_size(heat_figure):
     )
     assert r"\frac" in scaled["text"]
     assert scaled["font"]["size"] == units.COLORBAR_TITLE_FONT_SIZE
+
+
+def test_a_transform_slices_at_the_slider_position_before_filtering(monkeypatch):
+    """
+    The transform regenerates from the dataset, so the slider has to come with it.
+
+    A LineCut is a slice at a position the user picked; re-running a filter on
+    it without that position silently rebuilds the plot at the default slice --
+    the minimum -- so PolyFit fitted a different line from the one on screen.
+    """
+    import numpy as np
+    import xarray as xr
+
+    # signal(field, x) -- a distinct line per field value.
+    dataset = xr.Dataset(
+        {"signal": (("field", "x"), np.array([[0.0, 1.0, 2.0], [10.0, 11.0, 12.0]]))},
+        coords={"x": [0.0, 1.0, 2.0], "field": [0.0, 1.0]},
+        attrs={"path": "/data/run.nc"},
+    )
+    monkeypatch.setattr("api.data_loader.load_dataset_sync", lambda _path: dataset)
+
+    def y_of(slider):
+        plot_json, _ = filters._generate_plot_json_for_transform(
+            fpath="run.nc",
+            indeps=["x"],
+            deps=["signal"],
+            plot_type="LinePlot",
+            slider=slider,
+            filters_order=[],
+            filters_opts={},
+            swap_xy=False,
+        )
+        # Plotly encodes the arrays as binary, so decode them the way the
+        # filters themselves do.
+        return list(filters._extract_axis_data(plot_json["data"][0], "y"))
+
+    assert y_of({"field": {"value": 1.0}}) == [10.0, 11.0, 12.0]
+    # No slider means the default slice, which is the lowest coordinate value.
+    assert y_of({}) == [0.0, 1.0, 2.0]
+
+
+def test_polyfit_fits_the_slice_the_slider_selects(monkeypatch):
+    """The fitted coefficients follow the slice, not the default one."""
+    import numpy as np
+    import xarray as xr
+
+    # Two lines with clearly different slopes: 1 at field=0, 5 at field=1.
+    x = np.array([0.0, 1.0, 2.0, 3.0])
+    dataset = xr.Dataset(
+        {"signal": (("field", "x"), np.array([x * 1.0, x * 5.0]))},
+        coords={"x": x, "field": [0.0, 1.0]},
+        attrs={"path": "/data/run.nc"},
+    )
+    monkeypatch.setattr("api.data_loader.load_dataset_sync", lambda _path: dataset)
+
+    def fitted_slope(slider):
+        plot_json, _ = filters._generate_plot_json_for_transform(
+            fpath="run.nc",
+            indeps=["x"],
+            deps=["signal"],
+            plot_type="LinePlot",
+            slider=slider,
+            filters_order=["polyfit"],
+            filters_opts={"polyfit": {"deg": 1}},
+            swap_xy=False,
+        )
+        coefficients = plot_json["layout"]["meta"][filters.POLYFIT_META_KEY][
+            "coefficients"
+        ]
+        return coefficients[1]
+
+    assert fitted_slope({"field": {"value": 1.0}}) == pytest.approx(5.0)
+    assert fitted_slope({}) == pytest.approx(1.0)
