@@ -1,6 +1,6 @@
 ## Qimchi Changelog
 
-### v0.7.0 - 2026-08-16
+### v0.7.0 - 2026-09-12
 
 - [Feature] The footer now shows the exact build version, including release-candidate tags, links to this changelog, and uses its pulsing dot to report whether the backend is reachable. Docker and all three desktop packages carry the release tag into the bundled frontend.
 - [Fix] Instrument snapshots containing Python's non-standard `Infinity`, `-Infinity`, or `NaN` JSON constants now render as their corresponding JavaScript numeric values instead of appearing as a character-counted string.
@@ -50,6 +50,30 @@
 - [Fix] The colorbar of a running measurement no longer shifts the plot sideways as values grow, and Plotly's "Click to enter Colorscale title" placeholder no longer sits behind the real label.
 - [Misc] Release-candidate builds are no longer a dead end. A preview install is now offered the next preview and, as soon as it ships, the stable release of that version. Stable installs are still never offered previews.
 - [Misc] Installation instructions now cover the desktop app on all three platforms, including the one-time Windows SmartScreen and macOS "Open Anyway" prompts that appear because Qimchi is not code-signed or notarized yet. The old Windows clone-and-build scripts have been removed in favour of the installer; the Linux/macOS install script is unchanged.
+- [Feature] The sidebar is now an accordion. Explorer, Metadata, Notes and Live Measurements each get an icon tab on a slim rail and open one at a time, using the full height of the pane; `Alt+1` to `Alt+4` open them directly. Help, the theme toggle, the notifications log, app zoom and the collapse button sit together at the bottom of the rail.
+- [Feature] The Explorer can expand to fill the window with `Shift+F` (`Esc` to leave), where a wider layout shows each measurement's modified date.
+- [Feature] Live Measurements is now one of the sidebar panes rather than a separate mode of the Explorer.
+- [Feature] Basket, Composer and Viewer carry a control ribbon like the plot cards -- the section icon with its count, then the controls. `Alt+B` and `Alt+C` collapse the Basket and the Composer, and whether they are collapsed is remembered across restarts.
+- [Feature] Help is searchable. Type to fuzzy-match every section, move through the hits with the arrow keys and open one with Enter. The window also opens 30% wider.
+- [Feature] Zoom the whole app from the sidebar rail, in the same steps a browser uses, with a percentage button that resets it to 100%. The level is remembered.
+- [Feature] QCoDeS and Quantify measurements now show the metadata they actually carry. Qimchi looked only for qanary's four sections and showed "N/A" for each; a QCoDeS run now lists its run id, GUID, sample and experiment names and its station snapshot, and is named by its run name in the Explorer.
+- [Feature] Notes for QCoDeS runs are keyed to the database rather than to each run's own GUID, so they are no longer at risk of being orphaned. Selecting the database itself shows an overall view pooling the notes of every run in it.
+- [Feature] Measurement downloads now include each dataset's library record -- its tags, heart and trash state, and IDs -- as a JSON file inside the archive.
+- [Feature] The Explorer lists the newest measurements first by default.
+- [Fix] The Explorer keeps the tree, and your place in it, while it refreshes instead of replacing the whole pane with a spinner.
+- [Fix] The Explorer reopens the folders you had open rather than expanding everything, and Expand/Collapse all now follows the folder you are actually looking at, including after Back and Forward.
+- [Fix] The full-window Explorer now covers a plot's Plotly toolbar, which used to paint straight through it.
+- [Fix] An image export that produced no images now reports the failure, instead of handing you an archive containing only its own logs.
+- [Fix] The maximized plot view no longer repeats the measurement name in the plot title, where the header already carries it.
+- [Fix] Dark mode: dropdown lists, the notes editor and its header, the sidebar rail's active tab and hover colours, and several chip borders.
+- [Fix] The Explorer search box's focus ring is no longer clipped, and the icon rail no longer scrolls sideways.
+- [Fix] Clicking an axis title to edit it now works reliably on a freshly drawn plot.
+- [Fix] Metadata loads for datasets stored as an xarray DataTree instead of failing.
+- [Misc] The Explorer is much faster: scanning a folder of 210 measurements went from 1.06s to 0.19s. The scan no longer re-reads every chunk of a zarr store to date it, runs off the request loop so it cannot hold up plots and notes, and remembers each dataset's size and timestamp until the file changes.
+- [Misc] A large basket no longer slows the rest of the app down. With around 90 measurements loaded, opening Metadata used to wait behind the whole basket redrawing. The Explorer tree also loads collapsed now and draws only the rows on screen.
+- [Misc] The frontend has a test suite: Vitest over the stores and utilities, and Playwright over the library features, the sidebar rail and the control ribbons. CI runs both with coverage floors, alongside the backend's.
+- [Misc] CI fixes lint and formatting on the branch and pushes the result, so a merge request is never held up by a missed formatting run.
+- [Misc] The repository root is tidier: the Docker files live in `docker/`, and the Windows build script alongside the Linux and macOS ones in `scripts/`. The superseded Windows clone-and-build scripts are gone.
 
 ### v0.6.2 - 2026-06-23
 
