@@ -60,8 +60,8 @@ autofix:
     - export PATH="$HOME/.local/bin:$PATH"
     # Leftover unfixable errors are the pytest job's gate to report; exiting
     # here would discard the fixes already written to disk.
-    - uv tool run --from ruff==0.15.8 ruff check --fix backend || true
-    - uv tool run --from ruff==0.15.8 ruff format backend
+    - uv tool run --from ruff==0.16.6 ruff check --fix backend || true
+    - uv tool run --from ruff==0.16.6 ruff format backend
     # Unfixable lint errors are frontend-quality's business; do not lose the
     # fixes already written to disk by exiting here.
     - cd frontend
@@ -75,7 +75,8 @@ autofix:
         exit 0
       fi
       git diff --stat
-      git add -A
+      # -u, not -A: never sweep up a cache directory the job created.
+      git add -u
       git commit -m "Apply ruff and prettier fixes [skip ci]"
       # Never force: if the branch moved while this ran, the rejected push is
       # the correct outcome and the next pipeline fixes the new tip instead.
@@ -100,7 +101,7 @@ pytest:
   script:
     # Whatever autofix could not fix is a real error; ruff is not in the
     # `test` extra, so run the pinned one directly.
-    - uv tool run --from ruff==0.15.8 ruff check backend
+    - uv tool run --from ruff==0.16.6 ruff check backend
     # The `test` extra carries pytest-asyncio; without it every async test ERRORS instead of failing.
     - cd backend
     - uv sync --locked --extra test --extra datasets
