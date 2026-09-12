@@ -1405,13 +1405,23 @@ async def get_metadata(path: PathData) -> Dict:
                 qcodes_meta[key] = value
             meta_dict: dict = {QCODES_META_SECTION: qcodes_meta}
         else:
-            ordered_keys: list = [key for key in PREFERRED_META_KEYS if key in metadata]
-            ordered_keys += sorted(
-                key
-                for key in metadata
-                if key not in PREFERRED_META_KEYS and key not in INTERNAL_META_KEYS
-            )
-            meta_dict = {key: metadata[key] for key in ordered_keys}
+            qanary_sections: list = [
+                key for key in PREFERRED_META_KEYS if key in metadata
+            ]
+            if qanary_sections:
+                # A qanary dataset shows its four sections and nothing else.
+                # Its other attrs -- Cryostat, Wafer ID, Measurement ID and the
+                # rest -- are the Basket's attribute strip, not this pane, and
+                # listing them here buries the sections people come for.
+                meta_dict = {key: metadata[key] for key in qanary_sections}
+            else:
+                # Anything else (Quantify, a bare xarray file) has no sections
+                # to show, so show what it does carry rather than nothing.
+                meta_dict = {
+                    key: metadata[key]
+                    for key in sorted(metadata)
+                    if key not in INTERNAL_META_KEYS
+                }
 
         # Ensure metadata is JSON serializable
         meta_json = {}

@@ -34,8 +34,13 @@ def _patch_loader(monkeypatch, dataset: xr.Dataset) -> None:
 
 
 @pytest.mark.asyncio
-async def test_qanary_sections_keep_their_order(monkeypatch):
-    """qanary datasets are unchanged: its sections come first, in order."""
+async def test_a_qanary_dataset_shows_its_four_sections_and_nothing_else(monkeypatch):
+    """
+    qanary datasets are unchanged from before non-qanary support: four sections.
+
+    Its other attrs belong to the Basket's attribute strip. Listing them here
+    too buried the sections people open this pane for.
+    """
     _patch_loader(
         monkeypatch,
         _dataset(
@@ -51,14 +56,13 @@ async def test_qanary_sections_keep_their_order(monkeypatch):
 
     out = await dirtree.get_metadata(PathData(path="/tmp/run.zarr"))
 
-    assert list(out)[:4] == [
+    assert list(out) == [
         "Sweeps",
         "Parameters Snapshot",
         "Extra Metadata",
         "Instruments Snapshot",
     ]
-    # Anything else the dataset carries still comes through, after them.
-    assert out["Cryostat"] == "BlueFors"
+    assert "Cryostat" not in out
 
 
 @pytest.mark.asyncio

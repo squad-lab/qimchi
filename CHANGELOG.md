@@ -69,6 +69,7 @@
 - [Fix] The Explorer search box's focus ring is no longer clipped, and the icon rail no longer scrolls sideways.
 - [Fix] Clicking an axis title to edit it now works reliably on a freshly drawn plot.
 - [Fix] Metadata loads for datasets stored as an xarray DataTree instead of failing.
+- [Fix] The Metadata pane shows a qanary measurement's four sections again, rather than following them with every other attribute the file carries. Those belong to the Basket's attribute strip, and listing them here buried the sections.
 - [Misc] The Explorer is much faster: scanning a folder of 210 measurements went from 1.06s to 0.19s. The scan no longer re-reads every chunk of a zarr store to date it, runs off the request loop so it cannot hold up plots and notes, and remembers each dataset's size and timestamp until the file changes.
 - [Misc] A large basket no longer slows the rest of the app down. With around 90 measurements loaded, opening Metadata used to wait behind the whole basket redrawing. The Explorer tree also loads collapsed now and draws only the rows on screen.
 - [Misc] The frontend has a test suite: Vitest over the stores and utilities, and Playwright over the library features, the sidebar rail and the control ribbons. CI runs both with coverage floors, alongside the backend's.
