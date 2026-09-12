@@ -21,10 +21,70 @@ variables:
       - "all"
     description: "Optional ad-hoc desktop build target for a preview web pipeline"
 stages:
+  - format
   - test
   - auto_tag_version
   - build
   - release
+
+# Applies the formatters and pushes the result back to the branch, so a merge
+# request is never blocked on a forgotten `ruff format` or `prettier --write`.
+# Only fixable issues are fixed here; anything eslint or ruff cannot fix still
+# fails `frontend-quality` below.
+#
+# The commit carries [skip ci]: GitLab creates no pipeline for such a push, so
+# this job cannot trigger itself. It runs on branches other than the default
+# one -- never on tags (a release build must package the commit that was
+# tagged) and never on main (merge-only, and protected).
+autofix:
+  stage: format
+  image: node:22.12.0
+  tags:
+    - saas-linux-2xlarge-amd64
+  variables:
+    NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.npm"
+  # A push race, or a branch this token may not write to, must not take the
+  # pipeline down -- the quality jobs below still report the real state.
+  allow_failure: true
+  before_script:
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - export PATH="$HOME/.local/bin:$PATH"
+    - git config --global user.name "Janitor"
+    - git config --global user.email "squad@fz-juelich.de"
+    - git remote set-url origin https://squad_janitor:$CI_FORMAT@$CI_SERVER_HOST/$CI_PROJECT_NAMESPACE/$CI_PROJECT_NAME
+    # CI checks out a detached HEAD; put the branch here so a commit lands on it.
+    - git checkout -B "$CI_COMMIT_BRANCH" "$CI_COMMIT_SHA"
+  script:
+    # Pinned to the same ruff as .pre-commit-config.yaml, or CI and the local
+    # hook would disagree and each undo the other's formatting.
+    - export PATH="$HOME/.local/bin:$PATH"
+    - uv tool run --from ruff==0.14.2 ruff check --fix backend
+    - uv tool run --from ruff==0.14.2 ruff format backend
+    # Unfixable lint errors are frontend-quality's business; do not lose the
+    # fixes already written to disk by exiting here.
+    - cd frontend
+    - npm ci
+    - npm run lint:fix || true
+    - npm run format
+    - cd ..
+    - |
+      if git diff --quiet; then
+        echo "Nothing to fix."
+        exit 0
+      fi
+      git diff --stat
+      git add -A
+      git commit -m "Apply ruff and prettier fixes [skip ci]"
+      # Never force: if the branch moved while this ran, the rejected push is
+      # the correct outcome and the next pipeline fixes the new tip instead.
+      git push origin "HEAD:$CI_COMMIT_BRANCH"
+  cache:
+    key: npm-$CI_JOB_NAME
+    paths:
+      - .npm/
+  rules:
+    - if: $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      when: on_success
 
 pytest:
   stage: test
@@ -66,7 +126,10 @@ frontend-quality:
     - cd frontend
     - npm ci
     - npm run lint
-    - npm run format:check
+    # Write rather than check: `autofix` has already pushed this exact
+    # result to the branch, and re-checking the pre-fix commit this job
+    # was created for would fail on formatting that is already corrected.
+    - npm run format
     - npm run build
     # Unit (vitest, jsdom) then e2e (playwright, chromium). Both enforce their
     # own coverage floor; the unit run is first because it is seconds rather
