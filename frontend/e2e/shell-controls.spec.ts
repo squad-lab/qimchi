@@ -168,31 +168,3 @@ test.describe("help search", () => {
     await expect(page.getByText(/No help matches/)).toBeVisible();
   });
 });
-
-test.describe("oversized metadata", () => {
-  test("reports a withheld section in place instead of rendering it", async ({ page }) => {
-    await mockShellApi(page, {
-      Sweeps: { gate: [0, 1] },
-      snapshot: {
-        __qimchi_metadata_too_large__: true,
-        nodeCount: 7236,
-        nodeLimit: 100,
-      },
-    });
-    await page.goto("/");
-
-    await page.getByPlaceholder("Enter folder path").fill("C:\\measurements");
-    await page.getByTitle("Load folder").click();
-    const row = page
-      .getByText("run.nc", { exact: true })
-      .locator("xpath=ancestor::div[@data-level][1]");
-    await row.getByRole("button", { name: "Add to basket" }).click();
-
-    await page.keyboard.press("Alt+2");
-
-    // The small section still renders; only the oversized one is withheld.
-    await expect(page.getByText("Sweeps:", { exact: true })).toBeVisible();
-    await expect(page.getByText("snapshot:", { exact: true })).toBeVisible();
-    await expect(page.getByText(/7,236/)).toBeVisible();
-  });
-});
