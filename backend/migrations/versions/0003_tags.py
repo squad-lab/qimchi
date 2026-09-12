@@ -37,9 +37,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["tag_id"], ["tags.id"]),
         sa.PrimaryKeyConstraint("uuid", "tag_id"),
     )
-    op.create_index(
-        "ix_measurement_tags_tag_id", "measurement_tags", ["tag_id"]
-    )
+    op.create_index("ix_measurement_tags_tag_id", "measurement_tags", ["tag_id"])
 
 
 def downgrade() -> None:

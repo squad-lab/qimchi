@@ -1,8 +1,7 @@
 import pytest
 import xarray as xr
 
-from api import dirtree
-from api import plots
+from api import dirtree, plots
 from api.models import PathData, PlotRequest
 
 

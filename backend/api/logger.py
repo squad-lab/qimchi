@@ -1,8 +1,9 @@
 import logging
 import os
 import sys
-from concurrent_log_handler import ConcurrentRotatingFileHandler as RotatingFileHandler
 from pathlib import Path
+
+from concurrent_log_handler import ConcurrentRotatingFileHandler as RotatingFileHandler
 
 try:
     from rich.logging import RichHandler

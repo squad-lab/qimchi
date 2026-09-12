@@ -18,16 +18,16 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from fastapi import HTTPException
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
+from fastapi import HTTPException
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, create_engine, select
 
-from .paths import db_path
 from ..db_models import LOCAL_USER_EMAIL, LOCAL_USER_ID, User
 from ..logger import logger
+from .paths import db_path
 
 _engine: Engine | None = None
 

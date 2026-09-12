@@ -22,6 +22,7 @@ if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
 
 from sqlmodel import SQLModel  # noqa: E402
+
 import api.db_models  # noqa: E402,F401  (registers tables on SQLModel.metadata)
 
 config = context.config

@@ -58,12 +58,8 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("uuid", "user_id"),
     )
-    op.create_index(
-        "ix_measurement_state_hearted", "measurement_state", ["hearted"]
-    )
-    op.create_index(
-        "ix_measurement_state_trashed", "measurement_state", ["trashed"]
-    )
+    op.create_index("ix_measurement_state_hearted", "measurement_state", ["hearted"])
+    op.create_index("ix_measurement_state_trashed", "measurement_state", ["trashed"])
 
 
 def downgrade() -> None:
