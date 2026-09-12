@@ -7,7 +7,7 @@ This repository contains a unified FastAPI application that serves a React-based
 ## What's new in 0.7.0
 
 > [!TIP]
-> 🖥️ **Desktop app:** a self-contained build that runs Qimchi in a native window, with no separate Git/Python/Node install. Per-OS installers -- Windows (`qimchi-setup.exe`), Linux AppImage, macOS DMG -- on the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases). The app checks for updates on startup and offers a one-click "Update now".
+> 🖥️ **Desktop app:** a self-contained build that runs Qimchi in a native window, with no separate Git/Python/Node install. Per-OS installers -- a Windows `.exe`, a Linux AppImage, a macOS DMG, on the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases). The app checks for updates on startup and offers a one-click "Update now".
 
 - **Library:** heart, trash and tag your measurements. Marks are saved locally and shown in the Explorer, with filters for hearted-only, hiding trash, and tags. Select several measurements and apply any of them at once.
 - **Tags work like labels** -- a measurement can carry several. Filter from the searchable Tags dropdown, or type `#tag` (or `#"two words"`) in the Explorer search alongside an ordinary name search.
@@ -47,7 +47,7 @@ Everything in this release is listed in the [changelog on `preview`](https://git
 ## Installation
 
 > [!TIP]
-> **Download the latest build from the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases):** `qimchi-setup.exe` (Windows), `qimchi.dmg` (macOS) or `qimchi-x86_64.AppImage` (Linux).
+> **Download the latest build from the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases):** `qimchi-setup-<version>.exe` (Windows), `qimchi-<version>.dmg` (macOS) or `qimchi-x86_64-<version>.AppImage` (Linux).
 
 The desktop app is the recommended install on all three platforms. Qimchi can also be built from source and run as a local server, deployed with Docker, or installed manually -- choose the method that best suits your use case.
 
@@ -56,7 +56,7 @@ The desktop app is the recommended install on all three platforms. Qimchi can al
 > [!tip]
 > Easiest method for Windows users.
 
-Download `qimchi-setup.exe` from the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases) and run it. It installs per user, so no administrator rights are needed, and it creates a Start Menu entry plus an optional desktop shortcut. Qimchi runs as a desktop app and bundles everything it needs -- no Git, Python or Node.js required.
+Download `qimchi-setup-<version>.exe` from the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases) and run it. It installs per user, so no administrator rights are needed, and it creates a Start Menu entry plus an optional desktop shortcut. Qimchi runs as a desktop app and bundles everything it needs -- no Git, Python or Node.js required.
 
 Windows SmartScreen will warn that the publisher is unrecognised: click **More info**, then **Run anyway**. Qimchi is not code-signed yet, so this appears once per version you install.
 
@@ -69,13 +69,13 @@ Requires Windows 11 (x64) with the Edge WebView2 runtime (preinstalled).
 > [!tip]
 > Easiest method: the desktop app, from the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases).
 
-**macOS** -- download `qimchi.dmg`, open it, and drag Qimchi to Applications. Double-click Qimchi there; macOS reports that the app is from an unidentified developer. Open **System Settings -> Privacy and Security**, scroll down to **Security**, click **Open Anyway** next to Qimchi, confirm, and enter your account credentials. Qimchi is not notarized yet, so this happens once per version you install. Requires Apple Silicon.
+**macOS** -- download `qimchi-<version>.dmg`, open it, and drag Qimchi to Applications. Double-click Qimchi there; macOS reports that the app is from an unidentified developer. Open **System Settings -> Privacy and Security**, scroll down to **Security**, click **Open Anyway** next to Qimchi, confirm, and enter your account credentials. Qimchi is not notarized yet, so this happens once per version you install. Requires Apple Silicon.
 
-**Linux** -- download `qimchi-x86_64.AppImage`, then:
+**Linux** -- download `qimchi-x86_64-<version>.AppImage`, then:
 
 ```bash
-chmod +x qimchi-x86_64.AppImage
-./qimchi-x86_64.AppImage
+chmod +x qimchi-x86_64-<version>.AppImage
+./qimchi-x86_64-<version>.AppImage
 ```
 
 Requires the WebKit2GTK runtime (`sudo apt-get install libwebkit2gtk-4.0-37` on Ubuntu/Debian, `webkit2gtk4.0` on Fedora, `webkit2gtk` on Arch).

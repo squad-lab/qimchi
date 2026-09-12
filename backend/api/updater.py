@@ -45,7 +45,9 @@ def _platform_asset_match(name: str, url: str) -> tuple[str, str] | None:
     """
     haystack = f"{name} {url}".lower()
     if sys.platform == "win32":
-        if "setup.exe" in haystack:
+        # The installer is named qimchi-setup-<tag>.exe, so the version sits
+        # between the two halves of the name -- do not match "setup.exe".
+        if "qimchi-setup" in haystack and ".exe" in haystack:
             return ("windows", "run-installer")
         return None
     if sys.platform == "darwin":

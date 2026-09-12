@@ -403,7 +403,7 @@ class _Api:
 
 def _update_asset_suffix(asset_name: str, asset_url: str, platform: str) -> str:
     lower = f"{asset_name} {asset_url}".lower()
-    if platform == "windows" or "setup.exe" in lower:
+    if platform == "windows" or "qimchi-setup" in lower:
         return "-qimchi-setup.exe"
     if platform == "macos" or ".dmg" in lower:
         return "-qimchi.dmg"

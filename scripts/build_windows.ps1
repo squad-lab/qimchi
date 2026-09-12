@@ -234,18 +234,20 @@ foreach ($cand in $isccCandidates) {
     if ($cand -and (Test-Path $cand)) { $isccExe = $cand; break }
 }
 
-$installerPath = "packaging\build\qimchi-setup.exe"
-# Clear the previous installer BEFORE this step, including on the skip path.
+$installerPath = "packaging\build\qimchi-setup-$frontendVersion.exe"
+# Clear every previous installer BEFORE this step, including on the skip path.
+Get-ChildItem "packaging\build\qimchi-setup-*.exe" -ErrorAction SilentlyContinue |
+    ForEach-Object { Remove-StaleArtifact $_.FullName }
 Remove-StaleArtifact $installerPath
 
 if (!$isccExe) {
     Write-Warning "ISCC.exe not found -- SKIPPING installer build."
     Write-Warning "Install Inno Setup 6 (https://jrsoftware.org/isinfo.php or: choco install innosetup) then re-run."
-    Write-Warning "NOTE: no qimchi-setup.exe was produced by this run."
+    Write-Warning "NOTE: no installer was produced by this run."
     Write-Host "Packaged app is at: $(Get-Location)\$appDir"
 } else {
     # /Q = quiet (no progress window); /DAppVersion passes the version to the script.
-    & $isccExe "/DAppVersion=$VERSION" "/Q" "packaging\setup.iss"
+    & $isccExe "/DAppVersion=$VERSION" "/DAppFileVersion=$frontendVersion" "/Q" "packaging\setup.iss"
     Assert-LastExit "Inno Setup (ISCC)"
     if (!(Test-Path $installerPath)) {
         throw "ISCC reported success but $installerPath was not produced"

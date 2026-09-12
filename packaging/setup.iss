@@ -14,6 +14,10 @@
 #define AppVersion "0.0.0"
 #endif
 
+#ifndef AppFileVersion
+#define AppFileVersion AppVersion
+#endif
+
 [Setup]
 AppId={{7C5F3B82-A1E4-4D6F-9B2C-E5D8F3A7C6B1}
 AppName=Qimchi
@@ -35,7 +39,10 @@ DefaultGroupName=Qimchi
 DisableProgramGroupPage=yes
 
 ; Output
-OutputBaseFilename=qimchi-setup
+; The installer file carries the release tag so a downloaded installer says
+; which version it is. AppVersion stays a plain numeric version: Inno derives
+; VersionInfoVersion from it, and that cannot hold an -rc suffix.
+OutputBaseFilename=qimchi-setup-{#AppFileVersion}
 OutputDir=..\packaging\build
 SetupIconFile=..\packaging\build\qimchi-logo.ico
 UninstallDisplayName=Qimchi {#AppVersion}

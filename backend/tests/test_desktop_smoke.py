@@ -58,6 +58,9 @@ def test_release_builds_run_supported_packaged_smokes():
     ci = (repository / ".gitlab-ci.yml").read_text(encoding="utf-8")
 
     assert "qimchi.exe --mode headless" in ci
-    assert 'qimchi-${ARCH}.AppImage" --mode headless' in ci
-    assert 'qimchi-${ARCH}.AppImage" --mode native' in ci
+    # The AppImage filename carries the version, so the job discovers it into
+    # $APPIMAGE rather than naming it.
+    assert "APPIMAGE=$(ls packaging/build/qimchi-${ARCH}-*.AppImage" in ci
+    assert '"$APPIMAGE" --mode headless' in ci
+    assert '"$APPIMAGE" --mode native' in ci
     assert "xvfb-run" in ci

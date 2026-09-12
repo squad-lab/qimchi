@@ -159,8 +159,8 @@ echo "Built $APP_DIR (${APP_SIZE_MB} MB total)"
 echo "Packaging AppImage..."
 ARCH=$(uname -m)
 APPDIR="packaging/build/Qimchi.AppDir"
-APPIMAGE_OUT="packaging/build/qimchi-${ARCH}.AppImage"
-rm -rf "$APPDIR" "$APPIMAGE_OUT"
+APPIMAGE_OUT="packaging/build/qimchi-${ARCH}-${FRONTEND_VERSION}.AppImage"
+rm -rf "$APPDIR" packaging/build/qimchi-*.AppImage
 mkdir -p "$APPDIR"
 
 # Copy the PyInstaller onedir output flat into AppDir.

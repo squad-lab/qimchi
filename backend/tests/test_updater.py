@@ -119,9 +119,10 @@ def _release(tag, *links):
     }
 
 
+# Named as the release job names it: the tag sits inside the filename.
 _WIN_ASSET = {
-    "name": "qimchi-setup.exe (Windows)",
-    "direct_asset_url": "https://example.invalid/qimchi-setup.exe",
+    "name": "qimchi-setup-v0.7.0.exe (Windows installer)",
+    "direct_asset_url": "https://example.invalid/qimchi-setup-v0.7.0.exe",
 }
 
 
@@ -361,3 +362,23 @@ def test_every_build_script_stamps_the_version(monkeypatch):
     for script in scripts:
         assert script.exists(), script
         assert "_build_version.py" in script.read_text(encoding="utf-8"), script
+
+
+def test_a_versioned_installer_name_still_selects_the_windows_asset(monkeypatch):
+    """
+    The artefacts carry the release tag, so the name is not "qimchi-setup.exe".
+
+    Matching on that literal would find no asset for a newer release, and
+    check_for_update would return None -- every Windows install silently
+    stops being offered updates, with only an INFO line to show for it.
+    """
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+
+    versioned = "qimchi-setup-v0.7.0-rc.5.exe (Windows installer)"
+    assert updater._platform_asset_match(versioned, "") == ("windows", "run-installer")
+    # The plain name a hand-built installer still has must keep working too.
+    assert updater._platform_asset_match("qimchi-setup.exe", "") == (
+        "windows",
+        "run-installer",
+    )
+    assert updater._platform_asset_match("qimchi-x86_64-v0.7.0.AppImage", "") is None

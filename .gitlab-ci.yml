@@ -360,14 +360,16 @@ build-windows:
     #   3. fd.exe download → vendor/fd-windows/fd.exe
     #   4. backend/.venv setup (datasets extra + PyInstaller + pywebview + pythonnet)
     #   5. PyInstaller onedir build → packaging/build/qimchi/
-    #   6. Inno Setup installer → packaging/build/qimchi-setup.exe
+    #   6. Inno Setup installer → packaging/build/qimchi-setup-<version>.exe
     - ./scripts/build_windows.ps1
-    - if (!(Test-Path "packaging/build/qimchi-setup.exe")) { throw "Installer build failed" }
+    # The installer name carries the version, so find it rather than assume it.
+    - $installer = Get-ChildItem "packaging/build/qimchi-setup-*.exe" | Select-Object -First 1
+    - if (!$installer) { throw "Installer build failed" }
     # This runner has no interactive Windows desktop. Exercise the actual
     # packaged exe in headless smoke mode: backend, bundled SPA and downloads.
     - backend/.venv/Scripts/python.exe scripts/run_packaged_smoke.py packaging/build/qimchi/qimchi.exe --mode headless
-    - $installerSize = (Get-Item "packaging/build/qimchi-setup.exe").Length / 1MB
-    - echo "Successfully built qimchi-setup.exe ($([math]::Round($installerSize, 2)) MB)"
+    - $installerSize = $installer.Length / 1MB
+    - echo "Successfully built $($installer.Name) ($([math]::Round($installerSize, 2)) MB)"
 
     # --- Code signing (optional; enable once a cert is in GitLab secure files) -
     # Signs both the bundled exe and the installer for a clean install experience.
@@ -384,7 +386,7 @@ build-windows:
   artifacts:
     name: "qimchi-windows"
     paths:
-      - packaging/build/qimchi-setup.exe
+      - packaging/build/qimchi-setup-*.exe
     expire_in: 180 days
   rules:
     # Stable release build on version tags.
@@ -438,18 +440,20 @@ build-macos:
     - echo "Building Qimchi v$VERSION (pywebview desktop) for macOS"
     - bash scripts/build_macos.sh
     - |
-      if [ ! -f "packaging/build/qimchi.dmg" ]; then
-        echo "Error: DMG build failed - packaging/build/qimchi.dmg not found"
+      # The DMG name carries the version, so find it rather than assume it.
+      DMG=$(ls packaging/build/qimchi-*.dmg 2>/dev/null | head -1)
+      if [ -z "$DMG" ]; then
+        echo "Error: DMG build failed - no packaging/build/qimchi-*.dmg produced"
         exit 1
       fi
-    - echo "Successfully built qimchi.dmg ($(du -m packaging/build/qimchi.dmg | cut -f1) MB)"
+      echo "Successfully built $(basename "$DMG") ($(du -m "$DMG" | cut -f1) MB)"
 
     # --- Code signing (enable once a Developer ID cert is in GitLab secure files) ---
     # - bash scripts/sign_macos.sh packaging/build/qimchi.app packaging/build/qimchi.dmg
   artifacts:
     name: "qimchi-macos"
     paths:
-      - packaging/build/qimchi.dmg
+      - packaging/build/qimchi-*.dmg
     expire_in: 180 days
   rules:
     # Stable release build on version tags.
@@ -495,15 +499,17 @@ build-linux:
     - bash scripts/build_linux.sh
     - |
       ARCH=$(uname -m)
-      if [ ! -f "packaging/build/qimchi-${ARCH}.AppImage" ]; then
+      # The AppImage name carries the version, so find it rather than assume it.
+      APPIMAGE=$(ls packaging/build/qimchi-${ARCH}-*.AppImage 2>/dev/null | head -1)
+      if [ -z "$APPIMAGE" ]; then
         echo "Error: AppImage build failed"
         exit 1
       fi
-      echo "Successfully built qimchi-${ARCH}.AppImage ($(du -m packaging/build/qimchi-${ARCH}.AppImage | cut -f1) MB)"
-      python3 scripts/run_packaged_smoke.py "packaging/build/qimchi-${ARCH}.AppImage" --mode headless
+      echo "Successfully built $(basename "$APPIMAGE") ($(du -m "$APPIMAGE" | cut -f1) MB)"
+      python3 scripts/run_packaged_smoke.py "$APPIMAGE" --mode headless
       WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 dbus-run-session -- \
         xvfb-run -a python3 scripts/run_packaged_smoke.py \
-          "packaging/build/qimchi-${ARCH}.AppImage" --mode native --timeout 240
+          "$APPIMAGE" --mode native --timeout 240
   artifacts:
     name: "qimchi-linux"
     paths:
@@ -561,24 +567,24 @@ release:
       $PREVIEW_BANNER
 
       ## Windows
-      1. Download qimchi-setup.exe below.
+      1. Download qimchi-setup-$CI_COMMIT_TAG.exe below.
       2. Run the installer -- no administrator rights needed for a per-user install. It creates a Start Menu entry and an optional desktop shortcut.
       3. Windows SmartScreen will warn that the publisher is unrecognised. Click "More info", then "Run anyway", and Qimchi opens.
       - Step 3 happens once per version you install: Qimchi is not code-signed yet.
       - Requires Windows 11 (x64) with the Edge WebView2 runtime (preinstalled).
 
       ## Linux
-      1. Download the qimchi-x86_64.AppImage asset below.
+      1. Download the qimchi-x86_64-$CI_COMMIT_TAG.AppImage asset below.
       2. Make it executable and run it from a terminal:
-             chmod +x qimchi-x86_64.AppImage
-             ./qimchi-x86_64.AppImage
+             chmod +x qimchi-x86_64-$CI_COMMIT_TAG.AppImage
+             ./qimchi-x86_64-$CI_COMMIT_TAG.AppImage
       - Requires x86_64 Linux (kernel 4.4+, glibc 2.31+) and the WebKit2GTK runtime:
         - Ubuntu/Debian: sudo apt-get install libwebkit2gtk-4.0-37
         - Fedora: sudo dnf install webkit2gtk4.0
         - Arch: sudo pacman -S webkit2gtk
 
       ## macOS
-      1. Download qimchi.dmg below.
+      1. Download qimchi-$CI_COMMIT_TAG.dmg below.
       2. Open the DMG and drag Qimchi.app to Applications.
       3. Double-click Qimchi in Applications. macOS warns that the app cannot be opened because it is from an unidentified developer.
       4. Open System Settings -> Privacy and Security, scroll down to Security, and click "Open Anyway" next to Qimchi. Confirm "Open Anyway" and enter your account credentials, and Qimchi opens.
@@ -593,13 +599,17 @@ release:
       )
       # delete-then-create makes re-runs idempotent (a pre-existing release would 409).
       release-cli delete --tag-name "$CI_COMMIT_TAG" 2>/dev/null || true
+      # Every artefact carries the tag in its own filename, so these paths and
+      # names do too. api/updater.py::_platform_asset_match picks the asset for
+      # the running OS out of these names -- keep the two in step, and see
+      # tests/test_release_packaging.py, which checks exactly that.
       release-cli create \
         --name "$RELEASE_NAME" \
         --tag-name "$CI_COMMIT_TAG" \
         --description "$NOTES" \
-        --assets-link "{\"name\":\"qimchi-x86_64.AppImage (Linux)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-x86_64.AppImage?job=build-linux\",\"link_type\":\"package\"}" \
-        --assets-link "{\"name\":\"qimchi-setup.exe (Windows installer)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-setup.exe?job=build-windows\",\"link_type\":\"package\"}" \
-        --assets-link "{\"name\":\"qimchi.dmg (macOS)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi.dmg?job=build-macos\",\"link_type\":\"package\"}"
+        --assets-link "{\"name\":\"qimchi-x86_64-${CI_COMMIT_TAG}.AppImage (Linux)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-x86_64-${CI_COMMIT_TAG}.AppImage?job=build-linux\",\"link_type\":\"package\"}" \
+        --assets-link "{\"name\":\"qimchi-setup-${CI_COMMIT_TAG}.exe (Windows installer)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-setup-${CI_COMMIT_TAG}.exe?job=build-windows\",\"link_type\":\"package\"}" \
+        --assets-link "{\"name\":\"qimchi-${CI_COMMIT_TAG}.dmg (macOS)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-${CI_COMMIT_TAG}.dmg?job=build-macos\",\"link_type\":\"package\"}"
   rules:
     # Stable release.
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/

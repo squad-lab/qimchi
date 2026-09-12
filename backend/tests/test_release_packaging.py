@@ -7,6 +7,10 @@ from pathlib import Path
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
+# The release job embeds JSON inside a double-quoted shell string, so every
+# quote in it is backslash-escaped in the YAML.
+ESCAPED_QUOTE = '\\"'
+
 
 def test_docker_image_uses_the_lock_and_bundles_database_migrations():
     dockerfile = (_REPOSITORY_ROOT / "docker" / "Dockerfile").read_text(
@@ -83,3 +87,42 @@ def test_nginx_proxies_every_frontend_api_route_family():
     )
     missed = [route for route in routes if api_pattern.match(route) is None]
     assert not missed, f"nginx would serve API routes as SPA content: {missed}"
+
+
+def test_release_asset_names_carry_the_tag_and_stay_matchable(monkeypatch):
+    """
+    The release lists each asset by name, so the name states the version.
+
+    It must still contain the filename the updater matches on: api/updater.py
+    picks the asset for this OS by looking for "setup.exe", ".dmg" or
+    ".appimage" in it. Renaming the asset to "qimchi-setup-v0.7.0.exe" would
+    read fine on the releases page and quietly stop every Windows install from
+    being offered an update.
+    """
+    from api import updater
+
+    gitlab_ci = (_REPOSITORY_ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8")
+
+    # The links are shell-escaped JSON inside the YAML, so read them by marker
+    # rather than parsing: BACKSLASH"name\":\"<name>\",\"url
+    opening = ESCAPED_QUOTE + "name" + ESCAPED_QUOTE + ":" + ESCAPED_QUOTE
+    closing = ESCAPED_QUOTE + "," + ESCAPED_QUOTE + "url"
+    names = [
+        chunk.split(closing)[0]
+        for chunk in gitlab_ci.split(opening)[1:]
+        if closing in chunk
+    ]
+
+    assert len(names) == 3, names
+    expanded = [name.replace("${CI_COMMIT_TAG}", "v0.7.0-rc.5") for name in names]
+    assert all("v0.7.0-rc.5" in name for name in expanded), expanded
+
+    for platform, expected in (
+        ("win32", "windows"),
+        ("darwin", "macos"),
+        ("linux", "linux"),
+    ):
+        monkeypatch.setattr(updater.sys, "platform", platform)
+        hits = [name for name in expanded if updater._platform_asset_match(name, "")]
+        assert len(hits) == 1, (platform, hits)
+        assert updater._platform_asset_match(hits[0], "")[0] == expected

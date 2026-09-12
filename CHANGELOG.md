@@ -74,6 +74,7 @@
 - [Misc] The frontend has a test suite: Vitest over the stores and utilities, and Playwright over the library features, the sidebar rail and the control ribbons. CI runs both with coverage floors, alongside the backend's.
 - [Misc] CI fixes lint and formatting on the branch and pushes the result, so a merge request is never held up by a missed formatting run.
 - [Misc] The repository root is tidier: the Docker files live in `docker/`, and the Windows build script alongside the Linux and macOS ones in `scripts/`. The superseded Windows clone-and-build scripts are gone.
+- [Misc] Downloads from the Releases page now carry their version in the filename -- `qimchi-setup-v0.7.0.exe` rather than `qimchi-setup.exe` -- so a file in your Downloads folder says which build it is.
 
 ### v0.6.2 - 2026-06-23
 

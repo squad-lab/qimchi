@@ -183,8 +183,8 @@ echo "Built $APP_BUNDLE"
 #   left  = qimchi.app icon
 #   right = /Applications symlink  (user drags app onto it to install)
 echo "Creating DMG..."
-DMG_OUT="packaging/build/qimchi.dmg"
-rm -f "$DMG_OUT"
+DMG_OUT="packaging/build/qimchi-${FRONTEND_VERSION}.dmg"
+rm -f packaging/build/qimchi-*.dmg
 
 if ! create-dmg \
     --volname "Qimchi $VERSION" \
