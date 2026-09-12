@@ -297,8 +297,15 @@ export default function Notes({
   );
 
   // Keep sample dropdown aligned when a measurement is selected externally.
+  //
+  // Only when the selection actually changes. sampleGroups is rebuilt whenever
+  // the basket's attrs arrive, and running this again then would snap the scope
+  // back to "measurement" -- discarding a pooled or overall-notes selection the
+  // user had already made.
+  const alignedItemIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedItemId) return;
+    if (alignedItemIdRef.current === selectedItemId) return;
 
     const selected = datasetItems.find((item) => item.id === selectedItemId);
     if (!selected) return;
@@ -306,7 +313,10 @@ export default function Notes({
     const group = sampleGroups.find((sample) =>
       sample.items.some((item) => item.id === selected.id),
     );
+    // Not grouped yet: leave the ref alone so this runs again once it is.
     if (!group) return;
+
+    alignedItemIdRef.current = selectedItemId;
     setSelectedSampleKey(group.key);
     setSelectedScope("measurement");
   }, [selectedItemId, datasetItems, sampleGroups]);
