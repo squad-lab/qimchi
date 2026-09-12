@@ -6,7 +6,9 @@
 #
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.2
+    # Keep in step with the `dev` extra in backend/pyproject.toml and the
+    # pin in .gitlab-ci.yml: two ruff versions reformat each other's output.
+    rev: v0.15.8
     hooks:
       # Import sorting is part of `ruff check` via the "I" rules; the formatter
       # does not do it.

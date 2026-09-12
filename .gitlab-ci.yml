@@ -55,11 +55,13 @@ autofix:
     # CI checks out a detached HEAD; put the branch here so a commit lands on it.
     - git checkout -B "$CI_COMMIT_BRANCH" "$CI_COMMIT_SHA"
   script:
-    # Pinned to the same ruff as .pre-commit-config.yaml, or CI and the local
-    # hook would disagree and each undo the other's formatting.
+    # Pinned to the same ruff as .pre-commit-config.yaml and the `dev` extra:
+    # two versions reformat each other's output forever.
     - export PATH="$HOME/.local/bin:$PATH"
-    - uv tool run --from ruff==0.14.2 ruff check --fix backend
-    - uv tool run --from ruff==0.14.2 ruff format backend
+    # Leftover unfixable errors are the pytest job's gate to report; exiting
+    # here would discard the fixes already written to disk.
+    - uv tool run --from ruff==0.15.8 ruff check --fix backend || true
+    - uv tool run --from ruff==0.15.8 ruff format backend
     # Unfixable lint errors are frontend-quality's business; do not lose the
     # fixes already written to disk by exiting here.
     - cd frontend
@@ -96,6 +98,9 @@ pytest:
     - curl -LsSf https://astral.sh/uv/install.sh | sh
     - export PATH="$HOME/.local/bin:$PATH"
   script:
+    # Whatever autofix could not fix is a real error; ruff is not in the
+    # `test` extra, so run the pinned one directly.
+    - uv tool run --from ruff==0.15.8 ruff check backend
     # The `test` extra carries pytest-asyncio; without it every async test ERRORS instead of failing.
     - cd backend
     - uv sync --locked --extra test --extra datasets
