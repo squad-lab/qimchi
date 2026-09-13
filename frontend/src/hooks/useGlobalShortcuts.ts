@@ -117,10 +117,24 @@ export const KEYBOARD_SHORTCUTS: Record<string, ShortcutConfig | ShortcutConfig[
   delete: { action: "selected-remove-plot" },
 };
 
+// macOS composes Option+<key> into a different character, so e.key never
+// matches an Alt shortcut there. e.code names the physical key and is
+// unaffected, so fall back to it while Alt is held. Only while Alt is held:
+// on non-QWERTY layouts e.code is the QWERTY position, not the printed key,
+// and using it for bare letters would fire the wrong shortcut.
+const physicalKey = (e: KeyboardEvent): string | null => {
+  const code = e.code;
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3).toLowerCase();
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  if (/^Numpad[0-9]$/.test(code)) return code.slice(6);
+  return null;
+};
+
 export const useGlobalShortcutsInit = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
+      const altKey = e.altKey ? physicalKey(e) : null;
       // Always allow Escape, even when an input/textarea has focus.
       if (e.repeat || (key !== "escape" && key !== "esc" && isEditableTarget(e.target))) {
         return;
@@ -131,18 +145,22 @@ export const useGlobalShortcutsInit = () => {
         return;
       }
 
-      for (const [mappedKey, rawConfig] of Object.entries(KEYBOARD_SHORTCUTS)) {
-        if (key === mappedKey) {
-          const configs = Array.isArray(rawConfig) ? rawConfig : [rawConfig];
-          for (const config of configs) {
-            const requiresAlt = config.alt || false;
-            const requiresShift = config.shift || false;
+      // Physical key first, composed character second: on a non-QWERTY layout
+      // e.code is the QWERTY position, so e.key stays the fallback.
+      const candidates = altKey && altKey !== key ? [altKey, key] : [key];
 
-            if (e.altKey === requiresAlt && e.shiftKey === requiresShift) {
-              e.preventDefault();
-              window.dispatchEvent(new CustomEvent(`qimchi:shortcut:${config.action}`));
-              return;
-            }
+      for (const candidate of candidates) {
+        const rawConfig = KEYBOARD_SHORTCUTS[candidate];
+        if (!rawConfig) continue;
+        const configs = Array.isArray(rawConfig) ? rawConfig : [rawConfig];
+        for (const config of configs) {
+          const requiresAlt = config.alt || false;
+          const requiresShift = config.shift || false;
+
+          if (e.altKey === requiresAlt && e.shiftKey === requiresShift) {
+            e.preventDefault();
+            window.dispatchEvent(new CustomEvent(`qimchi:shortcut:${config.action}`));
+            return;
           }
         }
       }
