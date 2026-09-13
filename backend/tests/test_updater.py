@@ -35,7 +35,9 @@ def _release_with_links(*links):
 
 
 def _install_fake_release_fetch(monkeypatch, payload):
-    monkeypatch.setattr(updater, "urlopen", lambda *_args, **_kwargs: _Response(payload))
+    monkeypatch.setattr(
+        updater, "urlopen", lambda *_args, **_kwargs: _Response(payload)
+    )
     monkeypatch.setattr(updater, "current_version", lambda: "0.6.1")
 
 
