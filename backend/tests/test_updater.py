@@ -351,6 +351,47 @@ def test_a_stamped_preview_build_is_offered_the_stable_release(monkeypatch):
     assert result is not None and result["tag"] == "v0.7.0"
 
 
+def test_stamped_rc_reaches_the_desktop_stable_update_dialog(monkeypatch):
+    """Mock the unreleased v0.7.0 stable and exercise the desktop handoff."""
+    import importlib.metadata as metadata
+    import importlib.util
+    from pathlib import Path
+
+    stable_asset = {
+        "name": "qimchi-setup-v0.7.0.exe (Windows installer)",
+        "direct_asset_url": "https://example.invalid/qimchi-setup-v0.7.0.exe",
+    }
+    releases = [
+        _release("v0.7.0", stable_asset),
+        _release("v0.7.0-rc.7", _WIN_ASSET),
+    ]
+    monkeypatch.setattr(metadata, "version", lambda _name: "0.7.0")
+    _stamp_build_version(monkeypatch, "v0.7.0-rc.7")
+    monkeypatch.setattr(updater, "current_version", _REAL_CURRENT_VERSION)
+    monkeypatch.setattr(updater, "urlopen", lambda *_args, **_kwargs: _Response(releases))
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+    monkeypatch.setattr(__import__("time"), "sleep", lambda _seconds: None)
+
+    launcher_path = (
+        Path(__file__).resolve().parents[2] / "packaging" / "qimchi_launcher.py"
+    )
+    spec = importlib.util.spec_from_file_location("qimchi_launcher", launcher_path)
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+    scripts = []
+    logs = []
+    window = SimpleNamespace(evaluate_js=scripts.append)
+
+    launcher._run_update_check(window, logs.append)
+
+    assert logs == []
+    assert len(scripts) == 1
+    assert 'var tag       = "v0.7.0";' in scripts[0]
+    assert 'var current   = "v0.7.0-rc.7";' in scripts[0]
+    assert 'var assetUrl  = "https://example.invalid/qimchi-setup-v0.7.0.exe";' in scripts[0]
+    assert "window.pywebview.api.apply_update" in scripts[0]
+
+
 def test_every_build_script_stamps_the_version(monkeypatch):
     """
     The stamp is invisible in a dev checkout, so nothing else would catch a
