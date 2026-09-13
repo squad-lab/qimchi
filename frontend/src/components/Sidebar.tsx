@@ -3,6 +3,7 @@ import { Panel, PanelResizeHandle } from "react-resizable-panels";
 // Local imports
 import Notes from "./Notes";
 import Explorer from "./Explorer";
+import ExplorerLayer from "./ExplorerLayer";
 import Metadata from "./Metadata";
 import BrandingFooter from "./BrandingFooter";
 import { TreeNode } from "./treeUtils";
@@ -91,13 +92,7 @@ const Sidebar = ({
       >
         <div className="flex flex-col h-full">
           <div className="flex-1 overflow-hidden bg-gray-100">
-            <div
-              // z-[1500]: above Plotly's modebar (1000), which otherwise paints
-              // through the covered plots, and below the modals (2001+). The
-              // full stack is documented in index.css.
-              className={explorerExpanded ? "fixed inset-0 z-[1500] bg-gray-100" : "h-full"}
-              style={explorerStyle}
-            >
+            <ExplorerLayer expanded={explorerExpanded} style={explorerStyle}>
               <Explorer
                 onSelectNode={handleSelectNode}
                 basketItems={basketItems}
@@ -109,7 +104,7 @@ const Sidebar = ({
                 onOpenSampleNotes={onOpenSampleNotes}
                 onCycleDataset={onCycleDataset}
               />
-            </div>
+            </ExplorerLayer>
 
             <div className="h-full" style={sectionStyle("metadata")}>
               <Metadata basketItems={basketItems} />

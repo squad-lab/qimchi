@@ -155,6 +155,35 @@ test.describe("bulk library actions", () => {
       .poll(() => requests.filter((entry) => entry.includes("/library/heart")).length)
       .toBeGreaterThanOrEqual(2);
   });
+
+  test("remain actionable in the full-window Explorer", async ({ page }) => {
+    const requests: string[] = [];
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (path.startsWith("/library/")) requests.push(`${request.method()} ${path}`);
+    });
+
+    await page.getByRole("button", { name: "Expand to full window" }).click();
+    await expect(page.getByRole("button", { name: "Exit full window" })).toBeVisible();
+
+    await page.getByText(/1-aaaaaaaa/).click();
+    await page.getByText(/2-ffffffff/).click({ modifiers: ["Control"] });
+
+    await page.getByTitle(/^Heart \/ unheart/).click();
+    await expect
+      .poll(() => requests.filter((entry) => entry.includes("/library/heart")).length)
+      .toBeGreaterThanOrEqual(2);
+
+    await page.getByTitle(/^Trash \/ restore/).click();
+    await expect
+      .poll(() => requests.filter((entry) => entry.includes("/library/trash")).length)
+      .toBeGreaterThanOrEqual(2);
+
+    await page.getByTitle(/^Tag 2 datasets/).click();
+    const tagDialog = page.getByRole("dialog", { name: "Tags" });
+    await expect(tagDialog).toBeVisible();
+    await expect(tagDialog).toHaveCSS("z-index", "1600");
+  });
 });
 
 test.describe("library unavailable", () => {

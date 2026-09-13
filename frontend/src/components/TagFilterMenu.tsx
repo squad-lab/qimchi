@@ -67,7 +67,7 @@ const TagFilterMenu = ({ anchorEl, tags, selectedTagIds, onToggle, onClear, onCl
     <div
       ref={ref}
       style={{ top: pos.top, left: pos.left }}
-      className="fixed z-50 w-56 rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+      className="fixed z-[1600] w-56 rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
       role="dialog"
       aria-label="Filter by tags"
     >

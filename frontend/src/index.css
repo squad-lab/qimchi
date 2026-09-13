@@ -151,7 +151,8 @@ select {
 /* Layer stack, in paint order. These are the only values that matter across
    component boundaries; anything local to a card stays well below them.
      1000  Plotly modebar (below)
-     1500  full-window Explorer (Explorer.tsx)
+     1500  full-window Explorer (ExplorerLayer.tsx)
+     1600  Explorer tag/filter popovers
      2001+ modals, incrementing per open (getNextGlobalModalZ)
      9999  tooltip portal
    The Explorer needs a slot above the modebar: it covers the viewport, and a

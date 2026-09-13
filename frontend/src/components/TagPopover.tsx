@@ -121,7 +121,9 @@ const TagPopover = ({
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-[1000] w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-2 text-sm"
+      role="dialog"
+      aria-label="Tags"
+      className="fixed z-[1600] w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-2 text-sm"
       style={{ top: pos.top, left: pos.left }}
       onClick={(e) => e.stopPropagation()}
     >
