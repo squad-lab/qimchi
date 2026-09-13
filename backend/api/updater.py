@@ -14,13 +14,18 @@ Public API:
         The running version string (the build tag when stamped, else
         importlib.metadata).
 
+    last_check_error() -> str | None
+        Diagnostic from the latest failed release fetch.
+
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sys
+from urllib.request import Request, urlopen
 
 _log = logging.getLogger(__name__)
 
@@ -36,6 +41,13 @@ _PRERELEASE_RE = re.compile(r"^v?\d+(?:\.\d+)*-(?:rc|alpha|beta)\.\d+$")
 _RELEASES_URL = (
     "https://gitlab.com/api/v4/projects/squad-lab%2Fqimchi/releases?per_page=20"
 )
+
+_last_check_error: str | None = None
+
+
+def last_check_error() -> str | None:
+    """Reason the most recent release fetch failed, if it failed."""
+    return _last_check_error
 
 
 def _platform_asset_match(name: str, url: str) -> tuple[str, str] | None:
@@ -135,13 +147,23 @@ def check_for_update() -> dict | None:
     Never raises - all errors are logged at INFO level and treated as "no update".
 
     """
+    global _last_check_error
+    _last_check_error = None
     try:
-        import requests  # transitive via qcodes; always present in the bundle
-
-        resp = requests.get(_RELEASES_URL, timeout=10)
-        resp.raise_for_status()
-        releases = resp.json()
+        # Use the standard library: requests is not a declared Qimchi runtime
+        # dependency and is therefore absent from the frozen desktop bundle.
+        # Importing it here made every packaged update check silently return
+        # None before it ever contacted GitLab.
+        request = Request(
+            _RELEASES_URL,
+            headers={"Accept": "application/json", "User-Agent": "Qimchi-Updater"},
+        )
+        with urlopen(request, timeout=10) as response:  # noqa: S310 - fixed HTTPS URL
+            releases = json.load(response)
+        if not isinstance(releases, list):
+            raise ValueError("GitLab releases response was not a list")
     except Exception as exc:
+        _last_check_error = f"{type(exc).__name__}: {exc}"
         _log.info("[updater] release check failed (non-fatal): %s", exc)
         return None
 
@@ -162,7 +184,9 @@ def check_for_update() -> dict | None:
     candidates = [
         rel
         for rel in releases
-        if rel.get("tag_name") and (on_preview or not is_prerelease(rel["tag_name"]))
+        if isinstance(rel, dict)
+        and rel.get("tag_name")
+        and (on_preview or not is_prerelease(rel["tag_name"]))
     ]
     if not candidates:
         _log.info(

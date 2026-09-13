@@ -15,6 +15,7 @@ This file is the source of truth. `build_windows.ps1` copies it into the bundle.
 import multiprocessing
 import os
 import sys
+from urllib.request import Request, urlopen
 
 
 # Paths / logging
@@ -282,20 +283,14 @@ class _Api:
 
         def _install() -> None:
             import subprocess
-            import tempfile
 
             self._log(f"[updater] downloading installer from {asset_url}")
             try:
-                import requests
-
-                resp = requests.get(asset_url, stream=True, timeout=180)
-                resp.raise_for_status()
-                suffix = _update_asset_suffix(asset_name, asset_url, platform)
-                fd, tmp = tempfile.mkstemp(suffix=suffix)
-                with os.fdopen(fd, "wb") as f:
-                    for chunk in resp.iter_content(65536):
-                        if chunk:
-                            f.write(chunk)
+                tmp = _download_update_asset(
+                    asset_url,
+                    asset_name=asset_name,
+                    platform=platform,
+                )
             except Exception as exc:
                 self._log(f"[updater] download failed: {exc!r}")
                 return
@@ -410,6 +405,30 @@ def _update_asset_suffix(asset_name: str, asset_url: str, platform: str) -> str:
     if platform == "linux" or ".appimage" in lower:
         return "-qimchi.AppImage"
     return "-qimchi-update"
+
+
+def _download_update_asset(asset_url: str, asset_name: str, platform: str) -> str:
+    """Download an update using only modules guaranteed in the frozen bundle."""
+    import tempfile
+
+    request = Request(asset_url, headers={"User-Agent": "Qimchi-Updater"})
+    suffix = _update_asset_suffix(asset_name, asset_url, platform)
+    fd, tmp = tempfile.mkstemp(suffix=suffix)
+    try:
+        with urlopen(request, timeout=180) as response, os.fdopen(fd, "wb") as target:
+            while chunk := response.read(65536):
+                target.write(chunk)
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return tmp
 
 
 def _linux_update_download_path(asset_name: str, tmp: str) -> str:
@@ -592,11 +611,15 @@ def _run_update_check(window, log) -> None:
     # Give the SPA a moment to render before injecting the overlay.
     time.sleep(3)
     try:
-        from api.updater import check_for_update, current_version
+        from api.updater import check_for_update, current_version, last_check_error
 
         result = check_for_update()
         if result is None:
-            log("[updater] no update available")
+            error = last_check_error()
+            if error:
+                log(f"[updater] update check failed (non-fatal): {error}")
+            else:
+                log("[updater] no update available")
             return
         js = _update_dialog_js(
             tag=result["tag"],

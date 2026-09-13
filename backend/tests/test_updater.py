@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 from api import updater
@@ -8,13 +9,19 @@ _REAL_CURRENT_VERSION = updater.current_version
 
 class _Response:
     def __init__(self, payload):
-        self._payload = payload
+        self._body = json.dumps(payload).encode("utf-8")
 
-    def raise_for_status(self):
-        return None
+    def read(self, size=-1):
+        if size is None or size < 0:
+            size = len(self._body)
+        chunk, self._body = self._body[:size], self._body[size:]
+        return chunk
 
-    def json(self):
-        return self._payload
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
 
 
 def _release_with_links(*links):
@@ -27,15 +34,14 @@ def _release_with_links(*links):
     ]
 
 
-def _install_fake_requests(monkeypatch, payload):
-    fake_requests = SimpleNamespace(get=lambda *args, **kwargs: _Response(payload))
-    monkeypatch.setitem(__import__("sys").modules, "requests", fake_requests)
+def _install_fake_release_fetch(monkeypatch, payload):
+    monkeypatch.setattr(updater, "urlopen", lambda *_args, **_kwargs: _Response(payload))
     monkeypatch.setattr(updater, "current_version", lambda: "0.6.1")
 
 
 def test_check_for_update_selects_windows_installer(monkeypatch):
     monkeypatch.setattr(updater.sys, "platform", "win32")
-    _install_fake_requests(
+    _install_fake_release_fetch(
         monkeypatch,
         _release_with_links(
             {
@@ -55,7 +61,7 @@ def test_check_for_update_selects_windows_installer(monkeypatch):
 
 def test_check_for_update_selects_linux_appimage(monkeypatch):
     monkeypatch.setattr(updater.sys, "platform", "linux")
-    _install_fake_requests(
+    _install_fake_release_fetch(
         monkeypatch,
         _release_with_links(
             {
@@ -75,7 +81,7 @@ def test_check_for_update_selects_linux_appimage(monkeypatch):
 
 def test_check_for_update_selects_macos_dmg(monkeypatch):
     monkeypatch.setattr(updater.sys, "platform", "darwin")
-    _install_fake_requests(
+    _install_fake_release_fetch(
         monkeypatch,
         _release_with_links(
             {
@@ -95,7 +101,7 @@ def test_check_for_update_selects_macos_dmg(monkeypatch):
 
 def test_check_for_update_returns_none_without_platform_asset(monkeypatch):
     monkeypatch.setattr(updater.sys, "platform", "darwin")
-    _install_fake_requests(
+    _install_fake_release_fetch(
         monkeypatch,
         _release_with_links(
             {
@@ -145,7 +151,7 @@ def test_prerelease_at_the_top_does_not_hide_the_newest_stable(monkeypatch):
         _release("v0.6.4", _WIN_ASSET),  # newest STABLE -> expected
         _release("v0.6.3", _WIN_ASSET),
     ]
-    _install_fake_requests(monkeypatch, payload)
+    _install_fake_release_fetch(monkeypatch, payload)
     monkeypatch.setattr(updater.sys, "platform", "win32")
 
     result = updater.check_for_update()
@@ -155,7 +161,7 @@ def test_prerelease_at_the_top_does_not_hide_the_newest_stable(monkeypatch):
 
 def test_only_prereleases_means_no_update(monkeypatch):
     payload = [_release("v0.7.0-rc.1", _WIN_ASSET), _release("v0.7.0-rc.2", _WIN_ASSET)]
-    _install_fake_requests(monkeypatch, payload)
+    _install_fake_release_fetch(monkeypatch, payload)
     monkeypatch.setattr(updater.sys, "platform", "win32")
     assert updater.check_for_update() is None
 
@@ -163,7 +169,7 @@ def test_only_prereleases_means_no_update(monkeypatch):
 def test_running_a_preview_is_not_offered_an_older_stable(monkeypatch):
     """A -rc user must not be 'updated' backwards onto the previous stable."""
     payload = [_release("v0.6.3", _WIN_ASSET)]
-    _install_fake_requests(monkeypatch, payload)
+    _install_fake_release_fetch(monkeypatch, payload)
     monkeypatch.setattr(updater, "current_version", lambda: "0.6.4-rc.1")
     monkeypatch.setattr(updater.sys, "platform", "win32")
     assert updater.check_for_update() is None
@@ -172,7 +178,7 @@ def test_running_a_preview_is_not_offered_an_older_stable(monkeypatch):
 def test_running_a_preview_is_offered_the_matching_stable(monkeypatch):
     """...but the stable of the same version IS an upgrade from its rc."""
     payload = [_release("v0.6.4", _WIN_ASSET)]
-    _install_fake_requests(monkeypatch, payload)
+    _install_fake_release_fetch(monkeypatch, payload)
     monkeypatch.setattr(updater, "current_version", lambda: "0.6.4-rc.1")
     monkeypatch.setattr(updater.sys, "platform", "win32")
     result = updater.check_for_update()
@@ -216,18 +222,17 @@ def test_current_version_reads_package_metadata(monkeypatch):
 def test_a_network_failure_is_not_an_update(monkeypatch):
     """The check runs at startup; a flaky network must never surface an error."""
 
-    class _Failing:
-        @staticmethod
-        def get(*_args, **_kwargs):
-            raise OSError("no route to host")
+    def fail(*_args, **_kwargs):
+        raise OSError("no route to host")
 
-    monkeypatch.setitem(__import__("sys").modules, "requests", _Failing)
+    monkeypatch.setattr(updater, "urlopen", fail)
 
     assert updater.check_for_update() is None
+    assert updater.last_check_error() == "OSError: no route to host"
 
 
 def test_an_empty_release_list_is_not_an_update(monkeypatch):
-    _install_fake_requests(monkeypatch, [])
+    _install_fake_release_fetch(monkeypatch, [])
 
     assert updater.check_for_update() is None
 
@@ -257,7 +262,7 @@ def test_an_unknown_platform_matches_nothing(monkeypatch):
 def test_a_preview_install_is_offered_the_next_preview(monkeypatch):
     """Preview users stay on the preview channel instead of stalling on an rc."""
     payload = [_release("v0.7.0-rc.2", _WIN_ASSET), _release("v0.7.0-rc.1", _WIN_ASSET)]
-    _install_fake_requests(monkeypatch, payload)
+    _install_fake_release_fetch(monkeypatch, payload)
     monkeypatch.setattr(updater, "current_version", lambda: "v0.7.0-rc.1")
     monkeypatch.setattr(updater.sys, "platform", "win32")
 
@@ -278,7 +283,7 @@ def test_a_preview_install_prefers_the_stable_over_a_newer_preview(monkeypatch):
         _release("v0.7.0", _WIN_ASSET),
         _release("v0.7.0-rc.5", _WIN_ASSET),
     ]
-    _install_fake_requests(monkeypatch, payload)
+    _install_fake_release_fetch(monkeypatch, payload)
     monkeypatch.setattr(updater, "current_version", lambda: "v0.7.0-rc.5")
     monkeypatch.setattr(updater.sys, "platform", "win32")
 
@@ -289,7 +294,7 @@ def test_a_preview_install_prefers_the_stable_over_a_newer_preview(monkeypatch):
 
 def test_a_stable_install_is_still_never_offered_a_preview(monkeypatch):
     payload = [_release("v0.8.0-rc.1", _WIN_ASSET), _release("v0.7.0", _WIN_ASSET)]
-    _install_fake_requests(monkeypatch, payload)
+    _install_fake_release_fetch(monkeypatch, payload)
     monkeypatch.setattr(updater, "current_version", lambda: "0.7.0")
     monkeypatch.setattr(updater.sys, "platform", "win32")
 
@@ -334,7 +339,7 @@ def test_a_stamped_preview_build_is_offered_the_stable_release(monkeypatch):
 
     monkeypatch.setattr(metadata, "version", lambda _name: "0.7.0")
     _stamp_build_version(monkeypatch, "v0.7.0-rc.5")
-    _install_fake_requests(monkeypatch, [_release("v0.7.0", _WIN_ASSET)])
+    _install_fake_release_fetch(monkeypatch, [_release("v0.7.0", _WIN_ASSET)])
     # The helper pins current_version; here the stamp is the thing under test.
     monkeypatch.setattr(updater, "current_version", _REAL_CURRENT_VERSION)
     monkeypatch.setattr(updater.sys, "platform", "win32")

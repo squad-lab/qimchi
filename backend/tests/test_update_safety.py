@@ -119,6 +119,45 @@ def test_launcher_and_backend_agree_on_the_app_home(monkeypatch, tmp_path):
     assert paths.db_path().parent == Path(launcher._qimchi_home())
 
 
+def test_update_asset_download_does_not_require_requests(monkeypatch):
+    """The frozen bundle has urllib but does not include the requests package."""
+    import importlib.util
+
+    launcher_path = (
+        Path(__file__).resolve().parents[2] / "packaging" / "qimchi_launcher.py"
+    )
+    spec = importlib.util.spec_from_file_location("qimchi_launcher", launcher_path)
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+
+    class _Download:
+        def __init__(self):
+            self._chunks = iter((b"installer ", b"bytes", b""))
+
+        def read(self, _size=-1):
+            return next(self._chunks)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(launcher, "urlopen", lambda *_args, **_kwargs: _Download())
+    downloaded = Path(
+        launcher._download_update_asset(
+            "https://example.invalid/qimchi-setup.exe",
+            "qimchi-setup.exe (Windows installer)",
+            "windows",
+        )
+    )
+    try:
+        assert downloaded.read_bytes() == b"installer bytes"
+        assert downloaded.name.endswith("-qimchi-setup.exe")
+    finally:
+        downloaded.unlink(missing_ok=True)
+
+
 def test_hashed_assets_referenced_by_index_actually_exist():
     """
     Guards the failure mode directly: every /assets/ URL the shell references
