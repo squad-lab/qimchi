@@ -725,7 +725,7 @@ const DirTree = ({
   ]);
 
   // Structure and ordering, as id lists. Nothing here allocates a node.
-  const { rootIds, childrenById, visibleNodes } = useMemo(() => {
+  const { rootIds, childrenById, visibleNodes, parentById } = useMemo(() => {
     const compare = (a: TreeNode, b: TreeNode) => {
       let comparison = 0;
 
@@ -756,6 +756,8 @@ const DirTree = ({
 
     const children = new Map<string, string[]>();
     const visible = new Map<string, TreeNode>();
+    // id -> parent id, so a node can be revealed by expanding its ancestors.
+    const parents = new Map<string, string>();
 
     // Chrono flattens to dataset leaves, so there is no hierarchy to build.
     if (sortBy === "chrono") {
@@ -773,6 +775,7 @@ const DirTree = ({
         rootIds: leaves.map((leaf) => leaf.id),
         childrenById: children,
         visibleNodes: visible,
+        parentById: parents,
       };
     }
 
@@ -782,7 +785,11 @@ const DirTree = ({
       kept.sort(compare);
       kept.forEach((node) => {
         visible.set(node.id, node);
-        if (node.children) children.set(node.id, buildLevel(node.children));
+        if (node.children) {
+          const childIds = buildLevel(node.children);
+          childIds.forEach((childId) => parents.set(childId, node.id));
+          children.set(node.id, childIds);
+        }
       });
       return kept.map((node) => node.id);
     };
@@ -791,6 +798,7 @@ const DirTree = ({
       rootIds: buildLevel(apiData),
       childrenById: children,
       visibleNodes: visible,
+      parentById: parents,
     };
   }, [apiData, matchedIds, sortBy, sortDirection]);
 
@@ -874,18 +882,18 @@ const DirTree = ({
       propMemoizationFeature, // For better memoization of props
     ],
   });
-  // headless-tree caches the flattened item structure and only rebuilds it
-  // when asked. useTree calls rebuildTree() once on mount; later renders call
-  // setConfig(), which swaps the dataLoader but leaves that cache alone. Since
-  // the directory loads asynchronously, the structure built at mount is empty
-  // and nothing ever asks the loader again -- which is why the tree used to
-  // render nothing until something called collapseAll() (it ends with
-  // rebuildTree()). Rebuilding on the structure itself is the supported way,
-  // and it leaves expansion state alone, so collapsed folders stay collapsed
-  // and only expanded subtrees are materialised.
+
   useEffect(() => {
     tree.rebuildTree();
   }, [tree, rootIds, childrenById]);
+
+  // Scroll handle for the virtualised list, so cycling datasets can bring the
+  // new one into view.
+  const virtualizerRef = useRef<Virtualizer<HTMLDivElement, Element> | null>(null);
+
+  // Set by revealNode; consumed one render later, once the expansions it made
+  // have been rendered and the virtualiser knows about the new rows.
+  const [revealNodeId, setRevealNodeId] = useState<string | null>(null);
 
   // Derived from the tree rather than stored: after navigating into a folder
   // the new tree is collapsed, but a remembered flag still read "expanded" and
@@ -907,6 +915,53 @@ const DirTree = ({
     },
     [updateDirTreeState],
   );
+
+  // Select a node and scroll it into view, opening whatever folders it sits
+  // in. Ancestors are expanded top-down because headless-tree only
+  // materialises the children of an expanded item -- expand() rebuilds the
+  // tree synchronously, so the next level down exists by the time we reach it.
+  const revealNode = useCallback(
+    (nodeId: string) => {
+      const ancestors: string[] = [];
+      let parentId = parentById.get(nodeId);
+      while (parentId) {
+        ancestors.unshift(parentId);
+        parentId = parentById.get(parentId);
+      }
+
+      ancestors.forEach((ancestorId) => {
+        const item = tree.getItemInstance(ancestorId);
+        if (item && !item.isExpanded()) {
+          item.expand();
+          updateExpandedNodeState(ancestorId, true);
+        }
+      });
+
+      setRevealNodeId(nodeId);
+    },
+    [parentById, tree, updateExpandedNodeState],
+  );
+
+  useEffect(() => {
+    if (!revealNodeId) return;
+    setRevealNodeId(null);
+
+    const index = tree.getItems().findIndex((item) => item.getId() === revealNodeId);
+    if (index === -1) return;
+
+    tree.setSelectedItems([revealNodeId]);
+    tree.getItemInstance(revealNodeId)?.setFocused();
+
+    // "auto" moves the list as little as it can, and not at all while the row
+    // is already on screen -- stepping to the next dataset should not throw
+    // the tree around. The scroll padding configured on the virtualiser keeps
+    // a couple of rows of context when it does have to scroll.
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    virtualizerRef.current?.scrollToIndex(index, {
+      align: "auto",
+      behavior: prefersReducedMotion ? "auto" : "smooth",
+    });
+  }, [revealNodeId, tree]);
 
   const handleSort = (newSortBy: typeof sortBy) => {
     if (sortBy === newSortBy) {
@@ -1246,6 +1301,10 @@ const DirTree = ({
 
       // Add new dataset to basket
       onAddToBasket?.(nextNode);
+
+      // Keep the Explorer on the dataset being viewed: select it, open any
+      // folders it is nested in, and scroll it into view.
+      revealNode(nextNode.id);
 
       // Call the cycle callback with direction info
       onCycleDataset(direction);
@@ -1778,6 +1837,7 @@ const DirTree = ({
       {/* Scrollable Tree View - Always Virtualized */}
       <div className="flex-1 min-h-0" aria-busy={isLoading}>
         <VirtualizedTreeView
+          ref={virtualizerRef}
           tree={tree}
           treeKey={treeKey}
           rootNodes={rootNodes}
@@ -1872,9 +1932,10 @@ const VirtualizedTreeView = forwardRef<
       estimateSize: () => 35, // Estimated height per item - adjust based on your actual item height
       // Add overscan for smoother scrolling - renders extra items above/below viewport
       overscan: 10,
-      // Enable smooth scrolling for better UX
-      scrollPaddingStart: 0,
-      scrollPaddingEnd: 0,
+      // Keep about two rows of context above/below when something is scrolled
+      // into view, so a revealed row never lands flush against an edge.
+      scrollPaddingStart: 70,
+      scrollPaddingEnd: 70,
     });
 
     useImperativeHandle(ref, () => virtualizer);
