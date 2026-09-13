@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 import plotly.io as pio
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from plotly import graph_objects as go
 
@@ -28,12 +28,7 @@ from .data_loader import resolve_to_disk_path
 
 # Local imports
 from .logger import logger
-from .notes import (
-    _make_frontmatter,
-    _measurement_notes_paths,
-    _parse_frontmatter,
-    append_sample_rollup,
-)
+from .notes import _measurement_notes_paths, _note_db_identity, append_measurement_note
 
 router = APIRouter()
 
@@ -1264,6 +1259,17 @@ async def export_and_send_to_notes(request: Request) -> JSONResponse:
             content={"success": False, "message": "Missing plot_json or fpath"},
         )
 
+    # Resolve the note's identity before rendering anything: a QCoDeS run is
+    # keyed by its registered UUID, and failing after the PNGs are written would
+    # leave images on disk with no note pointing at them.
+    note_uuid = measurement_info.get("qimchi_db_uuid")
+    try:
+        _note_db_identity(fpath, note_uuid if isinstance(note_uuid, str) else None)
+    except HTTPException as e:
+        return JSONResponse(
+            status_code=e.status_code, content={"success": False, "message": e.detail}
+        )
+
     try:
         now = datetime.now(timezone.utc)
         ts = now.strftime("%Y-%m-%d-%H-%M-%S")
@@ -1279,42 +1285,23 @@ async def export_and_send_to_notes(request: Request) -> JSONResponse:
         # Resolve memory:// paths to disk paths for notes file operations
         disk_fpath = _resolve_fpath_to_disk(fpath)
 
-        # Append markdown image link for the light image to the notes.md
+        # Link the light image as <dataset_uuid>/<image_filename>, relative to
+        # the note's sidecar folder.
         dataset_path = Path(disk_fpath)
-        dataset_uuid, notes_dir, notes_path = _measurement_notes_paths(dataset_path)
-        notes_dir.mkdir(parents=True, exist_ok=True)
-
-        # Ensure notes file exists with frontmatter
-        if not notes_path.exists():
-            with open(notes_path, "w", encoding="utf-8") as f:
-                f.write(_make_frontmatter(dataset_uuid, now))
-
-        # Build image path like <dataset_uuid>/<image_filename>
+        dataset_uuid, _, _ = _measurement_notes_paths(dataset_path)
         light_path = Path(saved.get("png_light"))
-        md_path = f"{dataset_uuid}/{light_path.name}"
-        md_line = f"![plot]({md_path})\n"
+        md_line = f"![plot]({dataset_uuid}/{light_path.name})\n"
 
-        with open(notes_path, "r", encoding="utf-8") as f:
-            existing_text = f.read()
-
-        previous_body, _, _ = _parse_frontmatter(existing_text)
-        previous_body = (previous_body or "").rstrip()
-
-        body = previous_body
-        if body:
-            body = f"{body}\n\n{md_line.strip()}\n"
-        else:
-            body = md_line
-
-        with open(notes_path, "w", encoding="utf-8") as f:
-            f.write(_make_frontmatter(dataset_uuid, now) + body)
-
-        sample_rollup = append_sample_rollup(
+        # Through the DB, not the .md alone: load_notes serves the DB first, so
+        # a link appended only to the file never showed up once a note existed.
+        appended = append_measurement_note(
             dataset_path,
-            body,
+            fpath,
+            md_line,
             now,
-            previous_measurement_notes_body=previous_body,
+            uuid=note_uuid if isinstance(note_uuid, str) else None,
         )
+        sample_rollup = appended["sample_rollup"] or {}
 
         return JSONResponse(
             status_code=200,
@@ -1323,7 +1310,7 @@ async def export_and_send_to_notes(request: Request) -> JSONResponse:
                 "message": "Saved images and appended note link.",
                 "paths": saved,
                 "md_line": md_line,
-                "notes_path": str(notes_path),
+                "notes_path": appended["notes_path"],
                 "sample_notes_path": sample_rollup.get("sample_notes_path"),
             },
         )

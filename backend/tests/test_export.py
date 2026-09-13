@@ -13,7 +13,7 @@ import pytest
 from PIL import Image
 from starlette.responses import FileResponse
 
-from api import db_models, export
+from api import db_models, export, notes
 from api.shared import db
 
 
@@ -601,6 +601,38 @@ async def test_status_and_download_endpoints_cover_all_states(tmp_path):
     assert response.filename == "named.zip"
 
 
+@pytest.fixture
+def notes_db(tmp_path, monkeypatch):
+    """Send-to-notes now writes through the notes DB: give it a scratch one."""
+    monkeypatch.setenv("QIMCHI_HOME", str(tmp_path / "home"))
+    db._engine = None
+    db.run_migrations()
+    db.seed_local_user()
+    yield
+    if db._engine is not None:
+        db._engine.dispose()
+    db._engine = None
+
+
+@pytest.mark.asyncio
+async def test_send_to_notes_rejects_a_qcodes_run_without_its_uuid(
+    tmp_path, monkeypatch
+):
+    """Refused before rendering, so no orphaned PNGs are written."""
+    rendered = []
+    monkeypatch.setattr(
+        export, "_save_light_dark_pngs", lambda *a, **k: rendered.append(1)
+    )
+
+    response = await export.export_and_send_to_notes(
+        FakeRequest({"plot_json": {"data": [{}]}, "fpath": "/data/runs.db#run_id=3"})
+    )
+
+    assert response.status_code == 400
+    assert rendered == []
+
+
+@pytest.mark.usefixtures("notes_db")
 @pytest.mark.asyncio
 async def test_send_to_notes_appends_image_and_lists_exports(tmp_path, monkeypatch):
     dataset = tmp_path / "sample" / "experiment" / "run.zarr"
@@ -618,7 +650,7 @@ async def test_send_to_notes_appends_image_and_lists_exports(tmp_path, monkeypat
     monkeypatch.setattr(export, "_save_light_dark_pngs", fake_save)
     monkeypatch.setattr(export, "_resolve_fpath_to_disk", lambda _path: str(dataset))
     monkeypatch.setattr(
-        export,
+        notes,
         "append_sample_rollup",
         lambda *_args, **_kwargs: {"sample_notes_path": "pool.md"},
     )
