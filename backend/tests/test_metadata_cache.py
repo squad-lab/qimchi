@@ -61,6 +61,51 @@ def test_payload_shape_matches_the_endpoint(tmp_path):
     assert payload["Measurement ID"] == "N/A"  # absent -> sentinel, not missing
 
 
+def test_payload_reports_the_independents_of_each_variable(tmp_path):
+    """
+    Mixed 1D/2D datasets are the norm: lock-in readings along a sweep next to a
+    map over the sweep AND a frequency axis. The UI cannot tell them apart from
+    the flat independents/dependents lists, so the payload spells out which
+    coordinates each variable actually varies over.
+
+    """
+    voltage = np.linspace(0, 1, 8)
+    freq = np.linspace(1e8, 2e8, 4)
+    ds = xr.Dataset(
+        data_vars={
+            "lockin_amp": (("voltage",), np.zeros(8)),
+            "s21_mag": (("voltage", "freq"), np.zeros((8, 4))),
+        },
+        coords={"voltage": voltage, "freq": freq},
+    )
+    nc = tmp_path / "mixed.nc"
+    ds.to_netcdf(nc)
+
+    with xr.open_dataset(nc) as opened:
+        payload = build_attrs_payload(opened)
+
+    assert payload["independents"] == ["voltage", "freq"]
+    assert payload["variable_independents"] == {
+        "lockin_amp": ["voltage"],
+        "s21_mag": ["voltage", "freq"],
+    }
+
+
+def test_payload_reports_no_variable_independents_for_flat_tables(tmp_path):
+    """Every column of a flat table is both a coordinate and a variable, so the
+    relation says nothing -- and the UI must fall back to the plain lists."""
+    ds = xr.Dataset(
+        data_vars={"b": (("index",), np.arange(4.0))},
+        coords={"index": np.arange(4.0)},
+        attrs={"qimchi_all_columns": ["index", "b"]},
+    )
+
+    payload = build_attrs_payload(ds)
+
+    assert payload["independents"] == ["index", "b"]
+    assert payload["variable_independents"] == {}
+
+
 @pytest.mark.asyncio
 async def test_first_open_of_an_unseen_measurement_populates_the_cache(tmp_path):
     """

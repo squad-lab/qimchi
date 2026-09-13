@@ -304,6 +304,7 @@ def _add_export_info_footer(
             if key in consumed_keys or key in (
                 "independents",
                 "dependents",
+                "variable_independents",
                 "Size",
                 "size",
             ):

@@ -193,7 +193,11 @@ async def test_attrs_payload_is_unchanged_for_a_qanary_dataset(monkeypatch):
 
     out = await dirtree.get_meta_attrs(PathData(path="/tmp/run.zarr"))
 
-    assert set(out) == set(dirtree.ATTR_KEYS) | {"independents", "dependents"}
+    assert set(out) == set(dirtree.ATTR_KEYS) | {
+        "independents",
+        "dependents",
+        "variable_independents",
+    }
 
 
 @pytest.mark.asyncio

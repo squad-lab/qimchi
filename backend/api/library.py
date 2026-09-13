@@ -407,9 +407,7 @@ def _read_cached_attrs(path: str) -> dict | None:
             cached = json.loads(row.metadata_json)
         except (TypeError, ValueError):
             return None
-        # Only serve a payload complete enough to BE the endpoint's response;
-        # older rows were written before independents/dependents were cached.
-        if not isinstance(cached, dict) or "independents" not in cached:
+        if not isinstance(cached, dict) or "variable_independents" not in cached:
             return None
         return cached
 

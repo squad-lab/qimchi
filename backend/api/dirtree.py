@@ -1309,8 +1309,24 @@ def build_attrs_payload(data: xr.Dataset) -> Dict:
         if isinstance(value, (str, int, float, bool)):
             attr_json[key] = value
 
+    # Which independents each dependent actually varies over, in coordinate order.
+    var_indeps: dict = {}
+    if not (isinstance(tabular_columns, list) and tabular_columns):
+        coord_dims = {
+            str(name): tuple(str(dim) for dim in coord.dims)
+            for name, coord in data.coords.items()
+        }
+        for name, var in data.data_vars.items():
+            dims = {str(dim) for dim in var.dims}
+            var_indeps[str(name)] = [
+                coord_name
+                for coord_name, coord_dim_names in coord_dims.items()
+                if coord_dim_names and dims.issuperset(coord_dim_names)
+            ]
+
     attr_json["independents"] = indeps
     attr_json["dependents"] = deps
+    attr_json["variable_independents"] = var_indeps
     return attr_json
 
 
