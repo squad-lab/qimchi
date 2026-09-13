@@ -485,12 +485,15 @@ def append_sample_rollup(
         cryostat_name=cryostat_name,
     )
 
-    _ensure_notes_file(sample_notes_path, sample_filename)
+    # Read without creating: an empty or unchanged note appends nothing, and must
+    # not leave an empty pooled file behind. The file is created below, only
+    # once there is an entry to write into it.
+    existing_body = ""
+    if sample_notes_path.is_file():
+        with open(sample_notes_path, "r", encoding="utf-8") as f:
+            existing_body, _, _ = _parse_frontmatter(f.read())
+        existing_body = existing_body or ""
 
-    with open(sample_notes_path, "r", encoding="utf-8") as f:
-        sample_text = f.read()
-
-    existing_body, _, _ = _parse_frontmatter(sample_text)
     if previous_measurement_notes_body is not None:
         incremental_body = _compute_incremental_body(
             previous_measurement_notes_body,
@@ -527,6 +530,7 @@ def append_sample_rollup(
         merged_body = f"{new_entry}\n"
 
     sample_frontmatter = _make_frontmatter(sample_filename, now)
+    sample_notes_path.parent.mkdir(parents=True, exist_ok=True)
     with open(sample_notes_path, "w", encoding="utf-8") as f:
         f.write(sample_frontmatter + merged_body)
 
@@ -537,6 +541,74 @@ def append_sample_rollup(
         "dataset_uuid": dataset_uuid,
         "appended": "true",
     }
+
+
+def append_measurement_note(
+    measurement_path: Path,
+    path_ref: str,
+    text: str,
+    when: datetime,
+    uuid: str | None = None,
+    run_id: int | None = None,
+) -> Dict:
+    """
+    Append a block of text to a measurement's note, in the DB and its mirror.
+
+    The DB is the source of truth -- load_notes serves it before any sidecar --
+    so appending to the .md alone is invisible once a note exists in the DB.
+
+    Args:
+        measurement_path (Path): Measurement path on disk (sidecar location).
+        path_ref (str): The dataset reference used for the note's DB identity.
+        text (str): Markdown to append.
+        when (datetime): Timestamp for the note and its frontmatter.
+        uuid (str | None): Registered measurement UUID (required for QCoDeS).
+        run_id (int | None): QCoDeS run, when the path does not carry it.
+
+    Returns:
+        Dict: ``notes_path`` and the ``sample_rollup`` result (None if not run).
+
+    Raises:
+        HTTPException: 400 when the note identity cannot be resolved.
+
+    """
+    note_uuid, note_run_id = _note_db_identity(path_ref, uuid, run_id)
+    dataset_uuid, notes_dir, notes_path = _measurement_notes_paths(measurement_path)
+
+    prev = _db_get_note(note_uuid, note_run_id)
+    if prev is not None:
+        previous_body = prev[0].rstrip()
+    elif notes_path.is_file():
+        # A sidecar the Notes pane has not imported yet: carry it in rather
+        # than overwrite it with just the new text.
+        with open(notes_path, "r", encoding="utf-8") as f:
+            previous_body = (_parse_frontmatter(f.read())[0] or "").rstrip()
+    else:
+        previous_body = ""
+
+    addition = text.strip()
+    body = f"{previous_body}\n\n{addition}\n" if previous_body else f"{addition}\n"
+    _db_upsert_note(note_uuid, body, when, note_run_id)
+
+    sample_rollup = None
+    if _MD_EXPORT_ENABLED and not _is_qcodes_reference(path_ref):
+        try:
+            notes_dir.mkdir(parents=True, exist_ok=True)
+            with open(notes_path, "w", encoding="utf-8") as f:
+                f.write(_make_frontmatter(dataset_uuid, when) + body)
+            sample_rollup = append_sample_rollup(
+                measurement_path,
+                body,
+                when,
+                previous_measurement_notes_body=previous_body,
+            )
+        except Exception:
+            logger.warning(
+                "append_measurement_note | .md mirror/rollup failed (DB save succeeded)",
+                exc_info=True,
+            )
+
+    return {"notes_path": str(notes_path), "sample_rollup": sample_rollup}
 
 
 @router.post("/load-notes/")
@@ -613,15 +685,9 @@ async def load_notes(path: PathData) -> Dict:
                     "last_saved": last_saved,
                     "filename": filename or frontmatter_filename,
                 }
-            # No note yet. Optionally seed an empty .md mirror (file workflow).
-            if _MD_EXPORT_ENABLED and not _is_qcodes_reference(path.path):
-                try:
-                    _ensure_notes_file(notes_path, frontmatter_filename)
-                except Exception:
-                    logger.debug(
-                        "load_notes | could not seed .md sidecar (DB-only ok)",
-                        exc_info=True,
-                    )
+            # No note yet. Nothing is written: opening a measurement must not
+            # leave an empty sidecar folder next to it. save_notes creates the
+            # sidecar once there is something to put in it.
             return {
                 "notes": "",
                 "last_saved": None,
@@ -706,30 +772,45 @@ async def save_notes(data: NotesData) -> Dict:
     # sample rollup are best-effort and only when QIMCHI_NOTES_MD_EXPORT is on.
     if data.note_scope != "sample":
         now = datetime.now(timezone.utc)
+        body = data.notes or ""
+        has_content = bool(body.strip())
+        mirror = _MD_EXPORT_ENABLED and not _is_qcodes_reference(data.path)
         try:
             prev = await asyncio.to_thread(_db_get_note, note_uuid, note_run_id)
             previous_measurement_body = prev[0].rstrip() if prev else None
-            await asyncio.to_thread(
-                _db_upsert_note,
-                note_uuid,
-                data.notes or "",
-                now,
-                note_run_id,
-            )
+            # An empty save only matters when it clears an existing note. With
+            # nothing stored, it is a no-op: no row, no sidecar folder.
+            if not has_content and prev is None and not notes_path.is_file():
+                return {
+                    "message": "Nothing to save.",
+                    "path": str(notes_path),
+                    "last_saved": None,
+                    "filename": frontmatter_filename,
+                    "note_scope": "measurement",
+                    "frontmatter": None,
+                    "sample_rollup": None,
+                }
+            # Clearing writes the empty body rather than deleting the row: with
+            # the row gone, load_notes would re-import a surviving .md and bring
+            # the cleared note back.
+            await asyncio.to_thread(_db_upsert_note, note_uuid, body, now, note_run_id)
         except Exception as e:
             logger.error(f"save_notes | DB error: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Error saving notes: {str(e)}")
 
         frontmatter = _make_frontmatter(dataset_uuid, now)
         sample_rollup = None
-        if _MD_EXPORT_ENABLED and not _is_qcodes_reference(data.path):
+        # The sidecar folder is created only for a note with content. Clearing
+        # an existing note rewrites its .md in place and never deletes it: the
+        # folder also holds exported plot images that the note links to.
+        if mirror and (has_content or notes_path.is_file()):
             try:
                 notes_dir.mkdir(parents=True, exist_ok=True)
                 with open(notes_path, "w", encoding="utf-8") as f:
-                    f.write(frontmatter + (data.notes or ""))
+                    f.write(frontmatter + body)
                 sample_rollup = append_sample_rollup(
                     resolved_path,
-                    data.notes or "",
+                    body,
                     now,
                     sample_path=data.sample_path,
                     sample_name=data.sample_name,

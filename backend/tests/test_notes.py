@@ -233,6 +233,93 @@ async def test_measurement_note_load_save_and_sidecar_import(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_opening_a_measurement_creates_no_sidecar(tmp_path, monkeypatch):
+    """Loading notes for a measurement with none must not touch the disk."""
+    measurement = tmp_path / "sample" / "experiment" / "run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    _, notes_dir, _ = notes._measurement_notes_paths(measurement)
+
+    loaded = await notes.load_notes(PathData(path=str(measurement)))
+
+    assert loaded["notes"] == ""
+    assert not notes_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_empty_save_with_no_note_writes_nothing(tmp_path, monkeypatch):
+    """No sidecar folder, no pooled sample file, and no DB row."""
+    measurement = tmp_path / "sample" / "experiment" / "run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    _, notes_dir, _ = notes._measurement_notes_paths(measurement)
+    sample_dir = tmp_path / "sample"
+
+    saved = await notes.save_notes(NotesData(path=str(measurement), notes="  \n "))
+
+    assert saved["last_saved"] is None
+    assert not notes_dir.exists()
+    assert list(sample_dir.glob("*.md")) == []
+    assert notes._db_get_note("run") is None
+
+
+@pytest.mark.asyncio
+async def test_first_non_empty_save_creates_the_sidecar(tmp_path, monkeypatch):
+    measurement = tmp_path / "sample" / "experiment" / "run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    _, notes_dir, notes_path = notes._measurement_notes_paths(measurement)
+
+    await notes.save_notes(NotesData(path=str(measurement), notes="first note"))
+
+    assert notes_path.read_text(encoding="utf-8").endswith("first note")
+    assert list((tmp_path / "sample").glob("*.md"))  # pooled rollup written
+    assert notes._db_get_note("run")[0] == "first note"
+    assert notes_dir.is_dir()
+
+
+@pytest.mark.asyncio
+async def test_clearing_a_note_keeps_its_sidecar_and_stays_cleared(
+    tmp_path, monkeypatch
+):
+    """
+    Clearing must not delete the .md (the folder holds linked plot images), and
+    must not delete the DB row either -- load_notes would then re-import the
+    surviving .md and bring the cleared text back.
+    """
+    measurement = tmp_path / "sample" / "experiment" / "run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    _, notes_dir, notes_path = notes._measurement_notes_paths(measurement)
+    image = notes_dir / "run__stamp__plot_light.png"
+
+    await notes.save_notes(NotesData(path=str(measurement), notes="to be cleared"))
+    image.write_bytes(b"png")
+    await notes.save_notes(NotesData(path=str(measurement), notes=""))
+    reloaded = await notes.load_notes(PathData(path=str(measurement)))
+
+    assert reloaded["notes"] == ""
+    assert notes_path.is_file()
+    assert "to be cleared" not in notes_path.read_text(encoding="utf-8")
+    assert image.exists()
+
+
+def test_append_measurement_note_goes_through_the_db(tmp_path, monkeypatch):
+    """An appended image link must be visible to load_notes, which reads the DB."""
+    measurement = tmp_path / "sample" / "experiment" / "run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    when = datetime(2026, 9, 13, tzinfo=timezone.utc)
+    notes._db_upsert_note("run", "existing text", when)
+
+    notes.append_measurement_note(
+        measurement, str(measurement), "![plot](run/img.png)", when
+    )
+
+    assert notes._db_get_note("run")[0] == "existing text\n\n![plot](run/img.png)\n"
+
+
+@pytest.mark.asyncio
 async def test_measurement_note_db_errors_are_reported(tmp_path, monkeypatch):
     path = str(tmp_path / "run.zarr")
     monkeypatch.setattr(
