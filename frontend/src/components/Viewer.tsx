@@ -410,6 +410,20 @@ const Viewer = ({
     [effectiveSelectedPlotId],
   );
 
+  // Independents currently on the composer's axes. The Basket narrows the
+  // dependents it offers to the ones that vary over them -- a dependent that
+  // does not share the chosen coordinate cannot be plotted against it.
+  const [composerIndeps, setComposerIndeps] = useState<string[]>([]);
+  const handleComposerSelectionChange = useCallback((snapshot: ComposerSelectionSnapshot) => {
+    // Keep the previous array when the names are unchanged: this feeds a
+    // memoised prop chain down to every basket card.
+    setComposerIndeps((prev) =>
+      prev.length === snapshot.indeps.length && prev.every((name, i) => name === snapshot.indeps[i])
+        ? prev
+        : snapshot.indeps,
+    );
+  }, []);
+
   const selectedDatasets = getSelectedDatasets(basketItems, effectiveSelectedDatasetIds);
   const sharedFields = computeSharedFields(selectedDatasets);
   const enforceSharedGating =
@@ -681,6 +695,7 @@ const Viewer = ({
               enforceSharedGating={enforceSharedGating}
               onAutofillComposerField={handleAutofillComposerField}
               onOpenNotesItem={onOpenNotesItem}
+              composerIndeps={composerIndeps}
             />
           </div>
 
@@ -689,6 +704,7 @@ const Viewer = ({
             <PlotComposer
               ref={composerActionRef}
               onCreatePlot={handleCreatePlot}
+              onSelectionChange={handleComposerSelectionChange}
               selectionContextLabel={getSelectionContextLabel()}
             />
           </div>

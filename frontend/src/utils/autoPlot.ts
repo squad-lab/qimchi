@@ -1,6 +1,7 @@
 import { BasketItem } from "../components/Basket";
 import type { PlotConfiguration, AppliedFilter } from "../components/interfaces";
 import { isDatasetPath, isMemoryPath } from "./datasetPaths";
+import { getFieldIndependents } from "./datasetFieldSelectors";
 
 interface AutoPlotResult {
   success: boolean;
@@ -10,10 +11,18 @@ interface AutoPlotResult {
 
 /**
  * Generates plot configurations for automatic plot creation when a measurement is added to the basket.
- * - HeatMap: if there are at least 2 independents and 1 dependent
- * - LinePlot: if there is at least 1 independent and 1 dependent
+ * - HeatMap: the first dependent that actually varies over 2+ independents, against those two
+ * - LinePlot: the first dependent, against the first independent it varies over
  *
- * Takes the first N independents/dependents in the order they appear in the dataset.
+ * Datasets routinely mix 1D and 2D variables over the same coordinates (two
+ * lock-in readings along a voltage sweep next to an S21 map over voltage and
+ * frequency). Picking dependents[0] and independents[:2] for the heatmap then
+ * forces a 1D variable onto a 2D grid. So the 2D-ness of a variable decides:
+ * the heatmap uses the first dependent that has two independents of its own,
+ * and when the dataset has none, no heatmap is generated at all.
+ *
+ * Datasets that do not report per-variable independents (flat tables, payloads
+ * cached before that field existed) keep the original first-N behaviour.
  * Returns plot configurations that can be added to the viewer using addPlot().
  *
  * @param item - The basket item to generate plots for
@@ -55,8 +64,22 @@ export function generateAutoPlotConfigs(
     const source = isMemoryPath(fpath) ? "memory" : "disk";
     const preferredSource = source;
 
-    // Attempt to create HeatMap config if we have at least 2 indeps and 1 dep
-    if (independents.length >= 2 && dependents.length >= 1) {
+    // Pick the heatmap's dependent by its own dimensionality, falling back to
+    // the plain lists when the dataset reports no per-variable independents.
+    const heatmapDep = dependents.find(
+      (dep) => (getFieldIndependents(dep, item.attributes) ?? []).length >= 2,
+    );
+    const heatmapIndeps = heatmapDep
+      ? (getFieldIndependents(heatmapDep, item.attributes) ?? []).slice(0, 2)
+      : independents.slice(0, 2);
+    const knowsVariableIndeps = dependents.some(
+      (dep) => getFieldIndependents(dep, item.attributes) !== null,
+    );
+    // Without dim info, the first two independents remain the best guess.
+    const heatmapZ = heatmapDep ?? (knowsVariableIndeps ? undefined : dependents[0]);
+
+    // Attempt to create HeatMap config if we have a dependent over 2 indeps
+    if (heatmapZ && heatmapIndeps.length >= 2) {
       const filters_order: string[] = [];
       const filters_opts: Record<string, unknown> = {};
 
@@ -70,8 +93,8 @@ export function generateAutoPlotConfigs(
       plotConfigs.push({
         origin: "auto" as const,
         fpath,
-        indeps: independents.slice(0, 2), // Take first 2 independents
-        deps: [dependents[0]], // Take first dependent
+        indeps: heatmapIndeps,
+        deps: [heatmapZ],
         plotType: "HeatMap" as const,
         filters_order,
         filters_opts,
@@ -81,8 +104,13 @@ export function generateAutoPlotConfigs(
       });
     }
 
+    // The line plot takes the first dependent against the first independent it
+    // actually varies over, which is not necessarily independents[0].
+    const lineDep = dependents[0];
+    const lineIndep = (getFieldIndependents(lineDep, item.attributes) ?? independents)[0];
+
     // Attempt to create LinePlot config if we have at least 1 indep and 1 dep
-    if (independents.length >= 1 && dependents.length >= 1) {
+    if (lineIndep && lineDep) {
       const filters_order: string[] = [];
       const filters_opts: Record<string, unknown> = {};
 
@@ -96,8 +124,8 @@ export function generateAutoPlotConfigs(
       plotConfigs.push({
         origin: "auto" as const,
         fpath,
-        indeps: [independents[0]], // Take first independent
-        deps: [dependents[0]], // Take first dependent
+        indeps: [lineIndep],
+        deps: [lineDep],
         plotType: "LinePlot" as const,
         filters_order,
         filters_opts,

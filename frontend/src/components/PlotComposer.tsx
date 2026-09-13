@@ -38,6 +38,12 @@ export interface ComposerSelectionSnapshot {
 interface PlotComposerProps {
   onCreatePlot?: (snapshot: ComposerSelectionSnapshot) => void;
   selectionContextLabel?: string;
+  /**
+   * Fired whenever the axis selection changes, so the Basket can narrow the
+   * dependents it offers to the ones that vary over the chosen independents.
+   * Must be referentially stable -- it is an effect dependency.
+   */
+  onSelectionChange?: (snapshot: ComposerSelectionSnapshot) => void;
 }
 
 export interface PlotComposerHandle {
@@ -50,7 +56,7 @@ export interface PlotComposerHandle {
 }
 
 const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
-  ({ onCreatePlot, selectionContextLabel }: PlotComposerProps, ref) => {
+  ({ onCreatePlot, selectionContextLabel, onSelectionChange }: PlotComposerProps, ref) => {
     const [xFields, setXFields] = useState<PlotField[]>([]);
     const [yFields, setYFields] = useState<PlotField[]>([]);
     const [zFields, setZFields] = useState<PlotField[]>([]);
@@ -404,6 +410,12 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
         fieldSources,
       };
     }, [plotType, xFields, yFields, zFields]);
+
+    // Publish the selection upwards. getComposerSelectionNames is memoised on
+    // the fields themselves, so this fires when the axes actually change.
+    useEffect(() => {
+      onSelectionChange?.(getComposerSelectionNames());
+    }, [getComposerSelectionNames, onSelectionChange]);
 
     // Handle plot creation by delegating eligibility to Viewer.
     const handleCreatePlot = useCallback(() => {

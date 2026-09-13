@@ -178,5 +178,10 @@ export interface AttrData {
   experiment_name?: string;
   independents?: string[];
   dependents?: string[];
-  [key: string]: string | string[] | number | boolean | undefined;
+  /**
+   * Per-dependent list of the independents it actually varies over, in
+   * coordinate order.
+   */
+  variable_independents?: Record<string, string[]>;
+  [key: string]: string | string[] | number | boolean | Record<string, string[]> | undefined;
 }

@@ -7,13 +7,21 @@ const item = (
   independents?: string[],
   dependents?: string[],
   path = "C:\\data\\run.zarr",
+  variableIndependents?: Record<string, string[]>,
 ): BasketItem =>
   ({
     id: "run-1",
     name: "run.zarr",
     path,
     type: "file",
-    attributes: independents || dependents ? { independents, dependents } : undefined,
+    attributes:
+      independents || dependents
+        ? {
+            independents,
+            dependents,
+            ...(variableIndependents ? { variable_independents: variableIndependents } : {}),
+          }
+        : undefined,
   }) as BasketItem;
 
 describe("generateAutoPlotConfigs", () => {
@@ -25,6 +33,55 @@ describe("generateAutoPlotConfigs", () => {
     // The heatmap takes both independents; the lineplot takes the first.
     expect(result.plotConfigs[0].indeps).toEqual(["gate", "bias"]);
     expect(result.plotConfigs[1].indeps).toEqual(["gate"]);
+  });
+
+  it("puts the first genuinely 2D dependent on the heatmap", () => {
+    // Two lock-in readings along the voltage sweep, then an S21 map over
+    // voltage AND frequency. dependents[0] is 1D, so it must not be the Z.
+    const result = generateAutoPlotConfigs(
+      item(["up_voltages", "f"], ["lockin_amp_up", "s21_mag", "s21_phase"], undefined, {
+        lockin_amp_up: ["up_voltages"],
+        s21_mag: ["up_voltages", "f"],
+        s21_phase: ["up_voltages", "f"],
+      }),
+    );
+
+    const [heatmap, lineplot] = result.plotConfigs;
+    expect(heatmap.plotType).toBe("HeatMap");
+    expect(heatmap.deps).toEqual(["s21_mag"]);
+    expect(heatmap.indeps).toEqual(["up_voltages", "f"]);
+    // The lineplot keeps the first dependent, against the coordinate it
+    // actually varies over.
+    expect(lineplot.deps).toEqual(["lockin_amp_up"]);
+    expect(lineplot.indeps).toEqual(["up_voltages"]);
+  });
+
+  it("plots a 1D dependent against its own independent, not the dataset's first", () => {
+    const result = generateAutoPlotConfigs(
+      item(["f", "up_voltages"], ["lockin_amp_up"], undefined, {
+        lockin_amp_up: ["up_voltages"],
+      }),
+    );
+
+    // Only a lineplot: no dependent varies over two independents.
+    expect(result.plotConfigs.map((config) => config.plotType)).toEqual(["LinePlot"]);
+    expect(result.plotConfigs[0].indeps).toEqual(["up_voltages"]);
+  });
+
+  it("makes no heatmap when every dependent is 1D", () => {
+    const result = generateAutoPlotConfigs(
+      item(["gate", "bias"], ["signal"], undefined, { signal: ["gate"] }),
+    );
+
+    expect(result.plotConfigs.map((config) => config.plotType)).toEqual(["LinePlot"]);
+  });
+
+  it("falls back to the first two independents when dims are unknown", () => {
+    // Flat tables, and payloads cached before variable_independents existed.
+    const result = generateAutoPlotConfigs(item(["gate", "bias"], ["signal"]));
+
+    expect(result.plotConfigs[0].plotType).toBe("HeatMap");
+    expect(result.plotConfigs[0].indeps).toEqual(["gate", "bias"]);
   });
 
   it("makes only a lineplot when there is a single independent", () => {

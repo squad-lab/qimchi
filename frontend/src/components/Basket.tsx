@@ -29,7 +29,7 @@ import SectionRibbon, { ribbonButtonClass } from "./SectionRibbon";
 import { useShortcut } from "../hooks/useGlobalShortcuts";
 import { useSidebarStore } from "../stores/sidebarStore";
 import { useToast } from "../hooks/useToast";
-import { SharedFieldResult, isFieldShared } from "../utils/datasetFieldSelectors";
+import { SharedFieldResult, dependsOnAll, isFieldShared } from "../utils/datasetFieldSelectors";
 import { detectDatasetKind, isDatasetPath, isSqliteContainerPath } from "../utils/datasetPaths";
 import { finishArchiveDownload } from "../utils/download";
 import type { AttrData } from "./interfaces";
@@ -67,6 +67,12 @@ interface BasketProps {
   enforceSharedGating: boolean;
   onAutofillComposerField?: (field: BasketFieldSelection) => void;
   onOpenNotesItem?: (item: BasketItem) => void;
+  /**
+   * Independents currently on the composer's axes. Dependents that do not vary
+   * over all of them are greyed out, like fields gated by a multi-dataset
+   * selection: they cannot be plotted against the chosen coordinates.
+   */
+  composerIndeps?: string[];
 }
 
 // One ResizeObserver for every field row. Each row used to construct its own,
@@ -263,6 +269,8 @@ const FieldsRow = memo(
     onAutofillComposerField,
     isChipEnabled,
     highlightedFields,
+    narrowedBy,
+    variableIndependents,
   }: {
     type: "independent" | "dependent";
     loading: boolean;
@@ -275,6 +283,12 @@ const FieldsRow = memo(
     onAutofillComposerField?: (field: BasketFieldSelection) => void;
     isChipEnabled: (field: string) => boolean;
     highlightedFields: Set<string>;
+    /** Composer independents; chips not varying over all of them are greyed. */
+    narrowedBy?: string[];
+    /**
+     * The card's per-variable independents.
+     */
+    variableIndependents?: Record<string, string[]>;
   }) => {
     const sectionRef = useRef<HTMLDivElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -311,7 +325,11 @@ const FieldsRow = memo(
         type={type}
         getSelectedItems={getSelectedItems}
         onToggleSelect={onToggleSelect}
-        isDisabled={!isChipEnabled(f)}
+        isDisabled={
+          !isChipEnabled(f) ||
+          (!!narrowedBy?.length &&
+            !dependsOnAll(f, narrowedBy, { variable_independents: variableIndependents }))
+        }
         isSelected={selectedItems?.has(`${itemName}-${f}`) ?? false}
         isHighlighted={highlightedFields.has(`${itemName}-${f}`)}
         onAutofillComposerField={onAutofillComposerField}
@@ -413,6 +431,7 @@ const Basket = ({
   enforceSharedGating,
   onAutofillComposerField,
   onOpenNotesItem,
+  composerIndeps = [],
 }: BasketProps) => {
   const { showToast } = useToast();
   // Persisted, so a refresh keeps the Basket the way it was left.
@@ -536,14 +555,17 @@ const Basket = ({
           </div>
         )}
         {Object.entries(item.attributes)
-          .filter(([key]) => key !== "independents" && key !== "dependents")
+          .filter(
+            ([key]) =>
+              key !== "independents" && key !== "dependents" && key !== "variable_independents",
+          )
           .map(
             ([key, value]) =>
               value &&
               value !== "N/A" && (
                 <div key={key} className="text-sm" title={`${key}: ${value}`}>
                   <span className="font-medium text-blue-200">{key}:</span>{" "}
-                  <span className="text-white">{value}</span>
+                  <span className="text-white">{String(value)}</span>
                 </div>
               ),
           )}
@@ -887,6 +909,8 @@ const Basket = ({
                         type="dependent"
                         loading={!item.attributes}
                         fields={item.attributes?.dependents ?? []}
+                        narrowedBy={composerIndeps}
+                        variableIndependents={item.attributes?.variable_independents}
                         itemName={item.name}
                         itemPath={item.path}
                         selectedItems={selectedItems}

@@ -13,6 +13,8 @@
 export interface DatasetAttributesLike {
   independents?: string[];
   dependents?: string[];
+  /** Per-dependent list of the independents it varies over (see AttrData). */
+  variable_independents?: Record<string, string[]>;
 }
 
 export interface DatasetLike {
@@ -54,6 +56,34 @@ const intersect = (base: Set<string>, next: Set<string>): Set<string> => {
 
 const hasAllNames = (set: Set<string>, values: string[]): boolean =>
   values.every((value) => set.has(value));
+
+/**
+ * The independents a dependent actually varies over, or null when the dataset
+ * did not report it -- older cached payloads and flat tables have no such
+ * relation, and every caller must then fall back to the plain field lists.
+ */
+export const getFieldIndependents = (
+  field: string,
+  attributes?: DatasetAttributesLike,
+): string[] | null => {
+  const dims = attributes?.variable_independents?.[field];
+  return Array.isArray(dims) ? dims : null;
+};
+
+/**
+ * Whether a dependent varies over every one of `indeps`. Unknown dim info is
+ * permissive: a dependent is only rejected on evidence.
+ */
+export const dependsOnAll = (
+  field: string,
+  indeps: string[],
+  attributes?: DatasetAttributesLike,
+): boolean => {
+  if (indeps.length === 0) return true;
+  const dims = getFieldIndependents(field, attributes);
+  if (dims === null || dims.length === 0) return true;
+  return indeps.every((indep) => dims.includes(indep));
+};
 
 export const getSelectedDatasets = <T extends DatasetLike>(
   items: T[],

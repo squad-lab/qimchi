@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   computeSharedFields,
+  dependsOnAll,
   getEligibleDatasetsForComposer,
   getSelectedDatasets,
   isComposerCompatibleWithDataset,
@@ -132,5 +133,36 @@ describe("getEligibleDatasetsForComposer", () => {
     });
 
     expect(result.eligible).toHaveLength(1);
+  });
+});
+
+describe("dependsOnAll", () => {
+  const mixed = {
+    independents: ["up_voltages", "f"],
+    dependents: ["lockin_amp", "s21_mag"],
+    variable_independents: {
+      lockin_amp: ["up_voltages"],
+      s21_mag: ["up_voltages", "f"],
+    },
+  };
+
+  it("keeps a dependent that varies over every selected independent", () => {
+    expect(dependsOnAll("s21_mag", ["up_voltages"], mixed)).toBe(true);
+    expect(dependsOnAll("s21_mag", ["up_voltages", "f"], mixed)).toBe(true);
+    expect(dependsOnAll("lockin_amp", ["up_voltages"], mixed)).toBe(true);
+  });
+
+  it("rejects a dependent that does not vary over a selected independent", () => {
+    // lockin_amp is 1D along the sweep; nothing to plot against frequency.
+    expect(dependsOnAll("lockin_amp", ["f"], mixed)).toBe(false);
+    expect(dependsOnAll("lockin_amp", ["up_voltages", "f"], mixed)).toBe(false);
+  });
+
+  it("rejects nothing without evidence", () => {
+    // Empty selection, unknown variable, and datasets that report no dims at
+    // all (flat tables, payloads cached before the field existed).
+    expect(dependsOnAll("lockin_amp", [], mixed)).toBe(true);
+    expect(dependsOnAll("unknown_var", ["f"], mixed)).toBe(true);
+    expect(dependsOnAll("b", ["a"], { independents: ["a"], dependents: ["b"] })).toBe(true);
   });
 });
