@@ -368,7 +368,9 @@ def test_stamped_rc_reaches_the_desktop_stable_update_dialog(monkeypatch):
     monkeypatch.setattr(metadata, "version", lambda _name: "0.7.0")
     _stamp_build_version(monkeypatch, "v0.7.0-rc.7")
     monkeypatch.setattr(updater, "current_version", _REAL_CURRENT_VERSION)
-    monkeypatch.setattr(updater, "urlopen", lambda *_args, **_kwargs: _Response(releases))
+    monkeypatch.setattr(
+        updater, "urlopen", lambda *_args, **_kwargs: _Response(releases)
+    )
     monkeypatch.setattr(updater.sys, "platform", "win32")
     monkeypatch.setattr(__import__("time"), "sleep", lambda _seconds: None)
 
@@ -388,7 +390,10 @@ def test_stamped_rc_reaches_the_desktop_stable_update_dialog(monkeypatch):
     assert len(scripts) == 1
     assert 'var tag       = "v0.7.0";' in scripts[0]
     assert 'var current   = "v0.7.0-rc.7";' in scripts[0]
-    assert 'var assetUrl  = "https://example.invalid/qimchi-setup-v0.7.0.exe";' in scripts[0]
+    assert (
+        'var assetUrl  = "https://example.invalid/qimchi-setup-v0.7.0.exe";'
+        in scripts[0]
+    )
     assert "window.pywebview.api.apply_update" in scripts[0]
 
 
