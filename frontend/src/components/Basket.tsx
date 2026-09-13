@@ -224,12 +224,12 @@ const FieldItem = memo(
     const content = (
       <div
         className={`
-        flex items-center space-x-1 rounded p-1.5 cursor-grab active:cursor-grabbing 
+        flex items-center space-x-1 rounded p-1 cursor-grab active:cursor-grabbing
         transition-all duration-200 min-w-[70px] max-w-[90px]
         ${config.bgColor} ${config.hoverColor}
         ${isSelected ? `ring-2 ${config.ringColor}` : ""}
         ${isDisabled ? "opacity-45 cursor-not-allowed hover:bg-gray-200" : ""}
-        ${isHighlighted ? "ring-2 ring-yellow-400 shadow-lg" : ""}
+        ${isHighlighted ? "ring-2 ring-yellow-400 shadow-sm" : ""}
       `}
         draggable={!isDisabled}
         onDragStart={handleDragStart}
@@ -362,7 +362,7 @@ const FieldsRow = memo(
           ref={scrollRef}
           className="overflow-x-auto overflow-y-hidden scrollbar-thin scrollbar-track-gray-100 scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400"
         >
-          <div className="flex flex-nowrap gap-1 w-max h-[32px] items-center">
+          <div className="flex flex-nowrap gap-1 w-max h-[32px] items-center px-0.5">
             {loading ? (
               <>
                 <div className={`h-5 w-12 ${placeholderBg} rounded animate-pulse shrink-0`}></div>
