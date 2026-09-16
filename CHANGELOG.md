@@ -77,6 +77,16 @@
 - [Misc] CI fixes lint and formatting on the branch and pushes the result, so a merge request is never held up by a missed formatting run.
 - [Misc] The repository root is tidier: the Docker files live in `docker/`, and the Windows build script alongside the Linux and macOS ones in `scripts/`. The superseded Windows clone-and-build scripts are gone.
 - [Misc] Downloads from the Releases page now carry their version in the filename -- `qimchi-setup-v0.7.0.exe` rather than `qimchi-setup.exe` -- so a file in your Downloads folder says which build it is.
+- [Feature] A Reverse toggle next to the heatmap colorscale in Appearance flips any colormap. The choice stays when you pick another map, and carries through to exported images.
+- [Feature] The colour range in Appearance shows its values in the data's units with a suitable SI prefix, e.g. "250 pA" rather than "0.00000000025".
+- [Feature] The LineCut preview now follows a live measurement as new data arrives, and refreshes at once when you switch between X and Y cuts. Unmeasured points no longer shift the rest of the slice.
+- [Fix] A heatmap's colour range no longer inherits the range of heatmaps opened before it. "Data min" could read higher than "Data max", and the range stopped following new data on a live plot.
+- [Fix] A running measurement's colorbar keeps its SI prefix while some points are still unmeasured, instead of showing long raw decimals until the sweep finishes.
+- [Fix] Swapping axes while LineCut is active no longer squeezes the heatmap into a sliver at the edge of the plot.
+- [Fix] Zoom and pan are kept when a filter result, a live refresh or a background-correction overlay arrives after you moved the view. On a live plot a slow filter used to snap the view back to full range.
+- [Fix] Resetting a live plot, or changing its filters, no longer makes it flick back to the previous state for a moment, and Reset no longer blanks the plot while it reloads.
+- [Fix] Changing a filter while an earlier change is still being applied is no longer ignored. The latest change is applied once the earlier one finishes, so the plot matches what the Filters panel shows.
+- [Misc] The filter summary on the filter button uses the names shown in the Filters panel, such as "Diff along Y", instead of internal identifiers.
 
 ### v0.6.2 - 2026-06-23
 
