@@ -2,6 +2,7 @@ import { BasketItem } from "../components/Basket";
 import type { PlotConfiguration, AppliedFilter } from "../components/interfaces";
 import { isDatasetPath, isMemoryPath } from "./datasetPaths";
 import { getFieldIndependents } from "./datasetFieldSelectors";
+import type { PlottingBehaviour } from "../settings/userSettings";
 
 interface AutoPlotResult {
   success: boolean;
@@ -25,14 +26,19 @@ interface AutoPlotResult {
  * cached before that field existed) keep the original first-N behaviour.
  * Returns plot configurations that can be added to the viewer using addPlot().
  *
+ * With "heatmapOrLine" (the default) the LinePlot is made only when no HeatMap
+ * can be; "both" makes each one that can be made; "none" makes neither.
+ *
  * @param item - The basket item to generate plots for
  * @param sourceHeatmapFilters - Optional filters from an existing heatmap to apply
  * @param sourceLineplotFilters - Optional filters from an existing lineplot to apply
+ * @param behaviour - Which plots to make, from the Plotting behaviour setting
  */
 export function generateAutoPlotConfigs(
   item: BasketItem,
   sourceHeatmapFilters?: AppliedFilter[],
   sourceLineplotFilters?: AppliedFilter[],
+  behaviour: PlottingBehaviour = "heatmapOrLine",
 ): AutoPlotResult {
   try {
     // Only process supported dataset files (disk) or memory:// paths (live) with attributes
@@ -79,7 +85,7 @@ export function generateAutoPlotConfigs(
     const heatmapZ = heatmapDep ?? (knowsVariableIndeps ? undefined : dependents[0]);
 
     // Attempt to create HeatMap config if we have a dependent over 2 indeps
-    if (heatmapZ && heatmapIndeps.length >= 2) {
+    if (behaviour !== "none" && heatmapZ && heatmapIndeps.length >= 2) {
       const filters_order: string[] = [];
       const filters_opts: Record<string, unknown> = {};
 
@@ -109,8 +115,11 @@ export function generateAutoPlotConfigs(
     const lineDep = dependents[0];
     const lineIndep = (getFieldIndependents(lineDep, item.attributes) ?? independents)[0];
 
+    const madeHeatmap = plotConfigs.length > 0;
+    const wantLinePlot = behaviour === "both" || (behaviour === "heatmapOrLine" && !madeHeatmap);
+
     // Attempt to create LinePlot config if we have at least 1 indep and 1 dep
-    if (lineIndep && lineDep) {
+    if (wantLinePlot && lineIndep && lineDep) {
       const filters_order: string[] = [];
       const filters_opts: Record<string, unknown> = {};
 

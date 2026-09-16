@@ -85,6 +85,7 @@ const Viewer = ({
   // are for this session only.
   const plotWidthPercent = useSettingsStore((state) => state.settings.general.plotWidth);
   const isSquareModeGlobal = useSettingsStore((state) => state.settings.plots.squarify);
+  const plottingBehaviour = useSettingsStore((state) => state.settings.plots.plottingBehaviour);
   const setPlotWidthPercent = (percent: number) => {
     if (PLOT_WIDTHS.includes(percent as PlotWidthPercent)) {
       useSettingsStore.getState().update(["general", "plotWidth"], percent);
@@ -219,7 +220,10 @@ const Viewer = ({
         processedAutoPlotItems.current.add(item.id);
 
         // Generate auto-plot configs with copied filters
-        const result = generateAutoPlotConfigs(item, heatmapFilters, lineplotFilters);
+        const result =
+          plottingBehaviour === "none"
+            ? { success: true, message: "", plotConfigs: [] }
+            : generateAutoPlotConfigs(item, heatmapFilters, lineplotFilters, plottingBehaviour);
 
         // Mirror the user's custom plots onto the new measurement, so a
         // hand-built view isn't recreated by hand for every dataset.
@@ -262,10 +266,14 @@ const Viewer = ({
           const skipMsg = replicated.skipped.length
             ? ` (skipped ${replicated.skipped.join("; ")})`
             : "";
-          showToast(result.message + filterMsg + customMsg + skipMsg, "success");
+          const createdMsg = result.plotConfigs.length
+            ? result.message + filterMsg + customMsg
+            : `Replicated ${replicated.plotConfigs.length} custom plot(s)`;
+          showToast(createdMsg + skipMsg, "success");
         } else {
           // Only show error if there were actual issues (not just non-qualifying items)
           if (
+            result.message &&
             !result.message.includes("not a valid measurement") &&
             !result.message.includes("no independents or dependents")
           ) {
@@ -275,9 +283,10 @@ const Viewer = ({
       } else {
         // No existing plots - mark as processed
         processedAutoPlotItems.current.add(item.id);
+        if (plottingBehaviour === "none") return;
 
         // Generate auto-plot configs without copied filters (first dataset)
-        const result = generateAutoPlotConfigs(item);
+        const result = generateAutoPlotConfigs(item, undefined, undefined, plottingBehaviour);
 
         if (result.success && result.plotConfigs.length > 0) {
           // Add each generated plot config to the viewer
@@ -294,7 +303,15 @@ const Viewer = ({
         }
       }
     });
-  }, [basketItems, loadingAttributes, addPlots, showToast, plotConfigs, getPlotState]);
+  }, [
+    basketItems,
+    loadingAttributes,
+    addPlots,
+    showToast,
+    plotConfigs,
+    getPlotState,
+    plottingBehaviour,
+  ]);
 
   // Calculate dynamic height based on actual rendered heights
   const updateViewerHeight = () => {

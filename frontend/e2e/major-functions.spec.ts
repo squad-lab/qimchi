@@ -252,8 +252,9 @@ test("adds a measurement, creates default plots and clears the workspace", async
 
   await addDatasetToBasket(page, "run.nc");
   await expect(page.getByRole("button", { name: "Clear basket" })).toBeEnabled();
-  await expect(page.locator(".js-plotly-plot")).toHaveCount(2);
-  await expect.poll(() => state.plotRequests.length).toBe(2);
+  // Two independents allow a heatmap, so by default no line plot is made.
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(1);
+  await expect.poll(() => state.plotRequests.length).toBe(1);
 
   const statusBadge = page.getByRole("status", { name: "Status: Completed" }).first();
   const statusLabel = statusBadge.locator(".plot-status-label");
@@ -263,10 +264,7 @@ test("adds a measurement, creates default plots and clears the workspace", async
   await expect(statusLabel).toHaveCSS("max-width", "96px");
   await expect(statusLabel).toHaveCSS("opacity", "1");
 
-  expect(state.plotRequests.map((request) => request.postDataJSON().plotType).sort()).toEqual([
-    "HeatMap",
-    "LinePlot",
-  ]);
+  expect(state.plotRequests.map((request) => request.postDataJSON().plotType)).toEqual(["HeatMap"]);
 
   await page.getByTitle("Export images").first().click();
   await expect.poll(() => state.exportRequests.length).toBe(1);

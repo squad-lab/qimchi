@@ -331,6 +331,21 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
         return (
           <>
             <SectionHeader title="Plots" onReset={() => resetSection(["plots"])} />
+            <Field
+              label="Plotting behaviour"
+              description="Which plots to create when a measurement is added to the basket. Plots are only made when the measurement's variables allow them."
+            >
+              <select
+                aria-label="Plotting behaviour"
+                value={settings.plots.plottingBehaviour}
+                onChange={(e) => update(["plots", "plottingBehaviour"], e.target.value)}
+                className="rounded border border-gray-300 p-1.5 text-sm"
+              >
+                <option value="heatmapOrLine">HeatMap, or LinePlot if no HeatMap</option>
+                <option value="both">Both HeatMap and LinePlot</option>
+                <option value="none">None</option>
+              </select>
+            </Field>
             <Field label="Square plots" description="Keep every plot at a 1:1 aspect ratio.">
               <Toggle
                 label="Square plots"

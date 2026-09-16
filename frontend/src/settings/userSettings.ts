@@ -9,6 +9,8 @@ export type PlotWidthPercent = 33 | 50 | 66 | 100;
 export type ExplorerSort = "name" | "timestamp" | "size" | "chrono";
 export type ExportFormat = "png" | "svg";
 export type ExportVariant = "light" | "dark";
+/** Which plots adding a measurement creates. */
+export type PlottingBehaviour = "heatmapOrLine" | "both" | "none";
 
 export const PLOT_WIDTHS: PlotWidthPercent[] = [33, 50, 66, 100];
 export const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2] as const;
@@ -20,6 +22,7 @@ export interface UserSettings {
     plotWidth: PlotWidthPercent;
   };
   plots: {
+    plottingBehaviour: PlottingBehaviour;
     squarify: boolean;
   };
   explorer: {
@@ -48,7 +51,7 @@ export interface UserSettings {
 
 export const FACTORY_SETTINGS: UserSettings = {
   general: { theme: "system", zoom: 1, plotWidth: 50 },
-  plots: { squarify: false },
+  plots: { plottingBehaviour: "heatmapOrLine", squarify: false },
   explorer: { sortBy: "timestamp" },
   live: { autoAddToBasket: true },
   export: { formats: ["png", "svg"], variants: ["light", "dark"], scale: null, folder: null },
@@ -71,6 +74,7 @@ const ENUM_LEAVES: Record<string, readonly unknown[]> = {
   "general.theme": ["system", "light", "dark"],
   "general.plotWidth": PLOT_WIDTHS,
   "explorer.sortBy": ["name", "timestamp", "size", "chrono"],
+  "plots.plottingBehaviour": ["heatmapOrLine", "both", "none"],
 };
 
 /** The effective settings: stored values over the defaults, ignoring anything malformed. */

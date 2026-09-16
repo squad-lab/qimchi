@@ -25,8 +25,20 @@ const item = (
   }) as BasketItem;
 
 describe("generateAutoPlotConfigs", () => {
-  it("makes both a heatmap and a lineplot when there are two independents", () => {
+  it("makes only the heatmap by default when one can be plotted", () => {
     const result = generateAutoPlotConfigs(item(["gate", "bias"], ["signal"]));
+
+    expect(result.plotConfigs.map((config) => config.plotType)).toEqual(["HeatMap"]);
+  });
+
+  it("makes no plots when the behaviour is none", () => {
+    const result = generateAutoPlotConfigs(item(["gate", "bias"], ["signal"]), [], [], "none");
+
+    expect(result.plotConfigs).toEqual([]);
+  });
+
+  it("makes both a heatmap and a lineplot when asked for both", () => {
+    const result = generateAutoPlotConfigs(item(["gate", "bias"], ["signal"]), [], [], "both");
 
     expect(result.success).toBe(true);
     expect(result.plotConfigs.map((config) => config.plotType)).toEqual(["HeatMap", "LinePlot"]);
@@ -44,6 +56,9 @@ describe("generateAutoPlotConfigs", () => {
         s21_mag: ["up_voltages", "f"],
         s21_phase: ["up_voltages", "f"],
       }),
+      [],
+      [],
+      "both",
     );
 
     const [heatmap, lineplot] = result.plotConfigs;
@@ -112,6 +127,7 @@ describe("generateAutoPlotConfigs", () => {
       item(["gate", "bias"], ["signal"]),
       [{ name: "bg_corr", options: { mode: "line" } }],
       [{ name: "scale", options: { factor: 2 } }],
+      "both",
     );
 
     const [heatmap, lineplot] = result.plotConfigs;

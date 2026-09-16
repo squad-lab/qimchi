@@ -105,6 +105,39 @@ test("rail buttons and Settings edit the same saved values", async ({ page }) =>
   await expect(page.getByRole("button", { name: "66% width" })).toHaveClass(/bg-gray-200/);
 });
 
+for (const [behaviour, expected] of [
+  [undefined, ["heatmap"]],
+  ["both", ["heatmap", "scatter"]],
+  ["none", []],
+] as const) {
+  test(`plotting behaviour ${behaviour ?? "default"} creates ${expected.join(" + ") || "no plots"}`, async ({
+    page,
+  }) => {
+    await mockLiveHeatmapApi(page);
+    await mockSettingsApi(page, behaviour ? { plots: { plottingBehaviour: behaviour } } : {});
+    await page.goto("/");
+    await page.getByRole("button", { name: "Live Measurements" }).click();
+
+    const row = page
+      .getByText("live-heat", { exact: true })
+      .locator("xpath=ancestor::div[@data-level][1]");
+    await row.getByRole("button", { name: "Add to basket" }).click();
+    await expect(row.getByRole("button", { name: "Remove from basket" })).toBeVisible();
+
+    const plotTypes = () =>
+      page.evaluate(() =>
+        (Array.from(document.querySelectorAll(".js-plotly-plot")) as any[])
+          .map((plot) => plot.data?.[0]?.type)
+          .sort(),
+      );
+    if (expected.length) {
+      await expect.poll(plotTypes).toEqual([...expected]);
+    }
+    await page.waitForTimeout(1_500);
+    expect(await plotTypes()).toEqual([...expected]);
+  });
+}
+
 test("when settings cannot be saved, Settings says so and changes still apply locally", async ({
   page,
 }) => {

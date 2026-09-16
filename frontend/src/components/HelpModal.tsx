@@ -322,7 +322,9 @@ const BasketHelp = memo(() => (
       </h3>
       <p className="text-gray-600 mb-3">
         The Basket holds the datasets you're currently working with. Select dataset cards to define
-        the plotting scope for the Composer.
+        the plotting scope for the Composer. Adding one creates its default plots, as set under
+        Settings &gt; Plots &gt; Plotting behaviour: a HeatMap when its variables allow one,
+        otherwise a LinePlot.
       </p>
     </div>
 
@@ -733,7 +735,9 @@ const SettingsHelp = memo(() => (
           width. The rail and Viewer buttons change the same settings.
         </li>
         <li>
-          <strong>Plots</strong>: whether plots are kept square.
+          <strong>Plots</strong>: the plotting behaviour -- which plots adding a measurement creates
+          (by default a HeatMap when its variables allow one, otherwise a LinePlot) -- and whether
+          plots are kept square.
         </li>
         <li>
           <strong>Explorer</strong>, <strong>Live</strong> and <strong>Export</strong>: the sort
