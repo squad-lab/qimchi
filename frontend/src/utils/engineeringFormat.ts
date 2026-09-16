@@ -71,3 +71,46 @@ function formatNumber(value: number): string {
   if (!Number.isFinite(value)) return String(value);
   return Number(value.toPrecision(4)).toString().replace("-", "−");
 }
+
+const NICE_FRACTIONS = [1, 2, 5, 10];
+
+/**
+ * Evenly spaced round tick values (1, 2 or 5 times a power of ten) inside
+ * [minimum, maximum], aiming for about `count` of them.
+ */
+export function niceTicks(
+  minimum: number,
+  maximum: number,
+  count: number,
+): { ticks: number[]; step: number } {
+  const span = maximum - minimum;
+  const rough = span / Math.max(1, count - 1);
+  if (!Number.isFinite(rough) || rough <= 0) return { ticks: [minimum], step: 1 };
+
+  let power = 10 ** Math.floor(Math.log10(rough));
+  let index = NICE_FRACTIONS.findIndex((fraction) => rough / power <= fraction);
+  const ticksFor = (step: number) => {
+    const ticks: number[] = [];
+    const first = Math.ceil(minimum / step - 1e-10) * step;
+    for (let tick = first; tick <= maximum + step * 1e-9 && ticks.length < 1000; tick += step) {
+      ticks.push(tick);
+    }
+    return ticks;
+  };
+
+  let step = NICE_FRACTIONS[index] * power;
+  let ticks = ticksFor(step);
+  // Rounding the step up can leave a single tick (a 100-900 range gets a
+  // step of 500), so a colour bar would show one label. Step down until
+  // there are at least two.
+  while (ticks.length < 2) {
+    if (index === 0) {
+      index = NICE_FRACTIONS.length - 1;
+      power /= 10;
+    }
+    index -= 1;
+    step = NICE_FRACTIONS[index] * power;
+    ticks = ticksFor(step);
+  }
+  return { ticks, step };
+}

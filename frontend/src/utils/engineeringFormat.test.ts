@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { engineeringFormatter } from "./engineeringFormat";
+import { engineeringFormatter, niceTicks } from "./engineeringFormat";
 
 const volts = {
   unit: "V",
@@ -41,5 +41,17 @@ describe("engineeringFormatter", () => {
 
   it("falls back to plain numbers without metadata", () => {
     expect(engineeringFormatter(undefined, [1234.5])(1234.5)).toBe("1235");
+  });
+});
+
+describe("niceTicks", () => {
+  it("keeps the usual round steps", () => {
+    expect(niceTicks(-2, 1, 5)).toEqual({ ticks: [-2, -1, 0, 1], step: 1 });
+  });
+
+  it("never leaves a range with a single tick", () => {
+    const { ticks, step } = niceTicks(100, 920, 5);
+    expect(step).toBe(200);
+    expect(ticks).toEqual([200, 400, 600, 800]);
   });
 });

@@ -52,7 +52,7 @@ import { useShortcut } from "../../hooks/useGlobalShortcuts";
 import { filterLabel } from "../../utils/filterNames";
 import RibbonFlyout from "./RibbonFlyout";
 import { PLOT_WIDTHS } from "../../settings/userSettings";
-import { SI_PREFIXES } from "../../utils/engineeringFormat";
+import { niceTicks, SI_PREFIXES } from "../../utils/engineeringFormat";
 
 type PlotlyJSON = {
   data: Data[];
@@ -1756,15 +1756,6 @@ const PlotWrapper: React.FC<Props> = ({
           return Number(value.toFixed(decimals)).toString().replace("-", "−");
         };
 
-        const niceStep = (span: number, count: number): number => {
-          const rough = span / Math.max(1, count - 1);
-          if (!Number.isFinite(rough) || rough <= 0) return 1;
-          const power = 10 ** Math.floor(Math.log10(rough));
-          const fraction = rough / power;
-          const niceFraction = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10;
-          return niceFraction * power;
-        };
-
         const engineeringPresentation = (
           definition: EngineeringUnitMeta | undefined,
           values: number[],
@@ -1802,15 +1793,11 @@ const PlotWrapper: React.FC<Props> = ({
           const displayFactor = unitScale / 10 ** exponent;
           const displayMinimum = minimum * displayFactor;
           const displayMaximum = maximum * displayFactor;
-          const step = niceStep(displayMaximum - displayMinimum, requestedTicks);
-          const first = Math.ceil(displayMinimum / step - 1e-10) * step;
-          const last = Math.floor(displayMaximum / step + 1e-10) * step;
-          const displayTicks: number[] = [];
-          for (let tick = first, guard = 0; tick <= last + step * 1e-9 && guard < 1000; guard++) {
-            displayTicks.push(tick);
-            tick += step;
-          }
-          if (!displayTicks.length) displayTicks.push(displayMinimum);
+          const { ticks: displayTicks, step } = niceTicks(
+            displayMinimum,
+            displayMaximum,
+            requestedTicks,
+          );
           const tickPrefix = dimensionless ? SI_PREFIXES[exponent] || "" : "";
           return {
             title: dimensionless ? undefined : titles[String(exponent)],
