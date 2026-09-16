@@ -141,18 +141,6 @@ const SidebarRail = ({ onOpenHelp, onOpenSettings }: SidebarRailProps) => {
         </button>
       </Tooltip>
 
-      {/* Help -- sits directly above the collapse toggle at the foot of the rail */}
-      <Tooltip content="Help & Tips (Shift+H)" position="right">
-        <button
-          onClick={() => onOpenHelp?.()}
-          className={`${railButtonBaseClass} qimchi-dark-hover-plain group text-amber-600 hover:bg-amber-100 hover:text-amber-700`}
-          aria-label="Help and tips"
-        >
-          <Lightbulb size={17} className="transition-colors group-hover:fill-amber-200" />
-        </button>
-      </Tooltip>
-
-      {/* Theme + notifications log, between Help and the collapse toggle */}
       <Tooltip content={isDark ? "Switch to light theme" : "Switch to dark theme"} position="right">
         <button
           onClick={toggleTheme}
@@ -160,6 +148,16 @@ const SidebarRail = ({ onOpenHelp, onOpenSettings }: SidebarRailProps) => {
           aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
         >
           {isDark ? <Sun size={17} /> : <Moon size={17} />}
+        </button>
+      </Tooltip>
+
+      <Tooltip content="Help & Tips (Shift+H)" position="right">
+        <button
+          onClick={() => onOpenHelp?.()}
+          className={`${railButtonBaseClass} qimchi-dark-hover-plain group text-amber-600 hover:bg-amber-100 hover:text-amber-700`}
+          aria-label="Help and tips"
+        >
+          <Lightbulb size={17} className="transition-colors group-hover:fill-amber-200" />
         </button>
       </Tooltip>
 
