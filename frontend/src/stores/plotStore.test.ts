@@ -6,7 +6,7 @@ beforeEach(() => {
   usePlotStore.setState({ plotStates: {} });
 });
 
-const appearance = { showGrid: true } as never;
+const appearance = { x: { maj: { showgrid: true } } };
 
 describe("plotStore", () => {
   it("keeps each plot's state under its own id", () => {
@@ -25,9 +25,21 @@ describe("plotStore", () => {
     usePlotStore.getState().setPlotAxesSwapped("plot-1", true);
 
     const state = usePlotStore.getState().getPlotState("plot-1");
-    expect(state?.appearance_settings).toEqual(appearance);
+    expect(state?.appearance_overrides).toEqual(appearance);
     expect(state?.applied_filters).toHaveLength(1);
     expect(state?.axes_swapped).toBe(true);
+  });
+
+  it("replaces an old whole-appearance save with overrides", () => {
+    usePlotStore.setState({
+      plotStates: { "plot-1": { id: "plot-1", appearance_settings: { line: {} } } },
+    });
+
+    usePlotStore.getState().setPlotAppearance("plot-1", appearance);
+
+    const state = usePlotStore.getState().getPlotState("plot-1");
+    expect(state?.appearance_settings).toBeUndefined();
+    expect(state?.appearance_overrides).toEqual(appearance);
   });
 
   it("returns undefined for a plot it has never seen", () => {

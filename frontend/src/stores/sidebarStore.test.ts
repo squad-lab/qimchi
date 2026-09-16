@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { useSidebarStore } from "./sidebarStore";
+import { FACTORY_SETTINGS } from "../settings/userSettings";
 
 const initial = useSidebarStore.getState();
 
@@ -110,7 +111,7 @@ describe("full-window Explorer", () => {
 
 describe("persisted defaults", () => {
   it("opens the Explorer newest-first", () => {
-    expect(initial.componentStates.dirTree.sortBy).toBe("timestamp");
+    expect(FACTORY_SETTINGS.explorer.sortBy).toBe("timestamp");
     expect(initial.componentStates.dirTree.sortDirection).toBe("desc");
   });
 
@@ -118,8 +119,7 @@ describe("persisted defaults", () => {
     expect(initial.componentStates.dirTree.expandedNodeIds).toEqual([]);
   });
 
-  it("starts at 100% zoom with Basket and Composer open", () => {
-    expect(initial.zoomLevel).toBe(1);
+  it("starts with Basket and Composer open", () => {
     expect(initial.basketCollapsed).toBe(false);
     expect(initial.composerCollapsed).toBe(false);
   });

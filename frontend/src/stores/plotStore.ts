@@ -2,12 +2,12 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 // Local imports
-import type { PlotAppearanceSettings } from "../components/types";
 import type { AppliedFilter, SliderConfig, PlotPersistentState } from "../components/interfaces";
 
 interface PlotStoreState {
   plotStates: Record<string, PlotPersistentState>;
-  setPlotAppearance: (plotId: string, settings: PlotAppearanceSettings) => void;
+  /** Store the plot's appearance as its differences from the user's defaults. */
+  setPlotAppearance: (plotId: string, overrides: Record<string, unknown>) => void;
   setPlotFilters: (plotId: string, filters: AppliedFilter[]) => void;
   setPlotSliders: (plotId: string, sliders: Record<string, SliderConfig>) => void;
   setPlotAxesSwapped: (plotId: string, swapped: boolean) => void;
@@ -21,17 +21,17 @@ export const usePlotStore = create<PlotStoreState>()(
     (set, get) => ({
       plotStates: {},
 
-      setPlotAppearance: (plotId: string, settings: PlotAppearanceSettings) => {
-        set((state) => ({
-          plotStates: {
-            ...state.plotStates,
-            [plotId]: {
-              ...state.plotStates[plotId],
-              id: plotId,
-              appearance_settings: settings,
+      setPlotAppearance: (plotId: string, overrides: Record<string, unknown>) => {
+        set((state) => {
+          const previous = { ...state.plotStates[plotId] };
+          delete previous.appearance_settings;
+          return {
+            plotStates: {
+              ...state.plotStates,
+              [plotId]: { ...previous, id: plotId, appearance_overrides: overrides },
             },
-          },
-        }));
+          };
+        });
       },
 
       setPlotFilters: (plotId: string, filters: AppliedFilter[]) => {

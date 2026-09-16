@@ -15,12 +15,14 @@ import type { PlotAppearanceSettings } from "../../components/types";
 import { formatTitleWithUUID, getPlotTypeIcon } from "./UtilComponents";
 import Tooltip from "../Tooltip";
 import { AxisSection, ColormapSection, LineStyleSection } from "./AppearanceSections";
-import { FACTORY_APPEARANCE_SETTINGS, mergeAppearanceDefaults } from "./appearanceDefaults";
+import { mergeAppearanceDefaults } from "./appearanceDefaults";
 
 interface AppearanceModalProps {
   isOpen: boolean;
   onClose: () => void;
   settings: PlotAppearanceSettings;
+  /** What Reset returns to: the user's defaults for this plot type. */
+  defaults: PlotAppearanceSettings;
   onChange: (settings: PlotAppearanceSettings) => void;
   plotType?: string;
   plotTitle?: string;
@@ -41,6 +43,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
   isOpen,
   onClose,
   settings,
+  defaults,
   onChange,
   plotType = "line", // Fallback if detecting fails
   plotTitle,
@@ -153,7 +156,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
   // };
 
   const handleReset = () => {
-    updateSettingsWithHistory(FACTORY_APPEARANCE_SETTINGS);
+    updateSettingsWithHistory(defaults);
   };
 
   // const handleUndo = () => {
@@ -252,7 +255,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
   };
 
   const mergeWithDefaults = (imported: Partial<PlotAppearanceSettings>): PlotAppearanceSettings =>
-    mergeAppearanceDefaults(FACTORY_APPEARANCE_SETTINGS, imported);
+    mergeAppearanceDefaults(defaults, imported);
 
   const handleImportFile = (file: File) => {
     const reader = new FileReader();

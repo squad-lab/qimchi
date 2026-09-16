@@ -103,7 +103,10 @@ export interface PlotState {
 // Persistent plot state stored in plotStore (appearance, filters, sliders)
 export interface PlotPersistentState {
   id: string;
+  /** Saved before settings existed: the whole appearance. Read once, then replaced. */
   appearance_settings?: unknown;
+  /** The plot's appearance as its differences from the user's defaults. */
+  appearance_overrides?: Record<string, unknown>;
   applied_filters?: AppliedFilter[];
   slider_settings?: Record<string, SliderConfig>;
   axes_swapped?: boolean;

@@ -34,6 +34,8 @@ import {
 } from "../utils/datasetFieldSelectors";
 import { isDatasetPath, isMemoryPath } from "../utils/datasetPaths";
 import { finishArchiveDownload } from "../utils/download";
+import { useSettingsStore } from "../stores/settingsStore";
+import { PLOT_WIDTHS, type PlotWidthPercent } from "../settings/userSettings";
 
 interface ViewerProps {
   defaultWidth?: number; // In percentage (0-100)
@@ -79,11 +81,16 @@ const Viewer = ({
     setNotesCollapsed,
   } = useSidebarStore();
   const { showToast } = useToast();
-  // Global default percent and per-plot overrides
-  const [plotWidthPercent, setPlotWidthPercent] = useState<number>(50);
+  // The width and squarify buttons edit the saved settings; per-plot widths
+  // are for this session only.
+  const plotWidthPercent = useSettingsStore((state) => state.settings.general.plotWidth);
+  const isSquareModeGlobal = useSettingsStore((state) => state.settings.plots.squarify);
+  const setPlotWidthPercent = (percent: number) => {
+    if (PLOT_WIDTHS.includes(percent as PlotWidthPercent)) {
+      useSettingsStore.getState().update(["general", "plotWidth"], percent);
+    }
+  };
   const [perPlotWidthMap, setPerPlotWidthMap] = useState<Record<string, number>>({});
-  // Global squarify toggle affecting all plots
-  const [isSquareModeGlobal, setIsSquareModeGlobal] = useState<boolean>(false);
   const [selectedDatasetIds, setSelectedDatasetIds] = useState<Set<string>>(new Set());
   const [selectedPlotId, setSelectedPlotId] = useState<string | null>(null);
   const [viewerHeight, setViewerHeight] = useState<string>("calc(100vh - 200px)");
@@ -743,20 +750,9 @@ const Viewer = ({
                 position="left"
               >
                 <button
-                  onClick={() => {
-                    // Toggle local state and broadcast
-                    const next = !isSquareModeGlobal;
-                    setIsSquareModeGlobal(next);
-                    try {
-                      window.dispatchEvent(
-                        new CustomEvent("plot-squarify", {
-                          detail: { enabled: next },
-                        }),
-                      );
-                    } catch {
-                      /* ignore */
-                    }
-                  }}
+                  onClick={() =>
+                    useSettingsStore.getState().update(["plots", "squarify"], !isSquareModeGlobal)
+                  }
                   className={`flex h-7 w-7 items-center justify-center rounded transition-colors duration-150 ${
                     isSquareModeGlobal ? "bg-blue-50" : "qimchi-dark-hover-plain hover:bg-gray-200"
                   }`}

@@ -1,9 +1,20 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("../services/settingsAPI", () => ({
+  getSettings: vi.fn(),
+  patchSettings: vi.fn(async (patch: Record<string, unknown>) => ({
+    settings: patch,
+    updatedAt: null,
+  })),
+  resetSettings: vi.fn(),
+  settingsErrorMessage: () => "offline",
+}));
+
+import { useSettingsStore } from "./settingsStore";
 import { useThemeStore } from "./themeStore";
 
 beforeEach(() => {
-  useThemeStore.setState({ theme: "light" });
+  useSettingsStore.getState().update(["general", "theme"], "light");
 });
 
 describe("themeStore", () => {
@@ -24,9 +35,9 @@ describe("themeStore", () => {
     expect(useThemeStore.getState().theme).toBe("dark");
   });
 
-  it("persists the choice under its own key", () => {
+  it("saves the choice as a user setting", () => {
     useThemeStore.getState().setTheme("dark");
 
-    expect(JSON.parse(localStorage.getItem("theme-store") ?? "{}").state.theme).toBe("dark");
+    expect(useSettingsStore.getState().settings.general.theme).toBe("dark");
   });
 });

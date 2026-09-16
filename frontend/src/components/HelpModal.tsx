@@ -24,9 +24,9 @@ import {
   Heart,
   Trash2,
   Tag as TagIcon,
+  Settings as SettingsIcon,
 } from "lucide-react";
-import { Rnd } from "react-rnd";
-import Tooltip from "./Tooltip";
+import SectionedModal from "./SectionedModal";
 import { buildHelpIndex, searchHelp, HelpEntry, HelpSearchResult } from "./helpSearch";
 
 // Section Definitions
@@ -36,15 +36,6 @@ interface HelpSection {
   icon: React.ReactNode;
   content: React.ReactNode;
 }
-
-// Helper for z-index management
-const getNextGlobalModalZ = (): number => {
-  if (typeof window === "undefined") return 2000;
-  const w = window as unknown as { __qimchi_modal_z?: number };
-  if (!w.__qimchi_modal_z) w.__qimchi_modal_z = 2000;
-  w.__qimchi_modal_z = (w.__qimchi_modal_z || 2000) + 1;
-  return w.__qimchi_modal_z;
-};
 
 // Content
 const ExplorerHelp = memo(() => (
@@ -303,7 +294,8 @@ const ExplorerHelp = memo(() => (
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          New live measurements are automatically added to the Basket
+          New live measurements are added to the Basket automatically (turn this off under Settings
+          &gt; Live)
         </li>
       </ul>
     </div>
@@ -598,7 +590,8 @@ const ViewerHelp = memo(() => (
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>Reset (R):</strong> Restore the original data, axes, filters, appearance, and zoom
+          <strong>Reset (R):</strong> Restore the original data, axes, filters and zoom, and return
+          the appearance to your defaults from Settings
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
@@ -719,6 +712,43 @@ const NotesHelp = memo(() => (
           Toggle between Edit and Preview modes using the tab switcher
         </li>
       </ul>
+    </div>
+  </div>
+));
+
+const SettingsHelp = memo(() => (
+  <div className="space-y-4 text-sm text-gray-700">
+    <div>
+      <h3 className="text-xl font-bold text-gray-900 mb-2 flex items-center gap-2">
+        <SettingsIcon size={20} className="text-blue-600" />
+        Settings
+      </h3>
+      <p className="text-gray-600 mb-3">
+        Open Settings from the gear on the sidebar rail, or with Shift+S. Settings are saved to the
+        Qimchi database, so they follow you across restarts, and every change takes effect at once.
+      </p>
+      <ul className="list-disc space-y-1.5 pl-5">
+        <li>
+          <strong>General</strong>: theme (System follows your operating system), zoom and plot
+          width. The rail and Viewer buttons change the same settings.
+        </li>
+        <li>
+          <strong>Plots</strong>: whether plots are kept square.
+        </li>
+        <li>
+          <strong>Explorer</strong>, <strong>Live</strong> and <strong>Export</strong>: the sort
+          order, whether new live measurements join the basket, and which images an export writes.
+        </li>
+        <li>
+          <strong>HeatMap</strong> and <strong>LinePlot</strong>: the default appearance of each
+          plot type. A change reaches every plot straight away, except where that plot has its own
+          value from its Appearance panel. A plot&apos;s Reset returns it to these defaults.
+        </li>
+      </ul>
+      <p className="mt-3 text-gray-600">
+        If the database is unavailable, Settings says so; changes then apply to the open window
+        only.
+      </p>
     </div>
   </div>
 ));
@@ -869,6 +899,7 @@ const KeyboardHelp = memo(() => (
         {[
           ["H", "Set Composer to HeatMap"],
           ["Shift+H", "Toggle Help & Tips"],
+          ["Shift+S", "Toggle Settings"],
           ["L", "Set Composer to LinePlot"],
           ["P", "Create Plot from Composer"],
           ["Shift+F", "Expand/exit full-window Explorer"],
@@ -970,6 +1001,12 @@ const HELP_SECTIONS: HelpSection[] = [
     content: <NotesHelp />,
   },
   {
+    id: "settings",
+    label: "Settings",
+    icon: <SettingsIcon size={16} />,
+    content: <SettingsHelp />,
+  },
+  {
     id: "desktop",
     label: "Desktop App",
     icon: <Monitor size={16} />,
@@ -1032,8 +1069,6 @@ const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
   const [query, setQuery] = useState("");
   const [highlightIndex, setHighlightIndex] = useState(0);
 
-  const zRef = useRef<number | undefined>(undefined);
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   // Built on the first search rather than at mount: walking every section costs
@@ -1052,37 +1087,8 @@ const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
     setHighlightIndex(0);
   }, [query]);
 
-  useEffect(() => {
-    if (isOpen) {
-      const next = getNextGlobalModalZ();
-      zRef.current = next;
-      if (wrapperRef.current) {
-        wrapperRef.current.style.zIndex = String(next);
-      }
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    const handleKeydown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || !isOpen) return;
-      // Escape backs out of a search first; a second press closes the modal.
-      if (query) {
-        setQuery("");
-        return;
-      }
-      onClose();
-    };
-    window.addEventListener("keydown", handleKeydown);
-    return () => window.removeEventListener("keydown", handleKeydown);
-  }, [isOpen, onClose, query]);
-
-  const bringToFront = () => {
-    const next = getNextGlobalModalZ();
-    zRef.current = next;
-    if (wrapperRef.current) {
-      wrapperRef.current.style.zIndex = String(next);
-    }
-  };
+  // Escape backs out of a search first; a second press closes the modal.
+  const handleEscape = () => (query ? setQuery("") : onClose());
 
   // Sync when initialSection changes (e.g., opened from a specific button)
   const activeContent = useMemo(() => {
@@ -1132,161 +1138,93 @@ const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
   if (!isOpen) return null;
 
   return (
-    <div ref={wrapperRef} className="fixed inset-0 pointer-events-none">
-      <Rnd
-        default={{
-          x: window.innerWidth / 2 - 455,
-          y: window.innerHeight / 2 - 325,
-          width: 910,
-          height: 670,
-        }}
-        minWidth={500}
-        minHeight={400}
-        dragHandleClassName="drag-handle"
-        bounds="parent"
-        style={{ pointerEvents: "auto" }}
-        onMouseDown={bringToFront}
-        onPointerDown={bringToFront}
-      >
-        <div
-          className="bg-white rounded-xl shadow-2xl border border-gray-300 flex flex-col overflow-hidden w-full h-full"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 py-2 bg-amber-200 border-b border-amber-300 drag-handle cursor-move shrink-0">
-            <div className="flex items-center gap-2">
-              <div className="bg-amber-100 p-1.5 rounded-lg border border-amber-200 shadow-sm">
-                <Lightbulb size={18} className="text-amber-600 fill-amber-500/10" />
-              </div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-bold text-gray-800 tracking-tight">Help &amp; Tips</h2>
-                <span className="text-[12px] font-mono font-bold text-amber-700 bg-amber-50 px-1 py-0.5 rounded border border-amber-300/50 opacity-90">
-                  Shift+H
-                </span>
-              </div>
-            </div>
-            <Tooltip content="Close modal" position="bottom">
+    <SectionedModal
+      isOpen={isOpen}
+      onClose={onClose}
+      onEscape={handleEscape}
+      title="Help & Tips"
+      icon={<Lightbulb size={18} className="text-amber-600 fill-amber-500/10" />}
+      shortcut="Shift+H"
+      accent="amber"
+      sections={HELP_SECTIONS}
+      activeSection={activeSection}
+      onSelectSection={setActiveSection}
+      navLabel="Help sections"
+      contentRef={contentRef}
+      toolbar={
+        <div className="relative">
+          <Search
+            size={14}
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+          />
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            placeholder="Search help..."
+            aria-label="Search help"
+            className="w-full rounded-md border border-gray-300 bg-white py-1.5 pl-8 pr-8 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-amber-400"
+          />
+          {query && (
+            <button
+              onClick={() => setQuery("")}
+              aria-label="Clear search"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      }
+    >
+      {query.trim() ? (
+        results.length === 0 ? (
+          <div className="pt-8 text-center text-sm text-gray-500">
+            No help matches &ldquo;{query}&rdquo;
+          </div>
+        ) : (
+          <div className="space-y-1" role="group" aria-label="Help search results">
+            <p className="mb-2 text-xs text-gray-500">
+              {results.length} result{results.length === 1 ? "" : "s"} -- Enter to open, arrows to
+              move
+            </p>
+            {results.map((result, index) => (
               <button
-                onClick={onClose}
-                className="p-1.5 rounded hover:bg-gray-300 transition-colors"
-                title="Close modal"
-                aria-label="Close modal"
+                key={result.entry.id}
+                onClick={() => openResult(result)}
+                onMouseEnter={() => setHighlightIndex(index)}
+                className={`w-full rounded-md border px-3 py-2 text-left transition-colors ${
+                  index === highlightIndex
+                    ? "border-amber-300 bg-amber-50"
+                    : "border-transparent hover:bg-gray-50"
+                }`}
               >
-                <X size={16} className="text-red-600" />
-              </button>
-            </Tooltip>
-          </div>
-
-          {/* Search: spans both panes, directly under the header */}
-          <div className="shrink-0 border-b border-gray-200 bg-gray-50 p-2">
-            <div className="relative">
-              <Search
-                size={14}
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
-              />
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                placeholder="Search help..."
-                aria-label="Search help"
-                className="w-full rounded-md border border-gray-300 bg-white py-1.5 pl-8 pr-8 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-amber-400"
-              />
-              {query && (
-                <button
-                  onClick={() => setQuery("")}
-                  aria-label="Clear search"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                >
-                  <X size={14} />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Body: left tabs + right content */}
-          <div className="flex flex-1 min-h-0 bg-white">
-            {/* Left: section list */}
-            <div className="w-44 shrink-0 border-r border-gray-200 bg-gray-50 overflow-y-auto">
-              {HELP_SECTIONS.map((section) => (
-                <button
-                  key={section.id}
-                  onClick={() => setActiveSection(section.id)}
-                  className={`w-full flex items-center gap-2.5 px-4 py-3.5 text-sm font-semibold transition-all border-b border-gray-100 ${
-                    activeSection === section.id
-                      ? "bg-amber-50 text-amber-700 border-l-4 border-l-amber-500 shadow-inner"
-                      : "text-gray-500 hover:bg-gray-100 hover:text-gray-700 border-l-4 border-l-transparent"
+                <div className="mb-0.5 flex items-center gap-1 text-[11px] font-medium text-gray-500">
+                  <span>{result.entry.sectionLabel}</span>
+                  {result.entry.heading && result.entry.heading !== result.entry.text && (
+                    <>
+                      <ChevronRight size={11} />
+                      <span className="truncate">{result.entry.heading}</span>
+                    </>
+                  )}
+                </div>
+                <div
+                  className={`text-sm text-gray-800 ${
+                    result.entry.isHeading ? "font-semibold" : ""
                   }`}
                 >
-                  <span
-                    className={activeSection === section.id ? "text-amber-600" : "text-gray-400"}
-                  >
-                    {section.icon}
-                  </span>
-                  {section.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Right: search + content pane */}
-            <div className="flex min-w-0 flex-1 flex-col bg-white">
-              <div ref={contentRef} className="flex-1 overflow-y-auto p-6">
-                {query.trim() ? (
-                  results.length === 0 ? (
-                    <div className="pt-8 text-center text-sm text-gray-500">
-                      No help matches &ldquo;{query}&rdquo;
-                    </div>
-                  ) : (
-                    <div className="space-y-1" role="group" aria-label="Help search results">
-                      <p className="mb-2 text-xs text-gray-500">
-                        {results.length} result{results.length === 1 ? "" : "s"} -- Enter to open,
-                        arrows to move
-                      </p>
-                      {results.map((result, index) => (
-                        <button
-                          key={result.entry.id}
-                          onClick={() => openResult(result)}
-                          onMouseEnter={() => setHighlightIndex(index)}
-                          className={`w-full rounded-md border px-3 py-2 text-left transition-colors ${
-                            index === highlightIndex
-                              ? "border-amber-300 bg-amber-50"
-                              : "border-transparent hover:bg-gray-50"
-                          }`}
-                        >
-                          <div className="mb-0.5 flex items-center gap-1 text-[11px] font-medium text-gray-500">
-                            <span>{result.entry.sectionLabel}</span>
-                            {result.entry.heading && result.entry.heading !== result.entry.text && (
-                              <>
-                                <ChevronRight size={11} />
-                                <span className="truncate">{result.entry.heading}</span>
-                              </>
-                            )}
-                          </div>
-                          <div
-                            className={`text-sm text-gray-800 ${
-                              result.entry.isHeading ? "font-semibold" : ""
-                            }`}
-                          >
-                            <HighlightedText
-                              text={result.entry.text}
-                              positions={result.positions}
-                            />
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )
-                ) : (
-                  <div className="max-w-prose">{activeContent}</div>
-                )}
-              </div>
-            </div>
+                  <HighlightedText text={result.entry.text} positions={result.positions} />
+                </div>
+              </button>
+            ))}
           </div>
-        </div>
-      </Rnd>
-    </div>
+        )
+      ) : (
+        <div className="max-w-prose">{activeContent}</div>
+      )}
+    </SectionedModal>
   );
 };
 

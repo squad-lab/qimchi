@@ -15,9 +15,12 @@ import { AttrData } from "./components/interfaces";
 import { useSidebarStore } from "./stores/sidebarStore";
 import { useThemeStore } from "./stores/themeStore";
 import HelpModal from "./components/HelpModal";
+import SettingsModal from "./components/SettingsModal";
 import { useShortcut } from "./hooks/useGlobalShortcuts";
 import { isDatasetPath, detectDatasetKind } from "./utils/datasetPaths";
 import { useToast } from "./hooks/useToast";
+import { useSettingsStore } from "./stores/settingsStore";
+import { useSettingsSync } from "./hooks/useSettingsSync";
 
 // Browser default, and what the rem-based Tailwind scales assume at 100%.
 const BASE_FONT_SIZE_PX = 16;
@@ -35,9 +38,11 @@ const AppContent: React.FC = () => {
   const [loadingAttributes, setLoadingAttributes] = useState<Set<string>>(new Set());
   const [notesSelectedItemId, setNotesSelectedItemId] = useState<string | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const { setSidebarCollapsed, setNotesCollapsed, updateExplorerState } = useSidebarStore();
   const theme = useThemeStore((state) => state.theme);
-  const zoomLevel = useSidebarStore((state) => state.zoomLevel);
+  const zoomLevel = useSettingsStore((state) => state.settings.general.zoom);
+  useSettingsSync();
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -265,6 +270,7 @@ const AppContent: React.FC = () => {
   };
 
   useShortcut("toggle-help", () => setIsHelpOpen((prev) => !prev));
+  useShortcut("toggle-settings", () => setIsSettingsOpen((prev) => !prev));
 
   // TODO: WIP <:egg:>
   // Deep-link open (used by the open_in_qimchi MCP tool). On first load, read
@@ -320,7 +326,12 @@ const AppContent: React.FC = () => {
     <>
       <ErrorBoundary>
         <BaseLayout
-          rail={<SidebarRail onOpenHelp={() => setIsHelpOpen(true)} />}
+          rail={
+            <SidebarRail
+              onOpenHelp={() => setIsHelpOpen(true)}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+            />
+          }
           sidebar={
             <ErrorBoundary>
               <Sidebar
@@ -358,6 +369,7 @@ const AppContent: React.FC = () => {
         />
       </ErrorBoundary>
       <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </>
   );
 };

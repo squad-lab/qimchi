@@ -65,6 +65,7 @@ export type ShortcutAction =
   | "selected-export-images"
   | "selected-remove-plot"
   | "toggle-help"
+  | "toggle-settings"
   | "escape";
 
 interface ShortcutConfig {
@@ -89,7 +90,10 @@ export const KEYBOARD_SHORTCUTS: Record<string, ShortcutConfig | ShortcutConfig[
     { action: "toggle-basket", alt: true }, // Alt+B
     { action: "clear-basket", alt: true, shift: true }, // Alt+Shift+B
   ],
-  s: { action: "selected-swap-axes" },
+  s: [
+    { action: "selected-swap-axes" },
+    { action: "toggle-settings", shift: true }, // Shift+S
+  ],
   x: { action: "selected-enter-linecut", shift: true },
   // Bare digits pick a plot; Alt+digit opens the matching sidebar pane.
   "1": [{ action: "select-plot-1" }, { action: "show-explorer", alt: true }],

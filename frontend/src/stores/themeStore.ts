@@ -1,31 +1,35 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+
+import { resolveTheme } from "../settings/userSettings";
+import { useSettingsStore } from "./settingsStore";
 
 export type AppTheme = "light" | "dark";
 
 interface ThemeState {
+  /** The theme in effect, with "system" already resolved. */
   theme: AppTheme;
   setTheme: (theme: AppTheme) => void;
   toggleTheme: () => void;
 }
 
-const getSystemTheme = (): AppTheme =>
-  typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
+// The preference lives in the user's settings; this store only resolves it,
+// so the many components that read the theme need not know about settings.
+const effectiveTheme = () => resolveTheme(useSettingsStore.getState().settings.general.theme);
 
-export const useThemeStore = create<ThemeState>()(
-  persist(
-    (set, get) => ({
-      theme: getSystemTheme(),
+export const useThemeStore = create<ThemeState>()((_set, get) => ({
+  theme: effectiveTheme(),
 
-      setTheme: (theme) => set({ theme }),
+  setTheme: (theme) => useSettingsStore.getState().update(["general", "theme"], theme),
 
-      toggleTheme: () => set({ theme: get().theme === "dark" ? "light" : "dark" }),
-    }),
-    {
-      name: "theme-store",
-      version: 1,
-    },
-  ),
-);
+  toggleTheme: () => get().setTheme(get().theme === "dark" ? "light" : "dark"),
+}));
+
+const syncTheme = () => {
+  const theme = effectiveTheme();
+  if (useThemeStore.getState().theme !== theme) useThemeStore.setState({ theme });
+};
+
+useSettingsStore.subscribe(syncTheme);
+if (typeof window !== "undefined") {
+  window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", syncTheme);
+}

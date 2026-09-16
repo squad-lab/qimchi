@@ -11,6 +11,7 @@ import {
   History,
   Sun,
   Moon,
+  Settings,
   LucideIcon,
 } from "lucide-react";
 
@@ -19,10 +20,13 @@ import Tooltip from "./Tooltip";
 import { useSidebarStore, SidebarSection } from "../stores/sidebarStore";
 import { useShortcut } from "../hooks/useGlobalShortcuts";
 import { useThemeStore } from "../stores/themeStore";
+import { useSettingsStore } from "../stores/settingsStore";
+import { ZOOM_STEPS } from "../settings/userSettings";
 import { useToast } from "../hooks/useToast";
 
 interface SidebarRailProps {
   onOpenHelp?: () => void; // For opening the Help modal
+  onOpenSettings?: () => void;
 }
 
 // Rail tabs. Icon-only by design -- the labels live in the tooltips and the
@@ -50,7 +54,6 @@ const railPlainButtonClass =
 
 // The ladder Chromium uses for Ctrl+/Ctrl-, so the steps feel like the
 // browser's own zoom rather than an arbitrary percentage.
-const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2] as const;
 
 const nextZoom = (current: number, direction: 1 | -1): number => {
   // Snap to the nearest rung first, so a persisted off-ladder value still
@@ -62,11 +65,12 @@ const nextZoom = (current: number, direction: 1 | -1): number => {
   return ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, Math.max(0, index + direction))];
 };
 
-const SidebarRail = ({ onOpenHelp }: SidebarRailProps) => {
+const SidebarRail = ({ onOpenHelp, onOpenSettings }: SidebarRailProps) => {
   const { sidebarCollapsed, activeSection, setSidebarCollapsed, setActiveSection } =
     useSidebarStore();
-  const zoomLevel = useSidebarStore((state) => state.zoomLevel);
-  const setZoomLevel = useSidebarStore((state) => state.setZoomLevel);
+  const zoomLevel = useSettingsStore((state) => state.settings.general.zoom);
+  const setZoomLevel = (zoom: number) =>
+    useSettingsStore.getState().update(["general", "zoom"], zoom);
   const { theme, toggleTheme } = useThemeStore();
   const { openLogModal } = useToast();
   const isDark = theme === "dark";
@@ -156,6 +160,16 @@ const SidebarRail = ({ onOpenHelp }: SidebarRailProps) => {
           aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
         >
           {isDark ? <Sun size={17} /> : <Moon size={17} />}
+        </button>
+      </Tooltip>
+
+      <Tooltip content="Settings (Shift+S)" position="right">
+        <button
+          onClick={() => onOpenSettings?.()}
+          className={`${railButtonBaseClass} qimchi-dark-hover-plain group text-blue-600 hover:bg-blue-100 hover:text-blue-700`}
+          aria-label="Settings"
+        >
+          <Settings size={17} className="transition-transform duration-300 group-hover:rotate-45" />
         </button>
       </Tooltip>
 

@@ -36,6 +36,13 @@ import type { PlotAppearanceSettings } from "../../components/types";
 import type { AttrData, PlotConfiguration, SliderConfig } from "../../components/interfaces";
 import { useToast } from "../../hooks/useToast";
 import { usePlotStore } from "../../stores/plotStore";
+import { useSettingsStore } from "../../stores/settingsStore";
+import { appearanceDefaultsFor } from "../../settings/userSettings";
+import {
+  appearanceOverrides as diffAppearance,
+  FACTORY_APPEARANCE_SETTINGS,
+  mergeAppearanceDefaults,
+} from "./appearanceDefaults";
 import type { PlotPersistentState } from "../../components/interfaces";
 import usePainterStore from "../../stores/painterStore";
 import Tooltip from "../Tooltip";
@@ -121,107 +128,6 @@ type Props = {
   onAddPlot?: (config: Omit<PlotConfiguration, "id">) => void;
   onSwapAxesChange?: (swapped: boolean) => void;
   measurementInfo?: AttrData;
-};
-
-// Default appearance settings based on backend
-const DEFAULT_APPEARANCE_SETTINGS: PlotAppearanceSettings = {
-  hmap: {
-    colorscale: "viridis",
-    rangecolor: null,
-  },
-  line: {
-    mode: "lines+markers",
-    color: "#6acc64",
-    width: 3,
-    opacity: 1.0,
-    dash: "solid",
-    shape: "linear",
-    smoothing: 0.9,
-  },
-  marker: {
-    color: "#6acc64",
-    size: 6,
-    symbol: "circle",
-    opacity: 0.5,
-  },
-  x: {
-    maj: {
-      showgrid: false,
-      type: "linear",
-      nticks: 5,
-      gridcolor: "gray",
-      griddash: "solid",
-      gridwidth: 1,
-      tickcolor: "gray",
-      tickwidth: 1,
-      ticklen: 5,
-      tickangle: 0,
-    },
-    min: {
-      showgrid: false,
-      nticks: 5,
-      gridcolor: "gray",
-      griddash: "solid",
-      gridwidth: 1,
-      tickcolor: "gray",
-      tickwidth: 1,
-      ticklen: 4,
-    },
-  },
-  y: {
-    maj: {
-      showgrid: false,
-      type: "linear",
-      nticks: 5,
-      gridcolor: "gray",
-      griddash: "solid",
-      gridwidth: 1,
-      tickcolor: "gray",
-      tickwidth: 1,
-      ticklen: 5,
-      tickangle: 0,
-    },
-    min: {
-      showgrid: false,
-      nticks: 5,
-      gridcolor: "gray",
-      griddash: "solid",
-      gridwidth: 1,
-      tickcolor: "gray",
-      tickwidth: 1,
-      ticklen: 4,
-    },
-  },
-};
-
-// Recursively merge persisted appearance settings with defaults, while validating shapes.
-const mergeAppearanceDefaults = (
-  defaults: PlotAppearanceSettings,
-  persisted: unknown,
-): PlotAppearanceSettings => {
-  if (!persisted || typeof persisted !== "object") return defaults;
-
-  const p = persisted as Record<string, unknown>;
-
-  const merge = (def: unknown, pit: unknown): unknown => {
-    if (Array.isArray(def)) {
-      return Array.isArray(pit) ? pit : def;
-    }
-    if (def === null || typeof def !== "object") {
-      // primitive
-      return typeof pit === typeof def ? pit : def;
-    }
-    const defObj = def as Record<string, unknown>;
-    const out: Record<string, unknown> = { ...defObj };
-    for (const key of Object.keys(defObj)) {
-      const childDef = defObj[key];
-      const childPit = (pit as Record<string, unknown> | undefined)?.[key];
-      out[key] = merge(childDef, childPit);
-    }
-    return out;
-  };
-
-  return merge(defaults, p) as PlotAppearanceSettings;
 };
 
 // Helper function to get colorscale data from name
@@ -328,28 +234,29 @@ const PlotWrapper: React.FC<Props> = ({
 
   const plotTitle = getPlotTitle(plotJson);
 
-  // Initialize settings based on plot type
-  const getInitialSettings = (plotType: string): PlotAppearanceSettings => {
-    const baseSettings = { ...DEFAULT_APPEARANCE_SETTINGS };
-
-    if (plotType === "heatmap") {
-      // Ensure heatmap settings are included
-      baseSettings.hmap = baseSettings.hmap || {
-        colorscale: "viridis",
-        rangecolor: null,
-      };
-    }
-
-    return baseSettings;
-  };
-
   const [isMaximized, setIsMaximized] = useState(false);
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
   // Squarify state - when true, force the plot container to maintain 1:1 aspect ratio
-  const [isSquareMode, setIsSquareMode] = useState<boolean>(false);
-  const [appearanceSettings, setAppearanceSettings] = useState<PlotAppearanceSettings>(() =>
-    getInitialSettings(plotType),
+  const isSquareMode = useSettingsStore((state) => state.settings.plots.squarify);
+  // A plot stores only what differs from the user's defaults, so changing a
+  // default in Settings reaches every plot that has not overridden that value.
+  const appearanceDefaults = useSettingsStore((state) =>
+    appearanceDefaultsFor(state.settings, plotType),
   );
+  const [appearanceOverrideValues, setAppearanceOverrideValues] = useState<Record<string, unknown>>(
+    {},
+  );
+  const appearanceSettings = useMemo(
+    () => mergeAppearanceDefaults(appearanceDefaults, appearanceOverrideValues),
+    [appearanceDefaults, appearanceOverrideValues],
+  );
+  const appearanceDefaultsRef = useRef(appearanceDefaults);
+  appearanceDefaultsRef.current = appearanceDefaults;
+  const setAppearanceSettings = useCallback((next: PlotAppearanceSettings) => {
+    const overrides = diffAppearance(next, appearanceDefaultsRef.current);
+    setAppearanceOverrideValues(overrides);
+    return overrides;
+  }, []);
   const [customizedPlotJson, setCustomizedPlotJson] = useState<PlotlyJSON>(plotJson);
   const exportPlotJson = useMemo<PlotlyJSON>(
     () => ({
@@ -1393,12 +1300,16 @@ const PlotWrapper: React.FC<Props> = ({
     if (plotConfig?.id) {
       const plotState = getPlotState(plotConfig.id) as PlotPersistentState | undefined;
       if (plotState) {
-        if (plotState.appearance_settings) {
-          const normalized = mergeAppearanceDefaults(
-            getInitialSettings(plotType),
-            plotState.appearance_settings,
+        if (plotState.appearance_overrides) {
+          setAppearanceOverrideValues(plotState.appearance_overrides);
+        } else if (plotState.appearance_settings) {
+          // Saved before overrides: keep only what differed from the built-in look.
+          setAppearanceOverrideValues(
+            diffAppearance(
+              mergeAppearanceDefaults(FACTORY_APPEARANCE_SETTINGS, plotState.appearance_settings),
+              FACTORY_APPEARANCE_SETTINGS,
+            ),
           );
-          setAppearanceSettings(normalized);
         }
         if (plotState.applied_filters && plotState.applied_filters.length > 0) {
           setAppliedFilters(plotState.applied_filters);
@@ -2054,21 +1965,6 @@ const PlotWrapper: React.FC<Props> = ({
         clearTimeout(throttledUpdateConfig.current);
       }
     };
-  }, []);
-
-  // Listen for global squarify toggle from Viewer and apply locally
-  useEffect(() => {
-    const handler = (e: Event) => {
-      try {
-        const ce = e as CustomEvent<{ enabled: boolean }>;
-        const enabled = Boolean(ce.detail?.enabled);
-        setIsSquareMode(enabled);
-      } catch {
-        // ignore
-      }
-    };
-    window.addEventListener("plot-squarify", handler as EventListener);
-    return () => window.removeEventListener("plot-squarify", handler as EventListener);
   }, []);
 
   // Handle dataset changes by reapplying current filters/sliders with new dataset
@@ -2896,8 +2792,8 @@ const PlotWrapper: React.FC<Props> = ({
       onSwapAxesChange?.(false);
 
       // Reset state locally
-      const defaultSettings = getInitialSettings(plotType);
-      setAppearanceSettings(defaultSettings);
+      const defaultSettings = appearanceDefaults;
+      setAppearanceOverrideValues({});
       setAppliedFilters([]);
       setSliderConfig({});
       lastAppliedSliders.current = {};
@@ -2948,7 +2844,7 @@ const PlotWrapper: React.FC<Props> = ({
 
       // Save to store if available
       if (plotConfig?.id) {
-        setPlotAppearance(plotConfig.id, defaultSettings);
+        setPlotAppearance(plotConfig.id, {});
         setPlotFilters(plotConfig.id, []);
         setPlotSliders(plotConfig.id, {});
         setPlotAxesSwapped(plotConfig.id, false);
@@ -3375,17 +3271,17 @@ const PlotWrapper: React.FC<Props> = ({
 
   const handleAppearanceSettingsChange = useCallback(
     (newSettings: PlotAppearanceSettings) => {
-      setAppearanceSettings(newSettings);
+      const overrides = setAppearanceSettings(newSettings);
 
       // Save to store if available
       if (plotConfig?.id) {
-        setPlotAppearance(plotConfig.id, newSettings);
+        setPlotAppearance(plotConfig.id, overrides);
       }
 
       // The appearance will be applied by the useMemo and useEffect that watches customizedPlotJsonMemo
       // This ensures we always apply appearance to the currently filtered data without triggering unnecessary re-renders
     },
-    [plotConfig?.id, setPlotAppearance],
+    [plotConfig?.id, setPlotAppearance, setAppearanceSettings],
   );
 
   // Painter interactions (use store selectors)
@@ -3420,9 +3316,9 @@ const PlotWrapper: React.FC<Props> = ({
     if (mode === "theme") {
       const appearance = usePainterStore.getState().sourceAppearance;
       if (appearance) {
-        const normalized = mergeAppearanceDefaults(getInitialSettings(plotType), appearance);
-        setAppearanceSettings(normalized);
-        if (plotConfig?.id) setPlotAppearance(plotConfig.id, normalized);
+        const normalized = mergeAppearanceDefaults(appearanceDefaults, appearance);
+        const overrides = setAppearanceSettings(normalized);
+        if (plotConfig?.id) setPlotAppearance(plotConfig.id, overrides);
         showToast("Theme applied", "success");
       }
     } else if (mode === "filter") {
@@ -3442,6 +3338,7 @@ const PlotWrapper: React.FC<Props> = ({
     if (!usePainterStore.getState().shiftHeld) deactivatePainter();
   }, [
     plotType,
+    appearanceDefaults,
     deactivatePainter,
     setAppearanceSettings,
     plotConfig?.id,
@@ -4205,6 +4102,7 @@ const PlotWrapper: React.FC<Props> = ({
         isOpen={isAppearanceModalOpen}
         onClose={handleAppearanceSettingsClose}
         settings={appearanceSettings}
+        defaults={appearanceDefaults}
         onChange={handleAppearanceSettingsChange}
         plotType={plotType}
         plotTitle={plotTitle}

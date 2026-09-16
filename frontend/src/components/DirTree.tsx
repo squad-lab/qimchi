@@ -69,6 +69,7 @@ import TagFilterMenu from "./TagFilterMenu";
 import Tooltip from "./Tooltip";
 import { BasketItem } from "./Basket";
 import { useShortcut } from "../hooks/useGlobalShortcuts";
+import { useSettingsStore } from "../stores/settingsStore";
 import {
   detectDatasetKind,
   hasDatasetTag,
@@ -168,10 +169,14 @@ const DirTree = ({
 
   // Use Zustand store for persistent state
   const { componentStates, updateDirTreeState } = useSidebarStore();
+  // The sort field is a saved setting; its direction stays per-browser.
+  const sortBy = useSettingsStore((state) => state.settings.explorer.sortBy);
+  const autoAddLiveToBasket = useSettingsStore((state) => state.settings.live.autoAddToBasket);
+  const autoAddLiveToBasketRef = useRef(autoAddLiveToBasket);
+  autoAddLiveToBasketRef.current = autoAddLiveToBasket;
   const {
     searchInput,
     searchTerm,
-    sortBy,
     sortDirection,
     filterBy,
     showFilters,
@@ -520,7 +525,12 @@ const DirTree = ({
                   const inBasket = basketItemsRef.current?.some((item) => item.id === node.id);
                   const alreadyAutoAdded = autoAddedMeasurements.current.has(node.id);
 
-                  if (!inBasket && !alreadyAutoAdded && onAddToBasketRef.current) {
+                  if (
+                    autoAddLiveToBasketRef.current &&
+                    !inBasket &&
+                    !alreadyAutoAdded &&
+                    onAddToBasketRef.current
+                  ) {
                     console.log(`Auto-adding live measurement to basket: ${node.name}`);
                     // onAddToBasket also loads the measurement's attributes.
                     onAddToBasketRef.current(node);
@@ -927,8 +937,8 @@ const DirTree = ({
         sortDirection: sortDirection === "asc" ? "desc" : "asc",
       });
     } else {
+      useSettingsStore.getState().update(["explorer", "sortBy"], newSortBy);
       updateDirTreeState({
-        sortBy: newSortBy,
         // For chronological view, default to descending (newest first)
         // For others, default to ascending
         sortDirection: newSortBy === "chrono" ? "desc" : "asc",
