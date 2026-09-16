@@ -156,6 +156,100 @@ def _purge_webview_cache_on_upgrade(storage_path: str, log) -> None:
         log("[cache] could not record app version marker (will retry next launch)")
 
 
+WEBVIEW2_ARGUMENTS_ENV = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"
+
+
+def _with_webview2_argument(existing: str | None, argument: str) -> str:
+    """Add a browser flag to a WebView2 arguments string, once."""
+    parts = (existing or "").split()
+    if argument not in parts:
+        parts.append(argument)
+    return " ".join(parts)
+
+
+class _ReloadBudget:
+    """
+    Allow a few automatic reloads in a time window.
+
+    A page that crashes again as soon as it loads would otherwise reload
+    forever; past the budget, the crash page stays so the user can see it.
+
+    """
+
+    def __init__(self, limit: int = 3, window_seconds: float = 300.0, clock=None):
+        import time
+
+        self.limit = limit
+        self.window_seconds = window_seconds
+        self.clock = clock or time.monotonic
+        self.reloads: list[float] = []
+
+    def take(self) -> bool:
+        now = self.clock()
+        self.reloads = [t for t in self.reloads if now - t < self.window_seconds]
+        if len(self.reloads) >= self.limit:
+            return False
+        self.reloads.append(now)
+        return True
+
+
+def _handle_webview2_process_failed(sender, args, budget: _ReloadBudget, log) -> None:
+    """Log a WebView2 process failure and reload the page if its renderer died."""
+    kind = str(args.ProcessFailedKind)
+    details = ", ".join(
+        f"{name}={getattr(args, name, None)}"
+        for name in ("Reason", "ExitCode", "ProcessDescription")
+    )
+    log(f"[webview2] process failed: kind={kind}, {details}")
+    # A dead main-frame renderer leaves only the crash page. The browser process
+    # dying takes the whole control with it, and GPU crashes recover by themselves.
+    if kind != "RenderProcessExited":
+        return
+    if budget.take():
+        log("[webview2] reloading the page after a renderer crash")
+        sender.Reload()
+    else:
+        log("[webview2] renderer keeps crashing; not reloading again")
+
+
+def _watch_webview2_crashes(window, log) -> None:
+    """Hook WebView2's ProcessFailed event once the window has loaded (Windows only)."""
+    if sys.platform != "win32":
+        return
+
+    import traceback
+
+    budget = _ReloadBudget()
+    state = {"hooked": False}
+
+    def on_loaded() -> None:
+        if state["hooked"]:
+            return
+        try:
+            from System import Action
+
+            form = window.native
+
+            def on_failed(sender, args) -> None:
+                try:
+                    _handle_webview2_process_failed(sender, args, budget, log)
+                except Exception:
+                    log("[webview2] crash handler failed:\n" + traceback.format_exc())
+
+            def attach() -> None:
+                form.browser.webview.CoreWebView2.ProcessFailed += on_failed
+
+            # WebView2 objects may only be touched on the UI thread.
+            form.Invoke(Action(attach))
+            state["hooked"] = True
+            log("[webview2] watching for renderer crashes")
+        except Exception:
+            state["hooked"] = True
+            log("[webview2] could not hook ProcessFailed:\n" + traceback.format_exc())
+
+    window.events.loaded += on_loaded
+
+
 def _persistent_chrome_dir() -> str:
     """
     Persistent, writable dir for a downloaded Chrome (survives across runs).
@@ -942,6 +1036,14 @@ def main() -> int:
             f"{detail}</pre></body></html>"
         )
         webview.create_window("Qimchi - startup error", html=html)
+
+    if window is not None:
+        _watch_webview2_crashes(window, log)
+    # Live plots poll on a timer, which Chromium throttles while the window is
+    # minimized or hidden. The variable is appended to pywebview's own flags.
+    os.environ[WEBVIEW2_ARGUMENTS_ENV] = _with_webview2_argument(
+        os.environ.get(WEBVIEW2_ARGUMENTS_ENV), "--disable-background-timer-throttling"
+    )
 
     # private_mode=False + a persistent storage_path so the SPA's localStorage
     # (zustand-persisted basket/plot/sidebar state) survives across launches.
