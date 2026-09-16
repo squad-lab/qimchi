@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { generateAutoPlotConfigs, replicateCustomPlots } from "./autoPlot";
+import { generateAutoPlotConfigs, replicatePlots } from "./autoPlot";
 import type { BasketItem } from "../components/Basket";
 
 const item = (
@@ -137,7 +137,7 @@ describe("generateAutoPlotConfigs", () => {
   });
 });
 
-describe("replicateCustomPlots", () => {
+describe("replicatePlots", () => {
   const config = {
     id: "plot-1",
     origin: "custom" as const,
@@ -153,7 +153,7 @@ describe("replicateCustomPlots", () => {
   };
 
   it("recreates a plot whose variables all exist in the new measurement", () => {
-    const result = replicateCustomPlots(item(["gate", "bias"], ["signal"]), [{ config }]);
+    const result = replicatePlots(item(["gate", "bias"], ["signal"]), [{ config }]);
 
     expect(result.plotConfigs).toHaveLength(1);
     expect(result.plotConfigs[0].fpath).toBe("C:\\data\\run.zarr");
@@ -163,7 +163,7 @@ describe("replicateCustomPlots", () => {
   it("skips a plot with a missing variable, and says which", () => {
     // Silently dropping it would leave the user wondering why a plot
     // appeared for one measurement and not the next.
-    const result = replicateCustomPlots(item(["bias"], ["signal"]), [{ config }]);
+    const result = replicatePlots(item(["bias"], ["signal"]), [{ config }]);
 
     expect(result.plotConfigs).toHaveLength(0);
     expect(result.skipped).toHaveLength(1);
@@ -172,7 +172,7 @@ describe("replicateCustomPlots", () => {
 
   it("carries applied filters across, since the replica gets a new id", () => {
     // plotStore keys filters by plot id, so they have to travel in the config.
-    const result = replicateCustomPlots(item(["gate"], ["signal"]), [
+    const result = replicatePlots(item(["gate"], ["signal"]), [
       { config, filters: [{ name: "scale", options: { factor: 3 } }] },
     ]);
 
@@ -180,10 +180,18 @@ describe("replicateCustomPlots", () => {
     expect(result.plotConfigs[0].filters_opts).toEqual({ scale: { factor: 3 } });
   });
 
-  it("does nothing for a measurement it cannot read", () => {
-    expect(replicateCustomPlots(item(), [{ config }]).plotConfigs).toEqual([]);
+  it("keeps whether the source was a default or a custom plot", () => {
+    const auto = { ...config, origin: "auto" as const };
+
     expect(
-      replicateCustomPlots(item(["gate"], ["signal"], "C:/notes.md"), [{ config }]).plotConfigs,
+      replicatePlots(item(["gate"], ["signal"]), [{ config: auto }]).plotConfigs[0].origin,
+    ).toBe("auto");
+  });
+
+  it("does nothing for a measurement it cannot read", () => {
+    expect(replicatePlots(item(), [{ config }]).plotConfigs).toEqual([]);
+    expect(
+      replicatePlots(item(["gate"], ["signal"], "C:/notes.md"), [{ config }]).plotConfigs,
     ).toEqual([]);
   });
 });

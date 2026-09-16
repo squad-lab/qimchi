@@ -20,11 +20,7 @@ import { useSidebarStore } from "../stores/sidebarStore";
 import SectionRibbon, { ribbonButtonClass } from "./SectionRibbon";
 import { useToast } from "../hooks/useToast";
 import Tooltip from "./Tooltip";
-import {
-  generateAutoPlotConfigs,
-  replicateCustomPlots,
-  type ReplicationSource,
-} from "../utils/autoPlot";
+import { generateAutoPlotConfigs, replicatePlots, type ReplicationSource } from "../utils/autoPlot";
 import { useGlobalShortcutsInit, useShortcut } from "../hooks/useGlobalShortcuts";
 import {
   computeSharedFields,
@@ -205,36 +201,16 @@ const Viewer = ({
           return;
         }
 
-        // Find the first heatmap and lineplot that have filters to copy
-        const heatmapFilters = plotConfigs
-          .filter((config) => config.plotType === "HeatMap")
-          .map((config) => getPlotState(config.id)?.applied_filters)
-          .find((filters) => filters && filters.length > 0);
-
-        const lineplotFilters = plotConfigs
-          .filter((config) => config.plotType === "LinePlot")
-          .map((config) => getPlotState(config.id)?.applied_filters)
-          .find((filters) => filters && filters.length > 0);
-
-        // Mark as processed
         processedAutoPlotItems.current.add(item.id);
 
-        // Generate auto-plot configs with copied filters
-        const result =
-          plottingBehaviour === "none"
-            ? { success: true, message: "", plotConfigs: [] }
-            : generateAutoPlotConfigs(item, heatmapFilters, lineplotFilters, plottingBehaviour);
-
-        // Mirror the user's custom plots onto the new measurement, so a
-        // hand-built view isn't recreated by hand for every dataset.
-        //
-        // Deduplicated by plot *shape* (type + variables)
+        // Mirror the plots already in the Viewer onto the new measurement, so
+        // the view the user has shaped (defaults removed, custom plots added,
+        // filters applied) carries over. Deduplicated by plot shape.
         const replicationSources = (() => {
           const seen = new Set<string>();
           const sources: ReplicationSource[] = [];
 
           for (const config of plotConfigs) {
-            if (config.origin !== "custom") continue;
             const shape = [
               config.plotType,
               [...config.indeps].sort().join(","),
@@ -250,35 +226,52 @@ const Viewer = ({
           return sources;
         })();
 
-        const replicated = replicateCustomPlots(item, replicationSources);
+        const replicated = replicatePlots(item, replicationSources);
 
-        if (result.success && result.plotConfigs.length + replicated.plotConfigs.length > 0) {
-          // Batch: one group, prepended together so the defaults keep their
-          // own order while still landing ahead of older plots.
-          addPlots([...result.plotConfigs, ...replicated.plotConfigs]);
+        if (replicated.plotConfigs.length > 0) {
+          addPlots(replicated.plotConfigs);
+          const skipMsg = replicated.skipped.length
+            ? ` (skipped ${replicated.skipped.join("; ")})`
+            : "";
+          showToast(`Recreated ${replicated.plotConfigs.length} plot(s)${skipMsg}`, "success");
+          return;
+        }
+
+        // None of the Viewer's plots fit this measurement's variables, so
+        // fall back to its default plots, with the filters of a plot of the
+        // same type.
+        if (plottingBehaviour === "none") return;
+
+        const heatmapFilters = plotConfigs
+          .filter((config) => config.plotType === "HeatMap")
+          .map((config) => getPlotState(config.id)?.applied_filters)
+          .find((filters) => filters && filters.length > 0);
+
+        const lineplotFilters = plotConfigs
+          .filter((config) => config.plotType === "LinePlot")
+          .map((config) => getPlotState(config.id)?.applied_filters)
+          .find((filters) => filters && filters.length > 0);
+
+        const result = generateAutoPlotConfigs(
+          item,
+          heatmapFilters,
+          lineplotFilters,
+          plottingBehaviour,
+        );
+
+        if (result.success && result.plotConfigs.length > 0) {
+          addPlots(result.plotConfigs);
           const filterMsg =
             (heatmapFilters?.length ?? 0) > 0 || (lineplotFilters?.length ?? 0) > 0
               ? " with copied filters"
               : "";
-          const customMsg = replicated.plotConfigs.length
-            ? ` + ${replicated.plotConfigs.length} custom`
-            : "";
-          const skipMsg = replicated.skipped.length
-            ? ` (skipped ${replicated.skipped.join("; ")})`
-            : "";
-          const createdMsg = result.plotConfigs.length
-            ? result.message + filterMsg + customMsg
-            : `Replicated ${replicated.plotConfigs.length} custom plot(s)`;
-          showToast(createdMsg + skipMsg, "success");
-        } else {
+          showToast(result.message + filterMsg, "success");
+        } else if (
+          !result.message.includes("not a valid measurement") &&
+          !result.message.includes("no independents or dependents")
+        ) {
           // Only show error if there were actual issues (not just non-qualifying items)
-          if (
-            result.message &&
-            !result.message.includes("not a valid measurement") &&
-            !result.message.includes("no independents or dependents")
-          ) {
-            showToast(result.message, "error");
-          }
+          showToast(result.message, "error");
         }
       } else {
         // No existing plots - mark as processed
@@ -576,7 +569,7 @@ const Viewer = ({
 
       addPlot({
         // Composer-built: mark custom so it is replicated onto measurements
-        // added later (see replicateCustomPlots).
+        // added later (see replicatePlots).
         origin: "custom",
         fpath: dataset.path,
         indeps: snapshot.indeps,

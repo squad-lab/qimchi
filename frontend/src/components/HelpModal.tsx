@@ -322,10 +322,13 @@ const BasketHelp = memo(() => (
       </h3>
       <p className="text-gray-600 mb-3">
         The Basket holds the datasets you're currently working with. Select dataset cards to define
-        the plotting scope for the Composer. Adding one creates its default plots, as set under
-        Settings &gt; Plots &gt; Plotting behaviour: a HeatMap when its variables allow one,
-        otherwise a LinePlot. The Basket holds up to 50 datasets; while it is full, a caution icon
-        under the Basket icon says so, and further datasets are refused until you remove some.
+        the plotting scope for the Composer. Adding one to an empty Viewer creates its default
+        plots, as set under Settings &gt; Plots &gt; Plotting behaviour: a HeatMap when its
+        variables allow one, otherwise a LinePlot. Adding one while the Viewer has plots recreates
+        those plots, with their filters, for the new measurement -- so a default you removed stays
+        removed. Only when none of them fit its variables does it get its default plots. The Basket
+        holds up to 50 datasets; while it is full, a caution icon under the Basket icon says so, and
+        further datasets are refused until you remove some.
       </p>
     </div>
 
@@ -737,9 +740,10 @@ const SettingsHelp = memo(() => (
           width. The rail and Viewer buttons change the same settings.
         </li>
         <li>
-          <strong>Plots</strong>: the plotting behaviour -- which plots adding a measurement creates
-          (by default a HeatMap when its variables allow one, otherwise a LinePlot) -- and whether
-          plots are kept square.
+          <strong>Plots</strong>: the plotting behaviour -- which plots adding a measurement to an
+          empty Viewer creates (by default a HeatMap when its variables allow one, otherwise a
+          LinePlot) -- and whether plots are kept square. Once the Viewer has plots, new
+          measurements get copies of those instead.
         </li>
         <li>
           <strong>Explorer</strong>, <strong>Live</strong> and <strong>Export</strong>: the sort

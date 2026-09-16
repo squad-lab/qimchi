@@ -184,19 +184,14 @@ export interface ReplicationResult {
 }
 
 /**
- * Recreate the user's custom plots against a newly added measurement.
- *
- * When a measurement is added while another is loaded, the default-plot pass
- * only produces the standard heatmap/lineplot. Any carefully built custom view
- * would have to be rebuilt by hand for every new measurement, so we mirror
- * each custom plot: same plot type, same dependents/independents, same filters.
+ * Recreate the Viewer's plots against a newly added measurement: same plot
+ * type, same dependents/independents, same filters. This is what makes a
+ * view the user has shaped -- plots added, removed or filtered -- carry over
+ * to each new measurement.
  *
  * A plot is only replicated when EVERY variable it uses exists in the target measurement
  */
-export function replicateCustomPlots(
-  item: BasketItem,
-  sources: ReplicationSource[],
-): ReplicationResult {
+export function replicatePlots(item: BasketItem, sources: ReplicationSource[]): ReplicationResult {
   const result: ReplicationResult = { plotConfigs: [], skipped: [] };
 
   if (!isDatasetPath(item.path) || !item.attributes) return result;
@@ -244,7 +239,7 @@ export function replicateCustomPlots(
       appearance_settings: config.appearance_settings,
       source,
       preferredSource: source,
-      origin: "custom",
+      origin: config.origin,
     });
   }
 

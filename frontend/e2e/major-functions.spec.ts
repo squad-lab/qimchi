@@ -1,6 +1,7 @@
 import type { Page, Request } from "@playwright/test";
 
 import { expect, test } from "./coverage";
+import { mockSettingsApi } from "./settingsMock";
 
 const datasets = [
   {
@@ -54,6 +55,8 @@ interface ApiState {
   exportRequests: Request[];
   saveNotesRequests: Request[];
 }
+
+let apiState: ApiState;
 
 async function mockApplicationApi(page: Page): Promise<ApiState> {
   const state: ApiState = {
@@ -194,7 +197,7 @@ async function addDatasetToBasket(page: Page, displayedName: string) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await mockApplicationApi(page);
+  apiState = await mockApplicationApi(page);
   await page.goto("/");
 });
 
@@ -279,6 +282,36 @@ test("adds a measurement, creates default plots and clears the workspace", async
   await expect(page.locator(".js-plotly-plot")).toHaveCount(0);
   await page.getByRole("button", { name: "Clear basket" }).click();
   await expect(page.getByRole("button", { name: "Clear basket" })).toBeDisabled();
+});
+
+test("a new measurement gets the Viewer's plots, not the defaults the user removed", async ({
+  page,
+}) => {
+  await mockSettingsApi(page, { plots: { plottingBehaviour: "both" } });
+  await page.reload();
+  await loadExplorer(page);
+  const plotTypes = () =>
+    apiState.plotRequests.map((request) => request.postDataJSON().plotType as string);
+
+  await addDatasetToBasket(page, "run.nc");
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(2);
+  const linePlot = page
+    .locator(".js-plotly-plot")
+    .filter({ has: page.locator(".scatterlayer .trace") })
+    .locator("xpath=ancestor::*[.//button[@title='Close']][1]");
+  await linePlot.getByTitle("Close").first().click();
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(1);
+
+  await addDatasetToBasket(page, "sweep.zarr");
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(2);
+  await page.waitForTimeout(1_000);
+  expect(plotTypes().sort()).toEqual(["HeatMap", "HeatMap", "LinePlot"]);
+
+  // None of the Viewer's plots fit a measurement without "bias", so it gets
+  // its defaults instead.
+  await addDatasetToBasket(page, "7 | transport");
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(3);
+  expect(plotTypes().slice(3)).toEqual(["LinePlot"]);
 });
 
 test("edits MathJax X and Y axis titles inline", async ({ page }) => {
