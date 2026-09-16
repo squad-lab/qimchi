@@ -127,6 +127,14 @@ export const patchFor = (path: string[], value: unknown): Json => {
   return patch as Json;
 };
 
+/**
+ * The stored form of any settings-like object: only valid values that differ
+ * from the defaults. Used for imported files, which may be old, hand-edited or
+ * from another version.
+ */
+export const normalizeStored = (document: unknown): Json =>
+  applyPatch({}, patchFor([], resolveSettings(document)));
+
 /** Apply a patch to a stored document the way the backend does (null removes). */
 export const applyPatch = (stored: Json, patch: Json): Json => {
   const out: Json = { ...stored };

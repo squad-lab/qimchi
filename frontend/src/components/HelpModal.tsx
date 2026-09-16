@@ -750,6 +750,11 @@ const SettingsHelp = memo(() => (
         </li>
       </ul>
       <p className="mt-3 text-gray-600">
+        The upload and download buttons in the Settings title bar import and export your settings as
+        a JSON file, to move them to another machine or keep a copy. Importing replaces every
+        setting; anything missing from the file returns to its default.
+      </p>
+      <p className="mt-3 text-gray-600">
         If the database is unavailable, Settings says so; changes then apply to the open window
         only.
       </p>

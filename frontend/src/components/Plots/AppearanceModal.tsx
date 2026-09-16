@@ -551,7 +551,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
           {isDragging && (
             <div className="absolute inset-0 bg-blue-100 bg-opacity-90 flex items-center justify-center z-10 border-2 border-dashed border-blue-500 rounded-lg">
               <div className="text-center">
-                <Upload size={48} className="mx-auto text-blue-600 mb-2" />
+                <Download size={48} className="mx-auto text-blue-600 mb-2" />
                 <p className="text-blue-800 font-medium">Drop theme file here</p>
                 <p className="text-blue-600 text-sm">JSON files only</p>
               </div>

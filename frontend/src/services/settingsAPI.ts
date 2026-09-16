@@ -32,6 +32,14 @@ export async function patchSettings(patch: Record<string, unknown>): Promise<Sto
   return checked(data);
 }
 
+/** Replace the whole document, e.g. with an imported settings file. */
+export async function replaceSettings(document: Record<string, unknown>): Promise<StoredSettings> {
+  const { data } = await axios.put<StoredSettings>(`${PROD_BACKEND_URL}/settings`, {
+    settings: document,
+  });
+  return checked(data);
+}
+
 export async function resetSettings(): Promise<StoredSettings> {
   const { data } = await axios.delete<StoredSettings>(`${PROD_BACKEND_URL}/settings`);
   return checked(data);

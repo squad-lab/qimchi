@@ -4,11 +4,18 @@ import { persist } from "zustand/middleware";
 import {
   getSettings,
   patchSettings,
+  replaceSettings,
   resetSettings,
   settingsErrorMessage,
   type StoredSettings,
 } from "../services/settingsAPI";
-import { applyPatch, patchFor, resolveSettings, type UserSettings } from "../settings/userSettings";
+import {
+  applyPatch,
+  normalizeStored,
+  patchFor,
+  resolveSettings,
+  type UserSettings,
+} from "../settings/userSettings";
 
 type Json = Record<string, unknown>;
 
@@ -25,6 +32,8 @@ interface SettingsState {
   load: () => Promise<void>;
   update: (path: string[], value: unknown) => void;
   resetAll: () => Promise<void>;
+  /** Replace every setting, e.g. from an imported file. Invalid values are dropped. */
+  replaceAll: (document: unknown) => Promise<void>;
   clearSaveError: () => void;
 }
 
@@ -151,6 +160,11 @@ export const useSettingsStore = create<SettingsState>()(
         },
 
         resetAll: () => replaceWith({}, resetSettings),
+
+        replaceAll: (document) => {
+          const stored = normalizeStored(document);
+          return replaceWith(stored, () => replaceSettings(stored));
+        },
 
         clearSaveError: () => set({ saveError: null }),
       };

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { applyPatch, FACTORY_SETTINGS, patchFor, resolveSettings } from "./userSettings";
+import {
+  applyPatch,
+  FACTORY_SETTINGS,
+  normalizeStored,
+  patchFor,
+  resolveSettings,
+} from "./userSettings";
 
 describe("resolveSettings", () => {
   it("fills everything not stored from the defaults", () => {
@@ -57,5 +63,16 @@ describe("applyPatch", () => {
     );
 
     expect(stored).toEqual({ general: { theme: "dark" } });
+  });
+});
+
+describe("normalizeStored", () => {
+  it("keeps only valid values that differ from the defaults", () => {
+    expect(
+      normalizeStored({
+        general: { theme: "dark", zoom: 1, plotWidth: 7 },
+        unknown: { anything: true },
+      }),
+    ).toEqual({ general: { theme: "dark" } });
   });
 });

@@ -10,6 +10,8 @@ declare global {
         open_folder_dialog: () => Promise<string>;
         /** Open ~/.qimchi/qimchi_debug.log in a terminal that follows it live. */
         open_log_terminal: () => Promise<boolean>;
+        /** Ask where to save a text file and write it; resolves to the path (or ""). */
+        save_text_file: (filename: string, content: string) => Promise<string>;
       };
     };
   }

@@ -57,6 +57,8 @@ interface SectionedModalProps {
   sections: ModalSection[];
   activeSection: string;
   onSelectSection: (id: string) => void;
+  /** Extra header buttons, placed before the close button. */
+  headerActions?: React.ReactNode;
   /** Spans both panes, directly under the header. */
   toolbar?: React.ReactNode;
   navLabel: string;
@@ -75,6 +77,7 @@ const SectionedModal = ({
   sections,
   activeSection,
   onSelectSection,
+  headerActions,
   toolbar,
   navLabel,
   contentRef,
@@ -165,6 +168,7 @@ const SectionedModal = ({
               </div>
             </div>
             <div className="flex items-center gap-1">
+              {headerActions}
               <Tooltip content="Close modal" position="bottom">
                 <button
                   onClick={onClose}

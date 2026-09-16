@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   AlertTriangle,
+  Download,
+  Upload,
   ChartLine,
   ChartScatter,
   FolderOpen,
@@ -21,6 +23,9 @@ import {
 import SectionedModal, { type ModalSection } from "./SectionedModal";
 import { AxisSection, ColormapSection, LineStyleSection } from "./Plots/AppearanceSections";
 import { useSettingsStore } from "../stores/settingsStore";
+import { useToast } from "../hooks/useToast";
+import { saveTextFile } from "../utils/saveTextFile";
+import Tooltip from "./Tooltip";
 import {
   FACTORY_SETTINGS,
   PLOT_WIDTHS,
@@ -213,6 +218,46 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
   const update = useSettingsStore((state) => state.update);
   const [confirmingResetAll, setConfirmingResetAll] = useState(false);
   const resetAll = useSettingsStore((state) => state.resetAll);
+  const replaceAll = useSettingsStore((state) => state.replaceAll);
+  const { showToast } = useToast();
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Only the values that differ from the defaults, as stored.
+  const exportSettings = async () => {
+    const { stored } = useSettingsStore.getState();
+    const file = {
+      qimchi: "settings",
+      // Bump formatVersion only when the file layout changes.
+      formatVersion: 1,
+      qimchiVersion: __QIMCHI_VERSION__,
+      exportedAt: new Date().toISOString(),
+      settings: stored,
+    };
+    const filename = `qimchi-settings-${new Date().toISOString().split("T")[0]}.json`;
+    try {
+      const savedTo = await saveTextFile(filename, JSON.stringify(file, null, 2));
+      if (savedTo) showToast(`Settings saved to ${savedTo}`, "success", 4000, "Settings");
+    } catch (error) {
+      showToast(`Settings could not be exported: ${error}`, "error", 6000, "Settings");
+    }
+  };
+
+  const importSettings = async (file: File) => {
+    try {
+      const parsed = JSON.parse(await file.text());
+      if (parsed?.qimchi !== "settings" || typeof parsed.settings !== "object") {
+        showToast("That file is not a Qimchi settings export", "error", 6000, "Settings");
+        return;
+      }
+      await replaceAll(parsed.settings);
+      if (useSettingsStore.getState().available) {
+        showToast(`Settings imported from ${file.name}`, "success", 4000, "Settings");
+      }
+    } catch {
+      showToast("That file could not be read as JSON", "error", 6000, "Settings");
+    }
+  };
+
   const selectSection = (id: string) => {
     setConfirmingResetAll(false);
     const section = sections.find((s) => s.id === id);
@@ -527,6 +572,42 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
       activeSection={activeSection}
       onSelectSection={selectSection}
       navLabel="Settings sections"
+      headerActions={
+        <>
+          <Tooltip content="Import settings" position="bottom">
+            <button
+              type="button"
+              onClick={() => importInputRef.current?.click()}
+              className="p-1.5 rounded text-blue-700 hover:bg-blue-200 qimchi-dark-hover-plain transition-colors"
+              aria-label="Import settings"
+            >
+              <Download size={16} />
+            </button>
+          </Tooltip>
+          <Tooltip content="Export settings" position="bottom">
+            <button
+              type="button"
+              onClick={() => void exportSettings()}
+              className="p-1.5 rounded text-blue-700 hover:bg-blue-200 qimchi-dark-hover-plain transition-colors"
+              aria-label="Export settings"
+            >
+              <Upload size={16} />
+            </button>
+          </Tooltip>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            aria-label="Settings file to import"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) void importSettings(file);
+            }}
+          />
+        </>
+      }
       toolbar={
         available ? undefined : (
           <div role="alert" className="flex items-center gap-2 text-sm text-amber-800">

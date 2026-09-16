@@ -43,6 +43,8 @@ export async function mockSettingsApi(page: Page, initial: Json = {}) {
       const patch = request.postDataJSON().settings as Json;
       state.patches.push(patch);
       state.document = deepMerge(state.document, patch);
+    } else if (request.method() === "PUT") {
+      state.document = request.postDataJSON().settings as Json;
     } else if (request.method() === "DELETE") {
       state.document = {};
     }

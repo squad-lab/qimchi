@@ -229,6 +229,61 @@ test("Restore all defaults asks in place before clearing every setting", async (
   expect(nativeDialogs).toBe(0);
 });
 
+test("settings export to a JSON file and import back", async ({ page }) => {
+  await mockLiveHeatmapApi(page);
+  const settings = await mockSettingsApi(page, {
+    general: { theme: "dark", plotWidth: 66 },
+    appearance: { heatmap: { hmap: { colorscale: "plasma" } } },
+  });
+  await page.goto("/");
+  await openSettings(page);
+  const dialog = settingsDialog(page);
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    dialog.getByRole("button", { name: "Export settings" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toMatch(/^qimchi-settings-\d{4}-\d{2}-\d{2}\.json$/);
+  const exported = JSON.parse(
+    await (await download.createReadStream()).toArray().then((c) => Buffer.concat(c).toString()),
+  );
+  expect(exported).toMatchObject({
+    qimchi: "settings",
+    formatVersion: 1,
+    qimchiVersion: expect.any(String),
+    settings: settings.document,
+  });
+
+  // Importing replaces everything: values missing from the file go back to
+  // their defaults, and invalid ones are dropped rather than saved.
+  const file = {
+    qimchi: "settings",
+    formatVersion: 1,
+    settings: { general: { theme: "light", zoom: "huge" }, explorer: { sortBy: "name" } },
+  };
+  await dialog.getByLabel("Settings file to import").setInputFiles({
+    name: "mine.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(file)),
+  });
+  await expect
+    .poll(() => settings.document)
+    .toEqual({
+      general: { theme: "light" },
+      explorer: { sortBy: "name" },
+    });
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+  await expect(page.getByText("Settings imported from mine.json")).toBeVisible();
+
+  await dialog.getByLabel("Settings file to import").setInputFiles({
+    name: "theme.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({ settings: { line: {} } })),
+  });
+  await expect(page.getByText("That file is not a Qimchi settings export")).toBeVisible();
+  expect(settings.document).toEqual({ general: { theme: "light" }, explorer: { sortBy: "name" } });
+});
+
 test("Shift+S toggles Settings, like Shift+H does Help", async ({ page }) => {
   await mockLiveHeatmapApi(page);
   await mockSettingsApi(page);
@@ -236,6 +291,9 @@ test("Shift+S toggles Settings, like Shift+H does Help", async ({ page }) => {
 
   await page.keyboard.press("Shift+S");
   await expect(settingsDialog(page)).toBeVisible();
+  await expect(
+    settingsDialog(page).getByRole("button", { name: "Import settings" }).locator("svg"),
+  ).toHaveClass(/lucide-download/);
   await page.keyboard.press("Shift+S");
   await expect(settingsDialog(page)).toHaveCount(0);
 });
