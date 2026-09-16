@@ -187,7 +187,8 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
         automargin: true,
         zeroline: false,
         linewidth: 2,
-        showgrid: false,
+        // The Appearance grid toggle sets this; figures without one stay gridless.
+        showgrid: themedLayout.xaxis?.showgrid ?? false,
         linecolor: plotTheme.colors.text,
       },
       yaxis: {
@@ -198,7 +199,8 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
         automargin: true,
         zeroline: false,
         linewidth: 2,
-        showgrid: false,
+        // The Appearance grid toggle sets this; figures without one stay gridless.
+        showgrid: themedLayout.yaxis?.showgrid ?? false,
         linecolor: plotTheme.colors.text,
       },
     };
