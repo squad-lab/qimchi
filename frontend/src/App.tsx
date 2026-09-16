@@ -19,13 +19,12 @@ import SettingsModal from "./components/SettingsModal";
 import { useShortcut } from "./hooks/useGlobalShortcuts";
 import { isDatasetPath, detectDatasetKind } from "./utils/datasetPaths";
 import { useToast } from "./hooks/useToast";
+import { BASKET_FULL_MESSAGE, MAX_BASKET_ITEMS } from "./utils/basketLimit";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useSettingsSync } from "./hooks/useSettingsSync";
 
 // Browser default, and what the rem-based Tailwind scales assume at 100%.
 const BASE_FONT_SIZE_PX = 16;
-
-const MAX_BASKET_ITEMS = 50;
 
 const AppContent: React.FC = () => {
   const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
@@ -180,12 +179,7 @@ const AppContent: React.FC = () => {
         const now = Date.now();
         if (now - lastLimitWarningRef.current > 2000) {
           lastLimitWarningRef.current = now;
-          showToast(
-            `The basket holds at most ${MAX_BASKET_ITEMS} measurements. Remove some before adding more.`,
-            "warning",
-            6000,
-            "Basket",
-          );
+          showToast(BASKET_FULL_MESSAGE, "warning", 6000, "Basket");
         }
         return false;
       }

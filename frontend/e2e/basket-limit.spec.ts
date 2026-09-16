@@ -50,6 +50,11 @@ test("the basket stops at 50 measurements and says why", async ({ page }) => {
   // Refused measurements are not looked up.
   expect(attributeRequests).toHaveLength(50);
 
+  // The basket's ribbon keeps saying so while it is full.
+  const fullWarning = page.getByRole("img", { name: /basket holds at most 50/ });
+  await expect(fullWarning).toBeVisible();
+
   await page.getByRole("button", { name: "Clear basket" }).click();
   await expect(basketRows).toHaveCount(0);
+  await expect(fullWarning).toHaveCount(0);
 });

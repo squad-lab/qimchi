@@ -324,7 +324,8 @@ const BasketHelp = memo(() => (
         The Basket holds the datasets you're currently working with. Select dataset cards to define
         the plotting scope for the Composer. Adding one creates its default plots, as set under
         Settings &gt; Plots &gt; Plotting behaviour: a HeatMap when its variables allow one,
-        otherwise a LinePlot.
+        otherwise a LinePlot. The Basket holds up to 50 datasets; while it is full, a caution icon
+        under the Basket icon says so, and further datasets are refused until you remove some.
       </p>
     </div>
 

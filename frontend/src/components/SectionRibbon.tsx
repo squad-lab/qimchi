@@ -12,6 +12,7 @@ interface SectionRibbonProps {
   // the same ribbon out as a slim strip instead of clipping it.
   orientation?: "vertical" | "horizontal";
   onToggle?: () => void;
+  notice?: ReactNode; // Shown right under the section icon, e.g. a warning
   children?: ReactNode; // Control buttons, in order
 }
 
@@ -29,6 +30,7 @@ const SectionRibbon = ({
   count,
   orientation = "vertical",
   onToggle,
+  notice,
   children,
 }: SectionRibbonProps) => {
   const isVertical = orientation === "vertical";
@@ -61,6 +63,8 @@ const SectionRibbon = ({
           )}
         </div>
       </Tooltip>
+
+      {notice}
 
       {/* Collapsed: the icon stays at the left edge and the controls sit on the
           right, where they are in the expanded ribbon. */}

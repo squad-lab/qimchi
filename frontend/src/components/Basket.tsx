@@ -21,11 +21,13 @@ import {
   SquareFunction,
   ShoppingBasket,
   NotebookPen,
+  TriangleAlert,
 } from "lucide-react";
 
 // Local imports
 import Tooltip from "./Tooltip";
 import SectionRibbon, { ribbonButtonClass } from "./SectionRibbon";
+import { BASKET_FULL_MESSAGE, MAX_BASKET_ITEMS } from "../utils/basketLimit";
 import { useShortcut } from "../hooks/useGlobalShortcuts";
 import { useSidebarStore } from "../stores/sidebarStore";
 import { useToast } from "../hooks/useToast";
@@ -934,6 +936,19 @@ const Basket = ({
           count={items.length}
           orientation={isExpanded ? "vertical" : "horizontal"}
           onToggle={toggleExpanded}
+          notice={
+            items.length >= MAX_BASKET_ITEMS && (
+              <Tooltip content={BASKET_FULL_MESSAGE} position="left">
+                <span
+                  role="img"
+                  aria-label={BASKET_FULL_MESSAGE}
+                  className="flex h-5 w-5 items-center justify-center text-amber-600"
+                >
+                  <TriangleAlert size={14} aria-hidden="true" />
+                </span>
+              </Tooltip>
+            )
+          }
         >
           {onDownload && (
             <Tooltip content="Download basket" position="left">
