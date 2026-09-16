@@ -228,7 +228,7 @@ const mergeAppearanceDefaults = (
 const getColorscaleData = (
   name: string,
 ): string | Array<[number, string]> | Array<Array<number | string>> => {
-  const key = name.toLowerCase();
+  const key = name.toLowerCase().replace(/_r$/, "");
 
   // First, try to get from our JSON file
   if (key in plotlyColorscales) {
@@ -267,8 +267,11 @@ const getColorscaleData = (
     rainbow: "Rainbow",
     sinebow: "Sinebow",
   };
-  return builtInMap[key] || name.charAt(0).toUpperCase() + name.slice(1);
+  return builtInMap[key] || key.charAt(0).toUpperCase() + key.slice(1);
 };
+
+// Matplotlib-style "_r" names select the reversed map; Plotly reverses via reversescale.
+const isReversedColorscale = (name: string): boolean => /_r$/i.test(name);
 
 const PlotWrapper: React.FC<Props> = ({
   plotJson,
@@ -1486,6 +1489,7 @@ const PlotWrapper: React.FC<Props> = ({
           if (trace.type === "heatmap" && settings.hmap) {
             // If trace is not using a shared coloraxis, set per-trace fallback
             updatedTrace.colorscale = getColorscaleData(settings.hmap.colorscale);
+            updatedTrace.reversescale = isReversedColorscale(settings.hmap.colorscale);
             if (settings.hmap.rangecolor) {
               // Convert percentages (0-100) to actual z-values.
               // Try multiple sources for the data bounds in priority order:
@@ -1612,6 +1616,9 @@ const PlotWrapper: React.FC<Props> = ({
           };
           // Update scale - use the actual colorscale data array from JSON
           (newColoraxis as { colorscale?: unknown }).colorscale = getColorscaleData(
+            settings.hmap.colorscale,
+          );
+          (newColoraxis as { reversescale?: boolean }).reversescale = isReversedColorscale(
             settings.hmap.colorscale,
           );
           // Update or clear range

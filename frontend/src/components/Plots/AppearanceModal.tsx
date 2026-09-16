@@ -311,6 +311,12 @@ const COLORSCALE_CATEGORIES: ColorscaleCategory[] = [
   },
 ];
 
+// A reversed map is stored Matplotlib-style, as the base name plus "_r".
+const splitColorscale = (value: string) => ({
+  base: value.replace(/_r$/, ""),
+  reversed: /_r$/.test(value),
+});
+
 // Default settings based on Python backend
 const DEFAULT_SETTINGS: PlotAppearanceSettings = {
   hmap: {
@@ -725,6 +731,8 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
     // setHistory(newHistory);
     // setHistoryIndex(newHistory.length - 1);
   };
+
+  const colorscale = splitColorscale(localSettings.hmap?.colorscale || "viridis");
 
   const updateSetting = (path: string[], value: unknown) => {
     setLocalSettings((prev) => {
@@ -1147,12 +1155,36 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
             {activeTab === "heatmap" && (
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    Colorscale
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-sm font-medium text-gray-700">Colorscale</label>
+                    <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+                      Reverse
+                      <span className="relative inline-flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={colorscale.reversed}
+                          onChange={(e) =>
+                            updateSetting(
+                              ["hmap", "colorscale"],
+                              `${colorscale.base}${e.target.checked ? "_r" : ""}`,
+                            )
+                          }
+                          className="sr-only peer"
+                          title="Reverse colorscale"
+                          aria-label="Reverse colorscale"
+                        />
+                        <span className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></span>
+                      </span>
+                    </label>
+                  </div>
                   <select
-                    value={localSettings.hmap?.colorscale || "viridis"}
-                    onChange={(e) => updateSetting(["hmap", "colorscale"], e.target.value)}
+                    value={colorscale.base}
+                    onChange={(e) =>
+                      updateSetting(
+                        ["hmap", "colorscale"],
+                        `${e.target.value}${colorscale.reversed ? "_r" : ""}`,
+                      )
+                    }
                     className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     title="Heatmap colorscale"
                     aria-label="Heatmap colorscale"
@@ -1173,17 +1205,16 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                       </optgroup>
                     ))}
                   </select>
-                  {localSettings.hmap?.colorscale &&
-                    CYCLICAL_COLORSCALES.includes(localSettings.hmap.colorscale) && (
-                      <div className="mt-2 flex items-start gap-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
-                        <AlertTriangle size={14} className="shrink-0 mt-0.5" />
-                        <span>
-                          <strong>Warning:</strong> This is a cyclical colormap designed for phase
-                          or periodic data. Because it wraps around, it may be misleading for
-                          continuous heatmaps.
-                        </span>
-                      </div>
-                    )}
+                  {CYCLICAL_COLORSCALES.includes(colorscale.base) && (
+                    <div className="mt-2 flex items-start gap-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+                      <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                      <span>
+                        <strong>Warning:</strong> This is a cyclical colormap designed for phase or
+                        periodic data. Because it wraps around, it may be misleading for continuous
+                        heatmaps.
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="text-xs text-gray-500 italic mb-3">

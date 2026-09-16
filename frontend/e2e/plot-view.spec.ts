@@ -92,6 +92,35 @@ test("resetting a filtered live plot does not flip back to the filtered state", 
   expect(seen).toEqual(["filtered", "raw"]);
 });
 
+test("reverses the heatmap colormap from the Reverse toggle", async ({ page }) => {
+  await mockLiveHeatmapApi(page);
+  await openLiveHeatmap(page);
+  const coloraxis = () =>
+    page.evaluate(() => {
+      const gd = (Array.from(document.querySelectorAll(".js-plotly-plot")) as any[]).find(
+        (plot) => plot.data?.[0]?.type === "heatmap",
+      );
+      const axis = gd._fullLayout.coloraxis;
+      return { reversed: axis.reversescale, first: axis.colorscale[0][1] };
+    });
+
+  await page.getByTitle("Edit Appearance").first().click();
+  const select = page.getByLabel("Heatmap colorscale");
+  await select.selectOption("viridis");
+  await expect.poll(async () => (await coloraxis()).reversed).toBe(false);
+  const viridisStart = (await coloraxis()).first;
+
+  await page.getByLabel("Reverse colorscale").check({ force: true });
+  await expect.poll(async () => (await coloraxis()).reversed).toBe(true);
+  // Plotly reverses at draw time; the stored scale is still Viridis itself.
+  expect((await coloraxis()).first).toBe(viridisStart);
+
+  // Picking another map keeps it reversed.
+  await select.selectOption("plasma");
+  await expect.poll(async () => (await coloraxis()).first).not.toBe(viridisStart);
+  expect((await coloraxis()).reversed).toBe(true);
+});
+
 async function applyDiffAlongY(page: Page) {
   await page.getByTitle("Apply Filters & Sliders").first().click();
   await page.getByText("Diff along Y", { exact: true }).first().click();
