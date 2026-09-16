@@ -316,6 +316,37 @@ def test_export_plot_images_sync_writes_variants_and_archive(tmp_path, monkeypat
     Path(result["zip_path"]).unlink()
 
 
+def test_export_writes_only_the_chosen_formats_variants_and_scale(
+    tmp_path, monkeypatch
+):
+    dataset = tmp_path / "run.zarr"
+    dataset.mkdir()
+    scales = []
+
+    def fake_write(figure, path, **kwargs):
+        scales.append(kwargs.get("scale"))
+        Image.new("RGB", (2, 2), "white").save(path)
+
+    monkeypatch.setattr(export, "_write_plotly_image", fake_write)
+    monkeypatch.setattr(export, "_library_metadata", lambda path, uuid: {"tags": []})
+    plot = {"data": [{"type": "scatter", "x": [0], "y": [0]}], "layout": {}}
+    options = export.ExportSettings(formats=["png"], variants=["dark"], scale=2)
+
+    result = export._export_plot_images_sync(plot, str(dataset), options=options)
+
+    assert set(result["saved_paths"]) == {"png_dark"}
+    assert scales == [2]
+    Path(result["zip_path"]).unlink()
+
+
+def test_desktop_export_folder_setting_wins_over_the_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("QIMCHI_DESKTOP", "1")
+    monkeypatch.setenv("QIMCHI_EXPORT_DIR", str(tmp_path / "from-env"))
+
+    assert export._desktop_export_dir(str(tmp_path / "chosen")) == tmp_path / "chosen"
+    assert export._desktop_export_dir() == tmp_path / "from-env"
+
+
 def test_export_fails_rather_than_zipping_an_archive_with_no_images(
     tmp_path, monkeypatch
 ):
@@ -513,7 +544,7 @@ async def test_run_export_task_completes_and_copies_for_desktop(tmp_path, monkey
             "timings": {},
         },
     )
-    monkeypatch.setattr(export, "_desktop_export_dir", lambda: destination)
+    monkeypatch.setattr(export, "_desktop_export_dir", lambda _folder=None: destination)
 
     await export._run_export_task("task", {}, "/data/run.zarr")
 

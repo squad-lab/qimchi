@@ -29,6 +29,7 @@ from .data_loader import resolve_to_disk_path
 # Local imports
 from .logger import logger
 from .notes import _measurement_notes_paths, _note_db_identity, append_measurement_note
+from .settings import ExportSettings, export_settings
 
 router = APIRouter()
 
@@ -399,6 +400,7 @@ def _export_plot_images_sync(
     export_pool=None,
     applied_filters: list[Dict] | None = None,
     measurement_info: Dict | None = None,
+    options: ExportSettings | None = None,
 ) -> Dict:
     """
     Synchronous function to export plot images (runs in executor).
@@ -410,6 +412,7 @@ def _export_plot_images_sync(
         export_pool: optional ProcessPoolExecutor for parallel writes
         applied_filters (list[Dict] | None): ordered filters to print below the plot
         measurement_info (Dict | None): Basket hover-card fields to print below the plot
+        options (ExportSettings | None): formats, variants and scale to write
 
     Returns:
         Returns dict with:
@@ -479,9 +482,10 @@ def _export_plot_images_sync(
     # Prepare output paths for light and dark variants
     saved_paths = {}
     write_errors: list[str] = []
+    options = options or ExportSettings()
     outs = []
-    for variant in ("light", "dark"):
-        for fmt in ("png", "svg"):
+    for variant in options.variants:
+        for fmt in options.formats:
             name = f"{base_filename.name}_{variant}.{fmt}"
             path = base_filename.with_name(name)
             outs.append((variant, fmt, path))
@@ -539,7 +543,7 @@ def _export_plot_images_sync(
     def _write_and_time(local_fig, local_path_str):
         _width = int(local_fig.layout.width or 1920)
         _height = int(local_fig.layout.height or 1080)
-        _scale = 300.0 / 96.0
+        _scale = options.scale or 300.0 / 96.0
         start = time.perf_counter()
         _write_plotly_image(
             local_fig, local_path_str, width=_width, height=_height, scale=_scale
@@ -576,7 +580,9 @@ def _export_plot_images_sync(
         fig_dict = fig.to_dict()
         for variant, fmt, path in outs:
             local_fig_dict = fig_dict if variant == "light" else dark_fig.to_dict()
-            future = export_pool.submit(_write_image_worker, local_fig_dict, str(path))
+            future = export_pool.submit(
+                _write_image_worker, local_fig_dict, str(path), options.scale
+            )
             future_map[future] = (variant, fmt, path)
 
         for fut in as_completed(future_map):
@@ -653,7 +659,7 @@ def _export_plot_images_sync(
     }
 
 
-def _desktop_export_dir() -> Path | None:
+def _desktop_export_dir(folder: str | None = None) -> Path | None:
     """
     Directory to save export zips into when running as the desktop app.
 
@@ -662,13 +668,13 @@ def _desktop_export_dir() -> Path | None:
     itself. Returns None in server/Docker mode, where the browser handles the
     download as before. # TODO: Remove if webview is the only target.
 
-    Controlled by env: QIMCHI_DESKTOP=1 enables it; QIMCHI_EXPORT_DIR overrides
-    the destination (default: ~/Downloads). Set by the desktop launcher.
+    Controlled by env: QIMCHI_DESKTOP=1 enables it. The destination is the
+    user's export folder setting, else QIMCHI_EXPORT_DIR, else ~/Downloads.
 
     """
     if os.environ.get("QIMCHI_DESKTOP", "").lower() not in ("1", "true", "yes"):
         return None
-    override = os.environ.get("QIMCHI_EXPORT_DIR")
+    override = folder or os.environ.get("QIMCHI_EXPORT_DIR")
     target = Path(override).expanduser() if override else (Path.home() / "Downloads")
     try:
         target.mkdir(parents=True, exist_ok=True)
@@ -686,6 +692,7 @@ async def _run_export_task(
     export_pool=None,
     applied_filters: list[Dict] | None = None,
     measurement_info: Dict | None = None,
+    options: ExportSettings | None = None,
 ) -> None:
     """
     Background task to run export in executor.
@@ -705,6 +712,7 @@ async def _run_export_task(
             export_pool,
             applied_filters,
             measurement_info,
+            options,
         )
 
         # Update task status
@@ -715,7 +723,7 @@ async def _run_export_task(
         logger.info(f"Export task {task_id} completed successfully")
 
         # Desktop mode
-        save_dir = _desktop_export_dir()
+        save_dir = _desktop_export_dir(options.folder if options else None)
         if save_dir:
             try:
                 dest = save_dir / result["zip_filename"]
@@ -803,13 +811,16 @@ def _embed_png_metadata(path: str, meta: Dict[str, Any]) -> None:
         logger.info("Could not embed PNG metadata into %s: %s", path, exc)
 
 
-def _write_image_worker(fig_dict: Dict, path_str: str) -> tuple[str, float]:
+def _write_image_worker(
+    fig_dict: Dict, path_str: str, scale: float | None = None
+) -> tuple[str, float]:
     """
     Reconstruct a figure from a dict and write image to path_str.
 
     Args:
         fig_dict (Dict): dict representation of a Plotly figure
         path_str (str): output file path
+        scale (float | None): resolution multiplier, or Kaleido's default
 
     Returns:
         tuple[str, float]: (path_str, elapsed_seconds)
@@ -831,7 +842,7 @@ def _write_image_worker(fig_dict: Dict, path_str: str) -> tuple[str, float]:
         path_str,
         # width=_width,
         # height=_height,
-        # scale=_scale,
+        scale=scale,
     )
     return path_str, time.perf_counter() - start
 
@@ -1118,6 +1129,8 @@ async def export_plot_images(request: Request) -> JSONResponse:
             "zip_path": None,
         }
 
+        options = await asyncio.to_thread(export_settings)
+
         # Get export pool if available
         export_pool = None
         try:
@@ -1135,6 +1148,7 @@ async def export_plot_images(request: Request) -> JSONResponse:
                 export_pool,
                 applied_filters,
                 measurement_info,
+                options,
             )
         )
 
