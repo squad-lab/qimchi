@@ -323,14 +323,17 @@ test("edits MathJax X and Y axis titles inline", async ({ page }) => {
     ["ytitle", "Edited Y axis"],
   ] as const) {
     const mathTitle = page.locator(`g.${axisClass}-math-group`).first();
-    await expect(mathTitle).toBeVisible();
-    await mathTitle.scrollIntoViewIfNeeded();
-    const bounds = await mathTitle.boundingBox();
-    expect(bounds).not.toBeNull();
-    await page.mouse.click(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2);
-
     const editor = page.locator(".plugin-editable[contenteditable='true']").last();
-    await expect(editor).toBeVisible();
+    // Plotly redraws the typeset title while the plot settles, which can
+    // detach the element between finding it and clicking it.
+    await expect(async () => {
+      await expect(mathTitle).toBeVisible();
+      await mathTitle.scrollIntoViewIfNeeded({ timeout: 1_000 });
+      const bounds = await mathTitle.boundingBox();
+      expect(bounds).not.toBeNull();
+      await page.mouse.click(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2);
+      await expect(editor).toBeVisible({ timeout: 1_000 });
+    }).toPass();
     await editor.fill(replacement);
     await editor.press("Enter");
     await expect(page.locator(`text.${axisClass}`).first()).toHaveText(replacement);

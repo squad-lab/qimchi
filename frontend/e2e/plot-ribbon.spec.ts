@@ -112,8 +112,17 @@ test("plots are rearranged by dragging their handle, and keep their own widths",
     }),
   );
   const cards = page.locator("[data-plot-id]");
-  await cards.nth(1).hover();
+  // The ribbon slides in on hover or focus; wait until the handle sits inside
+  // its plot before grabbing it.
   const handle = cards.nth(1).getByRole("button", { name: "Move plot" });
+  await cards.nth(1).hover();
+  await handle.focus();
+  await expect
+    .poll(async () => {
+      const [box, card] = [await handle.boundingBox(), await cards.nth(1).boundingBox()];
+      return Boolean(box && card && box.x + box.width <= card.x + card.width);
+    })
+    .toBe(true);
   const from = (await handle.boundingBox())!;
   const onto = (await cards.nth(0).boundingBox())!;
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
