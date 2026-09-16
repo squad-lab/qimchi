@@ -278,6 +278,53 @@ async def test_first_non_empty_save_creates_the_sidecar(tmp_path, monkeypatch):
     assert notes_dir.is_dir()
 
 
+def test_sidecar_appears_only_with_the_first_non_empty_note(tmp_path, monkeypatch):
+    """The whole lifecycle through the HTTP routes the Notes pane calls."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api.shared import db as db_mod
+
+    monkeypatch.setattr(db_mod, "_db_ready", True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    measurement = tmp_path / "sample" / "experiment" / "run.zarr"
+    measurement.mkdir(parents=True)
+    _, notes_dir, notes_path = notes._measurement_notes_paths(measurement)
+    app = FastAPI()
+    app.include_router(notes.router)
+    client = TestClient(app)
+    ref = {"path": str(measurement)}
+
+    assert client.post("/load-notes/", json=ref).json()["notes"] == ""
+    assert client.post("/save-notes/", json={**ref, "notes": ""}).status_code == 200
+    assert client.post("/save-notes/", json={**ref, "notes": " \n"}).status_code == 200
+    assert not notes_dir.exists()
+    assert notes._db_get_note("run") is None
+
+    saved = client.post("/save-notes/", json={**ref, "notes": "first note"})
+
+    assert saved.status_code == 200
+    assert notes_dir.is_dir()
+    assert notes_path.read_text(encoding="utf-8").endswith("first note")
+    assert notes._db_get_note("run")[0] == "first note"
+    assert client.post("/load-notes/", json=ref).json()["notes"] == "first note"
+
+
+@pytest.mark.asyncio
+async def test_md_export_off_stores_the_note_without_a_sidecar(tmp_path, monkeypatch):
+    measurement = tmp_path / "sample" / "experiment" / "run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_MD_EXPORT_ENABLED", False)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    _, notes_dir, _ = notes._measurement_notes_paths(measurement)
+
+    await notes.save_notes(NotesData(path=str(measurement), notes="db only"))
+
+    assert notes._db_get_note("run")[0] == "db only"
+    assert not notes_dir.exists()
+    assert list((tmp_path / "sample").glob("*.md")) == []
+
+
 @pytest.mark.asyncio
 async def test_clearing_a_note_keeps_its_sidecar_and_stays_cleared(
     tmp_path, monkeypatch
