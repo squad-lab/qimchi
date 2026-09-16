@@ -1,9 +1,9 @@
 """
 SQLModel table definitions for the Qimchi database (``~/.qimchi/qimchi.db``).
 
-Tables: ``users``, ``measurements``, ``measurement_state`` (hearts/trash),
-``notes``, ``tags`` and ``measurement_tags``. Alembic owns the schema
-(``backend/migrations``, head ``0006_dataset_scan_cache``) -- changing a model
+Tables: ``users``, ``user_settings``, ``measurements``, ``measurement_state``
+(hearts/trash), ``notes``, ``tags`` and ``measurement_tags``. Alembic owns the
+schema (``backend/migrations``, head ``0008_user_settings``) -- changing a model
 here needs a matching migration, or an existing database will not match.
 
 - Everything keys on the measurement UUID, never on ``abs_path`` -- so future
@@ -46,6 +46,22 @@ class User(SQLModel, table=True):
     email: str = Field(unique=True, index=True)
     name: str | None = None
     sso_provider: str | None = None
+
+
+class UserSettings(SQLModel, table=True):
+    """
+    A user's preferences, as one JSON document whose shape the frontend owns.
+
+    Only values the user changed are stored; everything else falls back to the
+    defaults in code, so adding a setting needs no migration.
+
+    """
+
+    __tablename__ = "user_settings"
+
+    user_id: int = Field(primary_key=True, foreign_key="users.id")
+    settings_json: str = "{}"
+    updated_at: datetime = Field(default_factory=_utcnow)
 
 
 class Measurement(SQLModel, table=True):

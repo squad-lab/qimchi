@@ -22,6 +22,7 @@ from api import (
     live_measurements,
     notes,
     plots,
+    settings,
 )
 from api.shared.db import db_status, run_migrations, seed_local_user, set_db_status
 
@@ -256,6 +257,7 @@ app.include_router(filters.router)
 app.include_router(export.router)
 app.include_router(live_measurements.router)
 app.include_router(library.router)
+app.include_router(settings.router)
 
 
 # Root route to serve the SPA (only when FastAPI serves static files)
