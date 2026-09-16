@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({
   getSettings: vi.fn(),
   patchSettings: vi.fn(),
+  replaceSettings: vi.fn(),
   resetSettings: vi.fn(),
 }));
 
@@ -85,5 +86,36 @@ describe("settingsStore", () => {
     await useSettingsStore.getState().load();
 
     expect(useSettingsStore.getState().settings.general.zoom).toBe(2);
+  });
+
+  it("imports a file in place of unsent changes, keeping only valid non-default values", async () => {
+    api.replaceSettings.mockImplementation(async (document: Record<string, unknown>) => ({
+      settings: document,
+      updatedAt: null,
+    }));
+    const { update, replaceAll } = useSettingsStore.getState();
+
+    update(["general", "zoom"], 1.5);
+    await replaceAll({ general: { theme: "dark", zoom: 1, plotWidth: 7 }, unknown: true });
+    await vi.runAllTimersAsync();
+
+    expect(api.patchSettings).not.toHaveBeenCalled();
+    expect(api.replaceSettings).toHaveBeenCalledWith({ general: { theme: "dark" } });
+    expect(useSettingsStore.getState().stored).toEqual({ general: { theme: "dark" } });
+    expect(useSettingsStore.getState().settings.general.zoom).toBe(1);
+  });
+
+  it("reports a failed restore of all defaults", async () => {
+    api.resetSettings.mockRejectedValue(new Error("read-only"));
+    useSettingsStore.setState({ stored: { general: { theme: "dark" } } });
+
+    await useSettingsStore.getState().resetAll();
+
+    expect(useSettingsStore.getState()).toMatchObject({
+      stored: {},
+      available: false,
+      unavailableReason: "read-only",
+      saveError: "read-only",
+    });
   });
 });
