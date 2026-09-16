@@ -129,6 +129,10 @@ select {
   transform: var(--tooltip-transform, translate(-50%, -100%));
   z-index: 9999 !important;
   pointer-events: auto;
+  /* A fixed element's automatic width stops at the viewport edge, so a
+     left-hand tooltip near the right of the window wrapped word by word. */
+  width: max-content;
+  max-width: min(22rem, calc(100vw - 1rem));
 }
 
 .tooltip-top {
