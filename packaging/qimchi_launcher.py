@@ -355,6 +355,32 @@ class _Api:
             return ""
         return result[0] if isinstance(result, (list, tuple)) else str(result)
 
+    def save_text_file(self, filename: str, content: str) -> str:
+        """
+        Ask where to save ``content`` and write it there; return the path, or ""
+        if the user cancelled.
+
+        WebView2 silently drops downloads the page starts itself, so a file the
+        SPA generates (an exported settings file) is saved through this instead.
+
+        """
+        import webview
+
+        file_dialog = getattr(webview, "FileDialog", None)
+        dialog_type = (
+            file_dialog.SAVE if file_dialog is not None else webview.SAVE_DIALOG
+        )
+        result = webview.windows[0].create_file_dialog(
+            dialog_type, save_filename=filename
+        )
+        if not result:
+            return ""
+        path = result[0] if isinstance(result, (list, tuple)) else str(result)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        self._log(f"[settings] exported to {path}")
+        return path
+
     def apply_update(
         self,
         asset_url: str,
@@ -733,9 +759,14 @@ def _run_update_check(window, log) -> None:
     # Give the SPA a moment to render before injecting the overlay.
     time.sleep(3)
     try:
+        from api.settings import desktop_settings
         from api.updater import check_for_update, current_version, last_check_error
 
-        result = check_for_update()
+        preferences = desktop_settings()
+        if not preferences.checkForUpdates:
+            log("[updater] update checks are turned off in Settings")
+            return
+        result = check_for_update(include_previews=preferences.previewReleases)
         if result is None:
             error = last_check_error()
             if error:

@@ -99,3 +99,58 @@ def test_unix_log_terminal_uses_less_and_falls_back_to_tail(launcher):
 
     assert "less +F '/home/a b/.qimchi/debug.log'" in command
     assert "tail -n 200 -f '/home/a b/.qimchi/debug.log'" in command
+
+
+def test_update_check_follows_the_desktop_settings(launcher, monkeypatch):
+    import time
+
+    from api import settings, updater
+
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    calls, messages = [], []
+    monkeypatch.setattr(
+        updater, "check_for_update", lambda **kwargs: calls.append(kwargs)
+    )
+
+    monkeypatch.setattr(
+        settings,
+        "desktop_settings",
+        lambda: settings.DesktopSettings(checkForUpdates=False),
+    )
+    launcher._run_update_check(window=None, log=messages.append)
+    assert calls == []
+    assert "turned off in Settings" in messages[-1]
+
+    monkeypatch.setattr(
+        settings,
+        "desktop_settings",
+        lambda: settings.DesktopSettings(previewReleases=True),
+    )
+    launcher._run_update_check(window=None, log=messages.append)
+    assert calls == [{"include_previews": True}]
+
+
+def test_save_text_file_writes_where_the_user_chose(launcher, tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    target = tmp_path / "exported.json"
+    calls = []
+
+    def create_file_dialog(dialog_type, **kwargs):
+        calls.append((dialog_type, kwargs))
+        return (str(target),)
+
+    fake_webview = SimpleNamespace(
+        FileDialog=SimpleNamespace(SAVE="save"),
+        windows=[SimpleNamespace(create_file_dialog=create_file_dialog)],
+    )
+    monkeypatch.setitem(sys.modules, "webview", fake_webview)
+    api = launcher._Api(lambda _message: None)
+
+    assert api.save_text_file("settings.json", '{"a": 1}') == str(target)
+    assert target.read_text(encoding="utf-8") == '{"a": 1}'
+    assert calls == [("save", {"save_filename": "settings.json"})]
+
+    fake_webview.windows[0].create_file_dialog = lambda *_args, **_kwargs: None
+    assert api.save_text_file("settings.json", "{}") == ""

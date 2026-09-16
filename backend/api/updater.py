@@ -136,13 +136,15 @@ def _parse_ver(tag: str) -> tuple[int, ...]:
         return (0,)
 
 
-def check_for_update() -> dict | None:
+def check_for_update(include_previews: bool = False) -> dict | None:
     """
     Fetch the latest GitLab release and compare against the running version.
 
     Returns a dict with keys "tag", "notes", "asset_url", "asset_name",
     "platform", and "install_mode" when a newer release has an asset for this
     platform; returns None otherwise (no update, network error, or no asset).
+
+    ``include_previews`` puts a stable install on the preview channel as well.
 
     Never raises - all errors are logged at INFO level and treated as "no update".
 
@@ -180,7 +182,7 @@ def check_for_update() -> dict | None:
     # was a candidate for; _parse_ver ranks v0.7.0 above v0.7.0-rc.5, so an rc
     # user lands on stable as soon as it ships instead of being stranded.
     running = current_version()
-    on_preview = is_prerelease(running)
+    on_preview = include_previews or is_prerelease(running)
     candidates = [
         rel
         for rel in releases

@@ -168,6 +168,15 @@ def test_only_prereleases_means_no_update(monkeypatch):
     assert updater.check_for_update() is None
 
 
+def test_a_stable_install_can_opt_into_previews(monkeypatch):
+    payload = [_release("v0.7.0-rc.1", _WIN_ASSET), _release("v0.6.4", _WIN_ASSET)]
+    _install_fake_release_fetch(monkeypatch, payload)
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+
+    assert updater.check_for_update()["tag"] == "v0.6.4"
+    assert updater.check_for_update(include_previews=True)["tag"] == "v0.7.0-rc.1"
+
+
 def test_running_a_preview_is_not_offered_an_older_stable(monkeypatch):
     """A -rc user must not be 'updated' backwards onto the previous stable."""
     payload = [_release("v0.6.3", _WIN_ASSET)]
