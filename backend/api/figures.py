@@ -7,6 +7,7 @@ Includes Line and HeatMap classes for plotting line graphs and heatmaps using Pl
 import json
 import re
 from abc import ABC, abstractmethod
+from copy import deepcopy
 
 from plotly import graph_objects as go
 from plotly.express import colors, imshow
@@ -276,7 +277,8 @@ class QimchiFigure(ABC):
         self.ind = independents
         self.deps = dependents
         self.colors = colors
-        self.theme = theme
+        # HeatMap writes its colour range into the theme; the default is shared.
+        self.theme = deepcopy(theme)
         self.num_axes = num_axes
 
         if len(self.ind) > self.num_axes:
@@ -503,7 +505,7 @@ class HeatMap(QimchiFigure):
         )
         self.colors = named_colorscales()
         self.colorscale = theme["hmap"]["colorscale"]
-        self.rangecolor = theme["hmap"]["rangecolor"]
+        self.rangecolor = self.theme["hmap"]["rangecolor"]
 
         # Handle deps properly - get the first dependent variable
         dep_var = self.deps[0] if isinstance(self.deps, list) else self.deps

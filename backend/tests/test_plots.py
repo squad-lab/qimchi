@@ -600,3 +600,19 @@ def test_slicing_a_dimension_that_has_no_coordinate_leaves_the_dataset_alone():
     result = plots.apply_data_slicing(dataset, ["x"], {"repeat": {"value": 1.0}})
 
     assert result.sizes == {"repeat": 2, "x": 4}
+
+
+def test_heatmap_colour_range_does_not_leak_between_plots():
+    def heatmap(values):
+        dataset = xr.Dataset(
+            {"z": (("x", "y"), values)},
+            coords={"x": [0.0, 1.0], "y": [0.0, 1.0]},
+        )
+        created = plots.create_heat_maps([dataset], ["/run.nc"], ["x", "y"], ["z"])
+        return created[0]["plotJson"]["layout"]["coloraxis"]
+
+    heatmap(np.array([[-37.0, -30.0], [-25.0, -20.0]]))
+    coloraxis = heatmap(np.array([[1e-10, 2e-10], [4e-10, 6e-10]]))
+
+    assert (coloraxis["cmin"], coloraxis["cmax"]) == (1e-10, 6e-10)
+    assert plots.DEFAULT_THEME["hmap"]["rangecolor"] is None
