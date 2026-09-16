@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { PROD_BACKEND_URL } from "./config";
 
@@ -17,12 +17,20 @@ import { useThemeStore } from "./stores/themeStore";
 import HelpModal from "./components/HelpModal";
 import { useShortcut } from "./hooks/useGlobalShortcuts";
 import { isDatasetPath, detectDatasetKind } from "./utils/datasetPaths";
+import { useToast } from "./hooks/useToast";
 
 // Browser default, and what the rem-based Tailwind scales assume at 100%.
 const BASE_FONT_SIZE_PX = 16;
 
-const App: React.FC = () => {
+const MAX_BASKET_ITEMS = 50;
+
+const AppContent: React.FC = () => {
   const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
+  // Several adds can run in one event (a multi-selection, a drop), before the
+  // state re-renders, so the limit is checked against this synchronous copy.
+  const basketItemsRef = useRef<BasketItem[]>([]);
+  const lastLimitWarningRef = useRef(0);
+  const { showToast } = useToast();
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
   const [loadingAttributes, setLoadingAttributes] = useState<Set<string>>(new Set());
   const [notesSelectedItemId, setNotesSelectedItemId] = useState<string | null>(null);
@@ -104,7 +112,7 @@ const App: React.FC = () => {
         tags: node.tags,
       };
 
-      handleAddToBasket(newBasketItem);
+      if (!handleAddToBasket(newBasketItem)) return;
 
       // Load attributes for the new item
       try {
@@ -149,33 +157,44 @@ const App: React.FC = () => {
     setNotesSelectedItemId(itemId);
   };
 
-  const handleAddToBasket = (item: BasketItem) => {
+  // Returns whether the item was newly added, so callers skip loading its attributes otherwise.
+  const handleAddToBasket = (item: BasketItem): boolean => {
     try {
       // Validate item before adding
       if (!item || !item.id || !item.name || !item.path) {
         console.error("Invalid item passed to handleAddToBasket:", item);
-        return;
+        return false;
       }
 
-      let added = false;
-      setBasketItems((prev) => {
-        // Check if item already exists in basket
-        if (prev.some((existing) => existing.id === item.id)) {
-          console.log("Item already in basket:", item.name);
-          return prev;
+      const current = basketItemsRef.current;
+      if (current.some((existing) => existing.id === item.id)) {
+        return false;
+      }
+      if (current.length >= MAX_BASKET_ITEMS) {
+        // One warning for a whole multi-item add, not one per item.
+        const now = Date.now();
+        if (now - lastLimitWarningRef.current > 2000) {
+          lastLimitWarningRef.current = now;
+          showToast(
+            `The basket holds at most ${MAX_BASKET_ITEMS} measurements. Remove some before adding more.`,
+            "warning",
+            6000,
+            "Basket",
+          );
         }
-        console.log("Added to basket:", item.name);
-        added = true;
-        // Prepend so newly added items appear at the beginning of the basket.
-        return [item, ...prev];
-      });
-
-      // Keep Notes dropdown aligned to the latest added basket item.
-      if (added) {
-        setNotesSelectedItemId(item.id);
+        return false;
       }
+
+      // Prepend so newly added items appear at the beginning of the basket.
+      const next = [item, ...current];
+      basketItemsRef.current = next;
+      setBasketItems(next);
+      // Keep Notes dropdown aligned to the latest added basket item.
+      setNotesSelectedItemId(item.id);
+      return true;
     } catch (error) {
       console.error("Error adding item to basket:", error);
+      return false;
     }
   };
 
@@ -210,17 +229,22 @@ const App: React.FC = () => {
   }, [datasetKeys, openNotesPanel]);
 
   const handleRemoveBasketItem = (id: string) => {
-    setBasketItems((prev) => prev.filter((item) => item.id !== id));
+    const next = basketItemsRef.current.filter((item) => item.id !== id);
+    basketItemsRef.current = next;
+    setBasketItems(next);
   };
 
   const handleClearBasket = () => {
+    basketItemsRef.current = [];
     setBasketItems([]);
   };
 
   const handleUpdateBasketItemAttributes = (itemId: string, attributes: AttrData) => {
-    setBasketItems((prev) =>
-      prev.map((item) => (item.id === itemId ? { ...item, attributes } : item)),
+    const next = basketItemsRef.current.map((item) =>
+      item.id === itemId ? { ...item, attributes } : item,
     );
+    basketItemsRef.current = next;
+    setBasketItems(next);
     // Remove from loading state when attributes are loaded
     setLoadingAttributes((prev) => {
       const newSet = new Set(prev);
@@ -274,7 +298,7 @@ const App: React.FC = () => {
         type: "file",
         tags: [detectDatasetKind(datasetParam)],
       };
-      handleAddToBasket(item);
+      if (!handleAddToBasket(item)) return;
       handleStartLoadingAttributes(item.id);
       axios
         .post(`${PROD_BACKEND_URL}/load-attrs/`, { path: datasetParam })
@@ -293,7 +317,7 @@ const App: React.FC = () => {
   }, []);
 
   return (
-    <ToastProvider>
+    <>
       <ErrorBoundary>
         <BaseLayout
           rail={<SidebarRail onOpenHelp={() => setIsHelpOpen(true)} />}
@@ -334,8 +358,15 @@ const App: React.FC = () => {
         />
       </ErrorBoundary>
       <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
-    </ToastProvider>
+    </>
   );
 };
+
+// The provider wraps the content so the basket can raise toasts too.
+const App: React.FC = () => (
+  <ToastProvider>
+    <AppContent />
+  </ToastProvider>
+);
 
 export default App;

@@ -68,7 +68,6 @@ import TagPopover from "./TagPopover";
 import TagFilterMenu from "./TagFilterMenu";
 import Tooltip from "./Tooltip";
 import { BasketItem } from "./Basket";
-import type { AttrData } from "./interfaces";
 import { useShortcut } from "../hooks/useGlobalShortcuts";
 import {
   detectDatasetKind,
@@ -102,8 +101,6 @@ interface DirTreeProps {
   onOpenSampleNotes?: (node: TreeNode) => void; // For opening pooled sample notes
   onDownload?: (node: TreeNode) => void; // For downloading datasets
   onCycleDataset?: (direction: "prev" | "next") => void; // For cycling through datasets
-  onStartLoadingAttributes?: (itemId: string) => void;
-  onUpdateBasketItemAttributes?: (itemId: string, attributes: AttrData) => void;
 }
 
 /**
@@ -151,8 +148,6 @@ const DirTree = ({
   onOpenSampleNotes,
   onDownload,
   onCycleDataset,
-  onStartLoadingAttributes,
-  onUpdateBasketItemAttributes,
 }: DirTreeProps) => {
   const { showToast } = useToast();
 
@@ -262,11 +257,6 @@ const DirTree = ({
   const autoAddedMeasurements = useRef<Set<string>>(new Set());
   const basketItemsRef = useRef<BasketItem[]>(basketItems);
   const onAddToBasketRef = useRef<typeof onAddToBasket>(onAddToBasket);
-  const onStartLoadingAttributesRef =
-    useRef<typeof onStartLoadingAttributes>(onStartLoadingAttributes);
-  const onUpdateBasketItemAttributesRef = useRef<typeof onUpdateBasketItemAttributes>(
-    onUpdateBasketItemAttributes,
-  );
 
   useEffect(() => {
     hiddenLiveIdsRef.current = new Set(hiddenLiveMeasurementIds);
@@ -343,14 +333,6 @@ const DirTree = ({
   useEffect(() => {
     onAddToBasketRef.current = onAddToBasket;
   }, [onAddToBasket]);
-
-  useEffect(() => {
-    onStartLoadingAttributesRef.current = onStartLoadingAttributes;
-  }, [onStartLoadingAttributes]);
-
-  useEffect(() => {
-    onUpdateBasketItemAttributesRef.current = onUpdateBasketItemAttributes;
-  }, [onUpdateBasketItemAttributes]);
 
   // Debounce search input
   useEffect(() => {
@@ -540,36 +522,9 @@ const DirTree = ({
 
                   if (!inBasket && !alreadyAutoAdded && onAddToBasketRef.current) {
                     console.log(`Auto-adding live measurement to basket: ${node.name}`);
+                    // onAddToBasket also loads the measurement's attributes.
                     onAddToBasketRef.current(node);
                     autoAddedMeasurements.current.add(node.id);
-
-                    // Load attributes for the new live measurement
-                    if (
-                      node.type === "file" &&
-                      onStartLoadingAttributesRef.current &&
-                      onUpdateBasketItemAttributesRef.current
-                    ) {
-                      onStartLoadingAttributesRef.current(node.id);
-                      axios
-                        .post(`${PROD_BACKEND_URL}/load-attrs/`, {
-                          path: node.path,
-                        })
-                        .then((response) => {
-                          console.log(
-                            "Attributes loaded for auto-added live measurement:",
-                            node.id,
-                            // response.data,
-                          );
-                          onUpdateBasketItemAttributesRef.current?.(node.id, response.data);
-                        })
-                        .catch((error) => {
-                          console.error(
-                            "Error loading attributes for auto-added live measurement:",
-                            error,
-                          );
-                          onUpdateBasketItemAttributesRef.current?.(node.id, {});
-                        });
-                    }
                   }
                 });
               }

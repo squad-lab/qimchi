@@ -18,7 +18,7 @@ import { finishArchiveDownload } from "../utils/download";
 interface ExplorerProps {
   onSelectNode: (node: TreeNode) => void;
   basketItems: BasketItem[];
-  onAddToBasket: (item: BasketItem) => void;
+  onAddToBasket: (item: BasketItem) => boolean;
   onRemoveBasketItem: (id: string) => void;
   onUpdateBasketItemAttributes: (itemId: string, attributes: AttrData) => void;
   onStartLoadingAttributes: (itemId: string) => void;
@@ -147,7 +147,7 @@ const Explorer = ({
     // console.log("Selected node:", node);
   };
 
-  const handleAddToBasket = async (node: TreeNode) => {
+  const handleAddToBasket = (node: TreeNode): boolean => {
     const basketItem: BasketItem = {
       id: node.id,
       name: node.name,
@@ -159,32 +159,35 @@ const Explorer = ({
       lastModified: node.lastModified,
     };
 
-    // Add the item to basket immediately (without attributes)
-    onAddToBasket(basketItem);
+    // Add the item to basket immediately; attributes follow asynchronously.
+    const added = onAddToBasket(basketItem);
+    if (added && node.type === "file") {
+      void loadAttributes(node);
+    }
+    return added;
+  };
 
-    // Load attributes from backend asynchronously if it's a file
-    if (node.type === "file") {
-      // Start loading state
-      onStartLoadingAttributes(node.id);
+  const loadAttributes = async (node: TreeNode) => {
+    // Start loading state
+    onStartLoadingAttributes(node.id);
 
-      try {
-        // console.log("Loading attributes for:", node.path);
-        const response = await axios.post(`${PROD_BACKEND_URL}/load-attrs/`, {
-          path: node.path,
-        });
-        // console.log("Attributes loaded for item:", node.id, response.data);
+    try {
+      // console.log("Loading attributes for:", node.path);
+      const response = await axios.post(`${PROD_BACKEND_URL}/load-attrs/`, {
+        path: node.path,
+      });
+      // console.log("Attributes loaded for item:", node.id, response.data);
 
-        // Update the basket item with the loaded attributes (this also removes from loading state)
-        onUpdateBasketItemAttributes(node.id, response.data);
-      } catch {
-        showToast("Failed to load file attributes", "error", 3000, "Explorer", {
-          path: node.path,
-          error: "API Request Failed",
-        });
-        // console.error("Error loading attributes for item:", error);
-        // Remove from loading state even if there's an error
-        onUpdateBasketItemAttributes(node.id, {});
-      }
+      // Update the basket item with the loaded attributes (this also removes from loading state)
+      onUpdateBasketItemAttributes(node.id, response.data);
+    } catch {
+      showToast("Failed to load file attributes", "error", 3000, "Explorer", {
+        path: node.path,
+        error: "API Request Failed",
+      });
+      // console.error("Error loading attributes for item:", error);
+      // Remove from loading state even if there's an error
+      onUpdateBasketItemAttributes(node.id, {});
     }
   };
 
@@ -295,8 +298,6 @@ const Explorer = ({
             onOpenSampleNotes={onOpenSampleNotes}
             onDownload={handleDownload}
             onCycleDataset={onCycleDataset}
-            onStartLoadingAttributes={onStartLoadingAttributes}
-            onUpdateBasketItemAttributes={onUpdateBasketItemAttributes}
           />
         ) : (
           <div className="h-full flex flex-col items-center justify-center text-gray-500">

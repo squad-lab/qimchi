@@ -16,7 +16,7 @@ interface SidebarProps {
   defaultWidth?: number; // In percentage (0-100)
   onSelectNode: (node: TreeNode) => void;
   basketItems: BasketItem[];
-  onAddToBasket: (item: BasketItem) => void;
+  onAddToBasket: (item: BasketItem) => boolean;
   onRemoveBasketItem: (id: string) => void;
   onUpdateBasketItemAttributes: (itemId: string, attributes: AttrData) => void;
   onStartLoadingAttributes: (itemId: string) => void;
@@ -56,9 +56,7 @@ const Sidebar = ({
     // console.log("Selected node:", node);
   };
 
-  const handleAddToBasket = (item: BasketItem) => {
-    onAddToBasket(item);
-  };
+  const handleAddToBasket = (item: BasketItem) => onAddToBasket(item);
 
   const handleOpenNotes = (node: TreeNode) => {
     // Ensure sidebar and Notes panel are visible before opening notes

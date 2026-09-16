@@ -41,7 +41,7 @@ interface ViewerProps {
   basketItems: BasketItem[];
   onRemoveBasketItem: (id: string) => void;
   onClearBasket: () => void;
-  onAddToBasket: (item: BasketItem) => void;
+  onAddToBasket: (item: BasketItem) => boolean;
   selectedNode?: TreeNode | null;
   loadingAttributes: Set<string>;
   onStartLoadingAttributes: (itemId: string) => void;
@@ -646,11 +646,8 @@ const Viewer = ({
   };
 
   const handleDropItem = async (item: BasketItem) => {
-    // Add the item to basket immediately (without attributes)
-    onAddToBasket(item);
-
-    // Load attributes from backend asynchronously if it's a file
-    if (item.type === "file") {
+    // Attributes are only worth fetching for an item the basket accepted.
+    if (onAddToBasket(item) && item.type === "file") {
       // Start loading state
       onStartLoadingAttributes(item.id);
 
