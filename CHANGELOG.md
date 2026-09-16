@@ -77,6 +77,13 @@
 - [Misc] CI fixes lint and formatting on the branch and pushes the result, so a merge request is never held up by a missed formatting run.
 - [Misc] The repository root is tidier: the Docker files live in `docker/`, and the Windows build script alongside the Linux and macOS ones in `scripts/`. The superseded Windows clone-and-build scripts are gone.
 - [Misc] Downloads from the Releases page now carry their version in the filename -- `qimchi-setup-v0.7.0.exe` rather than `qimchi-setup.exe` -- so a file in your Downloads folder says which build it is.
+- [Feature] Settings: a gear on the sidebar rail (Shift+S) opens one place for your preferences, saved to the Qimchi database so they survive restarts and updates. It covers the theme (now including System), zoom, plot width, square plots, the plotting behaviour, the Explorer's sort order, whether new live measurements join the basket, image export (formats, light/dark variants, resolution and, in the desktop app, the folder), and, in the desktop app, update checks and preview releases.
+- [Feature] Adding a measurement now creates a HeatMap when its variables allow one, and a LinePlot only when they don't, instead of always both. Change this under Settings > Plots > Plotting behaviour: HeatMap or LinePlot (the default), both, or none. The checks on whether a plot can be made are unchanged.
+- [Feature] Each plot has a width button that opens the same 33/50/66/100% choices as the Viewer, for that plot alone. The Viewer's buttons still set every plot. Its two export buttons are now one Export button that opens Disk and Notes.
+- [Feature] Settings can be exported to a JSON file and imported again from the Settings title bar, to copy them to another machine or keep a backup. Importing replaces every setting, and values the file does not hold, or that are invalid, return to their defaults.
+- [Feature] Default plot appearance: Settings sets the colormap, axes, grid, ticks, lines and markers for every HeatMap and LinePlot. A change applies to open plots straight away, except where a plot has its own value from its Appearance panel, and a plot's Reset now returns it to your defaults instead of the built-in look.
+- [Feature] The theme, zoom, plot-width, square-plot and Explorer sort buttons change the same saved settings, so the plot width is now kept across sessions too.
+- [Fix] Turning on a plot's major or minor grid in Appearance now draws the grid. The setting was saved but never shown.
 - [Feature] A Reverse toggle next to the heatmap colorscale in Appearance flips any colormap. The choice stays when you pick another map, and carries through to exported images.
 - [Feature] The colour range in Appearance shows its values in the data's units with a suitable SI prefix, e.g. "250 pA" rather than "0.00000000025".
 - [Feature] The LineCut preview now follows a live measurement as new data arrives, and refreshes at once when you switch between X and Y cuts. Unmeasured points no longer shift the rest of the slice.
@@ -88,7 +95,8 @@
 - [Fix] Changing a filter while an earlier change is still being applied is no longer ignored. The latest change is applied once the earlier one finishes, so the plot matches what the Filters panel shows.
 - [Fix] On the Windows desktop app, a crashed page now reloads by itself instead of leaving WebView2's "This page is having a problem" screen, and the crash is recorded in the debug log. If it crashes three times within five minutes, the page is left as it is.
 - [Fix] Live plots on the Windows desktop app keep refreshing at full speed while the window is minimized or behind other windows.
-- [Feature] The basket holds up to 50 measurements. Adding more shows a warning asking you to remove some first, instead of slowing the app down.
+- [Feature] The basket holds up to 50 measurements. Adding more shows a warning asking you to remove some first, instead of slowing the app down, and a caution icon under the basket icon says so while it is full.
+- [Fix] Tooltips near the right edge of the window no longer wrap after every word.
 - [Misc] The desktop app's "Open debug log" terminal no longer prints the whole log first. On Windows it shows the last 200 lines and keeps following; on macOS and Linux it opens in `less` following new lines (Ctrl+C to scroll and search, `F` to follow again, `q` to quit), or the last 200 lines with `tail` if `less` is missing.
 - [Misc] The filter summary on the filter button uses the names shown in the Filters panel, such as "Diff along Y", instead of internal identifiers.
 
