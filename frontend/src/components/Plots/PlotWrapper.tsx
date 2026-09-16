@@ -793,7 +793,9 @@ const PlotWrapper: React.FC<Props> = ({
   }, []);
 
   const toNumericArray = useCallback(
-    (values: unknown): number[] => {
+    // keepNonFinite preserves NaN positions, which a 2D reshape needs: a live
+    // heatmap holds NaN for every point not yet measured.
+    (values: unknown, keepNonFinite = false): number[] => {
       if (!values) return [];
 
       if (typeof values === "object" && !Array.isArray(values)) {
@@ -813,7 +815,7 @@ const PlotWrapper: React.FC<Props> = ({
             const typedToNumbers = (arr: ArrayLike<number | bigint>) =>
               Array.from(arr as ArrayLike<number | bigint>)
                 .map((v) => (typeof v === "bigint" ? Number(v) : Number(v)))
-                .filter((v) => Number.isFinite(v));
+                .filter((v) => keepNonFinite || Number.isFinite(v));
 
             if (dtype === "f8" || dtype === "float64") {
               return typedToNumbers(new Float64Array(buffer));
@@ -848,8 +850,8 @@ const PlotWrapper: React.FC<Props> = ({
       if (!isArrayLikeValue(values)) return [];
 
       return Array.from(values as ArrayLike<unknown>)
-        .map((v) => (typeof v === "number" ? v : Number(v)))
-        .filter((v) => Number.isFinite(v));
+        .map((v) => (v == null ? NaN : typeof v === "number" ? v : Number(v)))
+        .filter((v) => keepNonFinite || Number.isFinite(v));
     },
     [isArrayLikeValue],
   );
@@ -866,7 +868,7 @@ const PlotWrapper: React.FC<Props> = ({
         // Prefer _inputArray when present because it is already row-structured.
         if (Array.isArray(obj._inputArray)) {
           const rowsFromInputArray = (obj._inputArray as unknown[])
-            .map((row) => toNumericArray(row))
+            .map((row) => toNumericArray(row, true))
             .filter((row) => row.length > 0);
           if (rowsFromInputArray.length > 0) {
             return rowsFromInputArray;
@@ -906,7 +908,7 @@ const PlotWrapper: React.FC<Props> = ({
         if (parsedShape) {
           const rows = parsedShape.rows;
           const cols = parsedShape.cols;
-          const flat = toNumericArray(values);
+          const flat = toNumericArray(values, true);
           if (rows > 0 && cols > 0 && flat.length >= rows * cols) {
             const out: number[][] = [];
             for (let r = 0; r < rows; r++) {
@@ -924,10 +926,10 @@ const PlotWrapper: React.FC<Props> = ({
 
       const first = rows[0];
       if (isArrayLikeValue(first)) {
-        return rows.map((row) => toNumericArray(row)).filter((row) => row.length > 0);
+        return rows.map((row) => toNumericArray(row, true)).filter((row) => row.length > 0);
       }
 
-      const flat = toNumericArray(rows);
+      const flat = toNumericArray(rows, true);
       return flat.length > 0 ? [flat] : [];
     },
     [isArrayLikeValue, toNumericArray],
@@ -951,6 +953,106 @@ const PlotWrapper: React.FC<Props> = ({
       return bestIdx;
     },
     [],
+  );
+
+  const buildLineCutPreview = useCallback(
+    (
+      pointX: number,
+      pointY: number,
+      fallbackXIndex: number,
+      fallbackYIndex: number,
+    ): PlotlyJSON | null => {
+      const heatmapTrace = (customizedPlotJson.data || []).find(
+        (t) => t.type === "heatmap",
+      ) as unknown as Record<string, unknown> | undefined;
+      if (!heatmapTrace?.["z"]) return null;
+
+      const xArr = toNumericArray(heatmapTrace["x"] || customizedPlotJson.layout?.xaxis?.tickvals);
+      const yArr = toNumericArray(heatmapTrace["y"] || customizedPlotJson.layout?.yaxis?.tickvals);
+      lastLineCutAxisDomainsRef.current = { x: xArr, y: yArr };
+      const zRows = toNumeric2DArray(heatmapTrace["z"]);
+      if (zRows.length === 0) return null;
+
+      const activeAxis = lineCutAxis ?? lastLineCutAxisRef.current;
+      if (!activeAxis) return null;
+      lastLineCutAxisRef.current = activeAxis;
+
+      const xIndex = getClosestIndex(xArr, pointX, fallbackXIndex);
+      const yIndex = getClosestIndex(yArr, pointY, fallbackYIndex);
+
+      const getTitleText = (axis: any) => {
+        if (!axis?.title) return "";
+        if (typeof axis.title === "string") return axis.title;
+        return axis.title.text || "";
+      };
+
+      const getZTitle = () => {
+        const annotation = (customizedPlotJson.layout.annotations as any[])?.find(
+          (item: any) => item?.name === COLORBAR_TITLE_ANNOTATION_NAME,
+        );
+        if (annotation?.text) return annotation.text;
+        const coloraxis = (customizedPlotJson.layout as any)?.coloraxis;
+        if (coloraxis?.colorbar?.title?.text) return coloraxis.colorbar.title.text;
+        return "Intensity";
+      };
+
+      // Pair each value with its coordinate before dropping unmeasured (NaN)
+      // points, so a gap does not shift the rest of the line.
+      const slice = activeAxis === "x" ? zRows.map((row) => row[xIndex]) : zRows[yIndex] || [];
+      const coords = activeAxis === "x" ? yArr : xArr;
+      const previewX: number[] = [];
+      const previewY: number[] = [];
+      slice.forEach((value, i) => {
+        if (!Number.isFinite(value)) return;
+        previewX.push(coords.length > 0 ? coords[i] : i);
+        previewY.push(value);
+      });
+      if (previewY.length === 0) return null;
+
+      const title =
+        activeAxis === "x"
+          ? `Slice at X = ${pointX.toFixed(4)}`
+          : `Slice at Y = ${pointY.toFixed(4)}`;
+
+      return {
+        data: [
+          {
+            x: previewX,
+            y: previewY,
+            type: "scatter",
+            mode: "lines",
+            line: { color: "#2563eb", width: 3 },
+            name: "LineCut Preview",
+          },
+        ],
+        layout: {
+          title: { text: title, font: { size: 16 } },
+          uirevision: title,
+          margin: { t: 48, r: 20, b: 52, l: 70 },
+          xaxis: {
+            title: {
+              text:
+                activeAxis === "x"
+                  ? getTitleText(customizedPlotJson.layout?.yaxis)
+                  : getTitleText(customizedPlotJson.layout?.xaxis),
+              font: { size: 14 },
+            },
+            tickfont: { size: 13 },
+          },
+          yaxis: {
+            title: {
+              text: getZTitle(),
+              font: { size: 14 },
+            },
+            tickfont: { size: 13 },
+          },
+          paper_bgcolor: "rgba(0,0,0,0)",
+          plot_bgcolor: "rgba(0,0,0,0)",
+        },
+        config: { responsive: true, displayModeBar: false },
+      };
+    },
+    [customizedPlotJson, lineCutAxis, toNumericArray, toNumeric2DArray, getClosestIndex],
   );
 
   // Handle Heatmap Hover for LineCut Preview
@@ -984,152 +1086,42 @@ const PlotWrapper: React.FC<Props> = ({
         const pointX = typeof point.x === "number" ? point.x : Number(point.x || 0);
         const pointY = typeof point.y === "number" ? point.y : Number(point.y || 0);
 
-        // Persist hover lock even if preview generation fails.
-        const earlyHoverData = {
+        const nextHoverData = {
           x: pointX,
           y: pointY,
           xIndex: fallbackXIndex,
           yIndex: fallbackYIndex,
         };
-        setHoverData(earlyHoverData);
-        lastHoverDataRef.current = earlyHoverData;
-
-        const pointObj = point as {
-          data?: Record<string, unknown>;
-          fullData?: Record<string, unknown>;
-        };
-        const hoveredTrace = pointObj.data ?? pointObj.fullData;
-        const fallbackHeatmapTrace = (customizedPlotJson.data || []).find(
-          (t) => t.type === "heatmap",
-        ) as unknown as Record<string, unknown> | undefined;
-        const activeTrace = hoveredTrace ?? fallbackHeatmapTrace;
-
-        const zSource =
-          (activeTrace && activeTrace["z"]) || (fallbackHeatmapTrace && fallbackHeatmapTrace["z"]);
-
-        if (!zSource) {
-          setLineCutPreviewJson(null);
-          return;
-        }
-
-        const xArr = toNumericArray(
-          (activeTrace && activeTrace["x"]) || customizedPlotJson.layout?.xaxis?.tickvals,
-        );
-        const yArr = toNumericArray(
-          (activeTrace && activeTrace["y"]) || customizedPlotJson.layout?.yaxis?.tickvals,
-        );
-        lastLineCutAxisDomainsRef.current = { x: xArr, y: yArr };
-        const zRows = toNumeric2DArray(zSource);
-
-        if (zRows.length === 0) {
-          setLineCutPreviewJson(null);
-          return;
-        }
-
-        const xIndex = getClosestIndex(xArr, pointX, fallbackXIndex);
-        const yIndex = getClosestIndex(yArr, pointY, fallbackYIndex);
-
-        const nextHoverData = {
-          x: pointX,
-          y: pointY,
-          xIndex,
-          yIndex,
-        };
-
         setHoverData(nextHoverData);
         lastHoverDataRef.current = nextHoverData;
 
-        const activeAxis = lineCutAxis ?? lastLineCutAxisRef.current;
-        if (!activeAxis) return;
-        lastLineCutAxisRef.current = activeAxis;
-
-        let previewX: number[] = [];
-        let previewY: number[] = [];
-        let title = "";
-
-        const getTitleText = (axis: any) => {
-          if (!axis?.title) return "";
-          if (typeof axis.title === "string") return axis.title;
-          return axis.title.text || "";
-        };
-
-        const getZTitle = () => {
-          const annotation = (customizedPlotJson.layout.annotations as any[])?.find(
-            (item: any) => item?.name === COLORBAR_TITLE_ANNOTATION_NAME,
-          );
-          if (annotation?.text) return annotation.text;
-          const coloraxis = (customizedPlotJson.layout as any)?.coloraxis;
-          if (coloraxis?.colorbar?.title?.text) return coloraxis.colorbar.title.text;
-          return "Intensity";
-        };
-
-        if (activeAxis === "x") {
-          previewY = zRows.map((row) => row[xIndex]).filter((v) => Number.isFinite(v));
-          previewX = yArr.length > 0 ? yArr.slice(0, previewY.length) : previewY.map((_, i) => i);
-          title = `Slice at X = ${typeof point.x === "number" ? point.x.toFixed(4) : String(point.x)}`;
-        } else {
-          const row = zRows[yIndex] || [];
-          previewY = row.filter((v) => Number.isFinite(v));
-          previewX = xArr.length > 0 ? xArr.slice(0, previewY.length) : previewY.map((_, i) => i);
-          title = `Slice at Y = ${typeof point.y === "number" ? point.y.toFixed(4) : String(point.y)}`;
-        }
-
-        if (previewY.length === 0) {
-          setLineCutPreviewJson(null);
-          return;
-        }
-
-        const previewJson: PlotlyJSON = {
-          data: [
-            {
-              x: previewX,
-              y: previewY,
-              type: "scatter",
-              mode: "lines",
-              line: { color: "#2563eb", width: 3 },
-              name: "LineCut Preview",
-            },
-          ],
-          layout: {
-            title: { text: title, font: { size: 16 } },
-            margin: { t: 48, r: 20, b: 52, l: 70 },
-            xaxis: {
-              title: {
-                text:
-                  activeAxis === "x"
-                    ? getTitleText(customizedPlotJson.layout?.yaxis)
-                    : getTitleText(customizedPlotJson.layout?.xaxis),
-                font: { size: 14 },
-              },
-              tickfont: { size: 13 },
-            },
-            yaxis: {
-              title: {
-                text: getZTitle(),
-                font: { size: 14 },
-              },
-              tickfont: { size: 13 },
-            },
-            paper_bgcolor: "rgba(0,0,0,0)",
-            plot_bgcolor: "rgba(0,0,0,0)",
-          },
-          config: { responsive: true, displayModeBar: false },
-        };
-
-        setLineCutPreviewJson(previewJson);
+        setLineCutPreviewJson(buildLineCutPreview(pointX, pointY, fallbackXIndex, fallbackYIndex));
       } catch (err: any) {
         console.error("LineCut preview generation error:", err);
       }
     },
-    [
-      isLineCutActive,
-      lineCutAxis,
-      customizedPlotJson,
-      toNumericArray,
-      toNumeric2DArray,
-      getClosestIndex,
-    ],
+    [isLineCutActive, buildLineCutPreview],
   );
+
+  // Rebuild the preview at the locked position when the data changes (a live
+  // measurement refreshing) or the cut direction is toggled.
+  useEffect(() => {
+    const hover = lastHoverDataRef.current;
+    if (!isLineCutActive || !hover) return;
+    try {
+      setLineCutPreviewJson(buildLineCutPreview(hover.x, hover.y, hover.xIndex, hover.yIndex));
+    } catch (err) {
+      console.error("LineCut preview generation error:", err);
+    }
+  }, [isLineCutActive, buildLineCutPreview]);
+
+  // A locked hover position is in the old axes' coordinates after a swap. Its
+  // guide line would stretch the autoranged axes and squash the heatmap.
+  const clearLineCutHover = useCallback(() => {
+    setHoverData(null);
+    lastHoverDataRef.current = null;
+    setLineCutPreviewJson(null);
+  }, []);
 
   const handleLineCutClick = useCallback(
     async (event?: Plotly.PlotMouseEvent) => {
@@ -2951,6 +2943,7 @@ const PlotWrapper: React.FC<Props> = ({
     if (!isHeatmapPlot || isApplyingFilters) return;
 
     const newSwapped = !areAxesSwapped;
+    clearLineCutHover();
     setAreAxesSwapped(newSwapped);
     onSwapAxesChange?.(newSwapped);
     if (plotConfig?.id) {
