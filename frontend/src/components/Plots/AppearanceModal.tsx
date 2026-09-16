@@ -31,6 +31,7 @@ import type { PlotAppearanceSettings } from "../../components/types";
 import { formatTitleWithUUID, getPlotTypeIcon, IconDropdown, LogChartIcon } from "./UtilComponents";
 import DualThumbSlider from "./DualThumbSlider";
 import Tooltip from "../Tooltip";
+import { engineeringFormatter } from "../../utils/engineeringFormat";
 
 interface AppearanceModalProps {
   isOpen: boolean;
@@ -1275,11 +1276,15 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                       const pctMin = localSettings.hmap?.rangecolor?.[0] ?? 0;
                       const pctMax = localSettings.hmap?.rangecolor?.[1] ?? 100;
 
+                      const formatZ = engineeringFormatter(
+                        (plotJson?.layout as any)?.meta?.qimchi_units?.z,
+                        hasValidBounds ? [zMin, zMax] : [],
+                      );
                       const displayMin = hasValidBounds
-                        ? (zMin + (range * pctMin) / 100).toFixed(2)
+                        ? formatZ(zMin + (range * pctMin) / 100)
                         : `${pctMin}%`;
                       const displayMax = hasValidBounds
-                        ? (zMin + (range * pctMax) / 100).toFixed(2)
+                        ? formatZ(zMin + (range * pctMax) / 100)
                         : `${pctMax}%`;
 
                       return (
@@ -1298,8 +1303,8 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                           />
                           {hasValidBounds && (
                             <div className="flex justify-between text-[10px] text-gray-400 mt-1 pb-1">
-                              <span>Data min: {zMin.toFixed(2)}</span>
-                              <span>Data max: {zMax.toFixed(2)}</span>
+                              <span>Data min: {formatZ(zMin)}</span>
+                              <span>Data max: {formatZ(zMax)}</span>
                             </div>
                           )}
                         </>

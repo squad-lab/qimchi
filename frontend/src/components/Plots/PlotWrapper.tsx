@@ -40,6 +40,7 @@ import type { PlotPersistentState } from "../../components/interfaces";
 import usePainterStore from "../../stores/painterStore";
 import Tooltip from "../Tooltip";
 import { useShortcut } from "../../hooks/useGlobalShortcuts";
+import { SI_PREFIXES } from "../../utils/engineeringFormat";
 
 type PlotlyJSON = {
   data: Data[];
@@ -79,28 +80,6 @@ const createColorbarTitleAnnotation = (text: string) => ({
   showarrow: false,
   font: { size: colorbarTitleFontSize(text) },
 });
-
-// Mirrors api/units.py::_PREFIXES. Used for tick labels on a dimensionless
-// axis, where there is no unit string to attach the prefix to.
-const SI_PREFIXES: Record<number, string> = {
-  24: "Y",
-  21: "Z",
-  18: "E",
-  15: "P",
-  12: "T",
-  9: "G",
-  6: "M",
-  3: "k",
-  0: "",
-  "-3": "m",
-  "-6": "µ",
-  "-9": "n",
-  "-12": "p",
-  "-15": "f",
-  "-18": "a",
-  "-21": "z",
-  "-24": "y",
-};
 
 const normalizeMixedLatexTitle = (value: unknown): unknown => {
   if (typeof value !== "string") return value;

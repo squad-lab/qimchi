@@ -576,14 +576,18 @@ def _axis_unit_layout_definition(definition: Mapping[str, Any]) -> dict[str, Any
     parsed = parse_unit(normalized["unit"])
     enriched: dict[str, Any] = dict(normalized)
     enriched["engineering_scale"] = parsed.scale
+    # Plain-text forms are for UI that cannot typeset TeX, such as slider labels.
+    enriched["unit_text"] = render_unit(parsed)
 
     if parsed.opaque or parsed.is_dimensionless:
         enriched["engineering_units"] = {}
+        enriched["engineering_units_text"] = {}
         enriched["engineering_titles"] = {}
         return enriched
 
     unprefixed = _format_factors(parsed.factor_map, latex=True)
     units: dict[str, str] = {}
+    units_text: dict[str, str] = {}
     titles: dict[str, str] = {}
     for _prefix, exponent in _PREFIXES:
         latex_unit = _format_factors(
@@ -597,11 +601,15 @@ def _axis_unit_layout_definition(definition: Mapping[str, Any]) -> dict[str, Any
         if exponent and latex_unit == unprefixed:
             continue
         units[str(exponent)] = latex_unit
+        units_text[str(exponent)] = _format_factors(
+            parsed.factor_map, prefix_exponent=exponent
+        )
         titles[str(exponent)] = _axis_title_with_rendered_unit(
             normalized["label"],
             latex_unit,
         )
     enriched["engineering_units"] = units
+    enriched["engineering_units_text"] = units_text
     enriched["engineering_titles"] = titles
     return enriched
 

@@ -210,3 +210,20 @@ def test_filtering_a_heatmap_widens_its_gutter():
     )
 
     assert figure.layout.margin.r > before
+
+
+def test_unit_metadata_carries_plain_text_for_non_tex_labels():
+    current = units.unit_layout_meta(z={"label": "I", "unit": "A"})["qimchi_units"]["z"]
+    assert current["unit_text"] == "A"
+    assert current["engineering_units_text"]["-12"] == "pA"
+
+    inverse = units.unit_layout_meta(z={"label": "g", "unit": "1/V"})["qimchi_units"][
+        "z"
+    ]
+    assert inverse["engineering_units_text"]["3"] == "1/mV"
+
+    opaque = units.unit_layout_meta(z={"label": "S21", "unit": "dB"})["qimchi_units"][
+        "z"
+    ]
+    assert opaque["unit_text"] == "dB"
+    assert opaque["engineering_units_text"] == {}
