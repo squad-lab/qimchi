@@ -437,7 +437,7 @@ class _Api:
         """
         Open the debug log in a terminal that follows it live (best-effort).
 
-        Spawns a SYSTEM terminal (powershell / tail / Terminal.app), never the
+        Spawns a SYSTEM terminal (powershell / less / Terminal.app), never the
         frozen exe, so there is no re-launch/fork-bomb risk. Returns False if no
         terminal could be launched.
 
@@ -453,17 +453,19 @@ class _Api:
                         "powershell",
                         "-NoExit",
                         "-Command",
-                        f"Get-Content -LiteralPath '{log}' -Wait",
+                        _windows_log_follow_command(log),
                     ],
                     creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
                 )
                 return True
+            follow = _unix_log_follow_command(log)
             if sys.platform == "darwin":
+                script = follow.replace("\\", "\\\\").replace('"', '\\"')
                 subprocess.Popen(
                     [
                         "osascript",
                         "-e",
-                        f'tell application "Terminal" to do script "tail -f \\"{log}\\""',
+                        f'tell application "Terminal" to do script "{script}"',
                         "-e",
                         'tell application "Terminal" to activate',
                     ]
@@ -479,15 +481,41 @@ class _Api:
             ):
                 if shutil.which(term):
                     if term in ("gnome-terminal", "xfce4-terminal"):
-                        subprocess.Popen([term, "--", "bash", "-c", f"tail -f '{log}'"])
-                    elif term == "konsole":
-                        subprocess.Popen([term, "-e", "bash", "-c", f"tail -f '{log}'"])
+                        subprocess.Popen([term, "--", "sh", "-c", follow])
                     else:
-                        subprocess.Popen([term, "-e", f"tail -f '{log}'"])
+                        subprocess.Popen([term, "-e", "sh", "-c", follow])
                     return True
             return False
         except Exception:
             return False
+
+
+# Enough recent history for context without dumping a log that can run to
+# many megabytes.
+LOG_FOLLOW_TAIL_LINES = 200
+
+
+def _windows_log_follow_command(log: str) -> str:
+    """PowerShell that shows the end of the log and keeps printing new lines."""
+    quoted = "'" + log.replace("'", "''") + "'"
+    return f"Get-Content -LiteralPath {quoted} -Tail {LOG_FOLLOW_TAIL_LINES} -Wait"
+
+
+def _unix_log_follow_command(log: str) -> str:
+    """
+    Shell that follows the log in less, falling back to tail.
+
+    less +F opens at the end and follows new lines like tail -f; Ctrl+C stops
+    following so the whole log can be scrolled and searched, F resumes, q quits.
+
+    """
+    import shlex
+
+    quoted = shlex.quote(log)
+    return (
+        f"if command -v less >/dev/null 2>&1; then less +F {quoted}; "
+        f"else tail -n {LOG_FOLLOW_TAIL_LINES} -f {quoted}; fi"
+    )
 
 
 def _update_asset_suffix(asset_name: str, asset_url: str, platform: str) -> str:

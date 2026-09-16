@@ -84,3 +84,18 @@ def test_other_process_failures_are_only_logged(launcher, kind):
         f"[webview2] process failed: kind={kind}, Reason=Crashed, ExitCode=-1, "
         "ProcessDescription="
     ]
+
+
+def test_windows_log_terminal_shows_only_the_end_and_follows(launcher):
+    command = launcher._windows_log_follow_command(r"C:\Users\o'neil\.qimchi\debug.log")
+
+    assert command == (
+        r"Get-Content -LiteralPath 'C:\Users\o''neil\.qimchi\debug.log' -Tail 200 -Wait"
+    )
+
+
+def test_unix_log_terminal_uses_less_and_falls_back_to_tail(launcher):
+    command = launcher._unix_log_follow_command("/home/a b/.qimchi/debug.log")
+
+    assert "less +F '/home/a b/.qimchi/debug.log'" in command
+    assert "tail -n 200 -f '/home/a b/.qimchi/debug.log'" in command
