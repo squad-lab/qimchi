@@ -98,7 +98,7 @@ const DualThumbSlider: React.FC<DualThumbSliderProps> = ({
 
       {displayMin && (
         <div
-          className="absolute text-[10px] font-medium text-gray-700 bg-white/90 border border-gray-200 px-1 py-0.5 rounded shadow-sm whitespace-nowrap z-50 pointer-events-none"
+          className="absolute text-[10px] font-medium text-gray-700 bg-white/90 dark:bg-gray-800/90 border border-gray-200 px-1 py-0.5 rounded shadow-sm whitespace-nowrap z-50 pointer-events-none"
           style={{
             left: `${getPercent(minVal)}%`,
             top: "-1.5rem",
@@ -111,7 +111,7 @@ const DualThumbSlider: React.FC<DualThumbSliderProps> = ({
 
       {displayMax && (
         <div
-          className="absolute text-[10px] font-medium text-gray-700 bg-white/90 border border-gray-200 px-1 py-0.5 rounded shadow-sm whitespace-nowrap z-50 pointer-events-none"
+          className="absolute text-[10px] font-medium text-gray-700 bg-white/90 dark:bg-gray-800/90 border border-gray-200 px-1 py-0.5 rounded shadow-sm whitespace-nowrap z-50 pointer-events-none"
           style={{
             left: `${getPercent(maxVal)}%`,
             top: "-1.5rem",
