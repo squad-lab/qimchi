@@ -25,7 +25,7 @@ import type { AxisType, Dash } from "plotly.js";
 // Local imports
 import plotlyColorscales from "./plotly_colorscales_plotlyjs.json";
 import { applyThemeToLayout, lightTheme } from "./themes";
-import { PlotAPI } from "../../services/plotAPI";
+import { PlotAPI, type TransformPlotRequest } from "../../services/plotAPI";
 import { PROD_BACKEND_URL } from "../../config";
 import "./PlotWrapper.css";
 import PlotComponent from "./Plot";
@@ -48,6 +48,8 @@ type PlotlyJSON = {
 };
 
 type PlotLiveStatus = "live" | "paused" | "error" | "completed";
+
+class SupersededTransformError extends Error {}
 
 const COLORBAR_TITLE_ANNOTATION_NAME = "qimchi-colorbar-title";
 
@@ -130,6 +132,10 @@ type Props = {
   onTogglePinned?: (pinned: boolean) => void;
   plotConfig?: PlotConfiguration;
   onUpdateConfig?: (config: Partial<PlotConfiguration>) => void;
+  /** Called when a filter, slider, swap or reset starts changing the plot's config. */
+  onTransformStart?: () => void;
+  /** Called when such an operation ends without updating the config. */
+  onTransformEnd?: () => void;
   onFiltersModalOpenChange?: (isOpen: boolean) => void;
   availableSliders?: Record<string, SliderConfig>; // Sliders from backend
   onAddPlot?: (config: Omit<PlotConfiguration, "id">) => void;
@@ -292,6 +298,8 @@ const PlotWrapper: React.FC<Props> = ({
   onTogglePinned,
   plotConfig,
   onUpdateConfig,
+  onTransformStart,
+  onTransformEnd,
   onFiltersModalOpenChange,
   availableSliders = {},
   onAddPlot,
@@ -659,7 +667,7 @@ const PlotWrapper: React.FC<Props> = ({
   const [bgCorrMode, setBgCorrMode] = useState<
     "constant" | "linear" | "row_mean" | "col_mean" | "plane"
   >("constant");
-  const [plotKey, setPlotKey] = useState(0);
+  const [viewResetCount, setViewResetCount] = useState(0);
   const plotContainerRef = useRef<HTMLDivElement>(null);
 
   // Hover states for modal buttons to show paint overlay when Shift is held
@@ -2031,9 +2039,13 @@ const PlotWrapper: React.FC<Props> = ({
   // Throttled onUpdateConfig to prevent excessive backend calls
   const throttledUpdateConfig = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const configUpdateScheduledRef = useRef(false);
+  const transformSequenceRef = useRef(0);
+
   const handleUpdateConfig = useCallback(
     (config: Partial<PlotConfiguration>) => {
       if (!onUpdateConfig) return;
+      configUpdateScheduledRef.current = true;
 
       // Clear existing timeout
       if (throttledUpdateConfig.current) {
@@ -2131,6 +2143,16 @@ const PlotWrapper: React.FC<Props> = ({
 
       const { filters, sliders, swapAxesOverride } = updateRequest;
       const shouldSwapAxes = plotType === "heatmap" && (swapAxesOverride ?? areAxesSwapped);
+      // When filters are toggled in quick succession only the latest result may
+      // land: an older response arriving last would put the plot back a step.
+      const sequence = ++transformSequenceRef.current;
+      const transformLatest = async (request: TransformPlotRequest) => {
+        const result = await PlotAPI.transformPlot(request);
+        if (sequence !== transformSequenceRef.current) throw new SupersededTransformError();
+        return result;
+      };
+      configUpdateScheduledRef.current = false;
+      onTransformStart?.();
 
       // Always use local filter application to avoid plot reload and modal closure
       // This decouples filter application from plot refresh
@@ -2194,7 +2216,7 @@ const PlotWrapper: React.FC<Props> = ({
             }
 
             console.log("[PlotWrapper] Starting slider API call");
-            const result = await PlotAPI.transformPlot({
+            const result = await transformLatest({
               plot_ref: activePlotRef,
               filters_order: filtersOrder,
               filters_opts: filtersOpts,
@@ -2235,22 +2257,18 @@ const PlotWrapper: React.FC<Props> = ({
             }, 100);
             lastAppliedSliders.current = { ...appliedSliderConfig };
 
-            // Delay backend config update to separate UI responsiveness from persistence
-            setTimeout(() => {
-              if (handleUpdateConfig) {
-                handleUpdateConfig({
-                  filters_order: filtersOrder,
-                  filters_opts: filtersOpts,
-                  slider: appliedSliderConfig,
-                });
-              }
-            }, 200);
+            handleUpdateConfig({
+              filters_order: filtersOrder,
+              filters_opts: filtersOpts,
+              slider: appliedSliderConfig,
+            });
             if (result.warnings && result.warnings.length > 0) {
               result.warnings.forEach((warn) => showToast(warn, "warning"));
             } else {
               showToast("Sliders applied successfully", "success");
             }
           } catch (error) {
+            if (error instanceof SupersededTransformError) throw error;
             console.error("Error applying sliders:", error);
             showToast("Failed to apply sliders", "error");
           }
@@ -2268,7 +2286,7 @@ const PlotWrapper: React.FC<Props> = ({
                   throw new Error("Plot reference not available for transform operation");
                 }
 
-                const result = await PlotAPI.transformPlot({
+                const result = await transformLatest({
                   plot_ref: activePlotRef,
                   filters_order: [],
                   filters_opts: {},
@@ -2309,6 +2327,7 @@ const PlotWrapper: React.FC<Props> = ({
 
                 showToast("Filters reset, sliders maintained", "success");
               } catch (error) {
+                if (error instanceof SupersededTransformError) throw error;
                 console.error("Error applying sliders after filter reset:", error);
                 showToast("Failed to apply sliders after filter reset", "error");
                 // Clear loading state on error
@@ -2322,7 +2341,7 @@ const PlotWrapper: React.FC<Props> = ({
                   throw new Error("Plot reference not available for transform operation");
                 }
 
-                const result = await PlotAPI.transformPlot({
+                const result = await transformLatest({
                   plot_ref: activePlotRef,
                   filters_order: [],
                   filters_opts: {},
@@ -2378,16 +2397,11 @@ const PlotWrapper: React.FC<Props> = ({
               showToast("Filters cleared", "success");
             }
 
-            // Delay backend config update
-            setTimeout(() => {
-              if (handleUpdateConfig) {
-                handleUpdateConfig({
-                  filters_order: [],
-                  filters_opts: {},
-                  slider: sliders && Object.keys(sliders).length > 0 ? sliders : {},
-                });
-              }
-            }, 200);
+            handleUpdateConfig({
+              filters_order: [],
+              filters_opts: {},
+              slider: sliders && Object.keys(sliders).length > 0 ? sliders : {},
+            });
           } else {
             // Filters changed, sliders did not.
             if (!activePlotRef) {
@@ -2395,7 +2409,7 @@ const PlotWrapper: React.FC<Props> = ({
             }
 
             console.log("[PlotWrapper] Starting filter API call");
-            const result = await PlotAPI.transformPlot({
+            const result = await transformLatest({
               plot_ref: activePlotRef,
               filters_order: filtersOrder,
               filters_opts: filtersOpts,
@@ -2421,16 +2435,11 @@ const PlotWrapper: React.FC<Props> = ({
               result.warnings.forEach((warn) => showToast(warn, "warning"));
             }
 
-            // Delay backend config update
-            setTimeout(() => {
-              if (handleUpdateConfig) {
-                handleUpdateConfig({
-                  filters_order: filtersOrder,
-                  filters_opts: filtersOpts,
-                  slider: {},
-                });
-              }
-            }, 200);
+            handleUpdateConfig({
+              filters_order: filtersOrder,
+              filters_opts: filtersOpts,
+              slider: {},
+            });
           }
         }
 
@@ -2454,6 +2463,7 @@ const PlotWrapper: React.FC<Props> = ({
           setIsApplyingFilters(false);
         }, 100);
       } catch (error) {
+        if (error instanceof SupersededTransformError) return;
         console.error("Error applying filters:", error);
         showToast(
           `Failed to apply filters: ${error instanceof Error ? error.message : "Unknown error"}`,
@@ -2466,6 +2476,9 @@ const PlotWrapper: React.FC<Props> = ({
         setIsApplyingFilters(false);
       }
       // Note: setIsApplyingFilters(false) is now handled in setTimeout for success cases
+      if (sequence === transformSequenceRef.current && !configUpdateScheduledRef.current) {
+        onTransformEnd?.();
+      }
     },
     [
       plotConfig,
@@ -2480,15 +2493,23 @@ const PlotWrapper: React.FC<Props> = ({
       applyAppearanceSettings,
       activePlotRef,
       areAxesSwapped,
+      onTransformStart,
+      onTransformEnd,
     ],
   );
+
+  // A change made while another is still being applied waits here. Only the
+  // latest one is kept, since each carries the full filter and slider state.
+  const queuedFiltersRef = useRef<{
+    filters: AppliedFilter[];
+    sliders?: Record<string, SliderConfig>;
+  } | null>(null);
 
   // Simplified filter/slider handler with smart comparison to prevent unnecessary operations
   const handleFiltersApply = useCallback(
     async (filters: AppliedFilter[], sliders?: Record<string, SliderConfig>) => {
-      // Prevent overlapping operations
       if (isApplyingFilters) {
-        // console.log("[PlotWrapper] Operation already in progress, skipping");
+        queuedFiltersRef.current = { filters, sliders };
         return;
       }
 
@@ -2505,6 +2526,15 @@ const PlotWrapper: React.FC<Props> = ({
     },
     [executeFiltersApply, isApplyingFilters, filtersOrSlidersChanged],
   );
+
+  // Runs after the render that clears isApplyingFilters, so the comparison in
+  // handleFiltersApply sees the state the previous operation left behind.
+  useEffect(() => {
+    const queued = queuedFiltersRef.current;
+    if (isApplyingFilters || !queued) return;
+    queuedFiltersRef.current = null;
+    handleFiltersApply(queued.filters, queued.sliders);
+  }, [isApplyingFilters, handleFiltersApply]);
 
   // Function to update the plot's data source without recreating the plot component
   const updateDataSource = useCallback(
@@ -2868,6 +2898,11 @@ const PlotWrapper: React.FC<Props> = ({
 
   // Reset handler to clear all filters and appearance modifications
   const handleReset = async () => {
+    // Invalidate any filter result still in flight so it cannot land after the reset.
+    transformSequenceRef.current += 1;
+    queuedFiltersRef.current = null;
+    configUpdateScheduledRef.current = false;
+    onTransformStart?.();
     try {
       setIsApplyingFilters(true);
       setAreAxesSwapped(false);
@@ -2880,8 +2915,8 @@ const PlotWrapper: React.FC<Props> = ({
       setSliderConfig({});
       lastAppliedSliders.current = {};
 
-      // Increment plot key to force Plotly to reset internal state (relayout, etc.)
-      setPlotKey((prev) => prev + 1);
+      // Resets zoom and pan through uirevision; remounting the plot would flash it blank.
+      setViewResetCount((prev) => prev + 1);
 
       // Call backend to get a truly fresh plot
       if (plotConfig?.fpath) {
@@ -2936,6 +2971,7 @@ const PlotWrapper: React.FC<Props> = ({
       showToast("Failed to fully reset plot", "error");
     } finally {
       setIsApplyingFilters(false);
+      if (!configUpdateScheduledRef.current) onTransformEnd?.();
     }
   };
 
@@ -3096,7 +3132,6 @@ const PlotWrapper: React.FC<Props> = ({
         }),
         layout: {
           ...basePlot.layout,
-          uirevision: "bg-corr", // Keep camera constant across point selection
           scene: (basePlot.layout as any).scene || {
             aspectmode: "cube",
             dragmode: "turntable",
@@ -3104,15 +3139,6 @@ const PlotWrapper: React.FC<Props> = ({
               eye: { x: 1.5, y: 1.5, z: 1.5 },
             },
           },
-        },
-      };
-    } else if (isBGCorrActive) {
-      // Still set uirevision for 2D mode to preserve zoom
-      basePlot = {
-        ...basePlot,
-        layout: {
-          ...basePlot.layout,
-          uirevision: "bg-corr",
         },
       };
     }
@@ -3439,11 +3465,32 @@ const PlotWrapper: React.FC<Props> = ({
     showToast,
   ]);
 
+  // A stable uirevision keeps the user's zoom when a new figure arrives after
+  // they moved the view (a slow filter result, a live refresh). It changes only
+  // when the old view stops making sense: swapped axes or a new axis type.
+  const uiRevision = [
+    plotConfig?.id,
+    plotConfig?.fpath,
+    areAxesSwapped,
+    appearanceSettings.x.maj.type,
+    appearanceSettings.y.maj.type,
+    viewResetCount,
+  ].join("|");
+  const displayedPlotJson = useMemo(() => {
+    const plot = isBGCorrActive ? plotWithBGMarkers : customizedPlotJson;
+    return { ...plot, layout: { ...plot.layout, uirevision: uiRevision } };
+  }, [isBGCorrActive, plotWithBGMarkers, customizedPlotJson, uiRevision]);
+
   // Maximized puts the measurement name in its own header bar, so the Plotly
   // title would say it twice and keep the top margin it was given for it.
   // Non-maximized cards have no header, so they keep the title.
   const maximizedPlotJson = useMemo(() => {
-    if (!isMaximized) return plotWithLineCutGuide;
+    if (!isMaximized) {
+      return {
+        ...plotWithLineCutGuide,
+        layout: { ...plotWithLineCutGuide.layout, uirevision: uiRevision },
+      };
+    }
 
     const layout = { ...(plotWithLineCutGuide.layout ?? {}) } as Record<string, unknown>;
     delete layout.title;
@@ -3454,8 +3501,9 @@ const PlotWrapper: React.FC<Props> = ({
       layout.margin = { ...margin, t: 16 };
     }
 
+    layout.uirevision = uiRevision;
     return { ...plotWithLineCutGuide, layout } as typeof plotWithLineCutGuide;
-  }, [isMaximized, plotWithLineCutGuide]);
+  }, [isMaximized, plotWithLineCutGuide, uiRevision]);
 
   // When maximized, render as a modal overlay
   if (isMaximized) {
@@ -3587,7 +3635,6 @@ const PlotWrapper: React.FC<Props> = ({
                 </div>
 
                 <PlotComponent
-                  key={plotKey}
                   plotJson={maximizedPlotJson}
                   onRelayout={handleRelayout}
                   onHover={handlePlotHover}
@@ -3831,8 +3878,7 @@ const PlotWrapper: React.FC<Props> = ({
             </div>
 
             <PlotComponent
-              key={plotKey}
-              plotJson={isBGCorrActive ? plotWithBGMarkers : customizedPlotJson}
+              plotJson={displayedPlotJson}
               onRelayout={handleRelayout}
               onHover={handlePlotHover}
               onClick={

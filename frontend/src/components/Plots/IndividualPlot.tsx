@@ -70,6 +70,11 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
   // consecutive non-live responses before marking the measurement completed.
   const consecutiveNonLiveCount = useRef(0);
   const CONSECUTIVE_NON_LIVE_THRESHOLD = 10;
+  // A live poll sends the config it started with, which is stale while a filter,
+  // swap or reset is being applied. Hold polls until the new config arrives, and
+  // drop any response that started before it, so the plot never flips back.
+  const transformPending = useRef(false);
+  const configGeneration = useRef(0);
 
   const plotStatus: PlotLiveStatus = useMemo(() => {
     if (error) {
@@ -86,13 +91,31 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
   // Keep ref in sync with state
   useEffect(() => {
     currentConfigRef.current = currentConfig;
+    configGeneration.current += 1;
+    transformPending.current = false;
   }, [currentConfig]);
+
+  const handleTransformStart = useCallback(() => {
+    transformPending.current = true;
+    configGeneration.current += 1;
+  }, []);
+
+  const handleTransformEnd = useCallback(() => {
+    transformPending.current = false;
+  }, []);
 
   const createPlot = useCallback(
     async (configToUse?: PlotConfiguration, options: CreatePlotOptions = {}) => {
       if (options.skipIfPending && fetchInFlight.current) {
         return;
       }
+      if (options.silent && transformPending.current) {
+        return;
+      }
+      // Only background refreshes are dropped; an explicit request always lands.
+      const isStale = (generation: number) =>
+        options.silent === true && generation !== configGeneration.current;
+      const generation = configGeneration.current;
 
       fetchInFlight.current = true;
 
@@ -115,6 +138,9 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         };
 
         const response = await PlotAPI.createPlots(request);
+        if (isStale(generation)) {
+          return;
+        }
 
         if (response.success && response.plots.length > 0) {
           // Take the first plot from the response
@@ -205,9 +231,6 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
             ...(clonedPlotJson.layout || {}),
             // Ensure Plotly.react sees a revision bump even if data arrays compare equal
             datarevision: Date.now(),
-            // Keep uirevision stable so Plotly preserves the user's zoom/pan state
-            // across live refresh cycles. Changing it would reset zoom every 500 ms.
-            uirevision: currentConfigRef.current.fpath,
           };
           setPlotJson(clonedPlotJson);
           setError(null);
@@ -234,6 +257,9 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
           }
         }
       } catch (err) {
+        if (isStale(generation)) {
+          return;
+        }
         let errorMessage = "Unknown error occurred";
 
         if (err instanceof Error) {
@@ -468,6 +494,8 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         onTogglePinned={onSetPinned ? (pinned) => onSetPinned(config.id, pinned) : undefined}
         plotConfig={currentConfig}
         onUpdateConfig={handleConfigUpdate}
+        onTransformStart={handleTransformStart}
+        onTransformEnd={handleTransformEnd}
         onFiltersModalOpenChange={setIsFiltersModalOpen}
         availableSliders={availableSliders}
         onAddPlot={onAddPlot}
