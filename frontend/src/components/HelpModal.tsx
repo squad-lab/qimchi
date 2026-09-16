@@ -597,11 +597,11 @@ const ViewerHelp = memo(() => (
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>Send to Notes (N):</strong> Export current plot image to Notes
+          <strong>Export → Notes (N):</strong> Export current plot image to Notes
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>Export Images (E):</strong> Download plot as PNG/SVG
+          <strong>Export → Disk (E):</strong> Save the plot as PNG/SVG
         </li>
       </ul>
     </div>
@@ -634,7 +634,8 @@ const ViewerHelp = memo(() => (
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Use the 33 / 50 / 66 / 100 buttons to set plot width for all plots
+          Use the 33 / 50 / 66 / 100 buttons to set plot width for all plots, or a plot&apos;s own
+          width button (↔) for that plot alone
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
@@ -680,7 +681,7 @@ const NotesHelp = memo(() => (
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Send plot images from the Viewer to Notes via the "Send to Notes" (N) button
+          Send plot images from the Viewer to Notes via a plot&apos;s Export → Notes (N)
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />

@@ -17,6 +17,8 @@ import {
   Split,
   Pin,
   PinOff,
+  Download,
+  MoveHorizontal,
 } from "lucide-react";
 
 import { Data, Layout, Config } from "plotly.js";
@@ -48,6 +50,8 @@ import usePainterStore from "../../stores/painterStore";
 import Tooltip from "../Tooltip";
 import { useShortcut } from "../../hooks/useGlobalShortcuts";
 import { filterLabel } from "../../utils/filterNames";
+import RibbonFlyout from "./RibbonFlyout";
+import { PLOT_WIDTHS } from "../../settings/userSettings";
 import { SI_PREFIXES } from "../../utils/engineeringFormat";
 
 type PlotlyJSON = {
@@ -128,6 +132,7 @@ type Props = {
   onAddPlot?: (config: Omit<PlotConfiguration, "id">) => void;
   onSwapAxesChange?: (swapped: boolean) => void;
   measurementInfo?: AttrData;
+  widthPercent?: number;
 };
 
 // Helper function to get colorscale data from name
@@ -194,6 +199,7 @@ const PlotWrapper: React.FC<Props> = ({
   onAddPlot,
   onSwapAxesChange,
   measurementInfo,
+  widthPercent,
 }) => {
   const { showToast } = useToast();
 
@@ -3899,27 +3905,74 @@ const PlotWrapper: React.FC<Props> = ({
           {/* Control buttons at bottom */}
           <div className="flex flex-col gap-1 items-center">
             <div className="flex flex-col gap-1 items-center mt-1">
-              {/* Save as PNG, PDF & SVG on server */}
-              <Tooltip content="Export images" position="left">
-                <button
-                  onClick={handleSavePlotImages}
-                  className="qimchi-dark-hover-plain relative p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
-                  title="Export images"
-                >
-                  <ImageDown size={16} className="text-gray-600" />
-                </button>
-              </Tooltip>
+              {/* This plot's width; the Viewer's buttons set every plot's */}
+              <RibbonFlyout
+                label="Plot width"
+                icon={<MoveHorizontal size={16} className="text-gray-600" />}
+              >
+                {(close) =>
+                  PLOT_WIDTHS.map((percent) => (
+                    <button
+                      key={percent}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={widthPercent === percent}
+                      aria-label={`${percent}% width (this plot)`}
+                      onClick={() => {
+                        dispatchPlotWidthPreset(percent);
+                        close();
+                      }}
+                      className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                        widthPercent === percent
+                          ? "bg-blue-100 text-blue-700"
+                          : "qimchi-dark-hover-plain text-gray-700 hover:bg-gray-100"
+                      }`}
+                    >
+                      {percent}
+                    </button>
+                  ))
+                }
+              </RibbonFlyout>
 
-              {/* Send to Notes - saves light/dark PNG and appends markdown link */}
-              <Tooltip content="Send to Notes" position="left">
-                <button
-                  onClick={handleSendToNotes}
-                  className="qimchi-dark-hover-plain relative p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
-                  title="Send to Notes"
-                >
-                  <ImagePlus size={16} className="text-gray-600" />
-                </button>
-              </Tooltip>
+              {/* Export: images to disk, or into this measurement's notes */}
+              <RibbonFlyout label="Export" icon={<Download size={16} className="text-gray-600" />}>
+                {(close) => (
+                  <>
+                    <Tooltip content="Export images" position="top">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          close();
+                          void handleSavePlotImages();
+                        }}
+                        className="qimchi-dark-hover-plain flex items-center gap-1 rounded px-1.5 py-1 hover:bg-gray-100"
+                        title="Export images"
+                        aria-label="Export images"
+                      >
+                        <ImageDown size={16} className="text-gray-600" />
+                        <span className="text-[11px] font-medium text-gray-700">Disk</span>
+                      </button>
+                    </Tooltip>
+                    <Tooltip content="Send to Notes" position="top">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          close();
+                          void handleSendToNotes();
+                        }}
+                        className="qimchi-dark-hover-plain flex items-center gap-1 rounded px-1.5 py-1 hover:bg-gray-100"
+                        title="Send to Notes"
+                        aria-label="Send to Notes"
+                      >
+                        <ImagePlus size={16} className="text-gray-600" />
+                        <span className="text-[11px] font-medium text-gray-700">Notes</span>
+                      </button>
+                    </Tooltip>
+                  </>
+                )}
+              </RibbonFlyout>
 
               {/* Appearance Settings */}
               <Tooltip

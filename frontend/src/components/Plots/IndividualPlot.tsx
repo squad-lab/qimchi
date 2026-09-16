@@ -31,6 +31,8 @@ interface IndividualPlotProps {
   onSetPinned?: (id: string, pinned: boolean) => void;
   onAddPlot?: (config: Omit<PlotConfiguration, "id">) => void;
   measurementInfo?: AttrData;
+  /** The plot's current share of the Viewer's width. */
+  widthPercent?: number;
 }
 
 type PlotLiveStatus = "live" | "paused" | "error" | "completed";
@@ -41,6 +43,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
   onSetPinned,
   onAddPlot,
   measurementInfo,
+  widthPercent,
 }) => {
   const [plotJson, setPlotJson] = useState<PlotlyJSON | null>(null);
   const [plotRef, setPlotRef] = useState<string | undefined>(undefined);
@@ -500,6 +503,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         availableSliders={availableSliders}
         onAddPlot={onAddPlot}
         measurementInfo={measurementInfo}
+        widthPercent={widthPercent}
         onSwapAxesChange={(swapped) => {
           isAxesSwappedRef.current = swapped;
         }}

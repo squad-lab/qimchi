@@ -114,6 +114,7 @@ const PlotContainer: React.FC<PlotContainerProps> = ({
                 onSetPinned={onSetPlotPinned}
                 onAddPlot={onAddPlot}
                 measurementInfo={measurementInfo}
+                widthPercent={pct}
               />
             </div>
           );

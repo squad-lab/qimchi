@@ -266,7 +266,8 @@ test("adds a measurement, creates default plots and clears the workspace", async
 
   expect(state.plotRequests.map((request) => request.postDataJSON().plotType)).toEqual(["HeatMap"]);
 
-  await page.getByTitle("Export images").first().click();
+  await page.getByRole("button", { name: "Export", exact: true }).first().click();
+  await page.getByRole("menuitem", { name: "Export images" }).click();
   await expect.poll(() => state.exportRequests.length).toBe(1);
   expect(state.exportRequests[0].postDataJSON().measurement_info).toMatchObject({
     Timestamp: "2025-04-09T19:25:34.311282",
