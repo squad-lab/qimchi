@@ -86,6 +86,10 @@
 - [Fix] Zoom and pan are kept when a filter result, a live refresh or a background-correction overlay arrives after you moved the view. On a live plot a slow filter used to snap the view back to full range.
 - [Fix] Resetting a live plot, or changing its filters, no longer makes it flick back to the previous state for a moment, and Reset no longer blanks the plot while it reloads.
 - [Fix] Changing a filter while an earlier change is still being applied is no longer ignored. The latest change is applied once the earlier one finishes, so the plot matches what the Filters panel shows.
+- [Fix] On the Windows desktop app, a crashed page now reloads by itself instead of leaving WebView2's "This page is having a problem" screen, and the crash is recorded in the debug log. If it crashes three times within five minutes, the page is left as it is.
+- [Fix] Live plots on the Windows desktop app keep refreshing at full speed while the window is minimized or behind other windows.
+- [Feature] The basket holds up to 50 measurements. Adding more shows a warning asking you to remove some first, instead of slowing the app down.
+- [Misc] The desktop app's "Open debug log" terminal no longer prints the whole log first. On Windows it shows the last 200 lines and keeps following; on macOS and Linux it opens in `less` following new lines (Ctrl+C to scroll and search, `F` to follow again, `q` to quit), or the last 200 lines with `tail` if `less` is missing.
 - [Misc] The filter summary on the filter button uses the names shown in the Filters panel, such as "Diff along Y", instead of internal identifiers.
 
 ### v0.6.2 - 2026-06-23
