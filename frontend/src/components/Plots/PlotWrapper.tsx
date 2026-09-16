@@ -40,6 +40,7 @@ import type { PlotPersistentState } from "../../components/interfaces";
 import usePainterStore from "../../stores/painterStore";
 import Tooltip from "../Tooltip";
 import { useShortcut } from "../../hooks/useGlobalShortcuts";
+import { filterLabel } from "../../utils/filterNames";
 import { SI_PREFIXES } from "../../utils/engineeringFormat";
 
 type PlotlyJSON = {
@@ -4055,7 +4056,7 @@ const PlotWrapper: React.FC<Props> = ({
                     : appliedFilters.length > 0
                       ? // Names only, in the order they are applied -- the full
                         // filter strings live in the modal.
-                        `Filters: ${appliedFilters.map((f) => f.name).join(" → ")}`
+                        `Filters: ${appliedFilters.map((f) => filterLabel(f.name)).join(" → ")}`
                       : "Apply Filters & Sliders"
                 }
                 position="left"
@@ -4075,7 +4076,7 @@ const PlotWrapper: React.FC<Props> = ({
                     shiftHeld && hoverFiltersBtn
                       ? "Paint Filters"
                       : appliedFilters.length > 0
-                        ? `Filters: ${appliedFilters.map((f) => f.name).join(" → ")}`
+                        ? `Filters: ${appliedFilters.map((f) => filterLabel(f.name)).join(" → ")}`
                         : "Apply Filters & Sliders"
                   }
                   disabled={isApplyingFilters}

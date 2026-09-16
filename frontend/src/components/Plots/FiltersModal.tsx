@@ -29,6 +29,7 @@ import type { FilterSettings, AppliedFilter, SliderConfig } from "../../componen
 import { ApplyButton, formatTitleWithUUID, getPlotTypeIcon, LogChartIcon } from "./UtilComponents";
 import Tooltip from "../Tooltip";
 import RadialDial from "./RadialDial";
+import { FILTER_LABELS } from "../../utils/filterNames";
 
 type BGCorrPoint = {
   x: number;
@@ -86,103 +87,103 @@ const FILTER_CATEGORIES = {
 // Filter definitions with icons and descriptions
 const FILTER_DEFINITIONS = {
   diff: {
-    name: "Differentiate",
+    name: FILTER_LABELS.diff,
     icon: ChartGantt,
     description: "Calculate the derivative of the data",
   },
   diff_y: {
-    name: "Diff along X",
+    name: FILTER_LABELS.diff_y,
     icon: ChartColumn,
     description: "Differentiate along X-axis",
   },
   diff_x: {
-    name: "Diff along Y",
+    name: FILTER_LABELS.diff_x,
     icon: ChartGantt,
     description: "Differentiate along Y-axis",
   },
   log_scale: {
-    name: "Log Scale",
+    name: FILTER_LABELS.log_scale,
     icon: LogChartIcon,
     description: "Apply logarithmic scaling to axis",
   },
   savgol: {
-    name: "Savitzky-Golay",
+    name: FILTER_LABELS.savgol,
     icon: ChartSpline,
     description: "Smooth data using Savitzky-Golay filter",
   },
   sma: {
-    name: "Moving Average",
+    name: FILTER_LABELS.sma,
     icon: ChartSpline,
     description: "Smooth data using simple moving average",
   },
   normalize: {
-    name: "Normalize",
+    name: FILTER_LABELS.normalize,
     icon: SlidersHorizontal,
     description: "Normalize data along specified axis",
   },
   gamma_corr: {
-    name: "Gamma Correction",
+    name: FILTER_LABELS.gamma_corr,
     icon: Contrast,
     description: "Apply gamma correction to enhance contrast",
   },
   log_corr: {
-    name: "Log Correction",
+    name: FILTER_LABELS.log_corr,
     icon: LogChartIcon,
     description: "Apply logarithmic correction",
   },
   sig_corr: {
-    name: "Sigmoid Correction",
+    name: FILTER_LABELS.sig_corr,
     icon: Gauge,
     description: "Apply sigmoid correction for enhanced dynamic range",
   },
   rescale_intensity: {
-    name: "Rescale Intensity",
+    name: FILTER_LABELS.rescale_intensity,
     icon: Sliders,
     description: "Rescale intensity values to full range",
   },
 
   polyfit: {
-    name: "Polynomial Fit",
+    name: FILTER_LABELS.polyfit,
     icon: ChartLine,
     description: "Fit a polynomial to the line plot",
   },
   transform: {
-    name: "Scale",
+    name: FILTER_LABELS.transform,
     icon: Ruler,
     description: "Scale or invert Y/Z data with smart unit handling",
   },
   rotate: {
-    name: "Rotate Heatmap",
+    name: FILTER_LABELS.rotate,
     icon: Rotate3D,
     description: "Rotate heatmap by specified angle. Use mouse/arrow keys to adjust angle.",
   },
   flip: {
-    name: "Flip Heatmap",
+    name: FILTER_LABELS.flip,
     icon: FlipHorizontal,
     description: "Invert the color scale by multiplying Z-axis data by -1",
   },
   bg_corr_constant: {
-    name: "BG Correction (Constant)",
+    name: FILTER_LABELS.bg_corr_constant,
     icon: Crosshair,
     description: "Subtract a constant offset baseline",
   },
   bg_corr_linear: {
-    name: "BG Correction (Linear)",
+    name: FILTER_LABELS.bg_corr_linear,
     icon: Crosshair,
     description: "Subtract a linear baseline",
   },
   bg_corr_row_mean: {
-    name: "BG Correction (Row Mean)",
+    name: FILTER_LABELS.bg_corr_row_mean,
     icon: Crosshair,
     description: "Subtract the mean of a selected row",
   },
   bg_corr_col_mean: {
-    name: "BG Correction (Col Mean)",
+    name: FILTER_LABELS.bg_corr_col_mean,
     icon: Crosshair,
     description: "Subtract the mean of a selected column",
   },
   bg_corr_plane: {
-    name: "BG Correction (Plane)",
+    name: FILTER_LABELS.bg_corr_plane,
     icon: Crosshair,
     description: "Subtract a plane defined by 3 points",
   },

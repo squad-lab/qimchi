@@ -136,6 +136,20 @@ test("a filter result still in flight when Reset is pressed is discarded", async
   }
 });
 
+test("names filters and labels the colour range in the data's units", async ({ page }) => {
+  const state = await mockLiveHeatmapApi(page);
+  state.transformResult = liveHeatmap.early;
+  await openLiveHeatmap(page);
+
+  await applyDiffAlongY(page);
+  await expect(page.locator("[title='Filters: Diff along Y']").first()).toBeAttached();
+
+  await page.getByTitle("Edit Appearance").first().click();
+  // The early frame spans 100-260 pA.
+  await expect(page.getByText("Data min: 100 pA")).toBeVisible();
+  await expect(page.getByText("Data max: 260 pA")).toBeVisible();
+});
+
 test("a filter changed while another is still loading is applied after it", async ({ page }) => {
   const state = await mockLiveHeatmapApi(page);
   let releaseTransform = () => {};
@@ -154,6 +168,11 @@ test("a filter changed while another is still loading is applied after it", asyn
 
   await expect.poll(() => state.transformRequests.length).toBe(2);
   expect([...state.transformRequests[1].filters_order].sort()).toEqual(["diff_x", "diff_y"]);
+  await page.getByRole("button", { name: "Close modal" }).first().click();
+  await expect(page.locator("[title^='Filters: ']").first()).toHaveAttribute(
+    "title",
+    /Diff along Y.*Diff along X|Diff along X.*Diff along Y/,
+  );
 });
 
 test("switching an axis between linear and log clears the zoom", async ({ page }) => {
