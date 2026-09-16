@@ -28,6 +28,8 @@ const inferSourceFromPath = (path: string): "memory" | "disk" => {
 interface IndividualPlotProps {
   config: PlotConfiguration;
   onRemove: (id: string) => void;
+  /** Move this plot by `offset` places, from the keyboard on its drag handle. */
+  onMoveBy?: (offset: number) => void;
   onSetPinned?: (id: string, pinned: boolean) => void;
   onAddPlot?: (config: Omit<PlotConfiguration, "id">) => void;
   measurementInfo?: AttrData;
@@ -40,6 +42,7 @@ type PlotLiveStatus = "live" | "paused" | "error" | "completed";
 const IndividualPlot: React.FC<IndividualPlotProps> = ({
   config,
   onRemove,
+  onMoveBy,
   onSetPinned,
   onAddPlot,
   measurementInfo,
@@ -494,6 +497,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         plotRef={plotRef}
         plotStatus={plotStatus}
         onClose={handleClose}
+        onMoveBy={onMoveBy}
         onTogglePinned={onSetPinned ? (pinned) => onSetPinned(config.id, pinned) : undefined}
         plotConfig={currentConfig}
         onUpdateConfig={handleConfigUpdate}

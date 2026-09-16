@@ -15,6 +15,8 @@ export interface UsePlotCollectionReturn {
    */
   addPlots: (configs: Omit<PlotConfiguration, "id">[]) => void;
   removePlot: (id: string) => void;
+  /** Move a plot to `toIndex` in the list without it. */
+  movePlot: (id: string, toIndex: number) => void;
   /** Pin/unpin a plot so Next/Prev leaves it on its own measurement. */
   setPlotPinned: (id: string, pinned: boolean) => void;
   clearPlots: () => void;
@@ -111,6 +113,17 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
 
   const removePlot = useCallback((id: string) => {
     setPlotConfigs((prev) => prev.filter((plot) => plot.id !== id));
+  }, []);
+
+  const movePlot = useCallback((id: string, toIndex: number) => {
+    setPlotConfigs((prev) => {
+      const plot = prev.find((candidate) => candidate.id === id);
+      if (!plot) return prev;
+      const rest = prev.filter((candidate) => candidate.id !== id);
+      const index = Math.max(0, Math.min(rest.length, toIndex));
+      if (prev[index] === plot) return prev;
+      return [...rest.slice(0, index), plot, ...rest.slice(index)];
+    });
   }, []);
 
   const setPlotPinned = useCallback((id: string, pinned: boolean) => {
@@ -219,6 +232,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
     addPlot,
     addPlots,
     removePlot,
+    movePlot,
     setPlotPinned,
     clearPlots,
     updatePlotDataSource,

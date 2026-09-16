@@ -85,3 +85,55 @@ test("the export button offers export to disk and to notes", async ({ page }) =>
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menu", { name: "Export" })).toHaveCount(0);
 });
+
+// Plot trace types and widths in the Viewer's order.
+const plotLayout = (page: Page) =>
+  page.evaluate(() =>
+    (Array.from(document.querySelectorAll(".js-plotly-plot")) as any[]).map((plot) => {
+      const card = plot.closest("[data-plot-id]") as HTMLElement;
+      return `${plot.data?.[0]?.type} ${card.style.maxWidth}`;
+    }),
+  );
+
+test("plots are rearranged by dragging their handle, and keep their own widths", async ({
+  page,
+}) => {
+  await openBothPlots(page);
+  await page.getByRole("button", { name: "Plot width", exact: true }).first().click();
+  await page.getByRole("menuitemradio", { name: "100% width (this plot)" }).click();
+  await expect
+    .poll(() => plotLayout(page))
+    .toEqual(["heatmap calc(100% - 8px)", "scatter calc(50% - 8px)"]);
+
+  // Moving a plot must not redraw it from scratch.
+  await page.evaluate(() =>
+    document.querySelectorAll<HTMLElement>(".js-plotly-plot").forEach((plot) => {
+      plot.dataset.beforeMove = "yes";
+    }),
+  );
+  const cards = page.locator("[data-plot-id]");
+  await cards.nth(1).hover();
+  const handle = cards.nth(1).getByRole("button", { name: "Move plot" });
+  const from = (await handle.boundingBox())!;
+  const onto = (await cards.nth(0).boundingBox())!;
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(onto.x + 40, onto.y + 80, { steps: 10 });
+  await expect(page.locator("[data-drop-side='before']")).toHaveCount(1);
+  await page.mouse.up();
+
+  await expect
+    .poll(() => plotLayout(page))
+    .toEqual(["scatter calc(50% - 8px)", "heatmap calc(100% - 8px)"]);
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(2);
+  expect(await cards.nth(0).evaluate((node) => node.style.transform)).toBe("");
+  await expect(page.locator(".js-plotly-plot[data-before-move='yes']")).toHaveCount(2);
+
+  // The handle also moves a plot from the keyboard.
+  await cards.nth(1).hover();
+  await cards.nth(1).getByRole("button", { name: "Move plot" }).focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect
+    .poll(() => plotLayout(page))
+    .toEqual(["heatmap calc(100% - 8px)", "scatter calc(50% - 8px)"]);
+});

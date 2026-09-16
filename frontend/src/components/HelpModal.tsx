@@ -607,6 +607,15 @@ const ViewerHelp = memo(() => (
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           <strong>Export → Disk (E):</strong> Save the plot as PNG/SVG
         </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          <strong>Width (↔):</strong> Set this plot&apos;s width to 33, 50, 66 or 100%
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          <strong>Move (grip handle):</strong> Drag onto another plot to rearrange, or use the arrow
+          keys while the handle is focused
+        </li>
       </ul>
     </div>
 
@@ -640,6 +649,11 @@ const ViewerHelp = memo(() => (
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
           Use the 33 / 50 / 66 / 100 buttons to set plot width for all plots, or a plot&apos;s own
           width button (↔) for that plot alone
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          Drag a plot&apos;s grip handle onto another plot to move it there, or focus the handle and
+          use the arrow keys. Plots keep their own widths when moved
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />

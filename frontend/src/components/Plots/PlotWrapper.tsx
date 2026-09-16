@@ -19,6 +19,7 @@ import {
   PinOff,
   Download,
   MoveHorizontal,
+  GripVertical,
 } from "lucide-react";
 
 import { Data, Layout, Config } from "plotly.js";
@@ -119,6 +120,8 @@ type Props = {
   plotRef?: string;
   plotStatus?: PlotLiveStatus;
   onClose?: () => void;
+  /** Shows a drag handle; arrow keys on it move the plot by one place. */
+  onMoveBy?: (offset: number) => void;
   /** Toggle whether this plot stays on its measurement during Next/Prev. */
   onTogglePinned?: (pinned: boolean) => void;
   plotConfig?: PlotConfiguration;
@@ -189,6 +192,7 @@ const PlotWrapper: React.FC<Props> = ({
   plotRef,
   plotStatus = "completed",
   onClose,
+  onMoveBy,
   onTogglePinned,
   plotConfig,
   onUpdateConfig,
@@ -3842,6 +3846,26 @@ const PlotWrapper: React.FC<Props> = ({
                     title="Close"
                   >
                     <X size={16} className="text-red-600" />
+                  </button>
+                </Tooltip>
+              )}
+
+              {onMoveBy && (
+                <Tooltip content="Drag to move" position="left">
+                  <button
+                    type="button"
+                    aria-label="Move plot"
+                    onKeyDown={(event) => {
+                      const offset = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[
+                        event.key
+                      ];
+                      if (!offset) return;
+                      event.preventDefault();
+                      onMoveBy(offset);
+                    }}
+                    className="plot-drag-handle qimchi-dark-hover-plain p-1.5 rounded hover:bg-gray-300 transition-colors cursor-grab active:cursor-grabbing touch-none"
+                  >
+                    <GripVertical size={16} className="text-gray-600" />
                   </button>
                 </Tooltip>
               )}

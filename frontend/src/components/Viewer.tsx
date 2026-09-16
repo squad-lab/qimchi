@@ -63,6 +63,7 @@ const Viewer = ({
     addPlot,
     addPlots,
     removePlot,
+    movePlot,
     setPlotPinned,
     clearPlots,
     updatePlotDataSource,
@@ -734,6 +735,7 @@ const Viewer = ({
                   <PlotContainer
                     plotConfigs={plotConfigs}
                     onRemovePlot={removePlot}
+                    onMovePlot={movePlot}
                     onSetPlotPinned={setPlotPinned}
                     onAddPlot={addPlot}
                     widthPercent={plotWidthPercent}
