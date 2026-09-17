@@ -113,7 +113,6 @@ def _open_log_file(path: str):
 
 def _app_version() -> str:
     """Running version: the build's tag, else package metadata ('unknown' if neither)."""
-    # Metadata carries only the base version, so rc.7 -> rc.8 would look unchanged.
     try:
         from api._build_version import BUILD_VERSION
 
@@ -344,6 +343,8 @@ class _Api:
 
     def __init__(self, log_fn) -> None:
         self._log = log_fn
+        # Underscored so pywebview does not expose the object itself to the page.
+        self._updates = _Updates(log_fn)
 
     def open_folder_dialog(self) -> str:
         """
@@ -389,83 +390,29 @@ class _Api:
         self._log(f"[settings] exported to {path}")
         return path
 
-    def apply_update(
-        self,
-        asset_url: str,
-        asset_name: str = "",
-        platform: str = "",
-        install_mode: str = "",
-    ) -> None:
-        """
-        Download the platform update asset and hand it off to the OS.
+    def update_status(self) -> dict:
+        """The update state the SPA shows: see _Updates.status."""
+        return self._updates.status()
 
-        Windows runs the Inno Setup installer silently, then closes the app.
-        macOS opens the downloaded DMG. Linux downloads the AppImage, marks it
-        executable, and opens the containing folder so the user can replace or
-        run it.
+    def check_for_updates(self) -> dict:
+        """Look for a newer release now, whatever the startup-check setting says."""
+        return self._updates.check()
 
-        Runs in a daemon thread so the UI stays responsive during download.
+    def download_update(self) -> dict:
+        """Start downloading the offered update in the background."""
+        return self._updates.download()
 
-        """
-        import threading
+    def install_update(self) -> dict:
+        """Install the downloaded update; the app closes to let it."""
+        return self._updates.install()
 
-        def _install() -> None:
-            import subprocess
+    def remind_update_at_next_launch(self) -> dict:
+        """Keep the downloaded update and ask again when Qimchi next starts."""
+        return self._updates.remind_at_next_launch()
 
-            self._log(f"[updater] downloading installer from {asset_url}")
-            try:
-                tmp = _download_update_asset(
-                    asset_url,
-                    asset_name=asset_name,
-                    platform=platform,
-                )
-            except Exception as exc:
-                self._log(f"[updater] download failed: {exc!r}")
-                return
-
-            self._log(f"[updater] downloaded update asset: {tmp}")
-            try:
-                if platform == "windows" or os.name == "nt":
-                    # DETACHED_PROCESS + CREATE_NEW_PROCESS_GROUP so the installer
-                    # keeps running after this process exits.
-                    flags = (
-                        subprocess.DETACHED_PROCESS
-                        | subprocess.CREATE_NEW_PROCESS_GROUP
-                    )
-                    self._log(f"[updater] launching installer: {tmp}")
-                    subprocess.Popen(
-                        [tmp, "/VERYSILENT", "/SUPPRESSMSGBOXES"],
-                        creationflags=flags,
-                        close_fds=True,
-                    )
-                    self._log("[updater] closing app for update...")
-                    import webview
-
-                    if webview.windows:
-                        webview.windows[0].destroy()
-                    return
-                if platform == "macos" or sys.platform == "darwin":
-                    self._log(f"[updater] opening downloaded DMG: {tmp}")
-                    subprocess.Popen(["open", tmp], close_fds=True)
-                    return
-                if platform == "linux" or sys.platform.startswith("linux"):
-                    if _try_replace_running_appimage(tmp, self._log):
-                        import webview
-
-                        if webview.windows:
-                            webview.windows[0].destroy()
-                        return
-                    target = _linux_update_download_path(asset_name, tmp)
-                    self._log(f"[updater] downloaded AppImage to: {target}")
-                    _open_containing_folder(target, self._log)
-                    return
-            except Exception as exc:
-                self._log(f"[updater] failed to apply update: {exc!r}")
-                return
-
-            _open_containing_folder(tmp, self._log)
-
-        threading.Thread(target=_install, daemon=True).start()
+    def dismiss_update_prompt(self) -> dict:
+        """Close the update dialog for this session."""
+        return self._updates.dismiss()
 
     def open_log_terminal(self) -> bool:
         """
@@ -552,39 +499,52 @@ def _unix_log_follow_command(log: str) -> str:
     )
 
 
-def _update_asset_suffix(asset_name: str, asset_url: str, platform: str) -> str:
-    lower = f"{asset_name} {asset_url}".lower()
-    if platform == "windows" or "qimchi-setup" in lower:
-        return "-qimchi-setup.exe"
-    if platform == "macos" or ".dmg" in lower:
-        return "-qimchi.dmg"
-    if platform == "linux" or ".appimage" in lower:
-        return "-qimchi.AppImage"
-    return "-qimchi-update"
+def _close_windows(log) -> None:
+    import webview
+
+    if not webview.windows:
+        log("[updater] no open window to close")
+        return
+    for window in list(webview.windows):
+        window.destroy()
 
 
-def _download_update_asset(asset_url: str, asset_name: str, platform: str) -> str:
-    """Download an update using only modules guaranteed in the frozen bundle."""
-    import tempfile
+def _download_update_asset(asset_url: str, destination: str, log, progress=None) -> str:
+    """
+    Download an update to ``destination``, using only modules the frozen bundle has.
 
+    The file appears under its final name only once complete, so a download cut
+    short is never mistaken for an installer.
+    """
+    partial = destination + ".part"
     request = Request(asset_url, headers={"User-Agent": "Qimchi-Updater"})
-    suffix = _update_asset_suffix(asset_name, asset_url, platform)
-    fd, tmp = tempfile.mkstemp(suffix=suffix)
     try:
-        with urlopen(request, timeout=180) as response, os.fdopen(fd, "wb") as target:
+        with urlopen(request, timeout=180) as response, open(partial, "wb") as target:
+            headers = getattr(response, "headers", None) or {}
+            total = int(headers.get("Content-Length") or 0)
+            final_url = getattr(response, "url", None) or asset_url
+            log(
+                f"[updater] HTTP {getattr(response, 'status', '?')} from {final_url}; "
+                f"{total or 'unknown'} bytes"
+            )
+            received, next_report = 0, 0.25
             while chunk := response.read(65536):
                 target.write(chunk)
+                received += len(chunk)
+                if total:
+                    if progress is not None:
+                        progress(received / total)
+                    if received / total >= next_report:
+                        log(f"[updater] downloaded {received * 100 // total}%")
+                        next_report += 0.25
+        os.replace(partial, destination)
     except Exception:
         try:
-            os.close(fd)
-        except OSError:
-            pass
-        try:
-            os.unlink(tmp)
+            os.unlink(partial)
         except OSError:
             pass
         raise
-    return tmp
+    return destination
 
 
 def _linux_update_download_path(asset_name: str, tmp: str) -> str:
@@ -595,7 +555,7 @@ def _linux_update_download_path(asset_name: str, tmp: str) -> str:
     name = asset_name if asset_name.lower().endswith(".appimage") else "qimchi.AppImage"
     safe_name = "".join(c for c in name if c.isalnum() or c in "._- ()").strip()
     target = os.path.join(downloads, safe_name or "qimchi.AppImage")
-    shutil.move(tmp, target)
+    shutil.copy2(tmp, target)
     os.chmod(target, 0o755)
     return target
 
@@ -651,6 +611,154 @@ def _open_containing_folder(path: str, log) -> None:
         log(f"[updater] failed to open update location: {exc!r}")
 
 
+def _asset_file_name(asset_url: str, platform: str) -> str:
+    """A safe local file name for a release asset, keeping its extension."""
+    from urllib.parse import unquote, urlparse
+
+    name = os.path.basename(unquote(urlparse(asset_url).path))
+    name = "".join(c for c in name if c.isalnum() or c in "._-")
+    if name:
+        return name
+    return {
+        "windows": "qimchi-setup.exe",
+        "macos": "qimchi.dmg",
+        "linux": "qimchi.AppImage",
+    }.get(platform, "qimchi-update")
+
+
+def _windows_install_after_exit_command(installer: str) -> list[str]:
+    """
+    A detached helper that installs once this Qimchi is really gone.
+
+    Setup cannot replace qimchi.exe while it runs, and it cannot reliably close
+    it either: Restart Manager refuses on some machines ("Permission Denied +
+    Session Mismatch"), and the export workers are windowless processes it
+    cannot ask to quit. Setup then answers its own "file in use" error with
+    Abort, which leaves the installation part-done. So the helper waits for
+    this process and its workers to exit, ends any straggler, and only then
+    runs Setup -- which starts Qimchi again (/QIMCHIUPDATE=1).
+    """
+    quoted = installer.replace("'", "''")
+    script = (
+        "$ErrorActionPreference='SilentlyContinue';"
+        f"Wait-Process -Id {os.getpid()} -Timeout 120;"
+        "Get-Process qimchi | Wait-Process -Timeout 60;"
+        "Get-Process qimchi | Stop-Process -Force;"
+        "Start-Sleep -Seconds 1;"
+        f"Start-Process -FilePath '{quoted}' -Wait -ArgumentList "
+        "'/SILENT','/SUPPRESSMSGBOXES','/CLOSEAPPLICATIONS',"
+        "'/FORCECLOSEAPPLICATIONS','/NORESTART','/QIMCHIUPDATE=1'"
+    )
+    return [
+        "powershell",
+        "-NoProfile",
+        "-NonInteractive",
+        "-WindowStyle",
+        "Hidden",
+        "-Command",
+        script,
+    ]
+
+
+def _install_marker_path(home: str | None = None) -> str:
+    return os.path.join(home or _qimchi_home(), "updates", "installing.json")
+
+
+def _mark_install_started(pid: int, tag: str, home: str | None = None) -> None:
+    """Record the running installer, so a launch during the install can wait."""
+    import json
+    import time
+
+    path = _install_marker_path(home)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({"pid": pid, "tag": tag, "started": time.time()}, fh)
+
+
+def _process_is_running(pid: int) -> bool:
+    if os.name == "nt":
+        import ctypes
+
+        process_query_limited_information = 0x1000
+        still_active = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            return bool(
+                kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+                and code.value == still_active
+            )
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _update_being_installed(home: str | None = None, is_running=None) -> str | None:
+    """
+    The tag an installer is putting in place right now, if any.
+
+    Opening Qimchi while its installer replaces files locks some of them, and
+    the installer then aborts part-way, leaving a mix of two versions that no
+    longer starts. A stale marker (installer gone, or over 30 minutes old) is
+    removed.
+    """
+    import json
+    import time
+
+    path = _install_marker_path(home)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            marker = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    running = (is_running or _process_is_running)(int(marker.get("pid", 0)))
+    if running and time.time() - float(marker.get("started", 0)) < 30 * 60:
+        return str(marker.get("tag") or "a new version")
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+    return None
+
+
+def _tell_user_update_in_progress(tag: str) -> None:
+    message = (
+        f"Qimchi is being updated to {tag}.\n\n"
+        "It will open by itself when the update has finished."
+    )
+    if os.name == "nt":
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(None, message, "Qimchi", 0x40)
+
+
+def _evaluate_js_detached(window, script: str, log) -> None:
+    """
+    Run page script without waiting on it from the calling thread.
+
+    pywebview's evaluate_js blocks until the page answers, with no timeout. If
+    the window is closing, that answer never comes, and a non-daemon thread
+    stuck there -- the thread webview.start(func=...) runs in, or one serving a
+    js_api call -- keeps the whole process alive after the window is gone.
+    """
+    import threading
+
+    def run() -> None:
+        try:
+            window.evaluate_js(script)
+        except Exception as exc:
+            log(f"[webview] page script failed: {exc!r}")
+
+    threading.Thread(target=run, name="qimchi-evaluate-js", daemon=True).start()
+
+
 def _exit_soon_after_close(window, log, grace_seconds: float = 10.0) -> None:
     """
     End the process shortly after the window closes, even if shutdown hangs.
@@ -671,147 +779,352 @@ def _exit_soon_after_close(window, log, grace_seconds: float = 10.0) -> None:
     window.events.closed += on_closed
 
 
-def _update_dialog_js(
-    tag: str,
-    current: str,
-    notes: str,
-    asset_url: str,
-    asset_name: str,
-    platform: str,
-    install_mode: str,
-) -> str:
+class _Updates:
     """
-    Return a self-contained JS snippet that injects an update-available overlay
-    into the running SPA.  All dynamic strings are JSON-encoded to prevent XSS /
-    injection issues regardless of what the GitLab release notes contain.
+    The desktop update flow, shared by the startup check and the SPA.
 
+    Checking, downloading and installing are separate steps, so the app stays
+    usable while an update downloads. A downloaded update is remembered in
+    <home>/updates/pending.json, so "remind me at next launch" survives a
+    restart without downloading again.
+
+    Every change is pushed to the page as a ``qimchi-update`` event; the page
+    can also ask for :meth:`status` at any time.
     """
-    import json
 
-    return f"""(function() {{
-    if (document.getElementById('qimchi-updater-overlay')) return;
+    def __init__(self, log, home: str | None = None) -> None:
+        import threading
 
-    var tag       = {json.dumps(tag)};
-    var current   = {json.dumps(current)};
-    var notes     = {json.dumps(notes)};
-    var assetUrl  = {json.dumps(asset_url)};
-    var assetName = {json.dumps(asset_name)};
-    var platform  = {json.dumps(platform)};
-    var installMode = {json.dumps(install_mode)};
-    var actionText = platform === 'windows' ? 'Update now' : 'Download update';
+        self._log = log
+        self._home = home
+        self._lock = threading.Lock()
+        self._window = None
+        self._offer: dict | None = None
+        self._state: dict = {
+            "status": "idle",  # idle | checking | none | available | downloading | downloaded | installing | error
+            "current": None,
+            "tag": None,
+            "notes": "",
+            "platform": None,
+            "progress": 0.0,
+            "error": None,
+            "prompt": None,  # "available" | "ready" | None: what the dialog should show
+            "checkedAt": None,
+        }
+        self._last_emitted_progress = -1.0
 
-    var overlay = document.createElement('div');
-    overlay.id  = 'qimchi-updater-overlay';
-    overlay.style.cssText = [
-        'position:fixed;inset:0;z-index:99999',
-        'background:rgba(0,0,0,.65)',
-        'display:flex;align-items:center;justify-content:center',
-        'font-family:system-ui,sans-serif'
-    ].join(';');
+    # -- plumbing ---------------------------------------------------------------
+    def attach(self, window) -> None:
+        self._window = window
 
-    var card = document.createElement('div');
-    card.style.cssText = [
-        'background:#1c1c1e;color:#e5e5e7',
-        'border:1px solid #3a3a3c;border-radius:10px',
-        'padding:24px 28px;max-width:520px;width:90%',
-        'box-shadow:0 24px 64px rgba(0,0,0,.6)',
-        'display:flex;flex-direction:column;gap:14px'
-    ].join(';');
+    def _updates_dir(self) -> str:
+        folder = os.path.join(self._home or _qimchi_home(), "updates")
+        os.makedirs(folder, exist_ok=True)
+        return folder
 
-    var title = document.createElement('div');
-    title.style.cssText = 'font-size:1.05rem;font-weight:600;color:#f5f5f7';
-    title.textContent = 'Qimchi ' + tag + ' is available';
+    def _pending_path(self) -> str:
+        return os.path.join(self._updates_dir(), "pending.json")
 
-    var sub = document.createElement('div');
-    sub.style.cssText = 'font-size:.8rem;color:#8e8e93';
-    sub.textContent = 'You are running ' + current + '.';
+    def _current_version(self) -> str:
+        try:
+            from api.updater import current_version
 
-    var notesBox = document.createElement('pre');
-    notesBox.style.cssText = [
-        'margin:0;padding:12px 14px',
-        'background:#111113;border:1px solid #2c2c2e;border-radius:6px',
-        'font-size:.78rem;line-height:1.5;color:#c7c7cc',
-        'max-height:220px;overflow-y:auto',
-        'white-space:pre-wrap;word-break:break-word'
-    ].join(';');
-    notesBox.textContent = notes || '(No release notes.)';
+            return current_version()
+        except Exception:
+            return _app_version()
 
-    var btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display:flex;gap:10px;justify-content:flex-end;margin-top:4px';
+    def status(self) -> dict:
+        with self._lock:
+            state = dict(self._state)
+        state["current"] = state["current"] or self._current_version()
+        return state
 
-    var btnSkip = document.createElement('button');
-    btnSkip.textContent = 'Skip';
-    btnSkip.style.cssText = [
-        'padding:7px 18px;border-radius:6px;border:1px solid #3a3a3c',
-        'background:transparent;color:#aeaeb2;cursor:pointer;font-size:.875rem'
-    ].join(';');
+    def _set(self, **changes) -> dict:
+        with self._lock:
+            self._state.update(changes)
+            state = dict(self._state)
+        state["current"] = state["current"] or self._current_version()
+        self._emit(state)
+        return state
 
-    var btnUpdate = document.createElement('button');
-    btnUpdate.id = 'qimchi-updater-btn';
-    btnUpdate.textContent = actionText;
-    btnUpdate.style.cssText = [
-        'padding:7px 18px;border-radius:6px;border:none',
-        'background:#0a84ff;color:#fff;cursor:pointer',
-        'font-size:.875rem;font-weight:500'
-    ].join(';');
+    def _emit(self, state: dict) -> None:
+        if self._window is None:
+            return
+        import json
 
-    btnSkip.onclick   = function() {{ overlay.remove(); }};
-    btnUpdate.onclick = function() {{
-        btnUpdate.disabled    = true;
-        btnUpdate.textContent = 'Downloading...';
-        btnUpdate.style.opacity = '.6';
-        if (window.pywebview && window.pywebview.api) {{
-            window.pywebview.api.apply_update(assetUrl, assetName, platform, installMode);
-        }}
-    }};
+        _evaluate_js_detached(
+            self._window,
+            "window.dispatchEvent(new CustomEvent('qimchi-update', "
+            f"{{ detail: {json.dumps(state)} }}))",
+            self._log,
+        )
 
-    btnRow.appendChild(btnSkip);
-    btnRow.appendChild(btnUpdate);
-    card.appendChild(title);
-    card.appendChild(sub);
-    card.appendChild(notesBox);
-    card.appendChild(btnRow);
-    overlay.appendChild(card);
-    document.body.appendChild(overlay);
-}})();"""
+    # -- steps ------------------------------------------------------------------
+    def restore_pending(self) -> None:
+        """Offer an update downloaded in an earlier session, or clear a stale one."""
+        import json
+
+        path = self._pending_path()
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path, encoding="utf-8") as fh:
+                pending = json.load(fh)
+        except Exception as exc:
+            self._log(f"[updater] ignoring unreadable {path}: {exc!r}")
+            self._clear_pending()
+            return
+
+        from api.updater import _parse_ver
+
+        running = self._current_version()
+        installer = pending.get("path") or ""
+        if _parse_ver(pending.get("tag", "")) <= _parse_ver(running):
+            self._log(
+                f"[updater] {pending.get('tag')} is installed (running {running}); "
+                "removing the downloaded installer"
+            )
+            self._clear_pending()
+            return
+        if not os.path.isfile(installer):
+            self._log(
+                f"[updater] downloaded update is gone ({installer}); forgetting it"
+            )
+            self._clear_pending()
+            return
+        self._log(f"[updater] {pending['tag']} was downloaded earlier: {installer}")
+        self._offer = pending
+        self._set(
+            status="downloaded",
+            tag=pending["tag"],
+            notes=pending.get("notes", ""),
+            platform=pending.get("platform"),
+            progress=1.0,
+            error=None,
+            prompt="ready",
+        )
+
+    def _clear_pending(self) -> None:
+        import json
+
+        path = self._pending_path()
+        try:
+            with open(path, encoding="utf-8") as fh:
+                installer = json.load(fh).get("path") or ""
+            if installer and os.path.dirname(installer) == self._updates_dir():
+                os.unlink(installer)
+        except Exception:
+            pass
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+    def check(
+        self, startup: bool = False, include_previews: bool | None = None
+    ) -> dict:
+        import datetime
+
+        state = self.status()
+        if state["status"] in ("checking", "downloading", "installing"):
+            self._log(f"[updater] check skipped: already {state['status']}")
+            return state
+        if include_previews is None:
+            try:
+                from api.settings import desktop_settings
+
+                include_previews = desktop_settings().previewReleases
+            except Exception as exc:
+                self._log(f"[updater] could not read the update settings: {exc!r}")
+                include_previews = False
+
+        self._log(
+            f"[updater] checking for updates ({'startup' if startup else 'manual'})"
+        )
+        self._set(status="checking", error=None)
+        try:
+            from api.updater import check_for_update, last_check_error
+
+            result = check_for_update(include_previews=include_previews, log=self._log)
+        except Exception as exc:
+            result, error = None, f"{type(exc).__name__}: {exc}"
+        else:
+            error = last_check_error()
+        checked_at = datetime.datetime.now().isoformat(timespec="seconds")
+
+        pending = self._offer if state["status"] == "downloaded" else None
+        if result is None:
+            if pending is not None:
+                return self._set(status="downloaded", checkedAt=checked_at)
+            if error:
+                self._log(f"[updater] update check failed: {error}")
+                return self._set(status="error", error=error, checkedAt=checked_at)
+            self._log("[updater] no update available")
+            return self._set(status="none", tag=None, prompt=None, checkedAt=checked_at)
+
+        if pending is not None and pending.get("tag") == result["tag"]:
+            self._log(f"[updater] {result['tag']} is already downloaded")
+            return self._set(status="downloaded", checkedAt=checked_at)
+
+        self._offer = result
+        self._log(f"[updater] offering {result['tag']}")
+        return self._set(
+            status="available",
+            tag=result["tag"],
+            notes=result.get("notes", ""),
+            platform=result.get("platform"),
+            progress=0.0,
+            error=None,
+            prompt="available" if startup else None,
+            checkedAt=checked_at,
+        )
+
+    def download(self) -> dict:
+        import threading
+
+        state = self.status()
+        offer = self._offer
+        if state["status"] != "available" or not offer:
+            self._log(f"[updater] nothing to download (status {state['status']})")
+            return state
+
+        destination = os.path.join(
+            self._updates_dir(), _asset_file_name(offer["asset_url"], offer["platform"])
+        )
+        self._log(
+            f"[updater] downloading {offer['tag']} in the background: "
+            f"{offer['asset_url']} -> {destination}"
+        )
+
+        def report(fraction: float) -> None:
+            if fraction - self._last_emitted_progress >= 0.02 or fraction >= 1:
+                self._last_emitted_progress = fraction
+                self._set(progress=round(fraction, 3))
+
+        def run() -> None:
+            import json
+
+            self._last_emitted_progress = -1.0
+            try:
+                _download_update_asset(
+                    offer["asset_url"], destination, self._log, report
+                )
+            except Exception as exc:
+                self._log(f"[updater] download failed: {exc!r}")
+                self._set(status="error", error=f"Download failed: {exc}", prompt=None)
+                return
+            pending = {
+                "tag": offer["tag"],
+                "notes": offer.get("notes", ""),
+                "platform": offer["platform"],
+                "install_mode": offer.get("install_mode", ""),
+                "asset_name": offer.get("asset_name", ""),
+                "path": destination,
+            }
+            try:
+                with open(self._pending_path(), "w", encoding="utf-8") as fh:
+                    json.dump(pending, fh)
+            except OSError as exc:
+                self._log(f"[updater] could not remember the download: {exc!r}")
+            self._offer = pending
+            self._log(
+                f"[updater] {offer['tag']} downloaded ({os.path.getsize(destination)} "
+                "bytes); asking to install"
+            )
+            self._set(status="downloaded", progress=1.0, prompt="ready")
+
+        self._set(status="downloading", progress=0.0, error=None, prompt=None)
+        threading.Thread(target=run, name="qimchi-update-download", daemon=True).start()
+        return self.status()
+
+    def remind_at_next_launch(self) -> dict:
+        self._log(
+            f"[updater] install of {self._state.get('tag')} postponed to next launch"
+        )
+        return self._set(prompt=None)
+
+    def dismiss(self) -> dict:
+        self._log(f"[updater] update dialog dismissed ({self._state.get('status')})")
+        return self._set(prompt=None)
+
+    def install(self) -> dict:
+        import subprocess
+
+        state = self.status()
+        pending = self._offer
+        if state["status"] != "downloaded" or not pending or not pending.get("path"):
+            self._log(f"[updater] nothing to install (status {state['status']})")
+            return state
+        installer = pending["path"]
+        platform = pending.get("platform") or ""
+        self._log(
+            f"[updater] installing {pending['tag']} from {installer} "
+            f"(platform {platform!r}, running on {sys.platform})"
+        )
+        self._set(status="installing", prompt=None)
+        try:
+            if platform == "windows" or os.name == "nt":
+                # DETACHED_PROCESS + CREATE_NEW_PROCESS_GROUP so the installer
+                # keeps running after this process exits.
+                flags = (
+                    subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                )
+                process = subprocess.Popen(
+                    _windows_install_after_exit_command(installer),
+                    creationflags=flags,
+                    close_fds=True,
+                )
+                _mark_install_started(process.pid, pending["tag"], self._home)
+                self._log(
+                    f"[updater] installer will start once this app has closed "
+                    f"(helper pid {process.pid})"
+                )
+                _close_windows(self._log)
+            elif platform == "macos" or sys.platform == "darwin":
+                subprocess.Popen(["open", installer], close_fds=True)
+                # A running app cannot be replaced from the DMG, so quit.
+                self._log(
+                    "[updater] opened the disk image; closing app so it can be replaced"
+                )
+                _close_windows(self._log)
+            elif _try_replace_running_appimage(installer, self._log):
+                _close_windows(self._log)
+            else:
+                target = _linux_update_download_path(
+                    pending.get("asset_name", ""), installer
+                )
+                self._log(f"[updater] AppImage saved to {target}; showing it")
+                _open_containing_folder(target, self._log)
+                self._clear_pending()
+                return self._set(status="none", prompt=None)
+        except Exception as exc:
+            self._log(f"[updater] failed to install: {exc!r}")
+            return self._set(status="downloaded", error=f"Install failed: {exc}")
+        return self.status()
 
 
-def _run_update_check(window, log) -> None:
+def _run_update_check(updates: _Updates, log) -> None:
     """
-    Background thread: fetch the latest GitLab release and show an update
-    dialog if a newer version is available.  Never raises.
-
+    Startup: offer an update downloaded earlier, then look for a newer one.
+    Never raises.
     """
     import time
 
-    # Give the SPA a moment to render before injecting the overlay.
+    # Give the SPA a moment to start listening before announcing anything.
     time.sleep(3)
     try:
+        updates.restore_pending()
         from api.settings import desktop_settings
-        from api.updater import check_for_update, current_version, last_check_error
 
         preferences = desktop_settings()
-        if not preferences.checkForUpdates:
-            log("[updater] update checks are turned off in Settings")
-            return
-        result = check_for_update(include_previews=preferences.previewReleases)
-        if result is None:
-            error = last_check_error()
-            if error:
-                log(f"[updater] update check failed (non-fatal): {error}")
-            else:
-                log("[updater] no update available")
-            return
-        js = _update_dialog_js(
-            tag=result["tag"],
-            current=current_version(),
-            notes=result["notes"],
-            asset_url=result["asset_url"],
-            asset_name=result.get("asset_name", ""),
-            platform=result.get("platform", ""),
-            install_mode=result.get("install_mode", ""),
+        log(
+            f"[updater] settings: check for updates {preferences.checkForUpdates}, "
+            f"preview releases {preferences.previewReleases}"
         )
-        window.evaluate_js(js)
+        if not preferences.checkForUpdates:
+            log("[updater] update checks at startup are turned off in Settings")
+            return
+        updates.check(startup=True, include_previews=preferences.previewReleases)
     except Exception as exc:
         log(f"[updater] unexpected error: {exc!r}")
 
@@ -1016,6 +1329,20 @@ def main() -> int:
     sys.stderr = log_file
     log("Starting Qimchi launcher...")
 
+    # The installer starts Qimchi with --after-update just before it exits.
+    after_update = "--after-update" in sys.argv
+    if after_update:
+        try:
+            os.unlink(_install_marker_path())
+        except OSError:
+            pass
+    installing = None if after_update else _update_being_installed()
+    if installing:
+        log(f"An installer is updating Qimchi to {installing}; not starting now.")
+        log_file.flush()
+        _tell_user_update_in_progress(installing)
+        return 0
+
     bundle_dir = _bundle_dir()
     sys.path.insert(0, os.path.join(bundle_dir, "backend"))
     os.environ["SERVE_STATIC_FILES"] = "true"
@@ -1125,6 +1452,7 @@ def main() -> int:
         webview.create_window("Qimchi - startup error", html=html)
 
     if window is not None:
+        api._updates.attach(window)
         _watch_webview2_crashes(window, log)
         if not native_smoke:
             _exit_soon_after_close(window, log)
@@ -1152,7 +1480,14 @@ def main() -> int:
                     window, smoke_fixture[0], smoke_fixture[1], log
                 )
             else:
-                _run_update_check(window, log)
+                # webview.start runs this in a non-daemon thread; keep it short
+                # so it can never hold the process open after the window closes.
+                threading.Thread(
+                    target=_run_update_check,
+                    args=(api._updates, log),
+                    name="qimchi-update-check",
+                    daemon=True,
+                ).start()
 
         webview.start(
             func=_on_loaded,

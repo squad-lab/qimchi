@@ -119,7 +119,7 @@ def test_launcher_and_backend_agree_on_the_app_home(monkeypatch, tmp_path):
     assert paths.db_path().parent == Path(launcher._qimchi_home())
 
 
-def test_update_asset_download_does_not_require_requests(monkeypatch):
+def test_update_asset_download_does_not_require_requests(monkeypatch, tmp_path):
     """The frozen bundle has urllib but does not include the requests package."""
     import importlib.util
 
@@ -147,15 +147,12 @@ def test_update_asset_download_does_not_require_requests(monkeypatch):
     downloaded = Path(
         launcher._download_update_asset(
             "https://example.invalid/qimchi-setup.exe",
-            "qimchi-setup.exe (Windows installer)",
-            "windows",
+            str(tmp_path / "qimchi-setup.exe"),
+            log=lambda _message: None,
         )
     )
-    try:
-        assert downloaded.read_bytes() == b"installer bytes"
-        assert downloaded.name.endswith("-qimchi-setup.exe")
-    finally:
-        downloaded.unlink(missing_ok=True)
+    assert downloaded.read_bytes() == b"installer bytes"
+    assert not (tmp_path / "qimchi-setup.exe.part").exists()
 
 
 def test_hashed_assets_referenced_by_index_actually_exist():

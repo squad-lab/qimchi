@@ -60,6 +60,12 @@ DisableWelcomePage=no
 ; Minimum: Windows 11 21H2
 MinVersion=10.0.22000
 
+; Close a running (or stuck) Qimchi instead of failing on files in use. The
+; bundle's Python extension modules (.pyd) are held open too.
+CloseApplications=force
+CloseApplicationsFilter=*.exe,*.dll,*.pyd
+RestartApplications=no
+
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
@@ -93,11 +99,22 @@ Name: "{autodesktop}\Qimchi"; \
 Filename: "{app}\qimchi.exe"; \
     Description: "{cm:LaunchProgram,Qimchi}"; \
     Flags: nowait postinstall skipifsilent
+; Start Qimchi again after an in-app update (the updater passes /QIMCHIUPDATE=1),
+; as the user who ran it rather than the elevated installer.
+Filename: "{app}\qimchi.exe"; \
+    Parameters: "--after-update"; \
+    Flags: nowait runasoriginaluser skipifnotsilent; \
+    Check: IsInAppUpdate
 
 [UninstallRun]
 ; Nothing extra — Inno Setup removes everything under {app} automatically.
 
 [Code]
+
+function IsInAppUpdate: Boolean;
+begin
+  Result := ExpandConstant('{param:QIMCHIUPDATE|0}') = '1';
+end;
 
 { Return the appropriate default install directory.
   Per-user → LocalAppData\Qimchi   (no UAC)

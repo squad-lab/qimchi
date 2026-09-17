@@ -360,11 +360,15 @@ def test_a_stamped_preview_build_is_offered_the_stable_release(monkeypatch):
     assert result is not None and result["tag"] == "v0.7.0"
 
 
-def test_stamped_rc_reaches_the_desktop_stable_update_dialog(monkeypatch):
+def test_stamped_rc_reaches_the_desktop_stable_update_dialog(monkeypatch, tmp_path):
     """Mock the unreleased v0.7.0 stable and exercise the desktop handoff."""
     import importlib.metadata as metadata
     import importlib.util
     from pathlib import Path
+
+    # Import before metadata.version is patched: pydantic checks the
+    # email-validator version through it on first import.
+    from api import settings
 
     stable_asset = {
         "name": "qimchi-setup-v0.7.0.exe (Windows installer)",
@@ -382,6 +386,7 @@ def test_stamped_rc_reaches_the_desktop_stable_update_dialog(monkeypatch):
     )
     monkeypatch.setattr(updater.sys, "platform", "win32")
     monkeypatch.setattr(__import__("time"), "sleep", lambda _seconds: None)
+    monkeypatch.setattr(settings, "desktop_settings", settings.DesktopSettings)
 
     launcher_path = (
         Path(__file__).resolve().parents[2] / "packaging" / "qimchi_launcher.py"
@@ -391,19 +396,20 @@ def test_stamped_rc_reaches_the_desktop_stable_update_dialog(monkeypatch):
     spec.loader.exec_module(launcher)
     scripts = []
     logs = []
-    window = SimpleNamespace(evaluate_js=scripts.append)
+    updates = launcher._Updates(logs.append, home=str(tmp_path))
+    updates.attach(SimpleNamespace(evaluate_js=scripts.append))
 
-    launcher._run_update_check(window, logs.append)
+    launcher._run_update_check(updates, logs.append)
 
-    assert logs == []
-    assert len(scripts) == 1
-    assert 'var tag       = "v0.7.0";' in scripts[0]
-    assert 'var current   = "v0.7.0-rc.7";' in scripts[0]
-    assert (
-        'var assetUrl  = "https://example.invalid/qimchi-setup-v0.7.0.exe";'
-        in scripts[0]
-    )
-    assert "window.pywebview.api.apply_update" in scripts[0]
+    assert not [line for line in logs if "error" in line or "failed" in line]
+    assert any("update available: v0.7.0-rc.7 -> v0.7.0 " in line for line in logs)
+    state = updates.status()
+    assert state["status"] == "available"
+    assert state["tag"] == "v0.7.0"
+    assert state["prompt"] == "available"
+    assert state["current"] == "v0.7.0-rc.7"
+    assert '"tag": "v0.7.0"' in scripts[-1]
+    assert "qimchi-update" in scripts[-1]
 
 
 def test_every_build_script_stamps_the_version(monkeypatch):
