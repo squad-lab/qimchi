@@ -12,6 +12,8 @@ import {
   Sun,
   Moon,
   Settings,
+  Download,
+  PackageCheck,
   LucideIcon,
 } from "lucide-react";
 
@@ -23,10 +25,11 @@ import { useThemeStore } from "../stores/themeStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { ZOOM_STEPS } from "../settings/userSettings";
 import { useToast } from "../hooks/useToast";
+import { useUpdateStore } from "../stores/updateStore";
 
 interface SidebarRailProps {
   onOpenHelp?: () => void; // For opening the Help modal
-  onOpenSettings?: () => void;
+  onOpenSettings?: (section?: string) => void;
 }
 
 // Rail tabs. Icon-only by design -- the labels live in the tooltips and the
@@ -74,6 +77,9 @@ const SidebarRail = ({ onOpenHelp, onOpenSettings }: SidebarRailProps) => {
   const { theme, toggleTheme } = useThemeStore();
   const { openLogModal } = useToast();
   const isDark = theme === "dark";
+  const update = useUpdateStore((state) => state.state);
+  const showUpdateReady = useUpdateStore((state) => state.showReady);
+  const downloadPercent = Math.round(update.progress * 100);
 
   // Alt+1..4 open a pane directly, in rail order.
   useShortcut("show-explorer", () => setActiveSection("explorer"));
@@ -170,6 +176,38 @@ const SidebarRail = ({ onOpenHelp, onOpenSettings }: SidebarRailProps) => {
           <Settings size={17} className="transition-transform duration-300 group-hover:rotate-45" />
         </button>
       </Tooltip>
+
+      {update.status === "downloading" && (
+        <Tooltip content={`Downloading Qimchi ${update.tag}: ${downloadPercent}%`} position="right">
+          <button
+            onClick={() => onOpenSettings?.("updates")}
+            className={`${railButtonBaseClass} qimchi-dark-hover-plain text-blue-600 hover:bg-blue-100`}
+            aria-label={`Downloading update, ${downloadPercent}%`}
+          >
+            <Download size={17} className="animate-pulse" />
+            <span
+              aria-hidden="true"
+              className="absolute bottom-0.5 left-1.5 right-1.5 h-0.5 rounded bg-gray-300"
+            >
+              <span
+                className="block h-full rounded bg-blue-600"
+                style={{ width: `${downloadPercent}%` }}
+              />
+            </span>
+          </button>
+        </Tooltip>
+      )}
+      {update.status === "downloaded" && (
+        <Tooltip content={`Qimchi ${update.tag} is ready to install`} position="right">
+          <button
+            onClick={showUpdateReady}
+            className={`${railButtonBaseClass} qimchi-dark-hover-plain text-green-600 hover:bg-green-50`}
+            aria-label="Install downloaded update"
+          >
+            <PackageCheck size={17} />
+          </button>
+        </Tooltip>
+      )}
 
       <Tooltip content="Notifications log" position="right">
         <button

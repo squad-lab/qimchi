@@ -16,6 +16,8 @@ import { useSidebarStore } from "./stores/sidebarStore";
 import { useThemeStore } from "./stores/themeStore";
 import HelpModal from "./components/HelpModal";
 import SettingsModal from "./components/SettingsModal";
+import UpdateDialog from "./components/UpdateDialog";
+import { useDesktopUpdates } from "./hooks/useDesktopUpdates";
 import { useShortcut } from "./hooks/useGlobalShortcuts";
 import { isDatasetPath, detectDatasetKind } from "./utils/datasetPaths";
 import { useToast } from "./hooks/useToast";
@@ -38,10 +40,12 @@ const AppContent: React.FC = () => {
   const [notesSelectedItemId, setNotesSelectedItemId] = useState<string | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<string | undefined>();
   const { setSidebarCollapsed, setNotesCollapsed, updateExplorerState } = useSidebarStore();
   const theme = useThemeStore((state) => state.theme);
   const zoomLevel = useSettingsStore((state) => state.settings.general.zoom);
   useSettingsSync();
+  useDesktopUpdates();
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -323,7 +327,10 @@ const AppContent: React.FC = () => {
           rail={
             <SidebarRail
               onOpenHelp={() => setIsHelpOpen(true)}
-              onOpenSettings={() => setIsSettingsOpen(true)}
+              onOpenSettings={(section) => {
+                setSettingsSection(section);
+                setIsSettingsOpen(true);
+              }}
             />
           }
           sidebar={
@@ -363,7 +370,15 @@ const AppContent: React.FC = () => {
         />
       </ErrorBoundary>
       <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
-      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        initialSection={settingsSection}
+        onClose={() => {
+          setIsSettingsOpen(false);
+          setSettingsSection(undefined);
+        }}
+      />
+      <UpdateDialog />
     </>
   );
 };

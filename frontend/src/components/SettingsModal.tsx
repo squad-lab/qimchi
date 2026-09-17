@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   Download,
@@ -9,11 +9,11 @@ import {
   FolderTree,
   Grid3x3,
   Image,
-  Monitor,
   MoveHorizontal,
   MoveVertical,
   Palette,
   Radio,
+  RefreshCw,
   RotateCcw,
   Settings as SettingsIcon,
   SlidersHorizontal,
@@ -26,6 +26,8 @@ import { useSettingsStore } from "../stores/settingsStore";
 import { useToast } from "../hooks/useToast";
 import { saveTextFile } from "../utils/saveTextFile";
 import Tooltip from "./Tooltip";
+import UpdatesPanel from "./UpdatesPanel";
+import { useUpdateStore } from "../stores/updateStore";
 import {
   FACTORY_SETTINGS,
   PLOT_WIDTHS,
@@ -37,17 +39,19 @@ import {
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  /** The section to show when the modal opens. */
+  initialSection?: string;
 }
 
 const isDesktop = () => typeof window !== "undefined" && Boolean(window.pywebview?.api);
 
-const buildSections = (desktop: boolean): ModalSection[] => [
+const buildSections = (updates: boolean): ModalSection[] => [
   { id: "general", label: "General", icon: <SlidersHorizontal size={16} /> },
   { id: "plots", label: "Plots", icon: <ChartScatter size={16} /> },
   { id: "explorer", label: "Explorer", icon: <FolderTree size={16} /> },
   { id: "live", label: "Live", icon: <Radio size={16} /> },
   { id: "export", label: "Export", icon: <Image size={16} /> },
-  ...(desktop ? [{ id: "desktop", label: "Desktop app", icon: <Monitor size={16} /> }] : []),
+  ...(updates ? [{ id: "updates", label: "Updates", icon: <RefreshCw size={16} /> }] : []),
   {
     id: "heatmap",
     label: "HeatMap",
@@ -208,10 +212,15 @@ const SectionHeader = ({ title, onReset }: { title: string; onReset: () => void 
   </div>
 );
 
-const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
+const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) => {
   const desktop = isDesktop();
-  const sections = buildSections(desktop);
+  const updatesSupported = useUpdateStore((state) => state.supported);
+  const sections = buildSections(updatesSupported);
   const [activeSection, setActiveSection] = useState("general");
+
+  useEffect(() => {
+    if (isOpen && initialSection) setActiveSection(initialSection);
+  }, [isOpen, initialSection]);
   const settings = useSettingsStore((state) => state.settings);
   const available = useSettingsStore((state) => state.available);
   const unavailableReason = useSettingsStore((state) => state.unavailableReason);
@@ -506,16 +515,17 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
             )}
           </>
         );
-      case "desktop":
+      case "updates":
         return (
           <>
-            <SectionHeader title="Desktop app" onReset={() => resetSection(["desktop"])} />
+            <SectionHeader title="Updates" onReset={() => resetSection(["desktop"])} />
+            <UpdatesPanel />
             <Field
-              label="Check for updates"
-              description="Look for a new version each time Qimchi starts."
+              label="Check for updates at startup"
+              description="Look for a new version each time Qimchi starts. You can always check here."
             >
               <Toggle
-                label="Check for updates"
+                label="Check for updates at startup"
                 checked={settings.desktop.checkForUpdates}
                 onChange={(on) => update(["desktop", "checkForUpdates"], on)}
               />

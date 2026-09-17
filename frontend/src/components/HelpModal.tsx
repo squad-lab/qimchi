@@ -764,6 +764,13 @@ const SettingsHelp = memo(() => (
           order, whether new live measurements join the basket, and which images an export writes.
         </li>
         <li>
+          <strong>Updates</strong> (desktop app): the running version, a button to check for a new
+          one, and whether to check at startup and include preview releases. An update downloads in
+          the background while you keep working; once it is ready, Qimchi asks to install it, and
+          &ldquo;Remind me at next launch&rdquo; keeps the download for next time. While an update
+          downloads or waits to be installed, an icon on the sidebar rail shows it.
+        </li>
+        <li>
           <strong>HeatMap</strong> and <strong>LinePlot</strong>: the default appearance of each
           plot type. A change reaches every plot straight away, except where that plot has its own
           value from its Appearance panel. A plot&apos;s Reset returns it to these defaults.
