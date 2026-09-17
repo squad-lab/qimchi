@@ -250,7 +250,7 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
               {canOpenLog && (
                 <button
                   onClick={openDebugLog}
-                  className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                  className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors qimchi-dark-hover-plain"
                   title="Open debug log (live) in a terminal"
                 >
                   <ScrollText size={16} />
@@ -259,7 +259,7 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
               {logs.length > 0 && (
                 <button
                   onClick={onClear}
-                  className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                  className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors qimchi-dark-hover-plain"
                   title="Clear Logs"
                 >
                   <Trash2 size={16} />
@@ -267,7 +267,7 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
               )}
               <button
                 onClick={onClose}
-                className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-200 rounded-md transition-colors"
+                className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-200 rounded-md transition-colors qimchi-dark-hover-plain"
                 title="Close"
               >
                 <X size={18} />
