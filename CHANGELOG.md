@@ -77,6 +77,7 @@
 - [Misc] CI fixes lint and formatting on the branch and pushes the result, so a merge request is never held up by a missed formatting run.
 - [Misc] The repository root is tidier: the Docker files live in `docker/`, and the Windows build script alongside the Linux and macOS ones in `scripts/`. The superseded Windows clone-and-build scripts are gone.
 - [Misc] Downloads from the Releases page now carry their version in the filename -- `qimchi-setup-v0.7.0.exe` rather than `qimchi-setup.exe` -- so a file in your Downloads folder says which build it is.
+- [Feature] Updates download in the background: Qimchi stays usable while the new version downloads, shows its progress on the sidebar rail, and asks to install it once it is ready. "Remind me at next launch" keeps the download and asks again when Qimchi next starts. Settings > Updates shows the running version and checks for, downloads and installs updates on demand.
 - [Feature] Settings: a gear on the sidebar rail (Shift+S) opens one place for your preferences, saved to the Qimchi database so they survive restarts and updates. It covers the theme (now including System), zoom, plot width, square plots, the plotting behaviour, the Explorer's sort order, whether new live measurements join the basket, image export (formats, light/dark variants, resolution and, in the desktop app, the folder), and, in the desktop app, update checks and preview releases.
 - [Feature] Adding a measurement now creates a HeatMap when its variables allow one, and a LinePlot only when they don't, instead of always both. Change this under Settings > Plots > Plotting behaviour: HeatMap or LinePlot (the default), both, or none. The checks on whether a plot can be made are unchanged.
 - [Feature] Each plot has a width button that opens the same 33/50/66/100% choices as the Viewer, for that plot alone. The Viewer's buttons still set every plot. Its two export buttons are now one Export button that opens Disk and Notes.
@@ -99,6 +100,12 @@
 - [Feature] The basket holds up to 50 measurements. Adding more shows a warning asking you to remove some first, instead of slowing the app down, and a caution icon under the basket icon says so while it is full.
 - [Fix] Tooltips near the right edge of the window no longer wrap after every word.
 - [Fix] Axes and colour bars always show at least two labelled values. Some heatmaps had a colour bar with a single label, which gave no sense of scale.
+- [Fix] Closing the desktop app now always ends it, on Windows and macOS.
+- [Fix] Updating on Windows works again. Setup could not replace a running Qimchi and gave up part-way, leaving an install that would not open; the update now waits for Qimchi to close before installing, shows its progress, and opens Qimchi again when it is done. Opening Qimchi while an update installs now says an update is in progress instead of breaking it.
+- [Fix] On macOS, installing an update now quits Qimchi once the new version's disk image opens, so it can be installed straight away.
+- [Fix] After updating from one release candidate to the next, the app no longer risks showing the previous candidate's interface.
+- [Fix] Warning and error boxes, such as "Library unavailable", are readable in dark mode, and the Notifications Log buttons no longer flash a pale background on hover.
+- [Misc] The debug log now records each step of the update check.
 - [Misc] The desktop app's "Open debug log" terminal no longer prints the whole log first. On Windows it shows the last 200 lines and keeps following; on macOS and Linux it opens in `less` following new lines (Ctrl+C to scroll and search, `F` to follow again, `q` to quit), or the last 200 lines with `tail` if `less` is missing.
 - [Misc] The filter summary on the filter button uses the names shown in the Filters panel, such as "Diff along Y", instead of internal identifiers.
 
