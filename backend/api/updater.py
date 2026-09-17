@@ -6,13 +6,16 @@ download + install is triggered from the launcher so it has access to the
 pywebview window reference.
 
 Public API:
-    check_for_update() -> dict | None
+    check_for_update(include_previews=False, log=None) -> dict | None
         Returns update metadata if a newer release has an asset for this
         platform, else None.
 
     current_version() -> str
         The running version string (the build tag when stamped, else
         importlib.metadata).
+
+    version_source() -> str
+        Where current_version() came from, for the update log.
 
     last_check_error() -> str | None
         Diagnostic from the latest failed release fetch.
@@ -25,6 +28,7 @@ import json
 import logging
 import re
 import sys
+from collections.abc import Callable
 from urllib.request import Request, urlopen
 
 _log = logging.getLogger(__name__)
@@ -100,6 +104,24 @@ def current_version() -> str:
         return "0.0.0"
 
 
+def version_source() -> str:
+    """Where :func:`current_version` finds the version: the build stamp or metadata."""
+    try:
+        from ._build_version import BUILD_VERSION
+
+        if BUILD_VERSION:
+            return "build stamp"
+    except Exception:
+        pass
+    try:
+        from importlib.metadata import version
+
+        version("qimchi-api")
+        return "package metadata, so any -rc suffix is unknown"
+    except Exception:
+        return "neither a build stamp nor package metadata"
+
+
 def is_prerelease(tag: str) -> bool:
     """
     True for a preview tag such as ``v0.6.4-rc.1``.
@@ -136,7 +158,10 @@ def _parse_ver(tag: str) -> tuple[int, ...]:
         return (0,)
 
 
-def check_for_update(include_previews: bool = False) -> dict | None:
+def check_for_update(
+    include_previews: bool = False,
+    log: Callable[[str], None] | None = None,
+) -> dict | None:
     """
     Fetch the latest GitLab release and compare against the running version.
 
@@ -145,12 +170,29 @@ def check_for_update(include_previews: bool = False) -> dict | None:
     platform; returns None otherwise (no update, network error, or no asset).
 
     ``include_previews`` puts a stable install on the preview channel as well.
+    ``log`` receives every step of the decision, so the desktop log shows why an
+    update was or was not offered.
 
     Never raises - all errors are logged at INFO level and treated as "no update".
 
     """
     global _last_check_error
     _last_check_error = None
+
+    def trace(message: str) -> None:
+        _log.info("[updater] %s", message)
+        if log is not None:
+            log(f"[updater] {message}")
+
+    running = current_version()
+    on_preview = include_previews or is_prerelease(running)
+    trace(
+        f"running {running!r} (from {version_source()}) on {sys.platform}; "
+        f"channel: {'preview and stable' if on_preview else 'stable only'} "
+        f"(running a preview: {is_prerelease(running)}, "
+        f"preview releases setting: {include_previews})"
+    )
+    trace(f"fetching {_RELEASES_URL}")
     try:
         # Use the standard library: requests is not a declared Qimchi runtime
         # dependency and is therefore absent from the frozen desktop bundle.
@@ -161,15 +203,19 @@ def check_for_update(include_previews: bool = False) -> dict | None:
             headers={"Accept": "application/json", "User-Agent": "Qimchi-Updater"},
         )
         with urlopen(request, timeout=10) as response:  # noqa: S310 - fixed HTTPS URL
+            status = getattr(response, "status", None)
             releases = json.load(response)
         if not isinstance(releases, list):
             raise ValueError("GitLab releases response was not a list")
     except Exception as exc:
         _last_check_error = f"{type(exc).__name__}: {exc}"
-        _log.info("[updater] release check failed (non-fatal): %s", exc)
+        trace(f"release check failed (non-fatal): {_last_check_error}")
         return None
 
+    tags = [str(rel.get("tag_name")) for rel in releases if isinstance(rel, dict)]
+    trace(f"HTTP {status}: {len(releases)} release(s): {', '.join(tags) or 'none'}")
     if not releases:
+        trace("no update available: no releases are published")
         return None
 
     # Pick the newest release on this install's channel, scanning the whole
@@ -181,8 +227,6 @@ def check_for_update(include_previews: bool = False) -> dict | None:
     # channel, so it is offered both the next preview and the stable release it
     # was a candidate for; _parse_ver ranks v0.7.0 above v0.7.0-rc.5, so an rc
     # user lands on stable as soon as it ships instead of being stranded.
-    running = current_version()
-    on_preview = include_previews or is_prerelease(running)
     candidates = [
         rel
         for rel in releases
@@ -191,16 +235,17 @@ def check_for_update(include_previews: bool = False) -> dict | None:
         and (on_preview or not is_prerelease(rel["tag_name"]))
     ]
     if not candidates:
-        _log.info(
-            "[updater] no release on this channel (%d entries, preview=%s)",
-            len(releases),
-            on_preview,
-        )
+        trace(f"no update available: none of the {len(releases)} release(s) is stable")
         return None
 
     latest = max(candidates, key=lambda rel: _parse_ver(rel["tag_name"]))
     tag = latest["tag_name"]
+    trace(
+        f"newest on this channel: {tag} {_parse_ver(tag)}; "
+        f"running {running} {_parse_ver(running)}"
+    )
     if _parse_ver(tag) <= _parse_ver(running):
+        trace(f"no update available: {tag} is not newer than {running}")
         return None
 
     notes: str = latest.get("description", "")
@@ -209,10 +254,13 @@ def check_for_update(include_previews: bool = False) -> dict | None:
     asset_name = ""
     platform = ""
     install_mode = ""
-    for link in latest.get("assets", {}).get("links", []):
+    links = latest.get("assets", {}).get("links", [])
+    for link in links:
         name = (link.get("name") or "").lower()
         url = link.get("direct_asset_url") or link.get("url") or ""
         match = _platform_asset_match(name, url)
+        verdict = f"for {match[0]}" if match else f"not for {sys.platform}"
+        trace(f"asset {link.get('name')!r} -> {url}: {verdict}")
         if match:
             asset_url = url
             asset_name = link.get("name") or ""
@@ -220,14 +268,13 @@ def check_for_update(include_previews: bool = False) -> dict | None:
             break
 
     if not asset_url:
-        _log.info(
-            "[updater] %s is newer but no %s asset found; skipping",
-            tag,
-            sys.platform,
+        trace(
+            f"no update offered: {tag} is newer, but none of its {len(links)} "
+            f"asset(s) is for {sys.platform}"
         )
         return None
 
-    _log.info("[updater] update available: %s → %s", current_version(), tag)
+    trace(f"update available: {running} -> {tag} ({asset_name}; {install_mode})")
     return {
         "tag": tag,
         "notes": notes,
