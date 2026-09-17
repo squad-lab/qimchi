@@ -154,3 +154,47 @@ def test_save_text_file_writes_where_the_user_chose(launcher, tmp_path, monkeypa
 
     fake_webview.windows[0].create_file_dialog = lambda *_args, **_kwargs: None
     assert api.save_text_file("settings.json", "{}") == ""
+
+
+def test_closing_the_window_ends_the_process_even_if_workers_hang(
+    launcher, monkeypatch
+):
+    import multiprocessing
+    import os
+
+    killed, exits = [], []
+    worker = SimpleNamespace(kill=lambda: killed.append(True))
+    monkeypatch.setattr(multiprocessing, "active_children", lambda: [worker])
+    monkeypatch.setattr(os, "_exit", exits.append)
+
+    launcher._shut_down(0)
+
+    assert killed == [True]
+    assert exits == [0]
+
+
+def test_the_process_ends_soon_after_the_window_closes(launcher, monkeypatch):
+    import threading
+
+    handlers, timers = [], []
+
+    class _Events:
+        def __iadd__(self, handler):
+            handlers.append(handler)
+            return self
+
+    class _Timer:
+        def __init__(self, interval, function, args=()):
+            timers.append((interval, function, args))
+            self.daemon = False
+
+        def start(self):
+            assert self.daemon
+
+    monkeypatch.setattr(threading, "Timer", _Timer)
+    window = SimpleNamespace(events=SimpleNamespace(closed=_Events()))
+
+    launcher._exit_soon_after_close(window, lambda _message: None, grace_seconds=3)
+    handlers[0]()
+
+    assert timers == [(3, launcher._shut_down, (0,))]

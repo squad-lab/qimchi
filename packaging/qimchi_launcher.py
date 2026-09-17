@@ -112,7 +112,15 @@ def _open_log_file(path: str):
 
 
 def _app_version() -> str:
-    """Running version from package metadata ('unknown' if unavailable)."""
+    """Running version: the build's tag, else package metadata ('unknown' if neither)."""
+    # Metadata carries only the base version, so rc.7 -> rc.8 would look unchanged.
+    try:
+        from api._build_version import BUILD_VERSION
+
+        if BUILD_VERSION:
+            return BUILD_VERSION
+    except Exception:
+        pass
     try:
         from importlib.metadata import version
 
@@ -643,6 +651,26 @@ def _open_containing_folder(path: str, log) -> None:
         log(f"[updater] failed to open update location: {exc!r}")
 
 
+def _exit_soon_after_close(window, log, grace_seconds: float = 10.0) -> None:
+    """
+    End the process shortly after the window closes, even if shutdown hangs.
+
+    main() normally exits right after webview.start returns; this covers the
+    cases where it never returns, or the backend and export workers hang while
+    stopping. A lingering process blocks an installer from replacing the app,
+    and on macOS makes the next launch only re-activate the windowless process.
+    """
+    import threading
+
+    def on_closed() -> None:
+        log(f"Window closed; the process will end within {grace_seconds:.0f}s.")
+        timer = threading.Timer(grace_seconds, _shut_down, args=(0,))
+        timer.daemon = True
+        timer.start()
+
+    window.events.closed += on_closed
+
+
 def _update_dialog_js(
     tag: str,
     current: str,
@@ -1098,6 +1126,8 @@ def main() -> int:
 
     if window is not None:
         _watch_webview2_crashes(window, log)
+        if not native_smoke:
+            _exit_soon_after_close(window, log)
     # Live plots poll on a timer, which Chromium throttles while the window is
     # minimized or hidden. The variable is appended to pywebview's own flags.
     os.environ[WEBVIEW2_ARGUMENTS_ENV] = _with_webview2_argument(
@@ -1131,6 +1161,7 @@ def main() -> int:
         )
     else:
         webview.start(private_mode=False, storage_path=storage_path)
+    log("Window closed.")
 
     if native_smoke:
         server = server_ref.get("server")
@@ -1142,7 +1173,39 @@ def main() -> int:
             native_smoke_result["passed"] = False
         log_file.flush()
         return 0 if native_smoke_result["passed"] else 1
+
+    server = server_ref.get("server")
+    if server is not None:
+        server.should_exit = True
+        t.join(timeout=5)
+        if t.is_alive():
+            log("Backend did not stop within 5s; exiting anyway.")
+    log("Qimchi closed.")
+    log_file.flush()
     return 0
+
+
+def _shut_down(code: int) -> None:
+    """
+    End the process once the window has closed.
+
+    A normal interpreter exit waits for the export pool's workers and their
+    Chrome, and one that hangs leaves a windowless process behind. On macOS
+    that process keeps the app "running", so the next launch only re-activates
+    it: a window flashes and nothing opens, and an update cannot replace it.
+    """
+    for handle in (sys.stdout, sys.stderr):
+        try:
+            print(f"Qimchi process exiting (code {code}).", file=handle)
+            handle.flush()
+        except Exception:
+            pass
+    try:
+        for child in multiprocessing.active_children():
+            child.kill()
+    except Exception:
+        pass
+    os._exit(code)
 
 
 if __name__ == "__main__":
@@ -1150,4 +1213,7 @@ if __name__ == "__main__":
     # this frozen exe. freeze_support() makes those children run the worker and
     # exit instead of re-launching uvicorn + a new window.
     multiprocessing.freeze_support()
-    raise SystemExit(main())
+    exit_code = main()
+    if getattr(sys, "frozen", False):
+        _shut_down(exit_code)
+    raise SystemExit(exit_code)
