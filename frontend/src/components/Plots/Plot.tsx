@@ -137,6 +137,7 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
 
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const plotRef = useRef<HTMLDivElement>(null);
+  const plottedNodeRef = useRef<HTMLDivElement | null>(null);
   const plotContainerRef = useRef<HTMLDivElement>(null);
   const lastPlotStructureRef = useRef<string>("");
   const dataRevisionRef = useRef<number>(0);
@@ -277,6 +278,7 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
 
       // Use Plotly.react - it automatically determines whether to create or update
       await Plotly.react(plotRef.current, deferredPlotJson.data, enhancedLayout, enhancedConfig);
+      plottedNodeRef.current = plotRef.current;
       enableMathAxisTitleEditing(plotRef.current);
 
       // Register interaction listeners as soon as Plotly is ready. MathJax's
@@ -446,19 +448,21 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
     };
   }, []);
 
-  // Cleanup function to purge plot on unmount
-  useEffect(() => {
-    const currentPlotRef = plotRef.current;
-    return () => {
-      if (currentPlotRef) {
-        try {
-          Plotly.purge(currentPlotRef);
-        } catch (error) {
-          console.warn("[Plot] Error purging plot on unmount:", error);
-        }
+  // Purge on unmount. Without it Plotly's drag handlers and the trace data
+  // stay reachable from detached SVG nodes, so a closed plot keeps its memory.
+  useEffect(
+    () => () => {
+      const plotted = plottedNodeRef.current;
+      plottedNodeRef.current = null;
+      if (!plotted) return;
+      try {
+        Plotly.purge(plotted);
+      } catch (error) {
+        console.warn("[Plot] Error purging plot on unmount:", error);
       }
-    };
-  }, []);
+    },
+    [],
+  );
 
   return (
     <div ref={plotContainerRef} className="w-full h-full min-h-[400px]">
