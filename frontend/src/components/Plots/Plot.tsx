@@ -384,8 +384,8 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
   // The listener itself is registered inside updatePlot after Plotly initialises,
   // so there is exactly one listener per mounted Plot instance.
   useEffect(() => {
-    const plotEl = plotRef.current as any;
     return () => {
+      const plotEl = plottedNodeRef.current as any;
       if (plotEl && relayoutListenerRef.current && typeof plotEl.off === "function") {
         plotEl.off("plotly_relayout", relayoutListenerRef.current);
         relayoutListenerRef.current = null;
