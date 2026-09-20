@@ -100,6 +100,8 @@
 - [Feature] The basket holds up to 50 measurements. Adding more shows a warning asking you to remove some first, instead of slowing the app down, and a caution icon under the basket icon says so while it is full.
 - [Fix] Tooltips near the right edge of the window no longer wrap after every word.
 - [Fix] Closing a plot now frees its memory. Plots were never completely released, so a long session -- especially with large heatmaps -- could exhaust the browser's memory and show "This page is having a problem: Out of Memory".
+- [Fix] A live measurement no longer grows the app's memory as it refreshes. Every refresh left the previous figure behind, so a long live session could exhaust the browser's memory and lose the window to an "Out of Memory" page.
+- [Misc] Long sessions hold on to less: closing a plot also drops its saved filters, sliders and appearance, the notifications log keeps its most recent 500 entries, and the Explorer remembers only the folders you visited most recently.
 - [Fix] Axes and colour bars always show at least two labelled values. Some heatmaps had a colour bar with a single label, which gave no sense of scale.
 - [Fix] Closing the desktop app now always ends it, on Windows and macOS.
 - [Fix] Updating on Windows works again. Setup could not replace a running Qimchi and gave up part-way, leaving an install that would not open; the update now waits for Qimchi to close before installing, shows its progress, and opens Qimchi again when it is done. Opening Qimchi while an update installs now says an update is in progress instead of breaking it.
