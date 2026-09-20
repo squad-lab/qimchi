@@ -50,6 +50,7 @@ import type { PlotPersistentState } from "../../components/interfaces";
 import usePainterStore from "../../stores/painterStore";
 import Tooltip from "../Tooltip";
 import { useShortcut } from "../../hooks/useGlobalShortcuts";
+import { useStableCallback } from "../../hooks/useStableCallback";
 import { filterLabel } from "../../utils/filterNames";
 import RibbonFlyout from "./RibbonFlyout";
 import { PLOT_WIDTHS } from "../../settings/userSettings";
@@ -863,7 +864,7 @@ const PlotWrapper: React.FC<Props> = ({
     [],
   );
 
-  const buildLineCutPreview = useCallback(
+  const buildLineCutPreview = useStableCallback(
     (
       pointX: number,
       pointY: number,
@@ -960,7 +961,6 @@ const PlotWrapper: React.FC<Props> = ({
         config: { responsive: true, displayModeBar: false },
       };
     },
-    [customizedPlotJson, lineCutAxis, toNumericArray, toNumeric2DArray, getClosestIndex],
   );
 
   // Handle Heatmap Hover for LineCut Preview
@@ -1021,7 +1021,7 @@ const PlotWrapper: React.FC<Props> = ({
     } catch (err) {
       console.error("LineCut preview generation error:", err);
     }
-  }, [isLineCutActive, buildLineCutPreview]);
+  }, [isLineCutActive, buildLineCutPreview, customizedPlotJson, lineCutAxis]);
 
   // A locked hover position is in the old axes' coordinates after a swap. Its
   // guide line would stretch the autoranged axes and squash the heatmap.
@@ -2011,7 +2011,7 @@ const PlotWrapper: React.FC<Props> = ({
   );
 
   // Core function that executes filter/slider operations
-  const executeFiltersApply = useCallback(
+  const executeFiltersApply = useStableCallback(
     async (
       updateRequest: {
         filters: AppliedFilter[];
@@ -2360,22 +2360,6 @@ const PlotWrapper: React.FC<Props> = ({
         onTransformEnd?.();
       }
     },
-    [
-      plotConfig,
-      originalPlotJson,
-      sliderConfig,
-      appearanceSettings,
-      showToast,
-      handleUpdateConfig,
-      setPlotFilters,
-      setPlotSliders,
-      plotType,
-      applyAppearanceSettings,
-      activePlotRef,
-      areAxesSwapped,
-      onTransformStart,
-      onTransformEnd,
-    ],
   );
 
   // A change made while another is still being applied waits here. Only the
@@ -2386,7 +2370,7 @@ const PlotWrapper: React.FC<Props> = ({
   } | null>(null);
 
   // Simplified filter/slider handler with smart comparison to prevent unnecessary operations
-  const handleFiltersApply = useCallback(
+  const handleFiltersApply = useStableCallback(
     async (filters: AppliedFilter[], sliders?: Record<string, SliderConfig>) => {
       if (isApplyingFilters) {
         queuedFiltersRef.current = { filters, sliders };
@@ -2404,7 +2388,6 @@ const PlotWrapper: React.FC<Props> = ({
       // Execute immediately without debouncing to fix refresh loop
       await executeFiltersApply({ filters, sliders });
     },
-    [executeFiltersApply, isApplyingFilters, filtersOrSlidersChanged],
   );
 
   // Runs after the render that clears isApplyingFilters, so the comparison in
@@ -2417,185 +2400,154 @@ const PlotWrapper: React.FC<Props> = ({
   }, [isApplyingFilters, handleFiltersApply]);
 
   // Function to update the plot's data source without recreating the plot component
-  const updateDataSource = useCallback(
-    async (newFpath: string) => {
-      try {
-        if (!plotConfig) return;
+  const updateDataSource = useStableCallback(async (newFpath: string) => {
+    try {
+      if (!plotConfig) return;
 
-        console.log(`[PlotWrapper] Fetching fresh plot data from ${newFpath}`);
+      console.log(`[PlotWrapper] Fetching fresh plot data from ${newFpath}`);
 
-        // Clear any previous dataset update errors
-        setDatasetUpdateError(null);
+      // Clear any previous dataset update errors
+      setDatasetUpdateError(null);
 
-        // Create a basic plot request to get the new dataset's plot
-        const request = {
-          fpaths: [newFpath],
-          indeps: plotConfig.indeps,
-          deps: plotConfig.deps,
-          plotType: plotConfig.plotType,
-          filters_order: [], // Start with no filters
-          filters_opts: {},
-          slider: {},
-        };
+      // Create a basic plot request to get the new dataset's plot
+      const request = {
+        fpaths: [newFpath],
+        indeps: plotConfig.indeps,
+        deps: plotConfig.deps,
+        plotType: plotConfig.plotType,
+        filters_order: [], // Start with no filters
+        filters_opts: {},
+        slider: {},
+      };
 
-        const response = await PlotAPI.createPlots(request);
+      const response = await PlotAPI.createPlots(request);
 
-        if (response.success && response.plots.length > 0) {
-          const newPlot = response.plots[0];
-          const nextPlotRef = newPlot.plot_ref || activePlotRef;
-          setActivePlotRef(nextPlotRef);
+      if (response.success && response.plots.length > 0) {
+        const newPlot = response.plots[0];
+        const nextPlotRef = newPlot.plot_ref || activePlotRef;
+        setActivePlotRef(nextPlotRef);
 
-          // Update the original plot JSON with the new dataset
-          setOriginalPlotJson(newPlot.plotJson);
+        // Update the original plot JSON with the new dataset
+        setOriginalPlotJson(newPlot.plotJson);
 
-          // Update available sliders if they exist
-          if (newPlot.slider_config) {
-            // Note: We don't update the current slider values, just the available options
-            // This preserves the user's slider positions across dataset changes
-          }
+        // Update available sliders if they exist
+        if (newPlot.slider_config) {
+          // Note: We don't update the current slider values, just the available options
+          // This preserves the user's slider positions across dataset changes
+        }
 
-          // Check if we need to apply filters/sliders
-          const hasFiltersOrSliders =
-            appliedFilters.length > 0 || Object.keys(sliderConfig).length > 0;
-          const shouldSwapAxes = isHeatmapPlot && areAxesSwapped;
+        // Check if we need to apply filters/sliders
+        const hasFiltersOrSliders =
+          appliedFilters.length > 0 || Object.keys(sliderConfig).length > 0;
+        const shouldSwapAxes = isHeatmapPlot && areAxesSwapped;
 
-          if (hasFiltersOrSliders) {
-            console.log(
-              `[PlotWrapper] Applying ${appliedFilters.length} filters and ${
-                Object.keys(sliderConfig).length
-              } sliders to new dataset before display`,
-            );
+        if (hasFiltersOrSliders) {
+          console.log(
+            `[PlotWrapper] Applying ${appliedFilters.length} filters and ${
+              Object.keys(sliderConfig).length
+            } sliders to new dataset before display`,
+          );
 
-            // Apply filters/sliders immediately to prevent flicker
-            // Use the same logic as handleFiltersApply but synchronously
-            const filtersOrder = appliedFilters.map((f) => f.name);
-            const filtersOpts = appliedFilters.reduce(
-              (acc, filter) => {
-                if (filter.options) {
-                  acc[filter.name] = filter.options;
-                }
-                return acc;
-              },
-              {} as Record<string, unknown>,
-            );
-
-            const isSliderChange = Object.keys(sliderConfig).length > 0;
-
-            try {
-              if (isSliderChange) {
-                if (!nextPlotRef) {
-                  throw new Error("Plot reference not available for transform operation");
-                }
-
-                // Use unified transform API to apply both filters and sliders
-                const result = await PlotAPI.transformPlot({
-                  plot_ref: nextPlotRef,
-                  filters_order: filtersOrder,
-                  filters_opts: filtersOpts,
-                  slider: sliderConfig,
-                  swap_xy: shouldSwapAxes,
-                });
-
-                if (!result.plot_json.layout) {
-                  result.plot_json.layout = {};
-                }
-
-                const slicedPlotJson = result.plot_json as PlotlyJSON;
-                setBasePlotJson(slicedPlotJson);
-                const slicedWithAppearance = applyAppearanceSettings(
-                  slicedPlotJson,
-                  appearanceSettings,
-                );
-                setCustomizedPlotJson(slicedWithAppearance);
-              } else if (appliedFilters.length > 0) {
-                if (!nextPlotRef) {
-                  throw new Error("Plot reference not available for transform operation");
-                }
-
-                // Use unified transform API for filters only
-                const result = await PlotAPI.transformPlot({
-                  plot_ref: nextPlotRef,
-                  filters_order: filtersOrder,
-                  filters_opts: filtersOpts,
-                  slider: {},
-                  swap_xy: shouldSwapAxes,
-                });
-
-                const filteredPlotJson = result.plot_json as PlotlyJSON;
-                setBasePlotJson(filteredPlotJson);
-                const filteredWithAppearance = applyAppearanceSettings(
-                  filteredPlotJson,
-                  appearanceSettings,
-                );
-                setCustomizedPlotJson(filteredWithAppearance);
+          // Apply filters/sliders immediately to prevent flicker
+          // Use the same logic as handleFiltersApply but synchronously
+          const filtersOrder = appliedFilters.map((f) => f.name);
+          const filtersOpts = appliedFilters.reduce(
+            (acc, filter) => {
+              if (filter.options) {
+                acc[filter.name] = filter.options;
               }
-            } catch (filterError) {
-              console.error(
-                `[PlotWrapper] Error applying filters/sliders to new dataset:`,
-                filterError,
-              );
-              // TODOLATER: Check if needed
-              // Test Fallback: request a filtered/sliced plot directly from /plot/
-              // so dataset cycling does not silently drop filters for refs
-              // like sqlite#run_id=... when transform context is transient.
-              try {
-                const fallbackPlotResponse = await PlotAPI.createPlots({
-                  fpaths: [newFpath],
-                  indeps: plotConfig.indeps,
-                  deps: plotConfig.deps,
-                  plotType: plotConfig.plotType,
-                  filters_order: filtersOrder,
-                  filters_opts: filtersOpts,
-                  slider: isSliderChange ? sliderConfig : {},
-                });
+              return acc;
+            },
+            {} as Record<string, unknown>,
+          );
 
-                if (fallbackPlotResponse.success && fallbackPlotResponse.plots.length > 0) {
-                  const fallbackPlot = fallbackPlotResponse.plots[0];
-                  const fallbackPlotJson = fallbackPlot.plotJson as PlotlyJSON;
-                  setBasePlotJson(fallbackPlotJson);
-                  const fallbackWithAppearance = applyAppearanceSettings(
-                    fallbackPlotJson,
-                    appearanceSettings,
-                  );
-                  setCustomizedPlotJson(fallbackWithAppearance);
-                } else {
-                  throw new Error(
-                    fallbackPlotResponse.message || "Fallback plot request returned no plots",
-                  );
-                }
-              } catch (fallbackError) {
-                console.error(
-                  `[PlotWrapper] Fallback filtered plot request failed:`,
-                  fallbackError,
-                );
-                // Last-resort fallback to unfiltered plot
-                setBasePlotJson(newPlot.plotJson);
-                const plotWithAppearance = applyAppearanceSettings(
-                  newPlot.plotJson,
-                  appearanceSettings,
-                );
-                setCustomizedPlotJson(plotWithAppearance);
+          const isSliderChange = Object.keys(sliderConfig).length > 0;
+
+          try {
+            if (isSliderChange) {
+              if (!nextPlotRef) {
+                throw new Error("Plot reference not available for transform operation");
               }
-            }
-          } else {
-            // No filters/sliders to apply.
-            // For swapped heatmaps, fetch swapped data from backend.
-            if (shouldSwapAxes && nextPlotRef) {
+
+              // Use unified transform API to apply both filters and sliders
               const result = await PlotAPI.transformPlot({
                 plot_ref: nextPlotRef,
-                filters_order: [],
-                filters_opts: {},
-                slider: {},
-                swap_xy: true,
+                filters_order: filtersOrder,
+                filters_opts: filtersOpts,
+                slider: sliderConfig,
+                swap_xy: shouldSwapAxes,
               });
-              const swappedPlotJson = result.plot_json as PlotlyJSON;
-              setBasePlotJson(swappedPlotJson);
-              const plotWithAppearance = applyAppearanceSettings(
-                swappedPlotJson,
+
+              if (!result.plot_json.layout) {
+                result.plot_json.layout = {};
+              }
+
+              const slicedPlotJson = result.plot_json as PlotlyJSON;
+              setBasePlotJson(slicedPlotJson);
+              const slicedWithAppearance = applyAppearanceSettings(
+                slicedPlotJson,
                 appearanceSettings,
               );
-              setCustomizedPlotJson(plotWithAppearance);
-            } else {
+              setCustomizedPlotJson(slicedWithAppearance);
+            } else if (appliedFilters.length > 0) {
+              if (!nextPlotRef) {
+                throw new Error("Plot reference not available for transform operation");
+              }
+
+              // Use unified transform API for filters only
+              const result = await PlotAPI.transformPlot({
+                plot_ref: nextPlotRef,
+                filters_order: filtersOrder,
+                filters_opts: filtersOpts,
+                slider: {},
+                swap_xy: shouldSwapAxes,
+              });
+
+              const filteredPlotJson = result.plot_json as PlotlyJSON;
+              setBasePlotJson(filteredPlotJson);
+              const filteredWithAppearance = applyAppearanceSettings(
+                filteredPlotJson,
+                appearanceSettings,
+              );
+              setCustomizedPlotJson(filteredWithAppearance);
+            }
+          } catch (filterError) {
+            console.error(
+              `[PlotWrapper] Error applying filters/sliders to new dataset:`,
+              filterError,
+            );
+            // TODOLATER: Check if needed
+            // Test Fallback: request a filtered/sliced plot directly from /plot/
+            // so dataset cycling does not silently drop filters for refs
+            // like sqlite#run_id=... when transform context is transient.
+            try {
+              const fallbackPlotResponse = await PlotAPI.createPlots({
+                fpaths: [newFpath],
+                indeps: plotConfig.indeps,
+                deps: plotConfig.deps,
+                plotType: plotConfig.plotType,
+                filters_order: filtersOrder,
+                filters_opts: filtersOpts,
+                slider: isSliderChange ? sliderConfig : {},
+              });
+
+              if (fallbackPlotResponse.success && fallbackPlotResponse.plots.length > 0) {
+                const fallbackPlot = fallbackPlotResponse.plots[0];
+                const fallbackPlotJson = fallbackPlot.plotJson as PlotlyJSON;
+                setBasePlotJson(fallbackPlotJson);
+                const fallbackWithAppearance = applyAppearanceSettings(
+                  fallbackPlotJson,
+                  appearanceSettings,
+                );
+                setCustomizedPlotJson(fallbackWithAppearance);
+              } else {
+                throw new Error(
+                  fallbackPlotResponse.message || "Fallback plot request returned no plots",
+                );
+              }
+            } catch (fallbackError) {
+              console.error(`[PlotWrapper] Fallback filtered plot request failed:`, fallbackError);
+              // Last-resort fallback to unfiltered plot
               setBasePlotJson(newPlot.plotJson);
               const plotWithAppearance = applyAppearanceSettings(
                 newPlot.plotJson,
@@ -2604,65 +2556,75 @@ const PlotWrapper: React.FC<Props> = ({
               setCustomizedPlotJson(plotWithAppearance);
             }
           }
+        } else {
+          // No filters/sliders to apply.
+          // For swapped heatmaps, fetch swapped data from backend.
+          if (shouldSwapAxes && nextPlotRef) {
+            const result = await PlotAPI.transformPlot({
+              plot_ref: nextPlotRef,
+              filters_order: [],
+              filters_opts: {},
+              slider: {},
+              swap_xy: true,
+            });
+            const swappedPlotJson = result.plot_json as PlotlyJSON;
+            setBasePlotJson(swappedPlotJson);
+            const plotWithAppearance = applyAppearanceSettings(swappedPlotJson, appearanceSettings);
+            setCustomizedPlotJson(plotWithAppearance);
+          } else {
+            setBasePlotJson(newPlot.plotJson);
+            const plotWithAppearance = applyAppearanceSettings(
+              newPlot.plotJson,
+              appearanceSettings,
+            );
+            setCustomizedPlotJson(plotWithAppearance);
+          }
+        }
 
-          console.log(
-            `[PlotWrapper] Successfully updated data source to ${newFpath}${
-              hasFiltersOrSliders ? " with filters/sliders applied" : ""
-            }`,
+        console.log(
+          `[PlotWrapper] Successfully updated data source to ${newFpath}${
+            hasFiltersOrSliders ? " with filters/sliders applied" : ""
+          }`,
+        );
+      } else {
+        console.error(`[PlotWrapper] Failed to fetch plot data for ${newFpath}:`, response.message);
+
+        // Check if it's a variable not found error and provide helpful message
+        if (
+          response.message &&
+          (response.message.includes("not found") || response.message.includes("KeyError"))
+        ) {
+          const missingVars = plotConfig ? [...plotConfig.indeps, ...plotConfig.deps] : [];
+          setDatasetUpdateError(
+            `Cannot update to new dataset: Variables [${missingVars.join(
+              ", ",
+            )}] not found in the selected dataset. Please select a dataset that contains these variables or create a new plot.`,
           );
         } else {
-          console.error(
-            `[PlotWrapper] Failed to fetch plot data for ${newFpath}:`,
-            response.message,
+          setDatasetUpdateError(
+            `Failed to update to new dataset: ${response.message || "Unknown error"}`,
           );
-
-          // Check if it's a variable not found error and provide helpful message
-          if (
-            response.message &&
-            (response.message.includes("not found") || response.message.includes("KeyError"))
-          ) {
-            const missingVars = plotConfig ? [...plotConfig.indeps, ...plotConfig.deps] : [];
-            setDatasetUpdateError(
-              `Cannot update to new dataset: Variables [${missingVars.join(
-                ", ",
-              )}] not found in the selected dataset. Please select a dataset that contains these variables or create a new plot.`,
-            );
-          } else {
-            setDatasetUpdateError(
-              `Failed to update to new dataset: ${response.message || "Unknown error"}`,
-            );
-          }
         }
-      } catch (error) {
-        console.error(`[PlotWrapper] Error updating data source to ${newFpath}:`, error);
-
-        // Provide user-friendly error message for variable compatibility issues
-        let errorMessage = "Failed to update to new dataset";
-        if (error instanceof Error) {
-          if (error.message.includes("not found") || error.message.includes("KeyError")) {
-            const missingVars = plotConfig ? [...plotConfig.indeps, ...plotConfig.deps] : [];
-            errorMessage = `Cannot update to new dataset: Variables [${missingVars.join(
-              ", ",
-            )}] not found in the selected dataset. Please select a dataset that contains these variables or create a new plot.`;
-          } else {
-            errorMessage = `Failed to update to new dataset: ${error.message}`;
-          }
-        }
-
-        setDatasetUpdateError(errorMessage);
       }
-    },
-    [
-      plotConfig,
-      appearanceSettings,
-      appliedFilters,
-      sliderConfig,
-      applyAppearanceSettings,
-      activePlotRef,
-      isHeatmapPlot,
-      areAxesSwapped,
-    ],
-  );
+    } catch (error) {
+      console.error(`[PlotWrapper] Error updating data source to ${newFpath}:`, error);
+
+      // Provide user-friendly error message for variable compatibility issues
+      let errorMessage = "Failed to update to new dataset";
+      if (error instanceof Error) {
+        if (error.message.includes("not found") || error.message.includes("KeyError")) {
+          const missingVars = plotConfig ? [...plotConfig.indeps, ...plotConfig.deps] : [];
+          errorMessage = `Cannot update to new dataset: Variables [${missingVars.join(
+            ", ",
+          )}] not found in the selected dataset. Please select a dataset that contains these variables or create a new plot.`;
+        } else {
+          errorMessage = `Failed to update to new dataset: ${error.message}`;
+        }
+      }
+
+      setDatasetUpdateError(errorMessage);
+    }
+  });
 
   // Watch for dataset changes and update data source without recreating the plot
   useEffect(() => {
@@ -2956,41 +2918,38 @@ const PlotWrapper: React.FC<Props> = ({
   ]);
   /* eslint-enable react-hooks/exhaustive-deps */
 
-  const applyBGCorrNow = useCallback(
-    async (points: any[]) => {
-      if (points.length === 0) return;
+  const applyBGCorrNow = useStableCallback(async (points: any[]) => {
+    if (points.length === 0) return;
 
-      let mode = bgCorrMode;
-      // Force constant/linear for LinePlot; for heatmap row_mean/col_mean the
-      // backend handles baseline computation — just pass mode + points through.
-      if (!isHeatmapPlot) {
-        mode = points.length === 1 ? "constant" : "linear";
-      }
+    let mode = bgCorrMode;
+    // Force constant/linear for LinePlot; for heatmap row_mean/col_mean the
+    // backend handles baseline computation — just pass mode + points through.
+    if (!isHeatmapPlot) {
+      mode = points.length === 1 ? "constant" : "linear";
+    }
 
-      const filterName = `bg_corr_${mode}`;
+    const filterName = `bg_corr_${mode}`;
 
-      const newFilter: AppliedFilter = {
-        name: filterName,
-        options: {
-          points,
-        },
-      };
+    const newFilter: AppliedFilter = {
+      name: filterName,
+      options: {
+        points,
+      },
+    };
 
-      const otherFilters = appliedFilters.filter((f) => f.name !== filterName);
-      const nextFilters = [...otherFilters, newFilter];
+    const otherFilters = appliedFilters.filter((f) => f.name !== filterName);
+    const nextFilters = [...otherFilters, newFilter];
 
-      setAppliedFilters(nextFilters);
-      await executeFiltersApply({
-        filters: nextFilters,
-        sliders: sliderConfig,
-      });
+    setAppliedFilters(nextFilters);
+    await executeFiltersApply({
+      filters: nextFilters,
+      sliders: sliderConfig,
+    });
 
-      // Keep overlay active but clear markers to avoid squishing/autoscale issues.
-      // setIsBGCorrActive(false);
-      setBgCorrPoints([]);
-    },
-    [appliedFilters, executeFiltersApply, sliderConfig, bgCorrMode, isHeatmapPlot],
-  );
+    // Keep overlay active but clear markers to avoid squishing/autoscale issues.
+    // setIsBGCorrActive(false);
+    setBgCorrPoints([]);
+  });
 
   // Visual feedback for BG Corr points
   const plotWithBGMarkers = useMemo(() => {
@@ -3298,7 +3257,7 @@ const PlotWrapper: React.FC<Props> = ({
     showToast("Filter selection made — hold Shift and click target plots to apply", "info");
   }, [activateFilter, plotConfig?.id, plotType, appliedFilters, sliderConfig, showToast]);
 
-  const handlePaintTargetClick = useCallback(() => {
+  const handlePaintTargetClick = useStableCallback(() => {
     const mode = usePainterStore.getState().mode;
     if (!mode || mode === "none") return;
 
@@ -3333,18 +3292,7 @@ const PlotWrapper: React.FC<Props> = ({
     }
 
     if (!usePainterStore.getState().shiftHeld) deactivatePainter();
-  }, [
-    plotType,
-    appearanceDefaults,
-    deactivatePainter,
-    setAppearanceSettings,
-    plotConfig?.id,
-    setPlotAppearance,
-    handleFiltersApply,
-    setPlotFilters,
-    setPlotSliders,
-    showToast,
-  ]);
+  });
 
   // A stable uirevision keeps the user's zoom when a new figure arrives after
   // they moved the view (a slow filter result, a live refresh). It changes only
