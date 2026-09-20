@@ -21,7 +21,16 @@ interface ToastItem {
   action?: ToastAction;
 }
 
-export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+// The log is a running history, so it needs a ceiling: a long session with
+// live measurements can raise thousands of notifications, each holding its
+// metadata.
+const MAX_LOG_ENTRIES = 500;
+
+export const ToastProvider: React.FC<{
+  children: React.ReactNode;
+  /** How many notifications the log keeps; only tests pass a smaller one. */
+  maxLogEntries?: number;
+}> = ({ children, maxLogEntries = MAX_LOG_ENTRIES }) => {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
@@ -39,25 +48,27 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const newToast: ToastItem = { id, message, type, duration, action };
 
       setToasts((prev) => [...prev, newToast]);
-      setLogs((prev) => [
-        {
-          id,
-          message,
-          type,
-          timestamp: new Date().toISOString(),
-          source,
-          metadata,
-        },
-        ...prev,
-      ]);
+      setLogs((prev) =>
+        [
+          {
+            id,
+            message,
+            type,
+            timestamp: new Date().toISOString(),
+            source,
+            metadata,
+          },
+          ...prev,
+        ].slice(0, maxLogEntries),
+      );
 
       // Auto-remove toast after duration
       setTimeout(() => {
         setToasts((prev) => prev.filter((toast) => toast.id !== id));
       }, duration);
     },
-    [],
-  ); // No dependencies - uses setToasts functional update
+    [maxLogEntries],
+  ); // Otherwise independent: it uses the setToasts/setLogs updaters
 
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));

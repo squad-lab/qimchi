@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 
 // Local imports
 import type { AppliedFilter, PlotConfiguration } from "../components/interfaces";
+import { usePlotStore } from "../stores/plotStore";
 import { isMemoryPath, isDatasetPath } from "../utils/datasetPaths";
 
 export interface UsePlotCollectionReturn {
@@ -113,6 +114,9 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
 
   const removePlot = useCallback((id: string) => {
     setPlotConfigs((prev) => prev.filter((plot) => plot.id !== id));
+    // Plot ids are never reused, so keeping the state would grow for as long
+    // as the browser profile lives -- it is saved to localStorage.
+    usePlotStore.getState().removePlotState(id);
   }, []);
 
   const movePlot = useCallback((id: string, toIndex: number) => {
@@ -132,6 +136,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
 
   const clearPlots = useCallback(() => {
     setPlotConfigs([]);
+    usePlotStore.getState().clearAllStates();
   }, []);
 
   /** Identity of a plot for comparison purposes: type + variables. */
@@ -177,7 +182,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
         });
 
         // A pin is for COMPARING: hold this view on measurement A while the
-        // rest follow to B. So every pinned plot needs a live counterpart that
+        // rest follow to B. So every pinned plot needs a changing counterpart that
         // does follow -- otherwise pinning the only heatmap means the new
         // dataset simply has no heatmap.
         //

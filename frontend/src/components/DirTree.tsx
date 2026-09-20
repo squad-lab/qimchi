@@ -90,6 +90,23 @@ const globalDirTreeCache = new Map<
 >();
 
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+// Browsing a tree touches many folders, and each entry holds that folder's
+// whole listing, so the cache keeps only the most recent ones.
+const CACHE_MAX_FOLDERS = 25;
+
+const rememberFolder = (path: string, data: TreeNode[]) => {
+  const now = Date.now();
+  for (const [key, entry] of globalDirTreeCache) {
+    if (now - entry.timestamp >= CACHE_DURATION) globalDirTreeCache.delete(key);
+  }
+  globalDirTreeCache.delete(path);
+  globalDirTreeCache.set(path, { data, timestamp: now });
+  while (globalDirTreeCache.size > CACHE_MAX_FOLDERS) {
+    const oldest = globalDirTreeCache.keys().next().value;
+    if (oldest === undefined) break;
+    globalDirTreeCache.delete(oldest);
+  }
+};
 
 interface DirTreeProps {
   path?: string; // Path to load directory from
@@ -423,11 +440,7 @@ const DirTree = ({
             : [convertApiNode(response.data)];
           // console.log("Converted tree data:", treeData);
 
-          // Store in global cache
-          globalDirTreeCache.set(path, {
-            data: treeData,
-            timestamp: Date.now(),
-          });
+          rememberFolder(path, treeData);
 
           setApiData(treeData);
         })
