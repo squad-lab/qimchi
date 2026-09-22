@@ -200,7 +200,10 @@ const SectionedModal = ({
               {sections.map((section) => renderSection(section, 0))}
             </nav>
             <div className="@container/panel flex min-w-0 flex-1 flex-col bg-white">
-              <div ref={contentRef} className="flex-1 overflow-y-auto p-3 @min-[420px]/panel:p-4 @min-[560px]/panel:p-6">
+              <div
+                ref={contentRef}
+                className="flex-1 overflow-y-auto p-3 @min-[420px]/panel:p-4 @min-[560px]/panel:p-6"
+              >
                 {children}
               </div>
             </div>

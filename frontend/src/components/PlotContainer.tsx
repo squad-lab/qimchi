@@ -350,7 +350,9 @@ const PlotContainer: React.FC<PlotContainerProps> = ({
               onDrag={handleDrag}
               onDragStop={handleDragStop}
             >
-              <Suspense fallback={<div className="h-64 w-full animate-pulse rounded-lg bg-gray-100" />}>
+              <Suspense
+                fallback={<div className="h-64 w-full animate-pulse rounded-lg bg-gray-100" />}
+              >
                 <IndividualPlot
                   config={config}
                   onRemove={onRemovePlot}

@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 
-interface NumericInputProps
-  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type"> {
+interface NumericInputProps extends Omit<
+  React.InputHTMLAttributes<HTMLInputElement>,
+  "value" | "onChange" | "type"
+> {
   value: number;
   onChange: (value: number) => void;
 }

@@ -132,7 +132,10 @@ const ToastContainer: React.FC<{
     isExpanded
       ? ordered
           .slice(0, index)
-          .reduce((sum, front) => sum + (heights[front.id] || ASSUMED_CARD_HEIGHT_PX) + STACK_GAP_PX, 0)
+          .reduce(
+            (sum, front) => sum + (heights[front.id] || ASSUMED_CARD_HEIGHT_PX) + STACK_GAP_PX,
+            0,
+          )
       : index * STACK_PEEK_PX,
   );
 

@@ -869,9 +869,11 @@ def test_a_dependent_axis_hover_formats_the_sweep_value_with_its_unit():
     metadata = {"p1": {"label": "Plunger Gate 1", "unit": "V"}}
     dataset = dataset.assign_coords(p1=np.array([-0.5, -0.25, -0.005, 0.0]))
 
-    trace = Line(metadata, dataset, ["measured_gate"], ["current"]).plot().to_dict()[
-        "data"
-    ][0]
+    trace = (
+        Line(metadata, dataset, ["measured_gate"], ["current"])
+        .plot()
+        .to_dict()["data"][0]
+    )
 
     assert "Plunger Gate 1: %{customdata}" in trace["hovertemplate"]
     assert trace["customdata"] == ["-500 mV", "-250 mV", "-5 mV", "0 V"]
@@ -882,9 +884,11 @@ def test_line_hover_values_use_no_more_than_two_decimal_places():
     dataset["current"].attrs = {"label": "Current", "unit": "A"}
     dataset["gate"].attrs = {"label": "Gate", "unit": "V"}
 
-    template = Line({}, dataset, ["gate"], ["current"]).plot().to_dict()["data"][0][
-        "hovertemplate"
-    ]
+    template = (
+        Line({}, dataset, ["gate"], ["current"])
+        .plot()
+        .to_dict()["data"][0]["hovertemplate"]
+    )
 
     assert "Gate: %{x:.3~s}V" in template
     assert "Current: %{y:.3~s}A" in template

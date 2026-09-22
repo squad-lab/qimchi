@@ -215,10 +215,7 @@ describe("isComposerCompatibleWithDataset with a dependent on an axis", () => {
 
   it("accepts one measured quantity plotted against another", () => {
     expect(
-      isComposerCompatibleWithDataset(
-        { indeps: ["keithley_curr"], deps: ["mfli_p"] },
-        attributes,
-      ),
+      isComposerCompatibleWithDataset({ indeps: ["keithley_curr"], deps: ["mfli_p"] }, attributes),
     ).toBe(true);
   });
 
