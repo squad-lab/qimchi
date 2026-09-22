@@ -27,7 +27,7 @@ const BULKY_META_KEYS = new Set([
 
 // The custom theme for the metadata JSON view
 const metadataCustomTheme = {
-  "--w-rjv-font-family": "Martian Mono",
+  "--w-rjv-font-family": "Martian Mono Variable, Martian Mono, monospace",
   "--w-rjv-color": "#333333",
   "--w-rjv-key-number": "#0066cc",
   "--w-rjv-key-string": "#333333",
@@ -61,7 +61,7 @@ const metadataCustomTheme = {
 
 // Dark counterpart of the metadata JSON view (Atom One Dark palette).
 const metadataDarkTheme = {
-  "--w-rjv-font-family": "Martian Mono",
+  "--w-rjv-font-family": "Martian Mono Variable, Martian Mono, monospace",
   "--w-rjv-color": "#abb2bf",
   "--w-rjv-key-number": "#61afef",
   "--w-rjv-key-string": "#abb2bf",

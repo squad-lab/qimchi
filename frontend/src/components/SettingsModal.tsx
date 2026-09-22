@@ -90,12 +90,12 @@ const Field = ({
   description?: string;
   children: React.ReactNode;
 }) => (
-  <div className="flex items-start justify-between gap-6 py-3 border-b border-gray-100 last:border-b-0">
+  <div className="py-3 border-b border-gray-100 last:border-b-0">
     <div className="min-w-0">
       <div className="text-sm font-medium text-gray-700">{label}</div>
       {description && <div className="mt-0.5 text-xs text-gray-500">{description}</div>}
     </div>
-    <div className="shrink-0">{children}</div>
+    <div className="mt-2 w-full min-w-0 [&>select]:w-full">{children}</div>
   </div>
 );
 
@@ -116,7 +116,7 @@ const Toggle = ({
       className="sr-only peer"
       aria-label={label}
     />
-    <span className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></span>
+    <span className="qimchi-toggle w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></span>
   </label>
 );
 
@@ -134,7 +134,7 @@ const Segmented = <T extends string | number>({
   <div
     role="radiogroup"
     aria-label={label}
-    className="inline-flex rounded-md border border-gray-300"
+    className="flex w-full rounded-md border border-gray-300"
   >
     {options.map((option, index) => (
       <button
@@ -143,7 +143,7 @@ const Segmented = <T extends string | number>({
         role="radio"
         aria-checked={value === option.value}
         onClick={() => onChange(option.value)}
-        className={`px-3 py-1 text-sm ${index > 0 ? "border-l border-gray-300" : ""} ${
+        className={`min-w-0 flex-1 px-3 py-1 text-sm ${index > 0 ? "border-l border-gray-300" : ""} ${
           value === option.value
             ? "bg-blue-600 text-white"
             : "text-gray-700 hover:bg-gray-100 qimchi-dark-hover-plain"
@@ -166,7 +166,7 @@ const Checkboxes = <T extends string>({
   onChange: (values: T[]) => void;
   label: string;
 }) => (
-  <div role="group" aria-label={label} className="flex items-center gap-4">
+  <div role="group" aria-label={label} className="flex flex-wrap items-center gap-4">
     {options.map((option) => {
       const checked = values.includes(option.value);
       // At least one must stay selected; the last one cannot be cleared.
@@ -195,7 +195,7 @@ const Checkboxes = <T extends string>({
 );
 
 const SectionHeader = ({ title, onReset }: { title: string; onReset: () => void }) => (
-  <div className="mb-4 flex items-center justify-between">
+  <div className="mb-4 flex items-center justify-between col-span-full">
     <h3 className="text-lg font-semibold text-gray-800">{title}</h3>
     <button
       type="button"
@@ -399,6 +399,16 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
                 <option value="both">Both HeatMap and LinePlot</option>
                 <option value="none">None</option>
               </select>
+            </Field>
+            <Field
+              label="Recreate custom plots"
+              description="Adding a measurement recreates the plots already in the Viewer. Turn this off to recreate only its default plots, not Composer plots or LineCuts."
+            >
+              <Toggle
+                label="Recreate custom plots for new measurements"
+                checked={settings.plots.recreateCustomPlots}
+                onChange={(on) => update(["plots", "recreateCustomPlots"], on)}
+              />
             </Field>
             <Field label="Square plots" description="Keep every plot at a 1:1 aspect ratio.">
               <Toggle
@@ -630,7 +640,7 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
         )
       }
     >
-      <div className="max-w-2xl">{renderContent()}</div>
+      <div className="w-full">{renderContent()}</div>
     </SectionedModal>
   );
 };

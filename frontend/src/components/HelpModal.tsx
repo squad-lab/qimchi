@@ -76,7 +76,7 @@ const ExplorerHelp = memo(() => (
         </ul>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 mb-4">
+      <div className="grid grid-cols-1 @min-[460px]/panel:grid-cols-2 @min-[860px]/panel:grid-cols-3 gap-2 mb-4">
         <div className="flex items-center gap-2 p-2 bg-violet-50/50 rounded-lg border border-violet-100">
           <FileArchive size={16} className="text-violet-600" />
           <span className="text-xs font-semibold">Zarr</span>
@@ -297,6 +297,17 @@ const ExplorerHelp = memo(() => (
           New live measurements are added to the Basket automatically (turn this off under Settings
           &gt; Live)
         </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />A live plot refreshes
+          as fast as the machine can serve it, never faster than once every 750 ms and never slower
+          than every 5 s. A big measurement therefore settles into a steady rhythm instead of
+          queueing requests it would only drop
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          Those refresh times are summarised into the app log every couple of minutes -- search it
+          for &quot;live refresh&quot; to see what this machine sustains. It stays on the machine
+        </li>
       </ul>
     </div>
 
@@ -327,7 +338,7 @@ const BasketHelp = memo(() => (
         variables allow one, otherwise a LinePlot. Adding one while the Viewer has plots recreates
         those plots, with their filters, for the new measurement -- so a default you removed stays
         removed. Only when none of them fit its variables does it get its default plots. The Basket
-        holds up to 50 datasets; while it is full, a caution icon under the Basket icon says so, and
+        holds up to 50 datasets; while it is full, a caution icon appears under the Basket icon, and
         further datasets are refused until you remove some.
       </p>
     </div>
@@ -491,6 +502,33 @@ const ComposerHelp = memo(() => (
     </div>
 
     <div className="space-y-2">
+      <h4 className="font-medium text-gray-800">Dependent Against Dependent</h4>
+      <p className="text-gray-600 mb-2">
+        An axis can hold a measured quantity, not just a swept one -- a current against a measured
+        gate voltage, say. The two only have to have been swept together, which means sharing a
+        sweep axis. Dependents that do not share it are greyed out in the Basket once the first
+        field is on an axis, as coordinates already are.
+      </p>
+      <ul className="space-y-1.5 text-gray-600">
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          <strong>LinePlot:</strong> any two variables swept together, in the order they were
+          measured -- a sweep that doubles back is drawn as it happened, not sorted
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          <strong>HeatMap:</strong> one axis may be measured, the other must be swept. Two measured
+          axes trace a path rather than a grid, so there is no heat map to draw
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />A dependent that
+          varies over more than one sweep -- a value per point of a 2-D measurement -- has no single
+          axis to be, and is refused
+        </li>
+      </ul>
+    </div>
+
+    <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Adding Fields</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
@@ -564,6 +602,22 @@ const ViewerHelp = memo(() => (
     </div>
 
     <div className="space-y-2">
+      <h4 className="font-medium text-gray-800">Reading a Plot</h4>
+      <ul className="space-y-1.5 text-gray-600">
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          Axis titles are typeset, units and all, and carry the engineering prefix that suits the
+          range -- mV rather than 0.001 V
+        </li>
+        <li className="flex gap-2">
+          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+          Hovering a point shows each value with its own prefix, so a small one reads 508 µV rather
+          than 0.000508. The prefix is chosen per value, so it need not match the axis
+        </li>
+      </ul>
+    </div>
+
+    <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Plot Controls</h4>
       <ul className="space-y-1.5 text-gray-600">
         <li className="flex gap-2">
@@ -572,7 +626,9 @@ const ViewerHelp = memo(() => (
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>Filters (F):</strong> Apply signal processing (diff, smoothing, BG corr…)
+          <strong>Filters (F):</strong> Apply signal processing (diff, smoothing, BG corr…). A
+          derivative, a smoothing window and a fit line all read X as a swept variable, so they are
+          greyed out on a plot whose X axis holds measured data, with the reason on hover
         </li>
         <li className="flex gap-2">
           <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
@@ -782,7 +838,7 @@ const SettingsHelp = memo(() => (
         setting; anything missing from the file returns to its default.
       </p>
       <p className="mt-3 text-gray-600">
-        If the database is unavailable, Settings says so; changes then apply to the open window
+        If the database is unavailable, Settings mentions it; changes then apply to the open window
         only.
       </p>
     </div>
@@ -931,7 +987,7 @@ const KeyboardHelp = memo(() => (
     {/* Global */}
     <div>
       <h4 className="font-medium text-gray-800 mb-2">Global</h4>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+      <div className="grid grid-cols-1 @min-[460px]/panel:grid-cols-2 @min-[860px]/panel:grid-cols-4 gap-x-4 gap-y-1.5">
         {[
           ["H", "Set Composer to HeatMap"],
           ["Shift+H", "Toggle Help & Tips"],
@@ -972,7 +1028,7 @@ const KeyboardHelp = memo(() => (
         Selected Plot{" "}
         <span className="font-normal text-gray-500 text-xs">(requires a plot to be selected)</span>
       </h4>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+      <div className="grid grid-cols-1 @min-[460px]/panel:grid-cols-2 @min-[860px]/panel:grid-cols-4 gap-x-4 gap-y-1.5">
         {[
           ["1–9", "Select plot by index"],
           ["F", "Open Filters modal"],
@@ -1258,7 +1314,9 @@ const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
           </div>
         )
       ) : (
-        <div className="max-w-prose">{activeContent}</div>
+        <div className="max-w-prose @min-[760px]/panel:max-w-4xl @min-[1040px]/panel:max-w-none">
+          {activeContent}
+        </div>
       )}
     </SectionedModal>
   );

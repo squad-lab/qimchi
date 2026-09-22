@@ -41,7 +41,7 @@ html.qimchi-theme-switching *::after {
 
 body {
   background-color: #f0f0f0;
-  font-family: "Martian Mono", monospace;
+  font-family: "Martian Mono Variable", "Martian Mono", monospace;
   color: #333;
 }
 
@@ -984,3 +984,25 @@ select {
     }
   }
 } */
+
+/* Dark toggle colours need selectors stronger than the :where() variant. */
+.dark .qimchi-toggle {
+  background-color: #21252b;
+  border: 1px solid #4b5263;
+}
+.dark .qimchi-toggle::after {
+  background-color: #848b98;
+  border-color: #5c6370;
+}
+.dark .peer:checked ~ .qimchi-toggle {
+  background-color: #61afef;
+  border-color: #61afef;
+}
+.dark .peer:checked ~ .qimchi-toggle::after {
+  background-color: #f0f6fc;
+  border-color: #f0f6fc;
+}
+.dark .peer:focus-visible ~ .qimchi-toggle {
+  outline: 2px solid #61afef;
+  outline-offset: 2px;
+}

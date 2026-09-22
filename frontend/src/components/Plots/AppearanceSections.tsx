@@ -314,7 +314,7 @@ const splitColorscale = (value: string) => ({
 });
 
 export const LineStyleSection: React.FC<SectionProps> = ({ settings, updateSetting }) => (
-  <div className="space-y-4">
+  <div className="w-full [&>*:not(:last-child)]:mb-4">
     <div>
       <label className="block text-sm font-medium text-gray-700 mb-1.5">Mode</label>
       <IconDropdown
@@ -539,7 +539,7 @@ export const ColormapSection: React.FC<ColormapSectionProps> = ({
 }) => {
   const colorscale = splitColorscale(settings.hmap?.colorscale || "viridis");
   return (
-    <div className="space-y-4">
+    <div className="w-full [&>*:not(:last-child)]:mb-4">
       <div>
         <div className="flex items-center justify-between mb-1.5">
           <label className="block text-sm font-medium text-gray-700">Colorscale</label>
@@ -579,7 +579,7 @@ export const ColormapSection: React.FC<ColormapSectionProps> = ({
             <optgroup key={category.label} label={category.label}>
               {category.options.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.warning ? <AlertTriangle size={14} className="shrink-0 mt-0.5" /> : ""}
+                  {option.warning ? "⚠ " : ""}
                   {option.label}
                   {option.warning ? " (Cyclical)" : ""}
                 </option>
@@ -738,7 +738,7 @@ export const AxisSection: React.FC<AxisSectionProps> = ({
 }) => {
   const label = axis.toUpperCase();
   return (
-    <div className="space-y-6">
+    <div className="w-full [&>*:not(:last-child)]:mb-6">
       {/* Major Grid & Ticks */}
       <div>
         <h3 className="text-lg font-medium text-gray-800 mb-4">Major Grid & Ticks</h3>

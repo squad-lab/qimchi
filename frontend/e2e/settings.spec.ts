@@ -79,6 +79,35 @@ test("the grid default is drawn on the plot", async ({ page }) => {
   await expect.poll(async () => (await heatmapLook(page))?.grid).toBe(true);
 });
 
+test("wide Settings sections stay in one column", async ({ page }) => {
+  await mockLiveHeatmapApi(page);
+  await mockSettingsApi(page);
+  await page.goto("/");
+  await openSettings(page, "HeatMap");
+
+  const dialog = settingsDialog(page);
+  // Resize past the former two-column breakpoint.
+  await dialog.evaluate((node) => {
+    const frame = node.parentElement;
+    if (frame) frame.style.width = "1400px";
+  });
+
+  const colorscale = dialog.getByLabel("Heatmap colorscale");
+  const tip = dialog.getByText(/Sequential colormaps/);
+  const [colorscaleBox, tipBox] = await Promise.all([colorscale.boundingBox(), tip.boundingBox()]);
+  expect(colorscaleBox).not.toBeNull();
+  expect(tipBox).not.toBeNull();
+  expect(tipBox!.y).toBeGreaterThan(colorscaleBox!.y + colorscaleBox!.height);
+
+  await dialog.getByRole("button", { name: "X axis" }).first().click();
+  const major = await dialog.getByRole("heading", { name: "Major Grid & Ticks" }).boundingBox();
+  const minor = await dialog.getByRole("heading", { name: "Minor Grid & Ticks" }).boundingBox();
+  expect(major).not.toBeNull();
+  expect(minor).not.toBeNull();
+  expect(minor!.y).toBeGreaterThan(major!.y);
+  expect(Math.abs(minor!.x - major!.x)).toBeLessThan(4);
+});
+
 test("rail buttons and Settings edit the same saved values", async ({ page }) => {
   await mockLiveHeatmapApi(page);
   const settings = await mockSettingsApi(page, { general: { theme: "light" } });
@@ -138,7 +167,7 @@ for (const [behaviour, expected] of [
   });
 }
 
-test("when settings cannot be saved, Settings says so and changes still apply locally", async ({
+test("when settings cannot be saved, Settings mentions it and changes still apply locally", async ({
   page,
 }) => {
   await mockLiveHeatmapApi(page);

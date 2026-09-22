@@ -112,16 +112,22 @@ const SectionedModal = ({
         <button
           onClick={() => onSelectSection(section.id)}
           aria-current={active ? "page" : undefined}
+          // Preserve the full label when the sidebar truncates it.
+          title={section.label}
           className={`w-full flex items-center gap-2.5 text-left text-sm font-semibold transition-all border-b border-gray-100 border-l-4 ${
-            depth === 0 ? "px-4 py-3.5" : "pl-9 pr-4 py-2.5 text-[13px]"
+            depth === 0
+              ? "px-2.5 py-3.5 @min-[560px]/modal:px-4"
+              : "pl-5 pr-2.5 py-2.5 text-[13px] @min-[560px]/modal:pl-9 @min-[560px]/modal:pr-4"
           } ${
             active
               ? `${colors.active} shadow-inner`
               : "text-gray-500 hover:bg-gray-100 hover:text-gray-700 border-l-transparent"
           }`}
         >
-          <span className={active ? colors.activeIcon : "text-gray-400"}>{section.icon}</span>
-          {section.label}
+          <span className={`shrink-0 ${active ? colors.activeIcon : "text-gray-400"}`}>
+            {section.icon}
+          </span>
+          <span className="@max-[560px]/modal:truncate">{section.label}</span>
         </button>
         {section.children?.map((child) => renderSection(child, depth + 1))}
       </div>
@@ -186,15 +192,15 @@ const SectionedModal = ({
             <div className="shrink-0 border-b border-gray-200 bg-gray-50 p-2">{toolbar}</div>
           )}
 
-          <div className="flex flex-1 min-h-0 bg-white">
+          <div className="@container/modal flex flex-1 min-h-0 bg-white">
             <nav
               aria-label={navLabel}
-              className="w-48 shrink-0 border-r border-gray-200 bg-gray-50 overflow-y-auto"
+              className="w-28 shrink-0 border-r border-gray-200 bg-gray-50 overflow-y-auto @min-[560px]/modal:w-36 @min-[740px]/modal:w-48"
             >
               {sections.map((section) => renderSection(section, 0))}
             </nav>
-            <div className="flex min-w-0 flex-1 flex-col bg-white">
-              <div ref={contentRef} className="flex-1 overflow-y-auto p-6">
+            <div className="@container/panel flex min-w-0 flex-1 flex-col bg-white">
+              <div ref={contentRef} className="flex-1 overflow-y-auto p-3 @min-[420px]/panel:p-4 @min-[560px]/panel:p-6">
                 {children}
               </div>
             </div>
