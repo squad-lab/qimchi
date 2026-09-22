@@ -5,6 +5,12 @@ import { PlotAPI, PlotRequest } from "../../services/plotAPI";
 import type { AttrData, SliderConfig, PlotConfiguration } from "../../components/interfaces";
 import { useToast } from "../../hooks/useToast";
 import { usePlotStore } from "../../stores/plotStore";
+import { withSavedTransforms } from "../../utils/savedTransforms";
+import {
+  createLiveRefreshRecorder,
+  markLivePlotActive,
+  reportLiveRefresh,
+} from "../../utils/liveRefreshStats";
 
 type PlotlyJSON = {
   data: Data[];
@@ -18,12 +24,10 @@ type CreatePlotOptions = {
 };
 
 const MEMORY_REFRESH_INTERVAL_MS = 750;
+const MAX_MEMORY_REFRESH_INTERVAL_MS = 5000;
 
-const inferSourceFromPath = (path: string): "memory" | "disk" => {
-  const inferred = path.startsWith("memory://") ? "memory" : "disk";
-  console.log(`[IndividualPlot] inferSourceFromPath(${path}) -> ${inferred}`);
-  return inferred;
-};
+const inferSourceFromPath = (path: string): "memory" | "disk" =>
+  path.startsWith("memory://") ? "memory" : "disk";
 
 interface IndividualPlotProps {
   config: PlotConfiguration;
@@ -39,6 +43,22 @@ interface IndividualPlotProps {
 
 type PlotLiveStatus = "live" | "paused" | "error" | "completed";
 
+/** Count the points represented by the first trace. */
+const pointsInPlot = (plot: PlotlyJSON | null): number => {
+  const trace = plot?.data?.[0] as { z?: unknown; x?: unknown } | undefined;
+  const shape = (trace?.z as { shape?: string } | undefined)?.shape;
+  if (typeof shape === "string") {
+    return shape
+      .split(",")
+      .map((part) => Number(part.trim()))
+      .filter((n) => Number.isFinite(n) && n > 0)
+      .reduce((product, n) => product * n, 1);
+  }
+  if (Array.isArray(trace?.z)) return (trace.z as unknown[]).flat().length;
+  if (Array.isArray(trace?.x)) return (trace.x as unknown[]).length;
+  return 0;
+};
+
 const IndividualPlot: React.FC<IndividualPlotProps> = ({
   config,
   onRemove,
@@ -52,7 +72,9 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
   const [plotRef, setPlotRef] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [currentConfig, setCurrentConfig] = useState<PlotConfiguration>(config);
+  const [currentConfig, setCurrentConfig] = useState<PlotConfiguration>(() =>
+    withSavedTransforms(config),
+  );
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [availableSliders, setAvailableSliders] = useState<Record<string, SliderConfig>>({});
   const currentConfigRef = useRef(currentConfig);
@@ -72,6 +94,8 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
   const { showToast } = useToast();
   const fetchInFlight = useRef(false);
   const autoRefreshTimer = useRef<number | null>(null);
+  const refreshRecorder = useRef(createLiveRefreshRecorder());
+  const plotJsonRef = useRef<PlotlyJSON | null>(null);
   // Guard against transient live read failures by requiring multiple
   // consecutive non-live responses before marking the measurement completed.
   const consecutiveNonLiveCount = useRef(0);
@@ -131,7 +155,6 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
 
       try {
         const plotConfig = configToUse || currentConfigRef.current;
-        console.log(`[IndividualPlot] Creating plot with dataset: ${plotConfig.fpath}`);
         const request: PlotRequest = {
           fpaths: [plotConfig.fpath], // Convert single path to array for backend compatibility
           indeps: plotConfig.indeps,
@@ -238,6 +261,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
             // Ensure Plotly.react sees a revision bump even if data arrays compare equal
             datarevision: Date.now(),
           };
+          plotJsonRef.current = clonedPlotJson;
           setPlotJson(clonedPlotJson);
           setError(null);
 
@@ -357,7 +381,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
   // Update current config when props change and refresh plot if fpath changed
   useEffect(() => {
     const previousFpath = currentConfigRef.current.fpath;
-    setCurrentConfig(config);
+    setCurrentConfig(withSavedTransforms(config));
 
     // If this is not the initial setup and the fpath has changed, DON'T recreate the plot
     // Let PlotWrapper handle the dataset change by updating data source in place
@@ -375,42 +399,49 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
     // (fpath may still be memory:// even when loading from disk)
     const isMemorySource = currentConfig.source === "memory";
 
-    // Log current source and fpath
-    console.log(
-      `[IndividualPlot] auto-refresh check: fpath=${currentConfig.fpath} | source=${currentConfig.source} | isMemorySource=${isMemorySource}`,
-    );
-
     if (!isMemorySource || isFiltersModalOpen) {
-      console.log(
-        `[IndividualPlot] auto-refresh disabled for source=${currentConfig.source}, filtersModalOpen=${isFiltersModalOpen}`,
-      );
       if (autoRefreshTimer.current !== null) {
-        window.clearInterval(autoRefreshTimer.current);
+        window.clearTimeout(autoRefreshTimer.current);
         autoRefreshTimer.current = null;
       }
       return;
     }
 
     if (autoRefreshTimer.current !== null) {
-      console.log(
-        "[IndividualPlot] Clearing existing auto-refresh interval before creating new one",
-      );
-      window.clearInterval(autoRefreshTimer.current);
+      window.clearTimeout(autoRefreshTimer.current);
     }
 
-    const intervalId = window.setInterval(() => {
-      console.log("[IndividualPlot] auto-refresh interval firing for memory dataset");
-      createPlot(undefined, { silent: true, skipIfPending: true });
-    }, MEMORY_REFRESH_INTERVAL_MS);
-    console.log(
-      `[IndividualPlot] auto-refresh interval set (id=${intervalId}) for source=${currentConfig.source} fpath=${currentConfig.fpath}`,
-    );
-    autoRefreshTimer.current = intervalId;
+    // Pace polling from the previous refresh time to avoid overlapping work.
+    let cancelled = false;
+    markLivePlotActive(true);
+    const scheduleNext = (delay: number) => {
+      if (cancelled) return;
+      autoRefreshTimer.current = window.setTimeout(async () => {
+        const started = performance.now();
+        try {
+          await createPlot(undefined, { silent: true, skipIfPending: true });
+        } finally {
+          const elapsed = performance.now() - started;
+          // Record the sustained local refresh rate.
+          const summary = refreshRecorder.current.record(
+            currentConfigRef.current.plotType,
+            elapsed,
+            pointsInPlot(plotJsonRef.current),
+          );
+          if (summary) void reportLiveRefresh(summary);
+          scheduleNext(
+            Math.min(MAX_MEMORY_REFRESH_INTERVAL_MS, Math.max(MEMORY_REFRESH_INTERVAL_MS, elapsed)),
+          );
+        }
+      }, delay);
+    };
+    scheduleNext(MEMORY_REFRESH_INTERVAL_MS);
 
     return () => {
-      console.log("[IndividualPlot] auto-refresh effect cleanup running, clearing interval");
+      cancelled = true;
+      markLivePlotActive(false);
       if (autoRefreshTimer.current !== null) {
-        window.clearInterval(autoRefreshTimer.current);
+        window.clearTimeout(autoRefreshTimer.current);
         autoRefreshTimer.current = null;
       }
     };
