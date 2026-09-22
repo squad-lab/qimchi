@@ -31,7 +31,12 @@ import { BASKET_FULL_MESSAGE, MAX_BASKET_ITEMS } from "../utils/basketLimit";
 import { useShortcut } from "../hooks/useGlobalShortcuts";
 import { useSidebarStore } from "../stores/sidebarStore";
 import { useToast } from "../hooks/useToast";
-import { SharedFieldResult, dependsOnAll, isFieldShared } from "../utils/datasetFieldSelectors";
+import {
+  SharedFieldResult,
+  dependsOnAll,
+  isFieldShared,
+  resolveAxisIndependents,
+} from "../utils/datasetFieldSelectors";
 import { detectDatasetKind, isDatasetPath, isSqliteContainerPath } from "../utils/datasetPaths";
 import { finishArchiveDownload } from "../utils/download";
 import type { AttrData } from "./interfaces";
@@ -318,6 +323,19 @@ const FieldsRow = memo(
     // over the dark panel.
     const fadeVar = isIndep ? "--qimchi-basket-fade-indep" : "--qimchi-basket-fade-dep";
 
+    // A measured axis stands for its sweep variable.
+    const axisAttributes = {
+      independents: type === "independent" ? fields : undefined,
+      variable_independents: variableIndependents,
+    };
+    const narrowedTo = narrowedBy?.length
+      ? resolveAxisIndependents(narrowedBy, axisAttributes)
+      : [];
+    const sharesAnAxisWith = (f: string) =>
+      !narrowedTo.length ||
+      narrowedTo.includes(f) ||
+      dependsOnAll(f, narrowedTo, { variable_independents: variableIndependents });
+
     const renderChip = (f: string) => (
       <FieldItem
         key={f}
@@ -327,11 +345,7 @@ const FieldsRow = memo(
         type={type}
         getSelectedItems={getSelectedItems}
         onToggleSelect={onToggleSelect}
-        isDisabled={
-          !isChipEnabled(f) ||
-          (!!narrowedBy?.length &&
-            !dependsOnAll(f, narrowedBy, { variable_independents: variableIndependents }))
-        }
+        isDisabled={!isChipEnabled(f) || !sharesAnAxisWith(f)}
         isSelected={selectedItems?.has(`${itemName}-${f}`) ?? false}
         isHighlighted={highlightedFields.has(`${itemName}-${f}`)}
         onAutofillComposerField={onAutofillComposerField}

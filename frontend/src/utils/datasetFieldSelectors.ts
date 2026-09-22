@@ -70,6 +70,29 @@ export const getFieldIndependents = (
   return Array.isArray(dims) ? dims : null;
 };
 
+/** Resolve an axis field to its single sweep variable. */
+export const axisIndependents = (
+  field: string,
+  attributes?: DatasetAttributesLike,
+): string[] | null => {
+  if ((attributes?.independents ?? []).includes(field)) return [field];
+  const dims = getFieldIndependents(field, attributes);
+  if (dims === null) return null; // unknown: callers stay permissive
+  return dims.length === 1 ? dims : [];
+};
+
+/** Resolve all selected axes to their sweep variables. */
+export const resolveAxisIndependents = (
+  axisFields: string[],
+  attributes?: DatasetAttributesLike,
+): string[] => {
+  const resolved = new Set<string>();
+  axisFields.forEach((field) => {
+    (axisIndependents(field, attributes) ?? [field]).forEach((name) => resolved.add(name));
+  });
+  return [...resolved];
+};
+
 /**
  * Whether a dependent varies over every one of `indeps`. Unknown dim info is
  * permissive: a dependent is only rejected on evidence.
@@ -152,10 +175,16 @@ export const isComposerCompatibleWithDataset = (
   const indeps = toSet(datasetAttributes.independents);
   const deps = toSet(datasetAttributes.dependents);
 
-  const indepsMatch = hasAllNames(indeps, composerSelection.indeps);
+  // A measured value can be an axis when it belongs to one sweep.
+  const axesMatch = composerSelection.indeps.every((name) => {
+    if (indeps.has(name)) return true;
+    if (!deps.has(name)) return false;
+    const resolved = axisIndependents(name, datasetAttributes);
+    return resolved === null || resolved.length === 1;
+  });
   const depsMatch = hasAllNames(deps, composerSelection.deps);
 
-  return indepsMatch && depsMatch;
+  return axesMatch && depsMatch;
 };
 
 export const getEligibleDatasetsForComposer = <T extends DatasetLike>(

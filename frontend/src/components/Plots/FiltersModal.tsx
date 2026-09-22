@@ -25,6 +25,7 @@ import { Rnd } from "react-rnd";
 // Local imports
 import "./FiltersModal.css";
 import { useToast } from "../../hooks/useToast";
+import NumericInput from "../NumericInput";
 import type { FilterSettings, AppliedFilter, SliderConfig } from "../../components/interfaces";
 import { ApplyButton, formatTitleWithUUID, getPlotTypeIcon, LogChartIcon } from "./UtilComponents";
 import Tooltip from "../Tooltip";
@@ -49,7 +50,17 @@ interface FiltersModalProps {
   currentSliders?: Record<string, SliderConfig>;
   availableSliders?: Record<string, SliderConfig>;
   onRequestBGCorr?: (mode: string) => void;
+  /** Whether x contains measured data instead of an ordered sweep. */
+  xAxisIsMeasured?: boolean;
 }
+
+// Keep in step with _NEEDS_A_SWEPT_X in backend/api/filters.py.
+const NEEDS_A_SWEPT_X: Record<string, string> = {
+  diff: "Differentiation needs the step between swept X values.",
+  savgol: "Savitzky–Golay smoothing needs evenly spaced swept X values.",
+  sma: "Moving average needs points ordered along a swept X axis.",
+  polyfit: "Polynomial fit needs a swept X axis.",
+};
 
 // Filter categories and their available filters
 const FILTER_CATEGORIES = {
@@ -295,6 +306,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   currentSliders = {},
   availableSliders = {},
   onRequestBGCorr,
+  xAxisIsMeasured = false,
 }) => {
   const [localFilterSettings, setLocalFilterSettings] = useState<FilterSettings>({});
   const [filterOrder, setFilterOrder] = useState<string[]>([]);
@@ -323,6 +335,11 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   // Add sliders as a tab if there are any available - put it at the top
   const hasSliders = Object.keys(availableSliders).length > 0;
   const allTabs = hasSliders ? ["sliders", ...filterKeys] : filterKeys;
+
+  const unavailableReason = (key: string): string | null =>
+    xAxisIsMeasured && NEEDS_A_SWEPT_X[key]
+      ? `Unavailable for this plot. ${NEEDS_A_SWEPT_X[key]} Here, X is measured data.`
+      : null;
 
   const [activeTab, setActiveTab] = useState<string>(allTabs[0] || "diff");
   const [isDragging, setIsDragging] = useState(false);
@@ -1007,25 +1024,43 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                   const filterDef = FILTER_DEFINITIONS[key as keyof typeof FILTER_DEFINITIONS];
                   const IconComponent = filterDef.icon;
                   const isEnabled = isFilterEnabled(key);
-                  return (
+                  const reason = unavailableReason(key);
+                  const tab = (
                     <button
                       key={key}
-                      onClick={() => setActiveTab(key)}
+                      onClick={() => !reason && setActiveTab(key)}
+                      // Keep pointer events so the disabled reason can appear.
+                      title={reason ? undefined : filterDef.name}
                       className={`w-full px-3 py-2.5 text-sm font-medium transition-colors flex items-center gap-2 border-b border-gray-200 ${
-                        activeTab === key
-                          ? "text-blue-600 bg-white border-l-3 border-l-blue-600 shadow-inner"
-                          : "text-gray-600 hover:text-gray-800 hover:bg-gray-100"
+                        reason
+                          ? "text-gray-400 cursor-not-allowed bg-gray-50"
+                          : activeTab === key
+                            ? "text-blue-600 bg-white border-l-3 border-l-blue-600 shadow-inner"
+                            : "text-gray-600 hover:text-gray-800 hover:bg-gray-100"
                       }`}
                       aria-controls={`tab-panel-${key}`}
+                      aria-disabled={!!reason}
                       role="tab"
                     >
                       <IconComponent
                         size={18}
-                        className={isEnabled ? "text-green-600" : "text-gray-400"}
+                        className={
+                          reason ? "text-gray-300" : isEnabled ? "text-green-600" : "text-gray-400"
+                        }
                       />
                       <span className="text-left flex-1">{filterDef.name}</span>
-                      {isEnabled && <div className="w-2 h-2 bg-green-500 rounded-full"></div>}
+                      {isEnabled && !reason && (
+                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      )}
                     </button>
+                  );
+
+                  return reason ? (
+                    <Tooltip key={key} content={reason} position="right">
+                      {tab}
+                    </Tooltip>
+                  ) : (
+                    tab
                   );
                 })}
               </div>
@@ -1581,12 +1616,10 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
                                   Scalar
                                 </label>
-                                <input
-                                  type="number"
-                                  step="any"
+                                <NumericInput
                                   value={(filterConfig as Record<string, unknown>).factor as number}
-                                  onChange={(e) =>
-                                    updateFilterSetting(activeTab, "factor", Number(e.target.value))
+                                  onChange={(factor) =>
+                                    updateFilterSetting(activeTab, "factor", factor)
                                   }
                                   className="w-full p-2 border border-gray-300 rounded"
                                   aria-label="Scale scalar"

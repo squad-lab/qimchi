@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   computeSharedFields,
+  axisIndependents,
   dependsOnAll,
+  resolveAxisIndependents,
   getEligibleDatasetsForComposer,
   getSelectedDatasets,
   isComposerCompatibleWithDataset,
@@ -164,5 +166,77 @@ describe("dependsOnAll", () => {
     expect(dependsOnAll("lockin_amp", [], mixed)).toBe(true);
     expect(dependsOnAll("unknown_var", ["f"], mixed)).toBe(true);
     expect(dependsOnAll("b", ["a"], { independents: ["a"], dependents: ["b"] })).toBe(true);
+  });
+});
+
+describe("axisIndependents", () => {
+  const attributes = {
+    independents: ["gate", "bias"],
+    dependents: ["current", "measured_gate", "signal"],
+    variable_independents: {
+      current: ["gate"],
+      measured_gate: ["gate"],
+      signal: ["gate", "bias"],
+    },
+  };
+
+  it("resolves an independent to itself", () => {
+    expect(axisIndependents("gate", attributes)).toEqual(["gate"]);
+  });
+
+  it("resolves a dependent axis to the independent it was swept along", () => {
+    expect(axisIndependents("measured_gate", attributes)).toEqual(["gate"]);
+  });
+
+  it("refuses a dependent that varies over more than one independent", () => {
+    expect(axisIndependents("signal", attributes)).toEqual([]);
+  });
+
+  it("says nothing when the dataset reported no dimension info", () => {
+    expect(axisIndependents("current", { independents: [], dependents: ["current"] })).toBeNull();
+  });
+
+  it("keeps an unknown axis name as itself when resolving a list", () => {
+    expect(resolveAxisIndependents(["measured_gate"], attributes)).toEqual(["gate"]);
+    expect(resolveAxisIndependents(["mystery"], attributes)).toEqual(["mystery"]);
+  });
+});
+
+describe("isComposerCompatibleWithDataset with a dependent on an axis", () => {
+  const attributes = {
+    independents: ["p1"],
+    dependents: ["keithley_curr", "mfli_p", "mfli_r"],
+    variable_independents: {
+      keithley_curr: ["p1"],
+      mfli_p: ["p1"],
+      mfli_r: ["p1"],
+    },
+  };
+
+  it("accepts one measured quantity plotted against another", () => {
+    expect(
+      isComposerCompatibleWithDataset(
+        { indeps: ["keithley_curr"], deps: ["mfli_p"] },
+        attributes,
+      ),
+    ).toBe(true);
+  });
+
+  it("still rejects an axis the dataset does not have", () => {
+    expect(
+      isComposerCompatibleWithDataset({ indeps: ["not_here"], deps: ["mfli_p"] }, attributes),
+    ).toBe(false);
+  });
+
+  it("rejects a dependent that varies over more than one independent", () => {
+    const twoDimensional = {
+      independents: ["gate", "bias"],
+      dependents: ["signal", "current"],
+      variable_independents: { signal: ["gate", "bias"], current: ["gate"] },
+    };
+
+    expect(
+      isComposerCompatibleWithDataset({ indeps: ["signal"], deps: ["current"] }, twoDimensional),
+    ).toBe(false);
   });
 });
