@@ -11,6 +11,8 @@ interface ToastProps {
   onClose?: () => void;
   className?: string;
   action?: ToastAction;
+  /** Pause automatic dismissal. */
+  paused?: boolean;
 }
 
 interface ToastItem {
@@ -62,10 +64,7 @@ export const ToastProvider: React.FC<{
         ].slice(0, maxLogEntries),
       );
 
-      // Auto-remove toast after duration
-      setTimeout(() => {
-        setToasts((prev) => prev.filter((toast) => toast.id !== id));
-      }, duration);
+      // Each card owns its pausable dismiss timer.
     },
     [maxLogEntries],
   ); // Otherwise independent: it uses the setToasts/setLogs updaters
@@ -98,22 +97,78 @@ export const ToastProvider: React.FC<{
   );
 };
 
+// Collapse notifications into a deck and expand them on hover.
+const STACK_PEEK_PX = 10;
+const STACK_SCALE_STEP = 0.04;
+const STACK_GAP_PX = 8;
+const CARDS_VISIBLE_IN_STACK = 3;
+// Fallback until a card has been measured.
+const ASSUMED_CARD_HEIGHT_PX = 56;
+
 const ToastContainer: React.FC<{
   toasts: ToastItem[];
   onRemove: (id: string) => void;
 }> = ({ toasts, onRemove }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [heights, setHeights] = useState<Record<string, number>>({});
+
+  // Index zero is the front card.
+  const ordered = useMemo(() => [...toasts].reverse(), [toasts]);
+
+  const measure = useCallback((id: string, node: HTMLDivElement | null) => {
+    if (!node) return;
+    const height = node.offsetHeight;
+    setHeights((prev) => (prev[id] === height ? prev : { ...prev, [id]: height }));
+  }, []);
+
+  useEffect(() => {
+    if (!toasts.length) setIsExpanded(false);
+  }, [toasts.length]);
+
+  if (!ordered.length) return null;
+
+  // Expanded cards clear the full height of those before them.
+  const offsets = ordered.map((_, index) =>
+    isExpanded
+      ? ordered
+          .slice(0, index)
+          .reduce((sum, front) => sum + (heights[front.id] || ASSUMED_CARD_HEIGHT_PX) + STACK_GAP_PX, 0)
+      : index * STACK_PEEK_PX,
+  );
+
   return (
-    <div className="fixed bottom-4 right-4 z-50 space-y-2">
-      {toasts.map((toast) => (
-        <Toast
-          key={toast.id}
-          message={toast.message}
-          type={toast.type}
-          duration={toast.duration}
-          action={toast.action}
-          onClose={() => onRemove(toast.id)}
-        />
-      ))}
+    <div
+      className="fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))]"
+      onMouseEnter={() => setIsExpanded(true)}
+      onMouseLeave={() => setIsExpanded(false)}
+    >
+      {ordered.map((toast, index) => {
+        const buried = !isExpanded && index >= CARDS_VISIBLE_IN_STACK;
+        return (
+          <div
+            key={toast.id}
+            ref={(node) => measure(toast.id, node)}
+            className="absolute bottom-0 right-0 w-full origin-bottom transition-all duration-200 ease-out"
+            style={{
+              transform: `translateY(${-offsets[index]}px) scale(${
+                isExpanded ? 1 : 1 - index * STACK_SCALE_STEP
+              })`,
+              zIndex: ordered.length - index,
+              opacity: buried ? 0 : 1,
+              pointerEvents: buried ? "none" : "auto",
+            }}
+          >
+            <Toast
+              message={toast.message}
+              type={toast.type}
+              duration={toast.duration}
+              action={toast.action}
+              paused={isExpanded}
+              onClose={() => onRemove(toast.id)}
+            />
+          </div>
+        );
+      })}
     </div>
   );
 };
@@ -125,11 +180,13 @@ const Toast: React.FC<ToastProps> = ({
   onClose,
   className = "",
   action,
+  paused = false,
 }) => {
   const [isVisible, setIsVisible] = useState(true);
   const [isExiting, setIsExiting] = useState(false);
 
   useEffect(() => {
+    if (paused) return;
     const timer = setTimeout(() => {
       setIsExiting(true);
       setTimeout(() => {
@@ -139,7 +196,7 @@ const Toast: React.FC<ToastProps> = ({
     }, duration);
 
     return () => clearTimeout(timer);
-  }, [duration, onClose]);
+  }, [duration, onClose, paused]);
 
   const getToastStyles = () => {
     switch (type) {
