@@ -3,6 +3,8 @@
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
     "target": "ES2022",
     "lib": ["ES2023"],
+    // vite.config.ts reads node_modules and copies files at build time.
+    "types": ["node"],
     "module": "ESNext",
     "skipLibCheck": true,
 
