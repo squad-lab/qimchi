@@ -149,3 +149,23 @@ async def test_a_producer_that_stopped_beating_does_not_reach_the_explorer(tmp_p
         assert live_db.get_measurement("stopped").live_status is False
     finally:
         live_db.configure_database(None)
+
+
+def test_maintenance_runs_on_a_timer_not_on_every_call(monkeypatch):
+    passes: list[float] = []
+
+    def record(*_args, **_kwargs):
+        passes.append(time.monotonic())
+        return live_db.RegistryMaintenanceResult((), 0)
+
+    monkeypatch.setattr(data_loader.live_db, "maintain_registry", record)
+    monkeypatch.setattr(data_loader.live_db, "init_database", lambda: None)
+    monkeypatch.setattr(data_loader.live_db, "get_live_measurements", list)
+
+    for _ in range(5):
+        data_loader.get_live_dataset_entries()
+    assert len(passes) == 1, f"{len(passes)} maintenance passes for 5 calls"
+
+    monkeypatch.setenv("QIMCHI_LIVE_MAINTENANCE_INTERVAL", "0")
+    data_loader.get_live_dataset_entries()
+    assert len(passes) == 2, "the throttle must be defeatable for debugging"

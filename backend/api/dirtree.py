@@ -1115,6 +1115,16 @@ async def load_directory(path: PathData) -> Dict:
             return _build_sqlite_tree(fs_path)
         except Exception as exc:
             logger.error("load_directory | Failed to build sqlite tree: %s", exc)
+            # Give disconnected shares and unreadable files an actionable error.
+            if "unable to open database file" in str(exc):
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        f"Could not open '{fs_path.name}'. If it is on a network "
+                        "drive, check that the drive is still connected and that "
+                        "you can read the file."
+                    ),
+                )
             raise HTTPException(
                 status_code=500, detail=f"Error loading sqlite file: {exc}"
             )

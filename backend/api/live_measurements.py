@@ -10,6 +10,9 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from qimchi_connect import registry as live_db
 
+# Local imports
+from .data_loader import maintain_live_registry
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -45,17 +48,10 @@ def get_live_measurements() -> List[LiveMeasurementInfo]:
         return []
 
     try:
-        live_db.maintain_registry(
-            retention_days=7,
-            # Long enough to outlast a refused connection to a closed
-            # localhost port (~2s on Windows), which is what tells a dead
-            # producer apart from a busy one.
-            timeout=2.0,
-            retries=2,
-        )
+        maintain_live_registry(live_db)
 
         measurements = live_db.get_live_measurements()
-        logger.info(f"Found {len(measurements)} live measurements in database")
+        logger.debug("Found %d live measurements in database", len(measurements))
 
         return [
             LiveMeasurementInfo(

@@ -16,9 +16,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import sqlite3
-from dataclasses import dataclass, field
+import threading
+import time
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional, Protocol
 
@@ -133,6 +136,66 @@ def extract_measurement_id(ref: str) -> str:
     return ref[len(MEMORY_PROTOCOL) :].strip("/")
 
 
+def _maintenance_interval() -> float:
+    """Seconds between registry maintenance passes (0 disables the throttle)."""
+    try:
+        return float(os.environ.get("QIMCHI_LIVE_MAINTENANCE_INTERVAL", "30"))
+    except ValueError:
+        return 30.0
+
+
+_last_maintenance = 0.0
+_maintenance_lock = threading.Lock()
+
+# Live fetches are shared per measurement and only touched by the event loop.
+_live_polls: Dict[str, "asyncio.Task[LoadedData]"] = {}
+_live_poll_results: Dict[str, tuple] = {}
+
+
+def _live_poll_window() -> float:
+    """How long one live fetch may be reused for, in seconds."""
+    try:
+        return float(os.environ.get("QIMCHI_LIVE_POLL_WINDOW", "0.5"))
+    except ValueError:
+        return 0.5
+
+
+def _with_own_attrs(loaded: "LoadedData") -> "LoadedData":
+    """Return a shallow dataset copy with independent attributes."""
+    if loaded.kind != "dataset":
+        return loaded
+    return replace(loaded, obj=loaded.obj.copy(deep=False))
+
+
+def maintain_live_registry(registry=None) -> None:
+    """Run throttled live-registry maintenance."""
+    global _last_maintenance
+
+    registry = registry if registry is not None else live_db
+    now = time.monotonic()
+    interval = _maintenance_interval()
+    with _maintenance_lock:
+        if interval > 0 and _last_maintenance and now - _last_maintenance < interval:
+            return
+        _last_maintenance = now
+
+    maintenance = registry.maintain_registry(
+        retention_days=7,
+        # A refused localhost connection can take about two seconds on Windows.
+        timeout=2.0,
+        retries=2,
+    )
+    stale = getattr(maintenance, "stale_measurement_ids", ()) or ()
+    deleted = getattr(maintenance, "deleted_count", 0) or 0
+    if stale or deleted:
+        logger.info(
+            "Live registry maintenance marked %d stale and deleted %d old "
+            "dataset record(s)",
+            len(stale),
+            deleted,
+        )
+
+
 def get_live_dataset_entries() -> Dict[str, Dict[str, Any]]:
     """
     Return mapping of measurement ids to live dataset info from SQLite DB.
@@ -155,21 +218,7 @@ def get_live_dataset_entries() -> Dict[str, Dict[str, Any]]:
         return {}
 
     try:
-        maintenance = live_db.maintain_registry(
-            retention_days=7,
-            # Long enough to outlast a refused connection to a closed
-            # localhost port (~2s on Windows), which is what tells a dead
-            # producer apart from a busy one.
-            timeout=2.0,
-            retries=2,
-        )
-        if maintenance.stale_measurement_ids or maintenance.deleted_count:
-            logger.info(
-                "Live registry maintenance marked %d stale and deleted %d old "
-                "dataset record(s)",
-                len(maintenance.stale_measurement_ids),
-                maintenance.deleted_count,
-            )
+        maintain_live_registry()
         live_db.init_database()
         measurements = live_db.get_live_measurements()
         entries: Dict[str, Dict[str, Any]] = {}
@@ -840,6 +889,29 @@ def list_datatree_nodes(ref: str | Path) -> list[dict[str, Any]]:
             close_fn()
 
 
+def _read_qcodes_sqlite(path: Path, query: str) -> list[tuple]:
+    """Query a QCoDeS database, falling back to lock-free access."""
+    uri = path.as_uri()
+    attempts = (f"{uri}?mode=ro", None, f"{uri}?immutable=1")
+    last: Exception | None = None
+
+    for attempt in attempts:
+        try:
+            connection = (
+                sqlite3.connect(str(path))
+                if attempt is None
+                else sqlite3.connect(attempt, uri=True)
+            )
+            try:
+                return connection.execute(query).fetchall()
+            finally:
+                connection.close()
+        except Exception as exc:
+            last = exc
+
+    raise last if last else RuntimeError(f"Could not read {path}")
+
+
 def _get_latest_qcodes_run_id(db_path: Path) -> int:
     """
     Return the latest run_id from a QCoDeS sqlite DB.
@@ -855,17 +927,13 @@ def _get_latest_qcodes_run_id(db_path: Path) -> int:
 
     """
     try:
-        conn = sqlite3.connect(str(db_path))
-        try:
-            row = conn.execute("SELECT MAX(run_id) FROM runs").fetchone()
-        finally:
-            conn.close()
+        rows = _read_qcodes_sqlite(db_path, "SELECT MAX(run_id) FROM runs")
     except Exception as exc:
         raise DatasetResolutionError(
             f"Failed to query runs from QCoDeS DB '{db_path}': {exc}"
         ) from exc
 
-    run_id = row[0] if row else None
+    run_id = rows[0][0] if rows else None
     if run_id is None:
         raise DatasetResolutionError(f"No runs found in QCoDeS DB: {db_path}")
 
@@ -891,17 +959,14 @@ def list_qcodes_runs(db_path: str | Path) -> list[dict[str, Any]]:
         raise DatasetResolutionError(f"QCoDeS database file not found: {path}")
 
     try:
-        conn = sqlite3.connect(str(path))
-        try:
-            rows = conn.execute(
-                """
-                SELECT run_id, name, result_table_name, run_timestamp
-                FROM runs
-                ORDER BY run_id DESC
-                """
-            ).fetchall()
-        finally:
-            conn.close()
+        rows = _read_qcodes_sqlite(
+            path,
+            """
+            SELECT run_id, name, result_table_name, run_timestamp
+            FROM runs
+            ORDER BY run_id DESC
+            """,
+        )
     except Exception as exc:
         raise DatasetResolutionError(
             f"Failed to read runs from QCoDeS DB '{path}': {exc}"
@@ -1329,6 +1394,26 @@ class LiveMemoryProvider:
         return self._load_from_disk(normalized, measurement_id, info)
 
     async def load_async(self, ref: str) -> LoadedData:
+        """Share concurrent and closely spaced fetches for one measurement."""
+        measurement_id = extract_measurement_id(normalize_memory_reference(ref) or "")
+        if not measurement_id:
+            return await self._fetch(ref)
+
+        cached = _live_poll_results.get(measurement_id)
+        if cached and time.monotonic() - cached[0] < _live_poll_window():
+            return _with_own_attrs(cached[1])
+
+        poll = _live_polls.get(measurement_id)
+        if poll is None or poll.done():
+            poll = asyncio.create_task(self._fetch(ref))
+            _live_polls[measurement_id] = poll
+
+        # One cancelled caller must not cancel the shared fetch.
+        loaded = await asyncio.shield(poll)
+        _live_poll_results[measurement_id] = (time.monotonic(), loaded)
+        return _with_own_attrs(loaded)
+
+    async def _fetch(self, ref: str) -> LoadedData:
         normalized = normalize_memory_reference(ref)
         if normalized is None:
             raise DatasetResolutionError(f"Not a memory reference: {ref}")

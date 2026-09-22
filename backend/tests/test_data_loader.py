@@ -1,3 +1,4 @@
+import asyncio
 import sqlite3
 import threading
 from contextlib import nullcontext
@@ -832,3 +833,62 @@ def test_non_quantify_hdf5_dataset_is_unaffected(tmp_path, monkeypatch):
     assert loaded.format == "hdf5"
     assert "qimchi_quantify_gridded" not in loaded.obj.attrs
     loaded.obj.close()
+
+
+@pytest.mark.asyncio
+async def test_plots_of_one_measurement_share_a_single_live_fetch(monkeypatch):
+    base = xr.Dataset(
+        data_vars={"value": (("x",), [1.0, 2.0])},
+        coords={"x": [0, 1]},
+    )
+    fetches = 0
+
+    async def _async_ws(*_args, **_kwargs):
+        nonlocal fetches
+        fetches += 1
+        await asyncio.sleep(0.02)  # a round trip the other callers can join
+        return base.copy(deep=True)
+
+    monkeypatch.setattr(data_loader, "resolve_live_dataset", lambda _m: _live_row())
+    monkeypatch.setattr(data_loader.live_client, "open_live_measurement", _async_ws)
+
+    loaded = await asyncio.gather(
+        *(data_loader.load_data_async("memory://m-share") for _ in range(4))
+    )
+
+    assert fetches == 1, f"{fetches} fetches for four concurrent polls"
+    assert all(item.obj.attrs["measurement_id"] == "m-share" for item in loaded)
+    # Callers may update attrs independently.
+    loaded[0].obj.attrs["path"] = "rewritten by the first caller"
+    assert loaded[1].obj.attrs["path"] == "memory://m-share"
+
+
+def test_a_qcodes_database_is_read_without_taking_write_locks(tmp_path, monkeypatch):
+    db = tmp_path / "runs.db"
+    connection = sqlite3.connect(db)
+    connection.execute("CREATE TABLE runs (run_id INTEGER, name TEXT)")
+    connection.execute("INSERT INTO runs VALUES (1, 'sweep')")
+    connection.commit()
+    connection.close()
+
+    modes: list[str | None] = []
+    real_connect = sqlite3.connect
+
+    def recording_connect(target, *args, **kwargs):
+        modes.append(str(target) if kwargs.get("uri") else None)
+        return real_connect(target, *args, **kwargs)
+
+    monkeypatch.setattr(data_loader.sqlite3, "connect", recording_connect)
+
+    rows = data_loader._read_qcodes_sqlite(db, "SELECT run_id FROM runs")
+
+    assert rows == [(1,)]
+    assert modes and modes[0] is not None and modes[0].endswith("?mode=ro")
+
+
+def test_an_unreadable_qcodes_database_still_reports_why(tmp_path, monkeypatch):
+    db = tmp_path / "missing.db"
+    db.write_text("not a database", encoding="utf-8")
+
+    with pytest.raises(sqlite3.DatabaseError):
+        data_loader._read_qcodes_sqlite(db, "SELECT run_id FROM runs")
