@@ -3,7 +3,8 @@ import axios from "axios";
 import { Save, AlertCircle, Check, Clock, Loader2, NotebookPen } from "lucide-react";
 
 // Local imports
-import MarkdownEditor from "./MarkdownEditor";
+// Load the editor and its parsers only when Notes opens.
+const MarkdownEditor = React.lazy(() => import("./MarkdownEditor"));
 import { BasketItem } from "./Basket";
 import { PROD_BACKEND_URL } from "../config";
 import { themeClasses } from "../theme";
@@ -937,12 +938,16 @@ export default function Notes({
                 </div>
               </div>
             )}
-            <MarkdownEditor
-              value={notes}
-              onChange={handleNotesChange}
-              placeholder="Start typing your notes here... Auto-save is enabled. You can also drag and drop dataset paths from the explorer."
-              disabled={loading || !canEdit}
-            />
+            <React.Suspense
+              fallback={<div className="h-full w-full animate-pulse rounded-lg bg-gray-100" />}
+            >
+              <MarkdownEditor
+                value={notes}
+                onChange={handleNotesChange}
+                placeholder="Start typing your notes here... Auto-save is enabled. You can also drag and drop dataset paths from the explorer."
+                disabled={loading || !canEdit}
+              />
+            </React.Suspense>
           </div>
         ) : (
           <div className="h-full flex flex-col items-center justify-center text-gray-500">

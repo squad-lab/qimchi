@@ -8,16 +8,40 @@ const plotly = vi.hoisted(() => ({
   Plots: { resize: vi.fn() },
 }));
 
-vi.mock("plotly.js", () => ({ default: plotly, ...plotly }));
+vi.mock("./plotly", () => ({ default: plotly }));
 
 import Plot from "./Plot";
 
+const resizeCallbacks: Array<() => void> = [];
 class FakeResizeObserver {
+  constructor(callback: () => void) {
+    resizeCallbacks.push(callback);
+  }
   observe() {}
   unobserve() {}
   disconnect() {}
 }
 vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+
+const visibilityCallbacks: Array<(entries: { isIntersecting: boolean }[]) => void> = [];
+class FakeIntersectionObserver {
+  constructor(callback: (entries: { isIntersecting: boolean }[]) => void) {
+    visibilityCallbacks.push(callback);
+  }
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
+
+/** Resize the mocked plot container. */
+const resizeContainerTo = (width: number) => {
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+    value: width,
+    configurable: true,
+  });
+  resizeCallbacks.forEach((callback) => callback());
+};
 
 // jsdom lays nothing out, and the plot is only drawn once it has a size.
 beforeAll(() => {
@@ -32,6 +56,8 @@ const plotJson = {
 
 afterEach(() => {
   vi.clearAllMocks();
+  resizeCallbacks.length = 0;
+  visibilityCallbacks.length = 0;
 });
 
 describe("Plot", () => {
@@ -45,6 +71,32 @@ describe("Plot", () => {
     view.unmount();
 
     expect(plotly.purge).toHaveBeenCalledWith(node);
+  });
+
+  it("resizes with relayout rather than redrawing every trace", async () => {
+    render(<Plot plotJson={plotJson as never} />);
+    await waitFor(() => expect(plotly.react).toHaveBeenCalled(), { timeout: 3000 });
+    plotly.react.mockClear();
+
+    resizeContainerTo(1200);
+
+    await waitFor(() => expect(plotly.relayout).toHaveBeenCalled(), { timeout: 3000 });
+    expect(plotly.react).not.toHaveBeenCalled();
+  });
+
+  it("leaves a plot that is scrolled out of view until it comes back", async () => {
+    render(<Plot plotJson={plotJson as never} />);
+    await waitFor(() => expect(plotly.react).toHaveBeenCalled(), { timeout: 3000 });
+    plotly.react.mockClear();
+
+    visibilityCallbacks.forEach((callback) => callback([{ isIntersecting: false }]));
+    resizeContainerTo(900);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(plotly.relayout).not.toHaveBeenCalled();
+
+    visibilityCallbacks.forEach((callback) => callback([{ isIntersecting: true }]));
+
+    await waitFor(() => expect(plotly.relayout).toHaveBeenCalled(), { timeout: 3000 });
   });
 
   it("does not purge a plot that was never drawn", () => {

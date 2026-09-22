@@ -157,6 +157,10 @@ export interface PlotTheme {
     /** Figure heading. Brighter than body text so the title still leads. */
     titleText: string;
     grid: string;
+    /** Minor grid and ticks: always dimmer than the major ones. */
+    gridMinor: string;
+    tick: string;
+    tickMinor: string;
     zeroline: string;
   };
   font: {

@@ -20,7 +20,10 @@ export const lightTheme: PlotTheme = {
     paper: "rgba(0,0,0,0)",
     text: "#374151",
     titleText: "#111827",
-    grid: "#f3f4f6",
+    grid: "#d1d5db",
+    gridMinor: "#f3f4f6",
+    tick: "#6b7280",
+    tickMinor: "#c7cbd1",
     zeroline: "#e5e7eb",
   },
   font: {
@@ -47,7 +50,10 @@ export const darkTheme: PlotTheme = {
     paper: "rgba(0,0,0,0)",
     text: "#ABB2BF",
     titleText: "#F0F6FC",
-    grid: "#3E4451",
+    grid: "#5C6370",
+    gridMinor: "#3E4451",
+    tick: "#9DA5B4",
+    tickMinor: "#5C6370",
     zeroline: "#5C6370",
   },
   font: {
@@ -94,6 +100,13 @@ export const applyThemeToLayout = (layout: Partial<Layout>, theme: PlotTheme): P
     xaxis: {
       ...layout.xaxis,
       gridcolor: theme.colors.grid,
+      tickcolor: theme.colors.tick,
+      // Keep minor divisions dimmer than major ones.
+      minor: {
+        ...layout.xaxis?.minor,
+        gridcolor: theme.colors.gridMinor,
+        tickcolor: theme.colors.tickMinor,
+      },
       zerolinecolor: theme.colors.zeroline,
       tickfont: {
         size: tickSize,
@@ -114,6 +127,12 @@ export const applyThemeToLayout = (layout: Partial<Layout>, theme: PlotTheme): P
     yaxis: {
       ...layout.yaxis,
       gridcolor: theme.colors.grid,
+      tickcolor: theme.colors.tick,
+      minor: {
+        ...layout.yaxis?.minor,
+        gridcolor: theme.colors.gridMinor,
+        tickcolor: theme.colors.tickMinor,
+      },
       zerolinecolor: theme.colors.zeroline,
       tickfont: {
         size: tickSize,

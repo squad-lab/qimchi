@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback, useDeferredValue } from "react";
 import { Layout, Config, Data } from "plotly.js";
-import * as Plotly from "plotly.js";
+import Plotly from "./plotly";
 
 // Local imports
+import { engineeringPresentation, unitMetaFromLayout } from "./engineeringTicks";
 import { lightTheme, darkTheme, applyThemeToLayout } from "./themes";
 import { useThemeStore } from "../../stores/themeStore";
 
@@ -129,6 +130,87 @@ const forwardMathAxisTitleClick = (plotElement: HTMLDivElement, event: MouseEven
   }
 };
 
+/** Clear MathJax's retained items without removing rendered titles. */
+const forgetTypesetMath = (): void => {
+  const mathJax = (window as unknown as { MathJax?: { typesetClear?: () => void } }).MathJax;
+  try {
+    mathJax?.typesetClear?.();
+  } catch {
+    // Older MathJax versions may not provide typesetClear.
+  }
+};
+
+/** Rebuild engineering ticks for the visible axis ranges. */
+const retickForCurrentRange = (node: HTMLDivElement, layout: Partial<Layout>): void => {
+  const units = unitMetaFromLayout(layout);
+  const fullLayout = (node as unknown as { _fullLayout?: Record<string, AxisWithTicks> })
+    ._fullLayout;
+  if (!fullLayout) return;
+
+  const update: Record<string, unknown> = {};
+  for (const axis of ["x", "y"] as const) {
+    const full = fullLayout[`${axis}axis`];
+    const range = (full?.range ?? []).map(Number).filter(Number.isFinite);
+    if (range.length !== 2) continue;
+
+    // Autorange uses the data extent; zoom uses the visible range.
+    const extent = full?.autorange ? drawnExtent(node, axis) : range;
+    const presentation = engineeringPresentation(units[axis], extent, 5);
+    if (!presentation) continue;
+    // Avoid a relayout loop when the ticks already match.
+    if (sameTicks(full?.tickvals, presentation.tickvals)) continue;
+
+    update[`${axis}axis.tickvals`] = presentation.tickvals;
+    update[`${axis}axis.ticktext`] = presentation.ticktext;
+    if (presentation.title !== undefined) {
+      update[`${axis}axis.title.text`] = presentation.title;
+    }
+  }
+
+  // Plotly accepts dotted paths that its Layout type omits.
+  if (Object.keys(update).length) void Plotly.relayout(node, update as Partial<Layout>);
+};
+
+type AxisWithTicks = {
+  range?: unknown[];
+  tickvals?: unknown[];
+  ticktext?: unknown[];
+  autorange?: boolean;
+  title?: { text?: string };
+};
+
+/** Return the drawn data extent from Plotly's decoded traces. */
+const drawnExtent = (node: HTMLDivElement, axis: "x" | "y"): number[] => {
+  const traces =
+    (node as unknown as { _fullData?: Record<string, unknown>[] })._fullData ??
+    (node as unknown as { data?: Record<string, unknown>[] }).data ??
+    [];
+  let minimum = Infinity;
+  let maximum = -Infinity;
+  for (const trace of traces) {
+    const values = trace?.[axis];
+    if (!values || typeof (values as ArrayLike<number>).length !== "number") continue;
+    const list = values as ArrayLike<number>;
+    for (let index = 0; index < list.length; index++) {
+      const value = Number(list[index]);
+      if (!Number.isFinite(value)) continue;
+      if (value < minimum) minimum = value;
+      if (value > maximum) maximum = value;
+    }
+  }
+  return Number.isFinite(minimum) && Number.isFinite(maximum) ? [minimum, maximum] : [];
+};
+
+const sameTicks = (current: unknown[] | undefined, next: number[]): boolean => {
+  if (!Array.isArray(current) || current.length !== next.length) return false;
+  return next.every((value, index) => {
+    const existing = Number(current[index]);
+    if (!Number.isFinite(existing)) return false;
+    const scale = Math.max(Math.abs(existing), Math.abs(value), Number.MIN_VALUE);
+    return Math.abs(existing - value) <= scale * 1e-9;
+  });
+};
+
 const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onClick, onHover }) => {
   // Defer plot JSON updates to reduce flickering during rapid appearance changes
   const deferredPlotJson = useDeferredValue(plotJson);
@@ -140,7 +222,15 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
   const plottedNodeRef = useRef<HTMLDivElement | null>(null);
   const plotContainerRef = useRef<HTMLDivElement>(null);
   const lastPlotStructureRef = useRef<string>("");
+  // Let the stable relayout listener read the current layout.
+  const layoutBaseRef = useRef<Partial<Layout>>({});
   const dataRevisionRef = useRef<number>(0);
+  // Distinguish a size-only update from changed plot data.
+  const lastRenderRef = useRef<{
+    data: Data[];
+    layout: Partial<Layout>;
+    config: Partial<Config>;
+  } | null>(null);
 
   // Keep a ref to the latest onRelayout callback so the listener never needs
   // to be re-registered when the parent re-creates the callback function.
@@ -157,6 +247,9 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
   onHoverRef.current = onHover;
   const hoverListenerRef = useRef<((event: Plotly.PlotMouseEvent) => void) | null>(null);
 
+  // Wait for a measurable container before drawing.
+  const plotDrawn = dimensions.width > 0 && dimensions.height > 0;
+
   // Create a structural hash to detect when plot needs full recreation vs just data update
   const plotStructureHash = useMemo(() => {
     return JSON.stringify({
@@ -170,14 +263,12 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
   // Check if structure changed significantly
   const structureChanged = plotStructureHash !== lastPlotStructureRef.current;
 
-  // Enhanced layout with better visual styling using theme
-  const enhancedLayout: Partial<Layout> = useMemo(() => {
+  // Keep dimensions separate so resizing can use relayout.
+  const layoutBase: Partial<Layout> = useMemo(() => {
     const themedLayout = applyThemeToLayout(deferredPlotJson.layout, plotTheme);
-    const baseLayout = {
+    return {
       ...themedLayout,
       autosize: true,
-      width: dimensions.width || undefined,
-      height: dimensions.height || undefined,
       plot_bgcolor: "rgba(0,0,0,0)",
       paper_bgcolor: "rgba(0,0,0,0)",
       xaxis: {
@@ -190,6 +281,11 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
         linewidth: 2,
         // The Appearance grid toggle sets this; figures without one stay gridless.
         showgrid: themedLayout.xaxis?.showgrid ?? false,
+        // Match the minor-grid default to the major grid.
+        minor: {
+          ...themedLayout.xaxis?.minor,
+          showgrid: themedLayout.xaxis?.minor?.showgrid ?? themedLayout.xaxis?.showgrid ?? false,
+        },
         linecolor: plotTheme.colors.text,
       },
       yaxis: {
@@ -202,18 +298,26 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
         linewidth: 2,
         // The Appearance grid toggle sets this; figures without one stay gridless.
         showgrid: themedLayout.yaxis?.showgrid ?? false,
+        // Match the minor-grid default to the major grid.
+        minor: {
+          ...themedLayout.yaxis?.minor,
+          showgrid: themedLayout.yaxis?.minor?.showgrid ?? themedLayout.yaxis?.showgrid ?? false,
+        },
         linecolor: plotTheme.colors.text,
       },
     };
+  }, [deferredPlotJson.layout, plotTheme]);
 
-    // If structure didn't change but data might have changed, increment datarevision
-    if (!structureChanged && lastPlotStructureRef.current) {
-      dataRevisionRef.current += 1;
-      baseLayout.datarevision = dataRevisionRef.current;
-    }
+  layoutBaseRef.current = layoutBase;
 
-    return baseLayout;
-  }, [deferredPlotJson.layout, dimensions.width, dimensions.height, structureChanged, plotTheme]);
+  const enhancedLayout: Partial<Layout> = useMemo(
+    () => ({
+      ...layoutBase,
+      width: dimensions.width || undefined,
+      height: dimensions.height || undefined,
+    }),
+    [layoutBase, dimensions.width, dimensions.height],
+  );
 
   const enhancedConfig: Partial<Config> = useMemo(
     () => ({
@@ -237,11 +341,10 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
       displaylogo: false,
       displayModeBar: "hover",
       modeBarButtonsToAdd: [],
+      // Omit dimensions to export at the current plot size.
       toImageButtonOptions: {
         format: "svg" as const,
         filename: "plot",
-        height: dimensions.height,
-        width: dimensions.width,
         scale: 2,
       },
       ...deferredPlotJson.config,
@@ -250,7 +353,7 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
       // an older saved plot config did not know about this setting.
       typesetMath: true,
     }),
-    [deferredPlotJson.config, dimensions.height, dimensions.width],
+    [deferredPlotJson.config],
   );
 
   // Function to update plot using Plotly.react for efficient updates
@@ -260,12 +363,29 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
     }
 
     try {
+      // A size-only update can reuse the existing traces.
+      const rendered = lastRenderRef.current;
+      const sizeOnly =
+        plottedNodeRef.current === plotRef.current &&
+        !structureChanged &&
+        rendered !== null &&
+        rendered.data === deferredPlotJson.data &&
+        rendered.layout === layoutBase &&
+        rendered.config === enhancedConfig;
+
+      if (sizeOnly) {
+        await Plotly.relayout(plotRef.current, {
+          width: dimensions.width,
+          height: dimensions.height,
+        });
+        retickForCurrentRange(plotRef.current, layoutBase);
+        forgetTypesetMath();
+        return true;
+      }
+
       if (structureChanged) {
-        console.log("[Plot] Structure changed, using Plotly.react for full update");
         lastPlotStructureRef.current = plotStructureHash;
         dataRevisionRef.current = 0; // Reset data revision for new structure
-      } else {
-        console.log("[Plot] Structure unchanged, using Plotly.react for efficient update");
       }
 
       // Plotly v4 supports MathJax v3/v4 directly. Wait for the configured
@@ -276,9 +396,27 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
         await mathJax.startup.promise;
       }
 
+      // Bump datarevision only when trace data changed.
+      const layoutToRender = { ...enhancedLayout };
+      if (
+        !structureChanged &&
+        lastPlotStructureRef.current &&
+        rendered?.data !== deferredPlotJson.data
+      ) {
+        dataRevisionRef.current += 1;
+        layoutToRender.datarevision = dataRevisionRef.current;
+      }
+
       // Use Plotly.react - it automatically determines whether to create or update
-      await Plotly.react(plotRef.current, deferredPlotJson.data, enhancedLayout, enhancedConfig);
+      await Plotly.react(plotRef.current, deferredPlotJson.data, layoutToRender, enhancedConfig);
       plottedNodeRef.current = plotRef.current;
+      retickForCurrentRange(plotRef.current, layoutBase);
+      forgetTypesetMath();
+      lastRenderRef.current = {
+        data: deferredPlotJson.data,
+        layout: layoutBase,
+        config: enhancedConfig,
+      };
       enableMathAxisTitleEditing(plotRef.current);
 
       // Register interaction listeners as soon as Plotly is ready. MathJax's
@@ -288,6 +426,8 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
         const plotEl = plotRef.current as any;
         if (typeof plotEl.on === "function") {
           const handler = (event: Plotly.PlotRelayoutEvent) => {
+            const node = plottedNodeRef.current;
+            if (node) retickForCurrentRange(node, layoutBaseRef.current);
             onRelayoutRef.current?.(event as Record<string, unknown>);
           };
           relayoutListenerRef.current = handler;
@@ -340,6 +480,7 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
     }
   }, [
     deferredPlotJson.data,
+    layoutBase,
     enhancedLayout,
     enhancedConfig,
     dimensions.width,
@@ -378,7 +519,8 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
       plotElement.removeEventListener("click", clickHandler, true);
       if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
     };
-  }, [dimensions.height, dimensions.width]);
+    // The observer reconnects the title bridge after Plotly redraws it.
+  }, [plotDrawn]);
 
   // Clean up the plotly_relayout listener when the component unmounts.
   // The listener itself is registered inside updatePlot after Plotly initialises,
@@ -402,20 +544,31 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
   }, []);
 
   useEffect(() => {
-    const updateDimensions = () => {
-      if (plotContainerRef.current) {
-        const { offsetWidth, offsetHeight } = plotContainerRef.current;
-        const newWidth = offsetWidth;
-        const newHeight = Math.max(250, offsetHeight - 20);
+    // Defer off-screen resizes until the plot becomes visible.
+    let visible = true;
+    let resizePending = false;
+    let hasMeasured = false;
 
-        // Only update if dimensions changed significantly (more than 5px)
-        setDimensions((prev) => {
-          if (Math.abs(prev.width - newWidth) > 5 || Math.abs(prev.height - newHeight) > 5) {
-            return { width: newWidth, height: newHeight };
-          }
-          return prev;
-        });
+    const updateDimensions = () => {
+      if (!plotContainerRef.current) return;
+      if (!visible && hasMeasured) {
+        resizePending = true;
+        return;
       }
+      resizePending = false;
+      hasMeasured = true;
+
+      const { offsetWidth, offsetHeight } = plotContainerRef.current;
+      const newWidth = offsetWidth;
+      const newHeight = Math.max(250, offsetHeight - 20);
+
+      // Ignore subpixel layout noise.
+      setDimensions((prev) => {
+        if (Math.abs(prev.width - newWidth) > 5 || Math.abs(prev.height - newHeight) > 5) {
+          return { width: newWidth, height: newHeight };
+        }
+        return prev;
+      });
     };
 
     // Debounced update function
@@ -424,6 +577,16 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
       clearTimeout(timeoutId);
       timeoutId = setTimeout(updateDimensions, 150);
     };
+
+    // Resize shortly before the plot enters the viewport.
+    const visibilityObserver = new IntersectionObserver(
+      (entries) => {
+        visible = entries.some((entry) => entry.isIntersecting);
+        if (visible && resizePending) updateDimensions();
+      },
+      { rootMargin: "400px" },
+    );
+    if (plotContainerRef.current) visibilityObserver.observe(plotContainerRef.current);
 
     // Initial measurement
     const timer = setTimeout(updateDimensions, 100);
@@ -445,6 +608,7 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
       clearTimeout(timeoutId);
       window.removeEventListener("resize", debouncedUpdate);
       resizeObserver.disconnect();
+      visibilityObserver.disconnect();
     };
   }, []);
 
@@ -466,7 +630,7 @@ const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onCli
 
   return (
     <div ref={plotContainerRef} className="w-full h-full min-h-[400px]">
-      {dimensions.width > 0 && dimensions.height > 0 && (
+      {plotDrawn && (
         <div
           ref={plotRef}
           className="qimchi-plot"

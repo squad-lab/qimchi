@@ -1,11 +1,23 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { DraggableCore, type DraggableEvent } from "react-draggable";
 
 // Local imports
-import IndividualPlot from "./Plots/IndividualPlot";
 import type { BasketItem } from "./Basket";
 import type { PlotConfiguration } from "./interfaces";
 import usePainterStore from "../stores/painterStore";
+
+// Keep Plotly out of the startup bundle until plots are needed.
+const loadIndividualPlot = () => import("./Plots/IndividualPlot");
+const IndividualPlot = lazy(loadIndividualPlot);
+
+if (typeof window !== "undefined") {
+  const prefetch = () => void loadIndividualPlot();
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(prefetch, { timeout: 4000 });
+  } else {
+    window.setTimeout(prefetch, 1500);
+  }
+}
 
 interface PlotContainerProps {
   plotConfigs: PlotConfiguration[];
@@ -338,19 +350,21 @@ const PlotContainer: React.FC<PlotContainerProps> = ({
               onDrag={handleDrag}
               onDragStop={handleDragStop}
             >
-              <IndividualPlot
-                config={config}
-                onRemove={onRemovePlot}
-                onMoveBy={
-                  onMovePlot && plotConfigs.length > 1
-                    ? (offset) => onMovePlot(config.id, index + offset)
-                    : undefined
-                }
-                onSetPinned={onSetPlotPinned}
-                onAddPlot={onAddPlot}
-                measurementInfo={measurementInfo}
-                widthPercent={pct}
-              />
+              <Suspense fallback={<div className="h-64 w-full animate-pulse rounded-lg bg-gray-100" />}>
+                <IndividualPlot
+                  config={config}
+                  onRemove={onRemovePlot}
+                  onMoveBy={
+                    onMovePlot && plotConfigs.length > 1
+                      ? (offset) => onMovePlot(config.id, index + offset)
+                      : undefined
+                  }
+                  onSetPinned={onSetPlotPinned}
+                  onAddPlot={onAddPlot}
+                  measurementInfo={measurementInfo}
+                  widthPercent={pct}
+                />
+              </Suspense>
             </PlotTile>
           );
         })}
