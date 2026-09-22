@@ -3,7 +3,7 @@ Qimchi desktop launcher (PyInstaller + pywebview).
 
 Responsibilities:
 1. Starts the FastAPI/uvicorn server on a background thread.
-2. Waits until the server actually answers GET /health before opening the window.
+2. Opens the window on a splash at once, and loads the app when GET /health answers.
 3. Surfaces server startup crashes in the window instead of a blank page.
 4. Guards multiprocessing so export workers (ProcessPoolExecutor) don't re-launch the whole app on Windows.
 5. Best-effort ensure a Chrome/Chromium is available for Kaleido image export on first run.
@@ -126,6 +126,55 @@ def _app_version() -> str:
         return version("qimchi-api")
     except Exception:
         return "unknown"
+
+
+def _splash_html() -> str:
+    """The window's first page, shown while the backend starts."""
+    import base64
+
+    logo = ""
+    for candidate in (
+        os.path.join(_bundle_dir(), "frontend", "dist", "qimchi-logo.png"),
+        os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "frontend",
+            "public",
+            "qimchi-logo.png",
+        ),
+    ):
+        try:
+            with open(candidate, "rb") as handle:
+                data = base64.b64encode(handle.read()).decode("ascii")
+            logo = f'<img src="data:image/png;base64,{data}" alt="">'
+            break
+        except OSError:
+            continue
+
+    return f"""<!doctype html><html><head><meta charset="utf-8"><style>
+      html,body{{height:100%;margin:0}}
+      body{{display:flex;flex-direction:column;align-items:center;justify-content:center;
+        gap:18px;background:#f8fafc;color:#0f172a;
+        font-family:"Fira Sans",system-ui,-apple-system,"Segoe UI",sans-serif}}
+      img{{width:88px;height:88px;object-fit:contain;border-radius:16px;
+        animation:breathe 2.4s ease-in-out infinite}}
+      .name{{font-size:30px;font-weight:700;letter-spacing:.04em}}
+      .version{{font-size:13px;font-weight:500;color:#64748b;margin-top:-12px}}
+      .bar{{width:168px;height:3px;border-radius:999px;background:#e2e8f0;overflow:hidden}}
+      .bar span{{display:block;width:40%;height:100%;border-radius:999px;background:#16a34a;
+        animation:slide 1.1s ease-in-out infinite}}
+      .lab{{font-size:12px;color:#94a3b8;letter-spacing:.08em;text-transform:uppercase}}
+      @keyframes slide{{0%{{transform:translateX(-100%)}}100%{{transform:translateX(250%)}}}}
+      @keyframes breathe{{0%,100%{{transform:scale(1)}}50%{{transform:scale(1.06)}}}}
+      @media (prefers-color-scheme:dark){{
+        body{{background:#0f172a;color:#e2e8f0}}
+        .version{{color:#94a3b8}} .bar{{background:#1e293b}} .lab{{color:#64748b}}}}
+    </style></head><body>
+      {logo}
+      <div class="name">Qimchi</div>
+      <div class="version">v{_app_version()}</div>
+      <div class="bar"><span></span></div>
+      <div class="lab">SQUAD Lab &middot; FZ J&uuml;lich</div>
+    </body></html>"""
 
 
 def _purge_webview_cache_on_upgrade(storage_path: str, log) -> None:
@@ -257,6 +306,27 @@ def _watch_webview2_crashes(window, log) -> None:
     window.events.loaded += on_loaded
 
 
+def _use_bundled_certificates(log) -> None:
+    """Point HTTPS at certifi's CA bundle in frozen builds."""
+    if os.environ.get("SSL_CERT_FILE"):
+        return
+    try:
+        import certifi
+
+        bundle = certifi.where()
+    except Exception:
+        log("[ssl] certifi unavailable; HTTPS will use the system trust store")
+        return
+
+    if not os.path.isfile(bundle):
+        log(f"[ssl] certifi bundle missing at {bundle}")
+        return
+
+    os.environ["SSL_CERT_FILE"] = bundle
+    os.environ["REQUESTS_CA_BUNDLE"] = bundle
+    log(f"[ssl] using CA bundle {bundle}")
+
+
 def _persistent_chrome_dir() -> str:
     """
     Persistent, writable dir for a downloaded Chrome (survives across runs).
@@ -274,6 +344,15 @@ def _find_installed_chrome() -> str | None:
     """
     import glob
     import shutil
+
+    for pat in (
+        "chrome-*/chrome.exe",
+        "chrome-*/chrome",
+        "chrome-*/*.app/Contents/MacOS/Google Chrome for Testing",
+    ):
+        hits = glob.glob(os.path.join(_persistent_chrome_dir(), pat))
+        if hits:
+            return hits[0]
 
     for name in ("chrome", "google-chrome", "chromium", "chromium-browser"):
         p = shutil.which(name)
@@ -293,12 +372,65 @@ def _find_installed_chrome() -> str | None:
             if os.path.exists(cand):
                 return cand
 
-    # A Chrome-for-Testing we downloaded previously.
-    for pat in ("chrome-*/chrome.exe", "chrome-*/chrome"):
-        hits = glob.glob(os.path.join(_persistent_chrome_dir(), pat))
-        if hits:
-            return hits[0]
+    # macOS installs an .app bundle, which may not be on PATH.
+    if sys.platform == "darwin":
+        for cand in (
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            os.path.expanduser(
+                "~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            ),
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+        ):
+            if os.path.exists(cand):
+                return cand
+
+    if sys.platform.startswith("linux"):
+        for cand in (
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/snap/bin/chromium",
+        ):
+            if os.path.exists(cand):
+                return cand
+
     return None
+
+
+def _chrome_starts(executable: str, log) -> bool:
+    """Check that Chrome can start in Kaleido's headless mode."""
+    import subprocess
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="qimchi-chrome-check-") as profile:
+        try:
+            result = subprocess.run(
+                [
+                    executable,
+                    "--headless=new",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    f"--user-data-dir={profile}",
+                    "--dump-dom",
+                    "about:blank",
+                ],
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+        except Exception as exc:
+            log(f"[chrome] {executable} did not run: {exc!r}")
+            return False
+
+    if result.returncode != 0:
+        detail = (result.stderr or b"").decode("utf-8", "replace").strip()[:300]
+        log(f"[chrome] {executable} exited {result.returncode}: {detail}")
+        return False
+
+    log(f"[chrome] verified {executable} can render headless")
+    return True
 
 
 def _ensure_chrome_for_kaleido(log) -> None:
@@ -311,28 +443,37 @@ def _ensure_chrome_for_kaleido(log) -> None:
 
     """
     import threading
+    import traceback
 
     found = _find_installed_chrome()
     if found:
         os.environ["BROWSER_PATH"] = found
         log(f"[chrome] using Chrome for Kaleido export: {found}")
-        return
 
-    def _download() -> None:
+    def _download(reason: str) -> str | None:
         try:
-            log(
-                "[chrome] no Chrome found; downloading Chrome for Testing (one-time)..."
-            )
+            log(f"[chrome] {reason}; downloading Chrome for Testing (one-time)...")
             import kaleido
 
             exe = kaleido.get_chrome_sync(path=_persistent_chrome_dir())
             os.environ["BROWSER_PATH"] = str(exe)
             log(f"[chrome] downloaded Chrome to: {exe}")
-        except Exception as exc:  # never fatal -- app still runs, export just fails
-            log(f"[chrome] download failed (image export may not work): {exc!r}")
+            return str(exe)
+        except Exception:  # Image export may fail, but the app can still start.
+            log(
+                "[chrome] download failed (image export may not work):\n"
+                + traceback.format_exc()
+            )
+            return None
 
-    threading.Thread(target=_download, daemon=True).start()
-    log("[chrome] fetching Chrome in background; app will open now.")
+    def _prepare() -> None:
+        # Fall back to a managed Chrome if the installed one cannot run headless.
+        if found and _chrome_starts(found, log):
+            return
+        _download("no usable Chrome found" if found else "no Chrome found")
+
+    threading.Thread(target=_prepare, daemon=True).start()
+    log("[chrome] preparing Chrome for export in the background; app will open now.")
 
 
 class _Api:
@@ -519,7 +660,16 @@ def _download_update_asset(asset_url: str, destination: str, log, progress=None)
     partial = destination + ".part"
     request = Request(asset_url, headers={"User-Agent": "Qimchi-Updater"})
     try:
-        with urlopen(request, timeout=180) as response, open(partial, "wb") as target:
+        from api.updater import https_context
+
+        context = https_context()
+    except Exception:
+        context = None
+    try:
+        with (
+            urlopen(request, timeout=180, context=context) as response,
+            open(partial, "wb") as target,
+        ):
             headers = getattr(response, "headers", None) or {}
             total = int(headers.get("Content-Length") or 0)
             final_url = getattr(response, "url", None) or asset_url
@@ -1362,6 +1512,9 @@ def main() -> int:
             port = s.getsockname()[1]
         log(f"Default port busy; using free port {port}")
 
+    # Configure HTTPS before the backend and its workers start.
+    _use_bundled_certificates(log)
+
     if not (headless_smoke or native_smoke):
         _ensure_chrome_for_kaleido(log)
 
@@ -1386,24 +1539,41 @@ def main() -> int:
     t = threading.Thread(target=start_server, daemon=True)
     t.start()
 
-    # Poll /health until the server answers, or the thread dies, or we time out.
     health_url = f"http://127.0.0.1:{port}/health"
-    deadline = time.time() + 60.0
-    ready = False
-    log("Waiting for server /health ...")
-    while time.time() < deadline:
-        if server_error:
-            break
-        try:
-            with urllib.request.urlopen(health_url, timeout=1.0) as resp:
-                if resp.status == 200:
-                    ready = True
-                    log("Server is ready.")
-                    break
-        except Exception:
-            time.sleep(0.25)
-
     base_url = health_url.removesuffix("/health")
+
+    def wait_for_health(timeout: float = 60.0) -> bool:
+        """Poll /health until the server answers, the thread dies, or we time out."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if server_error:
+                return False
+            try:
+                with urllib.request.urlopen(health_url, timeout=1.0) as resp:
+                    if resp.status == 200:
+                        return True
+            except Exception:
+                time.sleep(0.25)
+        return False
+
+    def startup_error_html() -> str:
+        detail = server_error.get("tb", "Server did not respond within 60s.")
+        return (
+            "<html><body style='font-family:sans-serif;padding:2rem'>"
+            "<h2>Qimchi failed to start</h2>"
+            "<p>The backend server did not come up. Details have been written to "
+            f"<code>{_log_path()}</code>.</p><pre style='white-space:pre-wrap;"
+            "background:#f4f4f4;padding:1rem;border-radius:6px'>"
+            f"{detail}</pre></body></html>"
+        )
+
+    ready = False
+    if headless_smoke or native_smoke:
+        log("Waiting for server /health ...")
+        ready = wait_for_health()
+        if ready:
+            log("Server is ready.")
+
     if headless_smoke:
         passed = ready and _run_headless_smoke(base_url, log)
         server = server_ref.get("server")
@@ -1425,37 +1595,26 @@ def main() -> int:
     api = _Api(log)
 
     smoke_fixture = _prepare_smoke_fixture() if native_smoke else None
-    if ready:
+    if native_smoke:
         window_url = base_url + "/"
         if smoke_fixture is not None:
             import urllib.parse
 
             window_url += "?dataset=" + urllib.parse.quote(smoke_fixture[0])
+        window = webview.create_window("Qimchi", window_url, js_api=api, maximized=True)
+    else:
+        # Show the splash while the backend starts.
         window = webview.create_window(
             "Qimchi",
-            window_url,
+            html=_splash_html(),
             js_api=api,
             maximized=True,
         )
-    else:
-        window = None
-        detail = server_error.get("tb", "Server did not respond within 60s.")
-        log("Server never became ready. Showing error window.")
-        html = (
-            "<html><body style='font-family:sans-serif;padding:2rem'>"
-            "<h2>Qimchi failed to start</h2>"
-            "<p>The backend server did not come up. Details have been written to "
-            f"<code>{_log_path()}</code>.</p><pre style='white-space:pre-wrap;"
-            "background:#f4f4f4;padding:1rem;border-radius:6px'>"
-            f"{detail}</pre></body></html>"
-        )
-        webview.create_window("Qimchi - startup error", html=html)
 
-    if window is not None:
-        api._updates.attach(window)
-        _watch_webview2_crashes(window, log)
-        if not native_smoke:
-            _exit_soon_after_close(window, log)
+    api._updates.attach(window)
+    _watch_webview2_crashes(window, log)
+    if not native_smoke:
+        _exit_soon_after_close(window, log)
     # Live plots poll on a timer, which Chromium throttles while the window is
     # minimized or hidden. The variable is appended to pywebview's own flags.
     os.environ[WEBVIEW2_ARGUMENTS_ENV] = _with_webview2_argument(
@@ -1469,33 +1628,31 @@ def main() -> int:
     os.makedirs(storage_path, exist_ok=True)
     _purge_webview_cache_on_upgrade(storage_path, log)
 
-    # Run the update check in the background after the window is ready.
-    # Only run when the app started successfully and we're in a frozen build.
     native_smoke_result = {"passed": False}
-    if window is not None and (getattr(sys, "frozen", False) or native_smoke):
 
-        def _on_loaded() -> None:
-            if native_smoke and smoke_fixture is not None:
+    def _open_app() -> None:
+        log("Waiting for server /health ...")
+        if wait_for_health():
+            log("Server is ready.")
+            window.load_url(base_url + "/")
+            # The update check only makes sense for an installed build.
+            if getattr(sys, "frozen", False):
+                _run_update_check(api._updates, log)
+        else:
+            log("Server never became ready. Showing the error page.")
+            window.load_html(startup_error_html())
+
+    def _on_loaded() -> None:
+        if native_smoke:
+            if smoke_fixture is not None:
                 native_smoke_result["passed"] = _run_native_smoke(
                     window, smoke_fixture[0], smoke_fixture[1], log
                 )
-            else:
-                # webview.start runs this in a non-daemon thread; keep it short
-                # so it can never hold the process open after the window closes.
-                threading.Thread(
-                    target=_run_update_check,
-                    args=(api._updates, log),
-                    name="qimchi-update-check",
-                    daemon=True,
-                ).start()
+            return
+        # A daemon thread cannot keep the process open after the window closes.
+        threading.Thread(target=_open_app, name="qimchi-open-app", daemon=True).start()
 
-        webview.start(
-            func=_on_loaded,
-            private_mode=False,
-            storage_path=storage_path,
-        )
-    else:
-        webview.start(private_mode=False, storage_path=storage_path)
+    webview.start(func=_on_loaded, private_mode=False, storage_path=storage_path)
     log("Window closed.")
 
     if native_smoke:

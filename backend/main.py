@@ -2,6 +2,7 @@ import asyncio
 import atexit
 import logging
 import os
+import sys
 import threading
 import time
 from concurrent.futures import ProcessPoolExecutor
@@ -108,7 +109,13 @@ def _warm_export_pool(pool: ProcessPoolExecutor, workers: int) -> None:
                 slowest = max(slowest, float(future.result(timeout=120) or 0.0))
                 warmed += 1
             except Exception:
-                logging.exception("Kaleido warm-up task failed")
+                # Kaleido usually times out here when Chrome cannot start.
+                logging.exception(
+                    "Kaleido warm-up task failed -- image export needs a Chrome "
+                    "it can start; see BROWSER_PATH (%s) and the [chrome] lines "
+                    "in the desktop log",
+                    os.environ.get("BROWSER_PATH") or "unset",
+                )
         logging.info(
             "Kaleido warm-up finished: %d/%d export workers in %.1fs "
             "(slowest render %.1fs -- the wait the first export no longer pays)",
@@ -221,7 +228,10 @@ serve_static = os.environ.get("SERVE_STATIC_FILES", "true").lower() in (
 )
 
 # Always determine frontend dist path (needed for conditional root route)
-if os.path.exists("/app/frontend/dist"):
+if getattr(sys, "frozen", False):
+    # PyInstaller exposes bundled data under _MEIPASS.
+    frontend_dist_path = os.path.join(sys._MEIPASS, "frontend", "dist")
+elif os.path.exists("/app/frontend/dist"):
     # Docker environment - frontend built into /app/frontend/dist
     frontend_dist_path = "/app/frontend/dist"
 else:
@@ -240,6 +250,13 @@ if serve_static:
         assets_path = os.path.join(frontend_dist_path, "assets")
         if os.path.exists(assets_path):
             app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
+
+        # Plot titles load MathJax from this URL at runtime.
+        mathjax_path = os.path.join(frontend_dist_path, "mathjax")
+        if os.path.exists(mathjax_path):
+            app.mount("/mathjax", StaticFiles(directory=mathjax_path), name="mathjax")
+        else:
+            logging.warning("MathJax not found at: %s", mathjax_path)
 
         logging.info(f"Serving static files from: {frontend_dist_path}")
     else:

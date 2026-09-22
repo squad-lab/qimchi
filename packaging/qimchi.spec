@@ -73,6 +73,10 @@ datas = [
     (_backend_stage, "backend"),
 ]
 datas += collect_data_files("qcodes")
+# Choreographer reads its pinned Chrome version from package data.
+datas += collect_data_files("choreographer")
+# Frozen builds use certifi for HTTPS verification.
+datas += collect_data_files("certifi")
 # copy_metadata ensures importlib.metadata.version("qimchi-api") works in the
 # frozen build so the updater can compare the running version against releases.
 datas += copy_metadata("qimchi-api")

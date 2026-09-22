@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import ssl
 import sys
 from collections.abc import Callable
 from urllib.request import Request, urlopen
@@ -47,6 +48,16 @@ _RELEASES_URL = (
 )
 
 _last_check_error: str | None = None
+
+
+def https_context() -> "ssl.SSLContext":
+    """Build an SSL context that also works in frozen desktop builds."""
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
 
 
 def last_check_error() -> str | None:
@@ -202,7 +213,7 @@ def check_for_update(
             _RELEASES_URL,
             headers={"Accept": "application/json", "User-Agent": "Qimchi-Updater"},
         )
-        with urlopen(request, timeout=10) as response:  # noqa: S310 - fixed HTTPS URL
+        with urlopen(request, timeout=10, context=https_context()) as response:  # noqa: S310 - fixed HTTPS URL
             status = getattr(response, "status", None)
             releases = json.load(response)
         if not isinstance(releases, list):

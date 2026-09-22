@@ -399,3 +399,50 @@ def test_the_current_process_counts_as_running(launcher):
     import os
 
     assert launcher._process_is_running(os.getpid())
+
+
+def test_chrome_is_found_where_macos_actually_puts_it(launcher, monkeypatch, tmp_path):
+    chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+    monkeypatch.setattr(launcher.sys, "platform", "darwin")
+    monkeypatch.setattr(launcher, "_persistent_chrome_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(launcher.os.path, "exists", lambda path: path == chrome)
+
+    import shutil as _shutil
+
+    monkeypatch.setattr(_shutil, "which", lambda _name: None)
+
+    assert launcher._find_installed_chrome() == chrome
+
+
+def test_a_downloaded_chrome_wins_over_the_users_own(launcher, monkeypatch, tmp_path):
+    downloaded = tmp_path / "chrome-mac-arm64" / "chrome"
+    downloaded.parent.mkdir(parents=True)
+    downloaded.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setattr(launcher, "_persistent_chrome_dir", lambda: str(tmp_path))
+
+    import shutil as _shutil
+
+    monkeypatch.setattr(_shutil, "which", lambda _name: "/usr/bin/google-chrome")
+
+    assert launcher._find_installed_chrome() == str(downloaded)
+
+
+def test_https_uses_the_bundled_certificates(launcher, monkeypatch, tmp_path):
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
+
+    lines: list[str] = []
+    launcher._use_bundled_certificates(lines.append)
+
+    import certifi
+
+    assert launcher.os.environ["SSL_CERT_FILE"] == certifi.where()
+    assert launcher.os.environ["REQUESTS_CA_BUNDLE"] == certifi.where()
+
+
+def test_an_existing_certificate_setting_is_left_alone(launcher, monkeypatch):
+    monkeypatch.setenv("SSL_CERT_FILE", "/etc/ssl/chosen.pem")
+    launcher._use_bundled_certificates(lambda _msg: None)
+    assert launcher.os.environ["SSL_CERT_FILE"] == "/etc/ssl/chosen.pem"
