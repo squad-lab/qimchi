@@ -69,6 +69,8 @@ interface SidebarState {
   // Explorer takes over the whole window (wide "desktop" view) instead of
   // living in the sidebar column.
   explorerExpanded: boolean;
+  // Hide plots whose measurements are not running.
+  liveOnlyPlots: boolean;
 
   // Component states
   componentStates: ComponentStates;
@@ -83,6 +85,7 @@ interface SidebarState {
   setBasketCollapsed: (collapsed: boolean) => void;
   setComposerCollapsed: (collapsed: boolean) => void;
   setExplorerExpanded: (expanded: boolean) => void;
+  setLiveOnlyPlots: (liveOnly: boolean) => void;
 
   // Actions for component states
   updateExplorerState: (state: Partial<ComponentStates["explorer"]>) => void;
@@ -182,6 +185,7 @@ export const useSidebarStore = create<SidebarState>()(
       basketCollapsed: false,
       composerCollapsed: false,
       explorerExpanded: false,
+      liveOnlyPlots: false,
 
       // Initial component states
       componentStates: initialComponentStates,
@@ -217,6 +221,8 @@ export const useSidebarStore = create<SidebarState>()(
       // Expanding always implies the Explorer is the visible section.
       // Expanding keeps whichever Explorer-backed tab is open (Explorer or
       // Live) and falls back to Explorer from anywhere else.
+
+      setLiveOnlyPlots: (liveOnly) => set({ liveOnlyPlots: liveOnly }),
 
       setExplorerExpanded: (expanded) =>
         set((state) => {

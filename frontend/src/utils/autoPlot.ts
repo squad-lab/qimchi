@@ -183,6 +183,30 @@ export interface ReplicationResult {
   skipped: string[];
 }
 
+/** Select one replication source per plot shape. */
+export function selectReplicationSources(
+  configs: PlotConfiguration[],
+  filtersFor: (plotId: string) => AppliedFilter[] | undefined,
+  includeCustom: boolean,
+): ReplicationSource[] {
+  const seen = new Set<string>();
+  const sources: ReplicationSource[] = [];
+
+  for (const config of configs) {
+    if (!includeCustom && config.origin === "custom") continue;
+    const shape = [
+      config.plotType,
+      [...config.indeps].sort().join(","),
+      [...config.deps].sort().join(","),
+    ].join("|");
+    if (seen.has(shape)) continue;
+    seen.add(shape);
+    sources.push({ config, filters: filtersFor(config.id) });
+  }
+
+  return sources;
+}
+
 /**
  * Recreate the Viewer's plots against a newly added measurement: same plot
  * type, same dependents/independents, same filters. This is what makes a
@@ -191,7 +215,12 @@ export interface ReplicationResult {
  *
  * A plot is only replicated when EVERY variable it uses exists in the target measurement
  */
-export function replicatePlots(item: BasketItem, sources: ReplicationSource[]): ReplicationResult {
+export function replicatePlots(
+  item: BasketItem,
+  sources: ReplicationSource[],
+  options: { includeCustom?: boolean } = {},
+): ReplicationResult {
+  const { includeCustom = true } = options;
   const result: ReplicationResult = { plotConfigs: [], skipped: [] };
 
   if (!isDatasetPath(item.path) || !item.attributes) return result;
@@ -204,6 +233,9 @@ export function replicatePlots(item: BasketItem, sources: ReplicationSource[]): 
   const source = isMemoryPath(fpath) ? "memory" : "disk";
 
   for (const { config, filters } of sources) {
+    // Composer plots and saved LineCuts are custom plots.
+    if (!includeCustom && config.origin === "custom") continue;
+
     const missing = [
       ...config.indeps.filter((name) => !haveIndep.has(name)),
       ...config.deps.filter((name) => !haveDep.has(name)),

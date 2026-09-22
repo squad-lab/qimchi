@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { generateAutoPlotConfigs, replicatePlots } from "./autoPlot";
+import { generateAutoPlotConfigs, replicatePlots, selectReplicationSources } from "./autoPlot";
 import type { BasketItem } from "../components/Basket";
 
 const item = (
@@ -193,5 +193,72 @@ describe("replicatePlots", () => {
     expect(
       replicatePlots(item(["gate"], ["signal"], "C:/notes.md"), [{ config }]).plotConfigs,
     ).toEqual([]);
+  });
+});
+
+describe("replicatePlots and custom plots", () => {
+  const target = {
+    id: "t",
+    name: "run2",
+    path: "/data/run2.zarr",
+    type: "file" as const,
+    attributes: { independents: ["gate"], dependents: ["current"] },
+  };
+  const sources = [
+    {
+      config: {
+        id: "a",
+        fpath: "/data/run1.zarr",
+        indeps: ["gate"],
+        deps: ["current"],
+        plotType: "LinePlot" as const,
+        filters_order: [],
+        filters_opts: {},
+        slider: {},
+        source: "disk" as const,
+        origin: "auto" as const,
+      },
+    },
+    {
+      config: {
+        id: "b",
+        fpath: "/data/run1.zarr",
+        indeps: ["gate"],
+        deps: ["current"],
+        plotType: "HeatMap" as const,
+        filters_order: [],
+        filters_opts: {},
+        slider: {},
+        source: "disk" as const,
+        origin: "custom" as const,
+      },
+    },
+  ];
+
+  it("recreates every plot by default", () => {
+    const result = replicatePlots(target, sources);
+
+    expect(result.plotConfigs.map((config) => config.plotType)).toEqual(["LinePlot", "HeatMap"]);
+  });
+
+  it("leaves out the plots the user built when asked to", () => {
+    const result = replicatePlots(target, sources, { includeCustom: false });
+
+    expect(result.plotConfigs.map((config) => config.plotType)).toEqual(["LinePlot"]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it("does not let a newer LineCut hide a default plot of the same shape", () => {
+    const automatic = sources[0].config;
+    const lineCut = {
+      ...automatic,
+      id: "cut",
+      origin: "custom" as const,
+      slider: { bias: { min: -1, max: 1, step: 0.1, value: 0.2 } },
+    };
+
+    const selected = selectReplicationSources([lineCut, automatic], () => undefined, false);
+
+    expect(selected.map(({ config }) => config.id)).toEqual(["a"]);
   });
 });

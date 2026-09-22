@@ -2,7 +2,7 @@ import axios from "axios";
 import { PROD_BACKEND_URL } from "../config";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Panel } from "react-resizable-panels";
-import { ChartScatter, Trash2 } from "lucide-react";
+import { ChartScatter, CopyPlus, Radio, Trash2 } from "lucide-react";
 
 // Local imports
 import Basket, { BasketFieldSelection, BasketItem } from "./Basket";
@@ -20,7 +20,11 @@ import { useSidebarStore } from "../stores/sidebarStore";
 import SectionRibbon, { ribbonButtonClass } from "./SectionRibbon";
 import { useToast } from "../hooks/useToast";
 import Tooltip from "./Tooltip";
-import { generateAutoPlotConfigs, replicatePlots, type ReplicationSource } from "../utils/autoPlot";
+import {
+  generateAutoPlotConfigs,
+  replicatePlots,
+  selectReplicationSources,
+} from "../utils/autoPlot";
 import { useGlobalShortcutsInit, useShortcut } from "../hooks/useGlobalShortcuts";
 import {
   computeSharedFields,
@@ -82,6 +86,10 @@ const Viewer = ({
   // are for this session only.
   const plotWidthPercent = useSettingsStore((state) => state.settings.general.plotWidth);
   const isSquareModeGlobal = useSettingsStore((state) => state.settings.plots.squarify);
+  const recreateCustomPlots = useSettingsStore((state) => state.settings.plots.recreateCustomPlots);
+  // Hide non-live plots without removing them.
+  const liveOnlyPlots = useSidebarStore((state) => state.liveOnlyPlots);
+  const setLiveOnlyPlots = useSidebarStore((state) => state.setLiveOnlyPlots);
   const plottingBehaviour = useSettingsStore((state) => state.settings.plots.plottingBehaviour);
   const setPlotWidthPercent = (percent: number) => {
     if (PLOT_WIDTHS.includes(percent as PlotWidthPercent)) {
@@ -98,6 +106,10 @@ const Viewer = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const composerActionRef = useRef<PlotComposerHandle | null>(null);
   const previousBasketItems = useRef<BasketItem[]>([]);
+  // Read the latest setting without retriggering the auto-plot effect.
+  const recreateCustomPlotsRef = useRef(recreateCustomPlots);
+  recreateCustomPlotsRef.current = recreateCustomPlots;
+
   const processedAutoPlotItems = useRef<Set<string>>(new Set());
   const previousSelectionKeyRef = useRef<string>("");
 
@@ -207,27 +219,15 @@ const Viewer = ({
         // Mirror the plots already in the Viewer onto the new measurement, so
         // the view the user has shaped (defaults removed, custom plots added,
         // filters applied) carries over. Deduplicated by plot shape.
-        const replicationSources = (() => {
-          const seen = new Set<string>();
-          const sources: ReplicationSource[] = [];
+        const replicationSources = selectReplicationSources(
+          plotConfigs,
+          (plotId) => getPlotState(plotId)?.applied_filters,
+          recreateCustomPlotsRef.current,
+        );
 
-          for (const config of plotConfigs) {
-            const shape = [
-              config.plotType,
-              [...config.indeps].sort().join(","),
-              [...config.deps].sort().join(","),
-            ].join("|");
-            if (seen.has(shape)) continue;
-            seen.add(shape);
-            sources.push({
-              config,
-              filters: getPlotState(config.id)?.applied_filters,
-            });
-          }
-          return sources;
-        })();
-
-        const replicated = replicatePlots(item, replicationSources);
+        const replicated = replicatePlots(item, replicationSources, {
+          includeCustom: recreateCustomPlotsRef.current,
+        });
 
         if (replicated.plotConfigs.length > 0) {
           addPlots(replicated.plotConfigs);
@@ -431,6 +431,13 @@ const Viewer = ({
   // Independents currently on the composer's axes. The Basket narrows the
   // dependents it offers to the ones that vary over them -- a dependent that
   // does not share the chosen coordinate cannot be plotted against it.
+  const shownPlotConfigs = useMemo(
+    () =>
+      liveOnlyPlots ? plotConfigs.filter((config) => config.source === "memory") : plotConfigs,
+    [liveOnlyPlots, plotConfigs],
+  );
+  const hiddenPlotCount = plotConfigs.length - shownPlotConfigs.length;
+
   const [composerIndeps, setComposerIndeps] = useState<string[]>([]);
   const handleComposerSelectionChange = useCallback((snapshot: ComposerSelectionSnapshot) => {
     // Keep the previous array when the names are unchanged: this feeds a
@@ -730,10 +737,10 @@ const Viewer = ({
             style={{ maxHeight: viewerHeight }}
           >
             <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
-              {plotConfigs.length > 0 ? (
+              {shownPlotConfigs.length > 0 ? (
                 <div className="p-2">
                   <PlotContainer
-                    plotConfigs={plotConfigs}
+                    plotConfigs={shownPlotConfigs}
                     onRemovePlot={removePlot}
                     onMovePlot={movePlot}
                     onSetPlotPinned={setPlotPinned}
@@ -749,13 +756,72 @@ const Viewer = ({
                 <div className="h-full flex items-center justify-center text-gray-500 p-4">
                   <div className="text-center">
                     <ChartScatter size={48} className="mx-auto mb-2 opacity-50" />
-                    <p>No plots to display</p>
-                    <p className="text-sm mt-1">Create a plot using the composer above</p>
+                    <p>
+                      {hiddenPlotCount > 0 ? "No live plots to display" : "No plots to display"}
+                    </p>
+                    <p className="text-sm mt-1">
+                      {hiddenPlotCount > 0
+                        ? `${hiddenPlotCount} plot(s) hidden while showing live only`
+                        : "Create a plot using the composer above"}
+                    </p>
                   </div>
                 </div>
               )}
             </div>
             <SectionRibbon label="Viewer" Icon={ChartScatter} count={plotConfigs.length}>
+              {/* Live plots only */}
+              <Tooltip
+                content={
+                  liveOnlyPlots
+                    ? `Show all plots${hiddenPlotCount > 0 ? ` (${hiddenPlotCount} hidden)` : ""}`
+                    : "Show only live plots"
+                }
+                position="left"
+              >
+                <button
+                  onClick={() => setLiveOnlyPlots(!liveOnlyPlots)}
+                  className={`flex h-7 w-7 items-center justify-center rounded transition-colors duration-150 ${
+                    liveOnlyPlots ? "bg-blue-50" : "qimchi-dark-hover-plain hover:bg-gray-200"
+                  }`}
+                  aria-label={liveOnlyPlots ? "Show all plots" : "Show only live plots"}
+                  aria-pressed={liveOnlyPlots}
+                >
+                  <Radio size={16} className={liveOnlyPlots ? "text-blue-600" : "text-gray-600"} />
+                </button>
+              </Tooltip>
+
+              {/* Plot replication mode */}
+              <Tooltip
+                content={
+                  recreateCustomPlots
+                    ? "New measurements recreate every plot"
+                    : "New measurements get default plots only"
+                }
+                position="left"
+              >
+                <button
+                  onClick={() =>
+                    useSettingsStore
+                      .getState()
+                      .update(["plots", "recreateCustomPlots"], !recreateCustomPlots)
+                  }
+                  className={`flex h-7 w-7 items-center justify-center rounded transition-colors duration-150 ${
+                    recreateCustomPlots ? "bg-blue-50" : "qimchi-dark-hover-plain hover:bg-gray-200"
+                  }`}
+                  aria-label={
+                    recreateCustomPlots
+                      ? "Recreate custom plots for new measurements"
+                      : "Recreate default plots only for new measurements"
+                  }
+                  aria-pressed={recreateCustomPlots}
+                >
+                  <CopyPlus
+                    size={16}
+                    className={recreateCustomPlots ? "text-blue-600" : "text-gray-600"}
+                  />
+                </button>
+              </Tooltip>
+
               {/* Squarify toggle - applies to all plots */}
               <Tooltip
                 content={isSquareModeGlobal ? "Unsquarify all plots" : "Squarify all plots"}

@@ -54,7 +54,7 @@ import { useStableCallback } from "../../hooks/useStableCallback";
 import { filterLabel } from "../../utils/filterNames";
 import RibbonFlyout from "./RibbonFlyout";
 import { PLOT_WIDTHS } from "../../settings/userSettings";
-import { niceTicks, SI_PREFIXES } from "../../utils/engineeringFormat";
+import { engineeringPresentation, unitMetaFromLayout } from "./engineeringTicks";
 
 type PlotlyJSON = {
   data: Data[];
@@ -244,6 +244,13 @@ const PlotWrapper: React.FC<Props> = ({
   };
 
   const plotTitle = getPlotTitle(plotJson);
+  // Filters that depend on sweep order cannot use a measured x axis.
+  const xAxisIsMeasured = Boolean(
+    (
+      (plotJson?.layout as { meta?: { qimchi_axes?: Record<string, { dependent?: boolean }> } })
+        ?.meta?.qimchi_axes ?? {}
+    ).x?.dependent,
+  );
 
   const [isMaximized, setIsMaximized] = useState(false);
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
@@ -920,8 +927,8 @@ const PlotWrapper: React.FC<Props> = ({
 
       const title =
         activeAxis === "x"
-          ? `Slice at X = ${pointX.toFixed(4)}`
-          : `Slice at Y = ${pointY.toFixed(4)}`;
+          ? `Slice at X = ${pointX.toFixed(2)}`
+          : `Slice at Y = ${pointY.toFixed(2)}`;
 
       return {
         data: [
@@ -932,6 +939,7 @@ const PlotWrapper: React.FC<Props> = ({
             mode: "lines",
             line: { color: "#2563eb", width: 3 },
             name: "LineCut Preview",
+            hovertemplate: "X: %{x:.2~f}<br>Y: %{y:.2~f}<extra></extra>",
           },
         ],
         layout: {
@@ -1271,6 +1279,8 @@ const PlotWrapper: React.FC<Props> = ({
         });
 
         onAddPlot({
+          // Saved LineCuts are custom plots.
+          origin: "custom",
           fpath: plotConfig.fpath,
           indeps: [remainVar],
           deps: plotConfig.deps,
@@ -1282,7 +1292,7 @@ const PlotWrapper: React.FC<Props> = ({
           filters_opts: filtersOpts,
         });
 
-        showToast(`LinePlot created at ${cutVar}=${cutVal.toFixed(4)}`, "success");
+        showToast(`LinePlot created at ${cutVar}=${cutVal.toFixed(2)}`, "success");
       } catch (err: any) {
         showToast(`Failed to create linecut: ${err.message}`, "error");
       }
@@ -1476,9 +1486,16 @@ const PlotWrapper: React.FC<Props> = ({
             }
           }
 
+          // Preserve sweep colours on measured-vs-measured plots.
+          const markerColour = (trace.marker as { color?: unknown } | undefined)?.color;
+          const sweepColoured = markerColour != null && typeof markerColour !== "string";
+
           // Apply line settings if trace has line
           if (trace.line || trace.type === "scatter") {
-            updatedTrace.mode = settings.line.mode;
+            updatedTrace.mode =
+              sweepColoured && !settings.line.mode.includes("markers")
+                ? "lines+markers"
+                : settings.line.mode;
             updatedTrace.line = {
               ...trace.line,
               color: settings.line.color,
@@ -1494,7 +1511,7 @@ const PlotWrapper: React.FC<Props> = ({
           if (trace.marker || trace.type === "scatter") {
             updatedTrace.marker = {
               ...trace.marker,
-              color: settings.marker.color,
+              ...(sweepColoured ? {} : { color: settings.marker.color }),
               size: settings.marker.size,
               symbol: settings.marker.symbol,
               opacity: settings.marker.opacity,
@@ -1745,74 +1762,7 @@ const PlotWrapper: React.FC<Props> = ({
         }
         updatedPlotJson.layout.annotations = existingAnnotations;
 
-        type EngineeringUnitMeta = {
-          unit?: string;
-          engineering_scale?: number;
-          engineering_titles?: Record<string, string>;
-        };
-        const unitDefinitions =
-          ((updatedPlotJson.layout.meta as any)?.qimchi_units as
-            Record<string, EngineeringUnitMeta> | undefined) || {};
-
-        const formatTick = (value: number, step: number): string => {
-          if (Math.abs(value) < Math.abs(step) * 1e-10) return "0";
-          const decimals = Math.max(0, Math.min(8, -Math.floor(Math.log10(Math.abs(step))) + 1));
-          return Number(value.toFixed(decimals)).toString().replace("-", "−");
-        };
-
-        const engineeringPresentation = (
-          definition: EngineeringUnitMeta | undefined,
-          values: number[],
-          requestedTicks: number,
-        ) => {
-          const titles = definition?.engineering_titles || {};
-          const exponents = Object.keys(titles).map(Number).filter(Number.isFinite);
-          // A dimensionless axis (a filter cancelled its units, say) has no
-          // unit to carry a prefix, so the prefix goes on the tick labels
-          // instead -- "0.5m" rather than "0.0005". Its title is left alone.
-          const dimensionless = !exponents.length && definition?.unit === "";
-          if (!values.length || (!exponents.length && !dimensionless)) return null;
-
-          const unitScale = Number(definition?.engineering_scale ?? 1);
-          if (!Number.isFinite(unitScale) || unitScale <= 0) return null;
-          let minimum = Infinity;
-          let maximum = -Infinity;
-          for (const value of values) {
-            if (value < minimum) minimum = value;
-            if (value > maximum) maximum = value;
-          }
-          if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) return null;
-          const maxMagnitude = Math.max(Math.abs(minimum), Math.abs(maximum)) * unitScale;
-          let desiredExponent = 0;
-          if (maxMagnitude > 0 && Number.isFinite(maxMagnitude)) {
-            desiredExponent = 3 * Math.floor(Math.log10(maxMagnitude) / 3);
-          }
-          const exponent = dimensionless
-            ? Math.max(-24, Math.min(24, desiredExponent))
-            : exponents.reduce((best, candidate) =>
-                Math.abs(candidate - desiredExponent) < Math.abs(best - desiredExponent)
-                  ? candidate
-                  : best,
-              );
-          const displayFactor = unitScale / 10 ** exponent;
-          const displayMinimum = minimum * displayFactor;
-          const displayMaximum = maximum * displayFactor;
-          const { ticks: displayTicks, step } = niceTicks(
-            displayMinimum,
-            displayMaximum,
-            requestedTicks,
-          );
-          const tickPrefix = dimensionless ? SI_PREFIXES[exponent] || "" : "";
-          return {
-            title: dimensionless ? undefined : titles[String(exponent)],
-            tickvals: displayTicks.map((tick) => tick / displayFactor),
-            ticktext: displayTicks.map((tick) => {
-              const text = formatTick(tick, step);
-              // A bare "0m" reads as a unit, not a magnitude.
-              return tickPrefix && text !== "0" ? `${text}${tickPrefix}` : text;
-            }),
-          };
-        };
+        const unitDefinitions = unitMetaFromLayout(updatedPlotJson.layout);
 
         for (const axis of ["x", "y"] as const) {
           const axisLayout = updatedPlotJson.layout[`${axis}axis`] as any;
@@ -4123,6 +4073,7 @@ const PlotWrapper: React.FC<Props> = ({
 
       {/* Filters Modal */}
       <FiltersModal
+        xAxisIsMeasured={xAxisIsMeasured}
         isOpen={isFiltersModalOpen}
         onClose={handleFiltersModalClose}
         onApplyFilters={handleFiltersApply}

@@ -43,6 +43,7 @@ import {
   FileText,
   HardDrive,
   Table,
+  Radio,
   SearchXIcon,
   X,
   NotebookPen,
@@ -1982,20 +1983,29 @@ const VirtualizedTreeView = forwardRef<
             })}
           </div>
         ) : (
-          <div className="p-4 text-center text-gray-500 text-sm">
-            <div className="flex items-center justify-center gap-2 mb-2">
-              <SearchXIcon className="text-red-400" size={16} />
-              <span>No items to display</span>
-            </div>
-            <div className="text-xs mt-1">
+          // Match the other sidebar empty states.
+          <div className="h-full flex flex-col items-center justify-center text-gray-500 p-4 text-center">
+            {showLiveOnly ? (
+              <Radio size={48} className="mb-2 text-gray-400" />
+            ) : (
+              <SearchXIcon size={48} className="mb-2 text-gray-400" />
+            )}
+            <p>
               {showLiveOnly
                 ? hiddenLiveMeasurementCount > 0
                   ? "All live measurements are hidden"
                   : "No live measurements"
+                : "No items to display"}
+            </p>
+            <p className="text-sm mt-1">
+              {showLiveOnly
+                ? hiddenLiveMeasurementCount > 0
+                  ? "Unhide one to follow it here"
+                  : "They appear here as soon as one starts running"
                 : path
                   ? "Try a different path or check your filters"
                   : "Enter a path to load directory structure"}
-            </div>
+            </p>
           </div>
         )}
       </div>

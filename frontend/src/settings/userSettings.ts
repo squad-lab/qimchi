@@ -24,6 +24,8 @@ export interface UserSettings {
   plots: {
     plottingBehaviour: PlottingBehaviour;
     squarify: boolean;
+    /** Whether new measurements also recreate custom plots. */
+    recreateCustomPlots: boolean;
   };
   explorer: {
     sortBy: ExplorerSort;
@@ -51,7 +53,7 @@ export interface UserSettings {
 
 export const FACTORY_SETTINGS: UserSettings = {
   general: { theme: "system", zoom: 1, plotWidth: 50 },
-  plots: { plottingBehaviour: "heatmapOrLine", squarify: false },
+  plots: { plottingBehaviour: "heatmapOrLine", squarify: false, recreateCustomPlots: true },
   explorer: { sortBy: "timestamp" },
   live: { autoAddToBasket: true },
   export: { formats: ["png", "svg"], variants: ["light", "dark"], scale: null, folder: null },
