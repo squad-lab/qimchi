@@ -449,9 +449,11 @@ def _nearest_prefix_exponent(value_in_base_units: float) -> int:
     return min(24, max(-24, exponent))
 
 
-def _format_mantissa(value: float) -> str:
+def _format_mantissa(value: float, max_decimals: int | None = None) -> str:
     # Prefix selection is the policy.  ``g`` merely avoids binary-float noise;
     # it is deliberately not a fixed significant-digit or decimal-place rule.
+    if max_decimals is not None:
+        return f"{value:.{max_decimals}f}".rstrip("0").rstrip(".")
     return f"{value:.8g}"
 
 
@@ -460,12 +462,16 @@ def format_quantity(
     unit: Unit | str | None,
     *,
     latex: bool = False,
+    max_decimals: int | None = None,
 ) -> str:
     """Move a scalar to its nearest engineering prefix for presentation."""
     parsed = parse_unit(unit) if not isinstance(unit, Unit) else unit
     if parsed.opaque:
         separator = r"\," if latex else " "
-        return f"{_format_mantissa(value)}{separator}{render_unit(parsed, latex=latex)}"
+        return (
+            f"{_format_mantissa(value, max_decimals)}{separator}"
+            f"{render_unit(parsed, latex=latex)}"
+        )
     value_in_base_units = value * parsed.scale
     prefix_exponent = _nearest_prefix_exponent(value_in_base_units)
     displayed_value = value_in_base_units / (10.0**prefix_exponent)
@@ -473,9 +479,9 @@ def format_quantity(
         parsed.factor_map, prefix_exponent=prefix_exponent, latex=latex
     )
     if not unit_text:
-        return _format_mantissa(displayed_value)
+        return _format_mantissa(displayed_value, max_decimals)
     separator = r"\," if latex else " "
-    return f"{_format_mantissa(displayed_value)}{separator}{unit_text}"
+    return f"{_format_mantissa(displayed_value, max_decimals)}{separator}{unit_text}"
 
 
 def axis_definition(
@@ -568,6 +574,21 @@ def plain_axis_title(definition: Mapping[str, Any]) -> str:
     normalized = axis_definition(definition.get("label"), definition.get("unit"))
     unit = render_unit(normalized["unit"])
     return f"{normalized['label']} ({unit})" if unit else normalized["label"]
+
+
+def hover_entry(definition: Mapping[str, Any], placeholder: str) -> str:
+    """Build a Plotly hover line with engineering notation."""
+    normalized = axis_definition(definition.get("label"), definition.get("unit"))
+    label = normalized["label"]
+    unit = parse_unit(normalized["unit"])
+    symbol = render_unit(unit)
+
+    if symbol and not unit.opaque and unit.scale == 1.0:
+        # Three significant figures cap the mantissa at two decimal places.
+        return f"{label}: %{{{placeholder}:.3~s}}{symbol}"
+    if symbol:
+        return f"{label} ({symbol}): %{{{placeholder}:.2~f}}"
+    return f"{label}: %{{{placeholder}:.2~f}}"
 
 
 def _axis_unit_layout_definition(definition: Mapping[str, Any]) -> dict[str, Any]:
@@ -776,12 +797,29 @@ def set_figure_colorbar_title(figure: Any, title: str) -> None:
     )
 
 
+AXES_META_KEY = "qimchi_axes"
+
+
 def unit_layout_meta(**axes: Mapping[str, Any]) -> dict[str, Any]:
     return {
         UNIT_META_KEY: {
             name: _axis_unit_layout_definition(value) for name, value in axes.items()
         }
     }
+
+
+def axes_layout_meta(**kinds: Mapping[str, Any]) -> dict[str, Any]:
+    """Record each axis variable and whether it contains measured data."""
+    return {AXES_META_KEY: dict(kinds)}
+
+
+def figure_axis_is_dependent(figure: Mapping[str, Any], axis: str) -> bool:
+    """True when that axis of a built figure holds a measured quantity."""
+    layout = figure.get("layout", {})
+    meta = layout.get("meta", {}) if isinstance(layout, Mapping) else {}
+    kinds = meta.get(AXES_META_KEY, {}) if isinstance(meta, Mapping) else {}
+    entry = kinds.get(axis) if isinstance(kinds, Mapping) else None
+    return bool(entry.get("dependent")) if isinstance(entry, Mapping) else False
 
 
 def axis_definition_from_figure(figure: Mapping[str, Any], axis: str) -> dict[str, str]:

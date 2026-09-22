@@ -42,6 +42,12 @@ def test_fit_quantities_move_to_an_engineering_prefix_without_fixed_precision():
     assert format_quantity(-2e-6, "A", latex=True) == r"-2\,\mu\mathrm{A}"
 
 
+def test_hover_quantities_round_to_at_most_two_decimal_places():
+    assert format_quantity(-42.8901e-12, "A", max_decimals=2) == "-42.89 pA"
+    assert format_quantity(-0.36004, "V", max_decimals=2) == "-360.04 mV"
+    assert format_quantity(1.2, "deg", max_decimals=2) == "1.2 deg"
+
+
 def test_line_figure_uses_instrument_attrs_and_preserves_semantic_metadata():
     dataset = xr.Dataset(
         {"current": ("gate", np.array([1e-6, 2e-6, 3e-6]))},
@@ -160,12 +166,12 @@ def test_figure_hover_templates_avoid_latex():
     template = heatmap["data"][0]["hovertemplate"]
     assert "$" not in template
     assert r"\mathrm" not in template
-    assert template.startswith("Voltage 2 (V): %{x}")
+    assert template.startswith("Voltage 2: %{x:.3~s}V")
 
     line = Line({}, dataset.isel(bias=0), ["gate"], ["voltage"]).plot().to_dict()
     line_template = line["data"][0]["hovertemplate"]
     assert "$" not in line_template
-    assert line_template.startswith("Voltage 1 (V): %{x}")
+    assert line_template.startswith("Voltage 1: %{x:.3~s}V")
 
 
 def test_colorbar_gutter_grows_with_the_title_then_shrinks_the_type():
@@ -227,3 +233,18 @@ def test_unit_metadata_carries_plain_text_for_non_tex_labels():
     ]
     assert opaque["unit_text"] == "dB"
     assert opaque["engineering_units_text"] == {}
+
+
+def test_hover_entries_carry_the_unit_on_the_value():
+    assert units.hover_entry({"label": "Voltage 1", "unit": "V"}, "x") == (
+        "Voltage 1: %{x:.3~s}V"
+    )
+    assert units.hover_entry({"label": "Ratio", "unit": ""}, "y") == (
+        "Ratio: %{y:.2~f}"
+    )
+
+
+def test_a_prefixed_unit_keeps_the_plain_hover_form():
+    assert units.hover_entry({"label": "Bias", "unit": "mV"}, "z") == (
+        "Bias (mV): %{z:.2~f}"
+    )

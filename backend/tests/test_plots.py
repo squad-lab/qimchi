@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import base64
+
 import numpy as np
 import pytest
 import xarray as xr
 from fastapi import HTTPException
 
-from api import plots
+from api import figures, plots
+from api.figures import HeatMap, Line
 from api.models import PlotRequest
 
 
@@ -616,3 +619,281 @@ def test_heatmap_colour_range_does_not_leak_between_plots():
 
     assert (coloraxis["cmin"], coloraxis["cmax"]) == (1e-10, 6e-10)
     assert plots.DEFAULT_THEME["hmap"]["rangecolor"] is None
+
+
+@pytest.mark.asyncio
+async def test_live_polls_wait_their_turn_behind_user_requests():
+    import asyncio
+
+    lane = plots._UserFirst(max_wait=0.5)
+    order: list[str] = []
+
+    async def user_work():
+        async with lane.user_request():
+            await asyncio.sleep(0.05)
+            order.append("user")
+
+    async def live_poll():
+        await lane.wait_turn()
+        order.append("poll")
+
+    user = asyncio.create_task(user_work())
+    await asyncio.sleep(0)  # let the user request register
+    await asyncio.gather(live_poll(), user)
+
+    assert order == ["user", "poll"]
+
+    # Poll immediately when no interactive request is running.
+    order.clear()
+    await live_poll()
+    assert order == ["poll"]
+
+
+@pytest.mark.asyncio
+async def test_a_live_poll_is_not_held_back_forever():
+    import asyncio
+    import time
+
+    lane = plots._UserFirst(max_wait=0.1)
+
+    async def slow_user_work():
+        async with lane.user_request():
+            await asyncio.sleep(1.0)
+
+    user = asyncio.create_task(slow_user_work())
+    await asyncio.sleep(0)
+    start = time.perf_counter()
+    await lane.wait_turn()
+    waited = time.perf_counter() - start
+
+    assert 0.05 < waited < 0.5, f"poll waited {waited:.2f}s"
+    user.cancel()
+
+
+def test_a_dataset_that_cannot_be_plotted_says_what_it_has():
+    dataset = _dataset()
+
+    failure = plots._plot_failure("heat map", 0, dataset, KeyError("keithley_tg_volt"))
+    assert failure.status_code == 400
+    assert "keithley_tg_volt" in failure.detail
+    assert "signal" in failure.detail and "sweep" in failure.detail
+
+    dimensions = plots._plot_failure(
+        "heat map", 0, dataset, ValueError("Dimensions {'f'} do not exist")
+    )
+    assert dimensions.status_code == 400
+
+    # Unexpected failures remain server errors.
+    assert (
+        plots._plot_failure("line plot", 0, dataset, RuntimeError("boom")).status_code
+        == 500
+    )
+
+
+def _shared_sweep_dataset():
+    """Two measured quantities recorded along one swept axis."""
+    return xr.Dataset(
+        {
+            "current": ("gate", np.array([1e-6, 2e-6, 3e-6, 2e-6])),
+            "measured_gate": ("gate", np.array([0.0, 0.5, 1.0, 0.5])),
+        },
+        coords={"gate": np.array([0.0, 1.0, 2.0, 3.0])},
+        attrs={"path": "/data/run.nc"},
+    )
+
+
+def test_a_dependent_can_be_an_axis():
+    dataset = _shared_sweep_dataset()
+
+    assert figures.axis_dimension(dataset, "measured_gate") == "gate"
+    assert figures.axis_dimension(dataset, "gate") == "gate"
+    assert figures.is_dependent(dataset, "measured_gate")
+    assert not figures.is_dependent(dataset, "gate")
+    np.testing.assert_allclose(
+        figures.axis_values(dataset, "measured_gate"), [0.0, 0.5, 1.0, 0.5]
+    )
+
+
+def test_a_two_dimensional_dependent_is_not_an_axis():
+    dataset = xr.Dataset(
+        {"signal": (("sweep", "x"), np.arange(12.0).reshape(3, 4))},
+        coords={"x": [0.0, 1.0, 2.0, 3.0], "sweep": [0.0, 1.0, 2.0]},
+    )
+
+    with pytest.raises(figures.AxisResolutionError):
+        figures.axis_dimension(dataset, "signal")
+
+
+def test_a_line_plot_of_one_dependent_against_another_keeps_sweep_order():
+    dataset = _shared_sweep_dataset()
+
+    figure = Line({}, dataset, ["measured_gate"], ["current"]).plot().to_dict()
+
+    trace = figure["data"][0]
+    assert trace["type"] == "scatter"
+    assert figure["layout"]["meta"]["qimchi_axes"]["x"] == {
+        "variable": "measured_gate",
+        "dependent": True,
+    }
+
+
+def test_sliders_cover_the_dimensions_the_axes_leave_free():
+    dataset = xr.Dataset(
+        {
+            "signal": (("sweep", "x"), np.arange(12.0).reshape(3, 4)),
+            "measured_x": ("x", np.array([0.0, 0.5, 1.0, 1.5])),
+        },
+        coords={"x": [0.0, 1.0, 2.0, 3.0], "sweep": [0.0, 1.0, 2.0]},
+    )
+
+    config = plots.gen_slider_config(dataset, ["measured_x"])
+
+    assert set(config) == {"sweep"}, (
+        "the swept dimension behind x must not get a slider"
+    )
+
+
+def test_a_heat_map_needs_one_swept_axis():
+    dataset = xr.Dataset(
+        {
+            "signal": (("sweep", "x"), np.arange(12.0).reshape(3, 4)),
+            "measured_x": ("x", np.array([0.0, 0.5, 1.0, 1.5])),
+            "measured_sweep": ("sweep", np.array([0.0, 1.0, 2.0])),
+        },
+        coords={"x": [0.0, 1.0, 2.0, 3.0], "sweep": [0.0, 1.0, 2.0]},
+    )
+
+    both_measured = plots.validate_axes(
+        [dataset], ["measured_sweep", "measured_x"], ["signal"], "HeatMap"
+    )
+    assert not both_measured["valid"]
+    assert "swept axis" in "; ".join(both_measured["errors"])
+
+    # A measured axis and a swept axis can still form a grid.
+    mixed = plots.validate_axes(
+        [dataset], ["sweep", "measured_x"], ["signal"], "HeatMap"
+    )
+    assert mixed["valid"], mixed["errors"]
+
+    figure = HeatMap({}, dataset, ["sweep", "measured_x"], ["signal"]).plot().to_dict()
+    assert figure["layout"]["meta"]["qimchi_axes"]["x"]["dependent"] is True
+    assert figure["layout"]["meta"]["qimchi_axes"]["y"]["dependent"] is False
+
+
+def test_axes_must_have_been_swept_together():
+    dataset = xr.Dataset(
+        {
+            "current": ("gate", np.array([1.0, 2.0])),
+            "temperature": ("time", np.array([4.0, 5.0, 6.0])),
+        },
+        coords={"gate": [0.0, 1.0], "time": [0.0, 1.0, 2.0]},
+    )
+
+    result = plots.validate_axes([dataset], ["temperature"], ["current"], "LinePlot")
+
+    assert not result["valid"]
+    assert "not swept together" in "; ".join(result["errors"])
+
+
+def test_a_heat_map_axis_pair_on_one_dimension_is_refused():
+    dataset = xr.Dataset(
+        {
+            "signal": (("sweep", "x"), np.arange(12.0).reshape(3, 4)),
+            "measured_x": ("x", np.array([0.0, 0.5, 1.0, 1.5])),
+        },
+        coords={"x": [0.0, 1.0, 2.0, 3.0], "sweep": [0.0, 1.0, 2.0]},
+    )
+
+    result = plots.validate_axes([dataset], ["x", "measured_x"], ["signal"], "HeatMap")
+
+    assert not result["valid"]
+    assert "both run along" in "; ".join(result["errors"])
+
+
+def test_live_refresh_timing_is_written_to_the_app_log(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    written: list[str] = []
+    # The qimchi logger does not propagate to caplog.
+    monkeypatch.setattr(
+        plots.logger, "info", lambda message, *args: written.append(message % args)
+    )
+
+    app = FastAPI()
+    app.include_router(plots.router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/telemetry/live-refresh",
+        json={
+            "plotType": "HeatMap",
+            "count": 60,
+            "medianMs": 812,
+            "p90Ms": 1240,
+            "minMs": 640,
+            "maxMs": 2100,
+            "windowSeconds": 63,
+            "points": 250000,
+            "concurrentPlots": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    line = chr(10).join(written)
+    assert "live refresh | HeatMap" in line
+    assert "median=812ms" in line and "p90=1240ms" in line
+    assert "points=250000" in line and "live plots=3" in line
+
+
+def test_a_dependent_axis_colours_the_line_by_the_sweep():
+    dataset = _shared_sweep_dataset()
+
+    figure = Line({}, dataset, ["measured_gate"], ["current"]).plot().to_dict()
+    trace = figure["data"][0]
+
+    assert trace["mode"] == "lines+markers"
+    assert trace["marker"]["showscale"] is True
+    # to_dict() hands numeric arrays over in Plotly's binary form.
+    colour = trace["marker"]["color"]
+    decoded = np.frombuffer(base64.b64decode(colour["bdata"]), dtype=colour["dtype"])
+    np.testing.assert_allclose(decoded, dataset["gate"].values)
+    assert "gate" in trace["marker"]["colorbar"]["title"]["text"].lower()
+    # Hover labels survive frontend marker-colour overrides.
+    assert "%{customdata}" in trace["hovertemplate"]
+    assert trace["customdata"] == ["0", "1", "2", "3"]
+
+
+def test_a_dependent_axis_hover_formats_the_sweep_value_with_its_unit():
+    dataset = _shared_sweep_dataset().rename({"gate": "p1"})
+    metadata = {"p1": {"label": "Plunger Gate 1", "unit": "V"}}
+    dataset = dataset.assign_coords(p1=np.array([-0.5, -0.25, -0.005, 0.0]))
+
+    trace = Line(metadata, dataset, ["measured_gate"], ["current"]).plot().to_dict()[
+        "data"
+    ][0]
+
+    assert "Plunger Gate 1: %{customdata}" in trace["hovertemplate"]
+    assert trace["customdata"] == ["-500 mV", "-250 mV", "-5 mV", "0 V"]
+
+
+def test_line_hover_values_use_no_more_than_two_decimal_places():
+    dataset = _shared_sweep_dataset()
+    dataset["current"].attrs = {"label": "Current", "unit": "A"}
+    dataset["gate"].attrs = {"label": "Gate", "unit": "V"}
+
+    template = Line({}, dataset, ["gate"], ["current"]).plot().to_dict()["data"][0][
+        "hovertemplate"
+    ]
+
+    assert "Gate: %{x:.3~s}V" in template
+    assert "Current: %{y:.3~s}A" in template
+
+
+def test_an_ordinary_line_plot_is_left_alone():
+    dataset = _shared_sweep_dataset()
+
+    trace = Line({}, dataset, ["gate"], ["current"]).plot().to_dict()["data"][0]
+
+    assert not trace.get("marker", {}).get("showscale")
+    assert "customdata" not in trace

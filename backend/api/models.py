@@ -73,3 +73,17 @@ class TransformPlotResponse(BaseModel):
 
 class WatchPath(BaseModel):
     path: str
+
+
+class LiveRefreshSummary(BaseModel):
+    """Local live-plot timing summary written to the app log."""
+
+    plotType: str = ""
+    count: int = 0
+    medianMs: float = 0
+    p90Ms: float = 0
+    minMs: float = 0
+    maxMs: float = 0
+    windowSeconds: float = 0
+    points: int = 0
+    concurrentPlots: int = 0

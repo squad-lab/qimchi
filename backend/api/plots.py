@@ -3,8 +3,11 @@ FastAPI endpoints for creating and managing plots based on xarray datasets.
 
 """
 
+import asyncio
 import hashlib
 import json
+import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, List
 
@@ -16,17 +19,57 @@ from fastapi.concurrency import run_in_threadpool
 from .data_loader import MEMORY_PROTOCOL, load_dataset_async, resolve_to_disk_path
 
 # Local imports
-from .figures import DEFAULT_THEME, HeatMap, Line
+from .figures import (
+    DEFAULT_THEME,
+    AxisResolutionError,
+    HeatMap,
+    Line,
+    axis_dimension,
+)
 from .filters import apply_filters
 from .json_utils import sanitize_for_json
 from .logger import logger
-from .models import PlotRequest, PlotResponse
+from .models import LiveRefreshSummary, PlotRequest, PlotResponse
 
 # FastAPI router for plot endpoints
 router = APIRouter()
 
 # Runtime plot context registry used by unified transform endpoint.
 _PLOT_CONTEXTS: Dict[str, Dict] = {}
+
+
+class _UserFirst:
+    """Let interactive plot requests briefly take priority over live polls."""
+
+    def __init__(self, max_wait: float = 1.0) -> None:
+        self._in_flight = 0
+        self._idle = asyncio.Event()
+        self._idle.set()
+        self._max_wait = max_wait
+
+    @asynccontextmanager
+    async def user_request(self):
+        self._in_flight += 1
+        self._idle.clear()
+        try:
+            yield
+        finally:
+            self._in_flight -= 1
+            if self._in_flight <= 0:
+                self._in_flight = 0
+                self._idle.set()
+
+    async def wait_turn(self) -> None:
+        """Wait briefly for interactive work to finish."""
+        if self._idle.is_set():
+            return
+        try:
+            await asyncio.wait_for(self._idle.wait(), timeout=self._max_wait)
+        except (TimeoutError, asyncio.TimeoutError):
+            logger.debug("Live poll went ahead while user work was still running")
+
+
+_user_first = _UserFirst()
 
 
 def _build_plot_ref(context: Dict) -> str:
@@ -187,6 +230,67 @@ def validate_variables(
     return validation_result
 
 
+def plotted_dimensions(dataset: xr.Dataset, variables: List[str]) -> set:
+    """Return the dataset dimensions used by the selected axes."""
+    dimensions = set()
+    for variable in variables:
+        try:
+            dimensions.add(axis_dimension(dataset, variable))
+        except AxisResolutionError:
+            # Axis validation reports invalid variables separately.
+            if variable in dataset.dims:
+                dimensions.add(variable)
+    return dimensions
+
+
+def validate_axes(
+    datasets: List[xr.Dataset], indeps: List[str], deps: List[str], plot_type: str
+) -> Dict:
+    """Check that axes share the dimensions required by the plot type."""
+    errors: List[str] = []
+
+    for index, dataset in enumerate(datasets):
+        axes = indeps[:2] if plot_type == "HeatMap" else indeps[:1]
+
+        if plot_type == "HeatMap" and all(
+            variable in dataset.data_vars for variable in axes
+        ):
+            errors.append(
+                "A heat map needs at least one swept axis: "
+                f"'{axes[0]}' and '{axes[1]}' are both measured quantities, "
+                "which trace a path rather than a grid"
+            )
+            continue
+
+        try:
+            axis_dims = {
+                variable: axis_dimension(dataset, variable) for variable in axes
+            }
+        except AxisResolutionError as error:
+            errors.append(f"{error} (dataset {index})")
+            continue
+
+        if plot_type == "HeatMap" and len(set(axis_dims.values())) < len(axis_dims):
+            errors.append(
+                f"'{axes[0]}' and '{axes[1]}' both run along "
+                f"'{next(iter(axis_dims.values()))}', so they cannot be the two "
+                "axes of a heat map"
+            )
+            continue
+
+        for dep in deps:
+            dep_dims = set(dataset[dep].dims) if dep in dataset else set()
+            for variable, dimension in axis_dims.items():
+                if dimension not in dep_dims:
+                    errors.append(
+                        f"'{dep}' and '{variable}' were not swept together: "
+                        f"'{dep}' varies over {', '.join(sorted(dep_dims)) or 'nothing'} "
+                        f"and '{variable}' over '{dimension}'"
+                    )
+
+    return {"valid": not errors, "errors": errors}
+
+
 def gen_slider_config(dataset: xr.Dataset, indeps: List[str]) -> Dict:
     """
     Generate slider configuration for dimensions not in independents.
@@ -201,10 +305,11 @@ def gen_slider_config(dataset: xr.Dataset, indeps: List[str]) -> Dict:
 
     """
     slider_config = {}
+    plotted = plotted_dimensions(dataset, indeps)
 
     for dim in dataset.dims:
         # Only create sliders for dimensions not being plotted
-        if dim not in indeps:
+        if dim not in plotted:
             try:
                 vals = dataset.coords[dim].values
                 unique_vals = np.unique(vals)
@@ -264,11 +369,12 @@ def apply_data_slicing(
         return dataset
 
     slider_vals = {}
+    plotted = plotted_dimensions(dataset, indeps)
 
     # Build slider_vals dict for dimensions that exist in both dataset and slider config
     # and are not independent variables (not being plotted)
     for dim in dataset.dims:
-        if dim not in indeps and dim in slider:
+        if dim not in plotted and dim in slider:
             # Extract the value to select for this dimension
             slider_value = slider[dim]["value"]
             slider_vals[dim] = slider_value
@@ -419,15 +525,36 @@ def create_line_plots(
                 #     f"Created line plot for dataset {i} ({dataset_name}) with {dep} vs {', '.join(indeps)}"
                 # )
 
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.error(f"Failed to create line plot for dataset {i}: {e}")
-            logger.error(f"{e}", exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to create line plot for dataset {i}: {e}",
+            logger.error(
+                f"Failed to create line plot for dataset {i}: {e}", exc_info=True
             )
+            raise _plot_failure("line plot", i, dataset, e) from e
 
     return plots
+
+
+def _plot_failure(
+    kind: str, index: int, dataset: xr.Dataset, error: Exception
+) -> HTTPException:
+    """Convert expected dataset errors into actionable bad requests."""
+    if isinstance(error, (KeyError, ValueError)):
+        available = ", ".join(
+            sorted({*map(str, dataset.dims), *dataset.data_vars, *dataset.coords})
+        )
+        return HTTPException(
+            status_code=400,
+            detail=(
+                f"This dataset cannot be drawn as a {kind}: {error}. "
+                f"It has: {available}."
+            ),
+        )
+    return HTTPException(
+        status_code=500,
+        detail=f"Failed to create {kind} for dataset {index}: {error}",
+    )
 
 
 def create_heat_maps(
@@ -552,13 +679,13 @@ def create_heat_maps(
                 #     f"Created heat map for dataset {i} ({dataset_name}) with {dep} vs {x_var}, {y_var}"
                 # )
 
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.error(f"Failed to create heat map for dataset {i}: {e}")
-            logger.error(f"{e}", exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to create heat map for dataset {i}: {e}",
+            logger.error(
+                f"Failed to create heat map for dataset {i}: {e}", exc_info=True
             )
+            raise _plot_failure("heat map", i, dataset, e) from e
 
     return plots
 
@@ -575,9 +702,21 @@ async def create_plots(request: PlotRequest) -> PlotResponse:
         PlotResponse containing the generated plots or error information
 
     """
-    logger.info(f"Received plot request: {request}")
-    logger.info(f"Dependents requested: {request.deps}")
-    logger.info(f"Independents requested: {request.indeps}")
+    is_live_poll = any(
+        fpath.startswith(MEMORY_PROTOCOL) for fpath in (request.fpaths or [])
+    )
+    if is_live_poll:
+        await _user_first.wait_turn()
+        return await _create_plots(request)
+    async with _user_first.user_request():
+        return await _create_plots(request)
+
+
+async def _create_plots(request: PlotRequest) -> PlotResponse:
+    # Live polls make per-request details too noisy for the default log level.
+    logger.debug("Received plot request: %s", request)
+    logger.debug("Dependents requested: %s", request.deps)
+    logger.debug("Independents requested: %s", request.indeps)
 
     # Extra debug: ensure lists are present
     if not request.fpaths or len(request.fpaths) == 0:
@@ -675,6 +814,17 @@ async def create_plots(request: PlotRequest) -> PlotResponse:
                 message=f"Variable validation failed: {'; '.join(validation['errors'])}",
             )
 
+        # Coordinates and measured axes must belong to the same sweep.
+        axes_check = validate_axes(
+            datasets, effective_indeps, request.deps, request.plotType
+        )
+        if not axes_check["valid"]:
+            return PlotResponse(
+                plots=[],
+                success=False,
+                message="; ".join(axes_check["errors"]),
+            )
+
         # Create plots based on type — run in a thread so numpy/plotly work
         # doesn't block the async event loop for other concurrent requests.
         plots = []
@@ -707,13 +857,12 @@ async def create_plots(request: PlotRequest) -> PlotResponse:
                 request.filters_opts,
             )
 
-        logger.info(f"Successfully created {len(plots)} plots")
-        logger.info(f"Plot IDs: {[plot['id'] for plot in plots]}")
-
-        # DEBUG: Log slider configs for each plot
-        for i, plot in enumerate(plots):
-            slider_config = plot.get("slider_config", {})
-            logger.info(f"Plot {i} slider_config: {slider_config}")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Created %d plots: %s", len(plots), [p["id"] for p in plots])
+            for i, plot in enumerate(plots):
+                logger.debug(
+                    "Plot %d slider_config: %s", i, plot.get("slider_config", {})
+                )
 
         # Return the response with all created plots
         if len(plots) == 0:
@@ -739,3 +888,22 @@ async def create_plots(request: PlotRequest) -> PlotResponse:
     except Exception as e:
         logger.error(f"Unexpected error in create_plots: {e}")
         return PlotResponse(plots=[], success=False, message=f"Unexpected error: {e}")
+
+
+@router.post("/telemetry/live-refresh")
+async def record_live_refresh(summary: LiveRefreshSummary) -> dict:
+    """Write a local live-refresh timing summary to the app log."""
+    logger.info(
+        "live refresh | %s | n=%d over %.0fs | median=%.0fms p90=%.0fms "
+        "min=%.0fms max=%.0fms | points=%d | live plots=%d",
+        summary.plotType or "unknown",
+        summary.count,
+        summary.windowSeconds,
+        summary.medianMs,
+        summary.p90Ms,
+        summary.minMs,
+        summary.maxMs,
+        summary.points,
+        summary.concurrentPlots,
+    )
+    return {"ok": True}

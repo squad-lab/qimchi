@@ -12,9 +12,6 @@ import numpy as np
 from fastapi import APIRouter, HTTPException
 from numpy.polynomial.polynomial import Polynomial
 from plotly import graph_objects as go
-from scipy.ndimage import affine_transform
-from scipy.signal import savgol_filter
-from skimage import exposure
 
 from .json_utils import sanitize_for_json
 
@@ -31,6 +28,7 @@ from .units import (
     axis_definition_from_figure,
     axis_title_template_from_figure,
     divide_units,
+    figure_axis_is_dependent,
     inverse_unit,
     multiply_units,
     render_unit,
@@ -38,6 +36,29 @@ from .units import (
     set_figure_axis_definition,
     set_figure_derivative_axis_definition,
 )
+
+
+# Load scientific dependencies only when a filter needs them.
+def savgol_filter(*args, **kwargs):
+    from scipy.signal import savgol_filter as _savgol_filter
+
+    return _savgol_filter(*args, **kwargs)
+
+
+def affine_transform(*args, **kwargs):
+    from scipy.ndimage import affine_transform as _affine_transform
+
+    return _affine_transform(*args, **kwargs)
+
+
+class _Exposure:
+    def __getattr__(self, name: str):
+        from skimage import exposure
+
+        return getattr(exposure, name)
+
+
+exposure = _Exposure()
 
 # FastAPI Router
 router = APIRouter()
@@ -1446,6 +1467,34 @@ class RotateHeatMap(Filter):
         self._hmap_update(z_rotated, fil=f"Rot({self.angle}°)")
 
 
+# These filters require an ordered, evenly sampled x sweep.
+_NEEDS_A_SWEPT_X = {
+    "diff": "a derivative",
+    "savgol": "smoothing",
+    "sma": "a moving average",
+    "polyfit": "a fit",
+}
+
+
+def _refused_on_a_measured_axis(fil: str, fig: dict, fig_num_axes: int) -> str | None:
+    """Return why a filter cannot use the figure's measured x axis."""
+    if fig_num_axes != 1 or fil not in _NEEDS_A_SWEPT_X:
+        return None
+    if not figure_axis_is_dependent(fig, "x"):
+        return None
+    variable = (
+        fig.get("layout", {})
+        .get("meta", {})
+        .get("qimchi_axes", {})
+        .get("x", {})
+        .get("variable", "the x axis")
+    )
+    return (
+        f"{_NEEDS_A_SWEPT_X[fil].capitalize()} needs a swept x axis, and "
+        f"'{variable}' is measured data -- the filter was skipped"
+    )
+
+
 def apply_filters(
     filters_order: list,
     filters_opts: dict,
@@ -1477,6 +1526,12 @@ def apply_filters(
     fig_tmp = deepcopy(fig)
     all_warnings = []
     for fil in filters_order:
+        refusal = _refused_on_a_measured_axis(fil, fig, fig_num_axes)
+        if refusal:
+            logger.info("apply_filters | %s", refusal)
+            all_warnings.append(refusal)
+            continue
+
         # `filter_opts` is a nested dict. Get the required dict and then pass it
         opts = filters_opts[fil]
         logger.debug(f"apply_filters | Filter: {fil} | Options: {opts}")
@@ -1600,7 +1655,8 @@ def apply_filters(
         logger.debug(f"apply_filters | {fil} applied.")
         fig_tmp = filt_fig
 
-    return filt_fig, list(set(all_warnings))
+    # Return the original figure if every filter was refused.
+    return (fig if filt_fig is None else filt_fig), list(set(all_warnings))
 
 
 def _generate_plot_json_for_transform(

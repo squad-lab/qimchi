@@ -7,6 +7,7 @@ import re
 
 import numpy as np
 import pytest
+import xarray as xr
 from fastapi import HTTPException
 from numpy.polynomial import Polynomial
 
@@ -759,3 +760,47 @@ def test_polyfit_fits_the_slice_the_slider_selects(monkeypatch):
 
     assert fitted_slope({"field": {"value": 1.0}}) == pytest.approx(5.0)
     assert fitted_slope({}) == pytest.approx(1.0)
+
+
+def test_filters_that_need_a_swept_axis_are_refused_on_a_measured_one():
+    figure = {
+        "data": [{"x": [0.0, 0.5, 1.0, 0.5], "y": [1.0, 2.0, 3.0, 2.0]}],
+        "layout": {
+            "meta": {
+                "qimchi_axes": {
+                    "x": {"variable": "measured_gate", "dependent": True},
+                    "y": {"variable": "current", "dependent": True},
+                }
+            }
+        },
+    }
+
+    for name, options in (
+        ("diff", {}),
+        ("savgol", filters.DEFAULT_SAVGOL_OPTS),
+        ("sma", {"window": 3}),
+        ("polyfit", {"deg": 1}),
+    ):
+        result, warnings = filters.apply_filters(
+            filters_order=[name],
+            filters_opts={name: options},
+            fig=figure,
+            fig_num_axes=1,
+        )
+        assert result == figure, f"{name} must leave the figure alone"
+        assert any("swept x axis" in warning for warning in warnings), name
+
+
+def test_the_same_filters_still_run_on_a_swept_axis():
+    dataset = xr.Dataset(
+        {"current": ("gate", np.array([1.0, 2.0, 3.0, 4.0]))},
+        coords={"gate": np.array([0.0, 1.0, 2.0, 3.0])},
+    )
+    figure = figures.Line({}, dataset, ["gate"], ["current"]).plot().to_dict()
+
+    result, warnings = filters.apply_filters(
+        filters_order=["diff"], filters_opts={"diff": {}}, fig=figure, fig_num_axes=1
+    )
+
+    assert not any("swept x axis" in warning for warning in warnings)
+    assert result is not figure, "the derivative should have produced a new figure"

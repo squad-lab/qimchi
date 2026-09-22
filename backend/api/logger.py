@@ -1,6 +1,10 @@
+import atexit
 import logging
+import logging.handlers
 import os
+import queue
 import sys
+import time
 from pathlib import Path
 
 from concurrent_log_handler import ConcurrentRotatingFileHandler as RotatingFileHandler
@@ -72,6 +76,49 @@ LOG_PATH = _resolve_log_path()
 LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
+def _configured_level() -> int:
+    """Return QIMCHI_LOG_LEVEL, defaulting to INFO."""
+    name = os.getenv("QIMCHI_LOG_LEVEL", "INFO").upper()
+    level = logging.getLevelNamesMapping().get(name)
+    return level if isinstance(level, int) else logging.INFO
+
+
+class _QueueHandler(logging.handlers.QueueHandler):
+    """Queue log records while preserving synchronous ``flush()`` semantics."""
+
+    def __init__(self, record_queue: queue.Queue, listener) -> None:
+        super().__init__(record_queue)
+        self.listener = listener
+
+    def flush(self) -> None:
+        deadline = time.monotonic() + 2.0
+        while not self.queue.empty() and time.monotonic() < deadline:
+            time.sleep(0.005)
+        for handler in self.listener.handlers:
+            handler.flush()
+
+    def close(self) -> None:
+        self.listener.stop()
+        for handler in self.listener.handlers:
+            handler.close()  # releases the log file and its lock sidecar
+        super().close()
+
+
+def _attach_through_queue(
+    target: logging.Logger, *handlers: logging.Handler
+) -> logging.Handler:
+    """Move file and console writes off request threads."""
+    record_queue: queue.Queue = queue.Queue(-1)
+    listener = logging.handlers.QueueListener(
+        record_queue, *handlers, respect_handler_level=True
+    )
+    listener.start()
+    atexit.register(listener.stop)
+    handler = _QueueHandler(record_queue, listener)
+    target.addHandler(handler)
+    return handler
+
+
 def get_logger(name: str = "qimchi") -> logging.Logger:
     """
     Return a configured logger with RotatingFileHandler and RichHandler + console.
@@ -85,7 +132,7 @@ def get_logger(name: str = "qimchi") -> logging.Logger:
     if getattr(logger, "__configured", False):
         return logger
 
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(_configured_level())
 
     # Rotating file handler
     fh = RotatingFileHandler(
@@ -100,7 +147,6 @@ def get_logger(name: str = "qimchi") -> logging.Logger:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     fh.setFormatter(fh_formatter)
-    logger.addHandler(fh)
 
     # Console handler: use RichHandler if available, fallback to StreamHandler
     if RichHandler is not None:
@@ -114,7 +160,7 @@ def get_logger(name: str = "qimchi") -> logging.Logger:
             logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
         )
 
-    logger.addHandler(ch)
+    _attach_through_queue(logger, fh, ch)
 
     # Avoid duplicate logs when uvicorn/root config also configures logging
     logger.propagate = False
@@ -162,8 +208,8 @@ def consolidate_root_logging() -> None:
             datefmt="%Y-%m-%d %H:%M:%S",
         )
     )
-    fh._qimchi_root_handler = True
-    root.addHandler(fh)
+    _attach_through_queue(root, fh)
+    root.handlers[-1]._qimchi_root_handler = True
     if root.level == logging.NOTSET or root.level > logging.INFO:
         root.setLevel(logging.INFO)
 
