@@ -28,7 +28,6 @@ interface ComponentStates {
     searchInput: string;
     searchTerm: string;
     sortDirection: "asc" | "desc";
-    filterBy: "all" | "folder" | "dataset" | "zarr";
     showFilters: boolean;
     lastPath: string; // Track the last loaded path
     showLiveOnly: boolean; // Show only live measurements
@@ -116,7 +115,6 @@ const initialComponentStates: ComponentStates = {
     searchInput: "",
     searchTerm: "",
     sortDirection: "desc",
-    filterBy: "all",
     showFilters: false,
     lastPath: "",
     showLiveOnly: false,

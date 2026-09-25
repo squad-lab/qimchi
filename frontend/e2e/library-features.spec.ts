@@ -83,7 +83,7 @@ async function loadExplorer(page: Page) {
   await expect(page.getByText(/1-aaaaaaaa/)).toBeVisible();
 }
 
-const openFilters = (page: Page) => page.getByTitle("Toggle filters").click();
+const openFilters = (page: Page) => page.getByRole("button", { name: "Toggle filters" }).click();
 
 test.describe("library filters", () => {
   test.beforeEach(async ({ page }) => {
@@ -102,7 +102,7 @@ test.describe("library filters", () => {
 
   test("the tag dropdown filters by tag", async ({ page }) => {
     await openFilters(page);
-    await page.getByRole("button", { name: /^Tags/ }).click();
+    await page.getByRole("button", { name: "Tagged" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "#cold" }).click();
 
     // Only the measurement carrying the tag survives.
@@ -134,7 +134,7 @@ test.describe("bulk library actions", () => {
 
   test("stay disabled until datasets are selected", async ({ page }) => {
     // Nothing selected: the buttons say why rather than silently doing nothing.
-    const heart = page.getByTitle("Select datasets first").first();
+    const heart = page.getByRole("button", { name: "Select datasets or folders first" }).first();
     await expect(heart).toBeDisabled();
   });
 
@@ -148,7 +148,7 @@ test.describe("bulk library actions", () => {
     await page.getByText(/1-aaaaaaaa/).click();
     await page.getByText(/2-ffffffff/).click({ modifiers: ["Control"] });
 
-    await page.getByTitle(/^Heart \/ unheart/).click();
+    await page.getByRole("button", { name: /^Heart \/ unheart/ }).click();
 
     // Both selections are sent, in one action -- not one row at a time.
     await expect
@@ -169,17 +169,17 @@ test.describe("bulk library actions", () => {
     await page.getByText(/1-aaaaaaaa/).click();
     await page.getByText(/2-ffffffff/).click({ modifiers: ["Control"] });
 
-    await page.getByTitle(/^Heart \/ unheart/).click();
+    await page.getByRole("button", { name: /^Heart \/ unheart/ }).click();
     await expect
       .poll(() => requests.filter((entry) => entry.includes("/library/heart")).length)
       .toBeGreaterThanOrEqual(2);
 
-    await page.getByTitle(/^Trash \/ restore/).click();
+    await page.getByRole("button", { name: /^Trash \/ restore/ }).click();
     await expect
       .poll(() => requests.filter((entry) => entry.includes("/library/trash")).length)
       .toBeGreaterThanOrEqual(2);
 
-    await page.getByTitle(/^Tag 2 datasets/).click();
+    await page.getByRole("button", { name: /^Tag 2 datasets/ }).click();
     const tagDialog = page.getByRole("dialog", { name: "Tags" });
     await expect(tagDialog).toBeVisible();
     await expect(tagDialog).toHaveCSS("z-index", "1600");
@@ -200,5 +200,122 @@ test.describe("library unavailable", () => {
 
     await openFilters(page);
     await expect(page.getByRole("button", { name: "Hearted" })).toBeDisabled();
+  });
+});
+
+test.describe("folders", () => {
+  const FOLDER = "C:\\measurements\\cooldown";
+  const inside = {
+    id: "run-3",
+    name: "3-99999999-bbbb-cccc-dddd-eeeeeeeeeeee.zarr",
+    path: `${FOLDER}\\3-99999999-bbbb-cccc-dddd-eeeeeeeeeeee.zarr`,
+    type: "file",
+    tags: ["zarr"],
+  };
+  const tree = [
+    { id: "cooldown", name: "cooldown", path: FOLDER, type: "folder", children: [inside] },
+    ...datasets,
+  ];
+
+  async function mockFolderLibrary(
+    page: Page,
+    folderState: Record<string, unknown> | null,
+    childStates: Record<string, unknown>[] = [],
+  ) {
+    const requests: { path: string; body: Record<string, unknown> | null }[] = [];
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (path.startsWith("/library/")) {
+        requests.push({ path, body: request.method() === "POST" ? request.postDataJSON() : null });
+      }
+      if (path === "/health") {
+        await route.fulfill({ json: { ok: true, dbReady: true, dbError: null } });
+      } else if (path === "/load/") {
+        await route.fulfill({ json: tree });
+      } else if (path === "/library/states") {
+        await route.fulfill({
+          json: [
+            ...(folderState ? [{ uuid: "f1", abs_path: FOLDER, tags: [], ...folderState }] : []),
+            ...childStates,
+          ],
+        });
+      } else if (path === "/library/tags") {
+        await route.fulfill({ json: [] });
+      } else if (path === "/library/register") {
+        await route.fulfill({ json: { uuid: "f1", hearted: false, trashed: false } });
+      } else if (path.startsWith("/library/")) {
+        await route.fulfill({ json: {} });
+      } else {
+        await route.fallback();
+      }
+    });
+    return requests;
+  }
+
+  const folderRow = (page: Page) =>
+    page.locator("[data-level]").filter({ has: page.getByText("cooldown", { exact: true }) });
+
+  test("a folder can be hearted from its row", async ({ page }) => {
+    const requests = await mockFolderLibrary(page, null);
+    await page.goto("/");
+    await loadExplorer(page);
+
+    const row = folderRow(page);
+    await row.hover();
+    await row.getByRole("button", { name: "Heart" }).click();
+
+    await expect
+      .poll(() => requests.find((entry) => entry.path === "/library/register")?.body)
+      .toMatchObject({ path: FOLDER, folder: true });
+    await expect.poll(() => requests.some((entry) => entry.path === "/library/heart")).toBe(true);
+  });
+
+  test("Hearted shows a hearted folder with everything in it", async ({ page }) => {
+    await mockFolderLibrary(page, { hearted: true, trashed: false });
+    await page.goto("/");
+    await loadExplorer(page);
+
+    await openFilters(page);
+    await page.getByRole("button", { name: "Hearted" }).click();
+    await folderRow(page).getByRole("button", { name: "Expand folder" }).click();
+
+    await expect(page.getByText(/3-99999999/)).toBeVisible();
+    await expect(
+      page
+        .locator("[data-level]")
+        .filter({ has: page.getByText(/3-99999999/) })
+        .getByRole("button", { name: "Heart inherited from parent folder" }),
+    ).toBeDisabled();
+    await expect(page.getByText(/2-ffffffff/)).toHaveCount(0);
+  });
+
+  test("what is inside a trashed folder shows as trashed", async ({ page }) => {
+    await mockFolderLibrary(page, { hearted: false, trashed: true }, [
+      { uuid: "u3", abs_path: inside.path, tags: [], hearted: true, trashed: false },
+    ]);
+    await page.goto("/");
+    await loadExplorer(page);
+
+    // The folder can still be opened, and restored from its own row.
+    await folderRow(page).getByRole("button", { name: "Expand folder" }).click();
+    const child = page.locator("[data-level]").filter({ has: page.getByText(/3-99999999/) });
+    await expect(child).toHaveClass(/qimchi-trashed/);
+    await expect(child).toHaveAttribute("draggable", "false");
+    await expect(child.getByRole("button", { name: "Restore before hearting" })).toBeDisabled();
+    await expect(child.locator(".group\\/heart > svg")).not.toHaveClass(/fill-red-500/);
+
+    await child.getByText(/3-99999999/).dblclick({ force: true });
+    await expect(page.locator('[data-tour="basket"]').getByText(/3-99999999/)).toHaveCount(0);
+
+    await page.evaluate((item) => {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.setData("application/json", JSON.stringify(item));
+      document
+        .querySelector('[data-tour="basket"] > div > div')
+        ?.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer }));
+    }, inside);
+    await expect(page.locator('[data-tour="basket"]').getByText(/3-99999999/)).toHaveCount(0);
+    await expect(folderRow(page).getByRole("button", { name: "Restore from trash" })).toBeVisible();
   });
 });

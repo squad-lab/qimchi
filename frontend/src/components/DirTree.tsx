@@ -2,12 +2,14 @@ import {
   useState,
   useMemo,
   useEffect,
+  useLayoutEffect,
   useRef,
   useCallback,
   forwardRef,
   useImperativeHandle,
 } from "react";
 import axios from "axios";
+import { createPortal } from "react-dom";
 import { PROD_BACKEND_URL } from "../config";
 import { useVirtualizer, Virtualizer } from "@tanstack/react-virtual";
 import { useTree } from "@headless-tree/react";
@@ -25,9 +27,9 @@ import {
   Search,
   SortAsc,
   SortDesc,
+  ArrowUpDown,
   Filter,
   Plus,
-  Minus,
   GripVertical,
   ChevronDown,
   ChevronRight,
@@ -57,6 +59,7 @@ import {
   HeartCrack,
   Trash2,
   Tag as TagIcon,
+  Grid3x3,
 } from "lucide-react";
 
 // Local imports
@@ -64,16 +67,22 @@ import { TreeNode, convertApiNode } from "./treeUtils";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useToast } from "../hooks/useToast";
 import { useSidebarStore } from "../stores/sidebarStore";
-import { useLibraryStore, normalizePath } from "../stores/libraryStore";
+import {
+  effectiveState,
+  inheritedState,
+  isPathTrashed,
+  useLibraryStore,
+  normalizePath,
+} from "../stores/libraryStore";
 import TagPopover from "./TagPopover";
 import TagFilterMenu from "./TagFilterMenu";
 import Tooltip from "./Tooltip";
+import RibbonFlyout from "./Plots/RibbonFlyout";
 import { BasketItem } from "./Basket";
 import { useShortcut } from "../hooks/useGlobalShortcuts";
 import { useSettingsStore } from "../stores/settingsStore";
 import {
   detectDatasetKind,
-  hasDatasetTag,
   isDatasetNode,
   isDatasetPath,
   isSqliteContainerPath,
@@ -196,7 +205,6 @@ const DirTree = ({
     searchInput,
     searchTerm,
     sortDirection,
-    filterBy,
     showFilters,
     lastPath,
     showLiveOnly,
@@ -208,11 +216,11 @@ const DirTree = ({
   // Library (heart/trash/tag) state + DirTree filters (see stores/libraryStore).
   const libStatesByPath = useLibraryStore((s) => s.statesByPath);
   const filterHeartedOnly = useLibraryStore((s) => s.filterHeartedOnly);
-  const hideTrashed = useLibraryStore((s) => s.hideTrashed);
+  const showTrashed = useLibraryStore((s) => s.showTrashed);
   const selectedTagIds = useLibraryStore((s) => s.selectedTagIds);
   const libraryTags = useLibraryStore((s) => s.tags);
   const setFilterHeartedOnly = useLibraryStore((s) => s.setFilterHeartedOnly);
-  const setHideTrashed = useLibraryStore((s) => s.setHideTrashed);
+  const setShowTrashed = useLibraryStore((s) => s.setShowTrashed);
   const toggleSelectedTag = useLibraryStore((s) => s.toggleSelectedTag);
   const applyHeartMany = useLibraryStore((s) => s.applyHeartMany);
   const applyTrashMany = useLibraryStore((s) => s.applyTrashMany);
@@ -224,6 +232,8 @@ const DirTree = ({
   const clearSelectedTags = useLibraryStore((s) => s.clearSelectedTags);
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
   const tagFilterBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [filterButtonEl, setFilterButtonEl] = useState<HTMLButtonElement | null>(null);
+  const filterMenuRef = useRef<HTMLDivElement | null>(null);
   const fetchLibraryStates = useLibraryStore((s) => s.fetchStates);
   const checkDbStatus = useLibraryStore((s) => s.checkDbStatus);
   const dbAvailable = useLibraryStore((s) => s.dbAvailable);
@@ -234,6 +244,24 @@ const DirTree = ({
   useEffect(() => {
     void checkDbStatus().then(() => fetchLibraryStates());
   }, [checkDbStatus, fetchLibraryStates]);
+
+  useEffect(() => {
+    if (!showFilters) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (
+        filterMenuRef.current?.contains(target) ||
+        filterButtonEl?.contains(target) ||
+        target.closest("[data-explorer-tag-filter]")
+      ) {
+        return;
+      }
+      updateDirTreeState({ showFilters: false });
+      setTagMenuOpen(false);
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
+  }, [filterButtonEl, showFilters, updateDirTreeState]);
 
   // Split the search box into "#tag" tokens and plain text, so tags can be
   // filtered by typing as well as from the Tags dropdown.
@@ -277,6 +305,9 @@ const DirTree = ({
   const [apiData, setApiData] = useState<TreeNode[]>([]);
   const hiddenLiveIdsRef = useRef<Set<string>>(new Set(hiddenLiveMeasurementIds));
   const latestLiveMeasurementsRef = useRef<TreeNode[]>([]);
+  const activeDataSourceRef = useRef(showLiveOnly);
+  const loadRequestIdRef = useRef(0);
+  const previousShowLiveOnlyRef = useRef(showLiveOnly);
   const autoAddedMeasurements = useRef<Set<string>>(new Set());
   const basketItemsRef = useRef<BasketItem[]>(basketItems);
   const onAddToBasketRef = useRef<typeof onAddToBasket>(onAddToBasket);
@@ -349,6 +380,27 @@ const DirTree = ({
     [setHiddenLiveIds],
   );
 
+  // Clear stale Explorer rows before the newly selected pane is painted.
+  useLayoutEffect(() => {
+    activeDataSourceRef.current = showLiveOnly;
+
+    if (previousShowLiveOnlyRef.current === showLiveOnly) return;
+    previousShowLiveOnlyRef.current = showLiveOnly;
+    loadRequestIdRef.current += 1;
+    setTreeError(null);
+    setIsLoading(true);
+
+    if (showLiveOnly) {
+      setApiData(
+        latestLiveMeasurementsRef.current.filter((node) => !hiddenLiveIdsRef.current.has(node.id)),
+      );
+      return;
+    }
+
+    const cached = path ? globalDirTreeCache.get(path) : undefined;
+    setApiData(cached?.data ?? []);
+  }, [path, showLiveOnly]);
+
   useEffect(() => {
     basketItemsRef.current = basketItems;
   }, [basketItems]);
@@ -369,11 +421,14 @@ const DirTree = ({
   // Reset error when dependencies change
   useEffect(() => {
     setTreeError(null);
-  }, [searchTerm, sortBy, sortDirection, filterBy]);
+  }, [searchTerm, sortBy, sortDirection]);
 
   // Load data from API
   const loadDirectoryData = useCallback(
     (path: string, forceReload: boolean = false) => {
+      const requestId = ++loadRequestIdRef.current;
+      const isCurrentRequest = () => loadRequestIdRef.current === requestId;
+
       // If showLiveOnly is true, load from /load-live/ endpoint instead
       if (showLiveOnly) {
         setIsLoading(true);
@@ -383,6 +438,7 @@ const DirTree = ({
         axios
           .post(`${PROD_BACKEND_URL}/load-live/`)
           .then((response) => {
+            if (!isCurrentRequest() || !activeDataSourceRef.current) return;
             if (response.data.success && response.data.children) {
               const children = filterHiddenLiveMeasurements(
                 response.data.children.map(convertApiNode),
@@ -395,6 +451,7 @@ const DirTree = ({
             }
           })
           .catch((error) => {
+            if (!isCurrentRequest() || !activeDataSourceRef.current) return;
             console.error("Error loading live measurements:", error);
             let errorMessage = "Failed to load live measurements";
             if (error.response) {
@@ -407,7 +464,9 @@ const DirTree = ({
             setTreeError(errorMessage);
           })
           .finally(() => {
-            setIsLoading(false);
+            if (isCurrentRequest() && activeDataSourceRef.current) {
+              setIsLoading(false);
+            }
           });
         return;
       }
@@ -432,6 +491,7 @@ const DirTree = ({
           path,
         })
         .then((response) => {
+          if (!isCurrentRequest() || activeDataSourceRef.current) return;
           console.log("API Response status:", response.status);
           // console.log("API Response data:", response.data);
 
@@ -446,6 +506,7 @@ const DirTree = ({
           setApiData(treeData);
         })
         .catch((error) => {
+          if (!isCurrentRequest() || activeDataSourceRef.current) return;
           console.error("Error loading directory data:", error);
           showToast("Failed to load directory data", "error");
 
@@ -464,7 +525,9 @@ const DirTree = ({
           setTreeError(`Failed to load directory: ${errorMessage}`);
         })
         .finally(() => {
-          setIsLoading(false);
+          if (isCurrentRequest() && !activeDataSourceRef.current) {
+            setIsLoading(false);
+          }
         });
     },
     [filterHiddenLiveMeasurements, showLiveOnly, showToast],
@@ -496,6 +559,7 @@ const DirTree = ({
       axios
         .post(`${PROD_BACKEND_URL}/load-live/`)
         .then((response) => {
+          if (!activeDataSourceRef.current) return;
           if (response.data.success && response.data.children) {
             const newMeasurements = filterHiddenLiveMeasurements(
               response.data.children.map(convertApiNode),
@@ -607,13 +671,13 @@ const DirTree = ({
   // Signature that changes only when a library filter is active AND the
   // relevant heart/trash state changes.
   const libFilterSignature = useMemo(() => {
-    if (!filterHeartedOnly && !hideTrashed && effectiveTagIds.length === 0) return "";
+    if (!filterHeartedOnly && !showTrashed && effectiveTagIds.length === 0) return "";
     return Object.entries(libStatesByPath)
       .filter(([, v]) => v.hearted || v.trashed || v.tags.length > 0)
       .map(([k, v]) => `${k}:${v.hearted ? 1 : 0}${v.trashed ? 1 : 0}:${v.tags.join(",")}`)
       .sort()
       .join("|");
-  }, [libStatesByPath, filterHeartedOnly, hideTrashed, effectiveTagIds]);
+  }, [libStatesByPath, filterHeartedOnly, showTrashed, effectiveTagIds]);
 
   // id -> node over the RAW tree, rebuilt only when the API data changes.
   // Filtering and sorting read through this instead of allocating a parallel
@@ -642,31 +706,34 @@ const DirTree = ({
 
     const libraryFilterActive =
       filterHeartedOnly ||
-      hideTrashed ||
+      showTrashed ||
       effectiveTagIds.length > 0 ||
       unknownSearchTags.length > 0;
 
-    const shouldIncludeNode = (node: TreeNode): boolean => {
-      // Library (heart/trash/tag) filters apply to file nodes; folders are kept
-      // only when they contain matching descendants.
-      if (node.type === "file") {
-        // A "#name" that matches no known tag can never match a measurement.
-        if (unknownSearchTags.length > 0) return false;
-        const st = libStatesByPath[normalizePath(node.path)];
-        if (hideTrashed && st?.trashed) return false;
-        if (filterHeartedOnly && !st?.hearted) return false;
-        if (effectiveTagIds.length > 0 && !effectiveTagIds.some((id) => st?.tags?.includes(id)))
-          return false;
-      } else if (libraryFilterActive) {
+    type Marks = { hearted: boolean; trashed: boolean; tags: number[] };
+    const noMarks: Marks = { hearted: false, trashed: false, tags: [] };
+    // A node carries its own marks plus those of every folder it sits in.
+    const marksOf = (node: TreeNode, inherited: Marks): Marks => {
+      const own = libStatesByPath[normalizePath(node.path)];
+      if (!own) return inherited;
+      const trashed = inherited.trashed || own.trashed;
+      return {
+        hearted: !trashed && (inherited.hearted || own.hearted),
+        trashed,
+        tags: [...inherited.tags, ...own.tags],
+      };
+    };
+
+    const shouldIncludeNode = (node: TreeNode, marks: Marks): boolean => {
+      // A folder is kept by the library filters when it is marked itself;
+      // otherwise only when it contains matching descendants.
+      if (node.type === "folder" && libraryFilterActive && marks === noMarks) return false;
+      // A "#name" that matches no known tag can never match a measurement.
+      if (unknownSearchTags.length > 0) return false;
+      if (showTrashed && !marks.trashed) return false;
+      if (filterHeartedOnly && !marks.hearted) return false;
+      if (effectiveTagIds.length > 0 && !effectiveTagIds.some((id) => marks.tags.includes(id)))
         return false;
-      }
-      if (filterBy === "all") return true;
-      if (filterBy === "dataset" || filterBy === "zarr") {
-        return isDatasetPath(node.path) || hasDatasetTag(node.tags);
-      }
-      if (filterBy === "folder") {
-        return node.type === "folder";
-      }
       return true;
     };
 
@@ -674,30 +741,30 @@ const DirTree = ({
     // survived. The previous code answered that with a second recursive walk
     // of each subtree (hasMatchingChildren) on top of this one.
     const matched = new Set<string>();
-    const visit = (node: TreeNode): boolean => {
+    const visit = (node: TreeNode, inherited: Marks): boolean => {
+      const marks = marksOf(node, inherited);
       let anyChildMatched = false;
       if (node.children) {
         node.children.forEach((child) => {
-          if (visit(child)) anyChildMatched = true;
+          if (visit(child, marks)) anyChildMatched = true;
         });
       }
       const keep =
-        (shouldIncludeNode(node) && matchesSearch(node)) ||
+        (shouldIncludeNode(node, marks) && matchesSearch(node)) ||
         (node.type === "folder" && anyChildMatched);
       if (keep) matched.add(node.id);
       return keep;
     };
-    apiData.forEach(visit);
+    apiData.forEach((node) => visit(node, noMarks));
     return matched;
     // libStatesByPath is read inside but intentionally gated by libFilterSignature
     // so hearts don't re-derive the tree when no filter is active.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     apiData,
-    filterBy,
     searchText,
     filterHeartedOnly,
-    hideTrashed,
+    showTrashed,
     effectiveTagIds,
     unknownSearchTags,
     libFilterSignature,
@@ -942,27 +1009,26 @@ const DirTree = ({
     });
   }, [revealNodeId, tree]);
 
-  const handleSort = (newSortBy: typeof sortBy) => {
-    if (sortBy === newSortBy) {
-      // Don't toggle direction for chrono sort - it's always newest first
-      if (newSortBy === "chrono") return;
+  const selectSort = (newSortBy: typeof sortBy) => {
+    useSettingsStore.getState().update(["explorer", "sortBy"], newSortBy);
+    if (newSortBy === "chrono") updateDirTreeState({ sortDirection: "desc" });
+  };
 
-      updateDirTreeState({
-        sortDirection: sortDirection === "asc" ? "desc" : "asc",
-      });
-    } else {
-      useSettingsStore.getState().update(["explorer", "sortBy"], newSortBy);
-      updateDirTreeState({
-        // For chronological view, default to descending (newest first)
-        // For others, default to ascending
-        sortDirection: newSortBy === "chrono" ? "desc" : "asc",
-      });
-    }
+  const toggleSortDirection = () => {
+    if (sortBy === "chrono") return;
+    updateDirTreeState({ sortDirection: sortDirection === "asc" ? "desc" : "asc" });
   };
 
   const handleDragStart = (e: React.DragEvent, node: TreeNode) => {
     try {
       e.stopPropagation();
+
+      const libraryStates = useLibraryStore.getState().statesByPath;
+      if (isPathTrashed(libraryStates, node.path)) {
+        e.preventDefault();
+        showToast("Restore this item or its parent folder before dragging it.", "warning");
+        return;
+      }
 
       // Check if the dragged item is selected
       const selectedNodes = getSelectedNodes();
@@ -977,13 +1043,16 @@ const DirTree = ({
 
       // Process each item to drag
       itemsToDrag.forEach((item) => {
+        if (isPathTrashed(libraryStates, item.path)) return;
         if (item.type === "file") {
           // For files, add them directly
           validItemsToDrag.push(item);
         } else if (item.type === "folder") {
           // For folders, add all direct children that are dataset files.
           const folderChildren = item.children || [];
-          const datasetChildren = folderChildren.filter((child) => isDatasetNode(child));
+          const datasetChildren = folderChildren.filter(
+            (child) => isDatasetNode(child) && !isPathTrashed(libraryStates, child.path),
+          );
           validItemsToDrag.push(...datasetChildren);
         }
       });
@@ -1050,6 +1119,10 @@ const DirTree = ({
       // If already in basket, remove it
       onRemoveBasketItem?.(node.id);
     } else {
+      if (isPathTrashed(useLibraryStore.getState().statesByPath, node.path)) {
+        showToast("Restore this measurement or its parent folder before adding it.", "warning");
+        return;
+      }
       // Else, add to basket only if file, not folder
       // console.log("Adding to basket:", node);
       onAddToBasket?.(node);
@@ -1071,8 +1144,11 @@ const DirTree = ({
   // Add all selected files to basket (only files, not folders)
   const handleAddAllSelectedToBasket = () => {
     const selectedNodes = getSelectedNodes();
+    const libraryStates = useLibraryStore.getState().statesByPath;
     // Filter to only files for basket functionality
-    const selectedFiles = selectedNodes.filter((node) => node.type === "file");
+    const selectedFiles = selectedNodes.filter(
+      (node) => node.type === "file" && !isPathTrashed(libraryStates, node.path),
+    );
     selectedFiles.forEach((node) => {
       if (!basketItems.some((item) => item.id === node.id)) {
         onAddToBasket?.(node);
@@ -1080,27 +1156,32 @@ const DirTree = ({
     });
   };
 
-  // Bulk library actions over the current multi-selection
-  // Datasets only: folders have no measurement identity. The target state is
-  // computed from the selection so a mixed set resolves one way (heart all if
-  // any is unhearted, otherwise unheart all) rather than flipping each item.
-  const getSelectedDatasetPaths = (): string[] =>
+  // Bulk library actions over the current multi-selection, datasets and
+  // folders alike. The target state is computed from the selection so a mixed
+  // set resolves one way (heart all if any is unhearted, otherwise unheart all)
+  // rather than flipping each item.
+  const getSelectedLibraryPaths = (): string[] =>
     getSelectedNodes()
-      .filter((node) => node.type === "file")
+      .filter((node) => node.type === "file" || node.type === "folder")
+      .map((node) => node.path);
+
+  const getSelectedFolderPaths = (): string[] =>
+    getSelectedNodes()
+      .filter((node) => node.type === "folder")
       .map((node) => node.path);
 
   const handleBulkHeart = async () => {
-    const paths = getSelectedDatasetPaths();
+    const paths = getSelectedLibraryPaths();
     if (paths.length === 0) return;
     const target = !paths.every((p) => libStatesByPath[normalizePath(p)]?.hearted);
-    await applyHeartMany(paths, target);
+    await applyHeartMany(paths, target, getSelectedFolderPaths());
   };
 
   const handleBulkTrash = async () => {
-    const paths = getSelectedDatasetPaths();
+    const paths = getSelectedLibraryPaths();
     if (paths.length === 0) return;
     const target = !paths.every((p) => libStatesByPath[normalizePath(p)]?.trashed);
-    await applyTrashMany(paths, target);
+    await applyTrashMany(paths, target, getSelectedFolderPaths());
   };
 
   // Keyboard shortcuts for the two bulk actions, so a multi-selection can be
@@ -1122,7 +1203,7 @@ const DirTree = ({
       // Alt can rewrite e.key on some layouts, so match the physical key.
       const code = e.code;
       if (code !== "KeyH" && code !== "KeyT") return;
-      if (getSelectedDatasetPaths().length === 0) return;
+      if (getSelectedLibraryPaths().length === 0) return;
       e.preventDefault();
       void (code === "KeyH" ? handleBulkHeart() : handleBulkTrash());
     };
@@ -1131,15 +1212,15 @@ const DirTree = ({
   });
 
   const handleBulkTag = async (tagId: number) => {
-    const paths = getSelectedDatasetPaths();
+    const paths = getSelectedLibraryPaths();
     if (paths.length === 0) return;
     const add = !paths.every((p) => libStatesByPath[normalizePath(p)]?.tags?.includes(tagId));
-    await applyTagMany(paths, tagId, add);
+    await applyTagMany(paths, tagId, add, getSelectedFolderPaths());
   };
 
   // Tags carried by every selected dataset (drives the popover's checkmarks).
   const commonSelectedTagIds = (): number[] => {
-    const paths = getSelectedDatasetPaths();
+    const paths = getSelectedLibraryPaths();
     if (paths.length === 0) return [];
     return (libraryTags ?? [])
       .map((t) => t.id)
@@ -1368,298 +1449,326 @@ const DirTree = ({
             className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 text-sm"
           />
           {searchInput && (
-            <button
-              type="button"
-              onClick={() => {
-                updateDirTreeState({ searchInput: "", searchTerm: "" });
-              }}
-              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              title="Clear search"
-            >
-              <X size={16} />
-            </button>
+            <Tooltip content="Clear search" position="top">
+              <button
+                type="button"
+                onClick={() => {
+                  updateDirTreeState({ searchInput: "", searchTerm: "" });
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 transform text-gray-400 hover:text-gray-600"
+                aria-label="Clear search"
+              >
+                <X size={16} />
+              </button>
+            </Tooltip>
           )}
         </div>
 
-        {/* Sort and Filter Controls */}
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex flex-col items-center w-full gap-1">
-            {/* Row 1: Sort buttons */}
-            <div className="flex items-center justify-center w-full mb-1">
-              <div className="flex space-x-1">
-                {(["name", "timestamp", "size", "chrono"] as const).map((sort) => (
-                  <button
-                    type="button"
-                    key={sort}
-                    onClick={() => handleSort(sort)}
-                    title={sort === "chrono" ? "Chronological (Newest)" : `Sort by ${sort}`}
-                    className={`px-2 py-1 text-xs rounded flex items-center space-x-1 ${
-                      sortBy === sort
-                        ? "bg-blue-100 text-blue-800"
-                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                    }`}
-                  >
-                    <span className="capitalize">
-                      {sort === "timestamp" ? "date" : sort === "chrono" ? "Chrono" : sort}
-                    </span>
-                    {sortBy === sort &&
-                      (sort === "chrono" || sortDirection === "desc" ? (
-                        <SortDesc size={10} />
-                      ) : (
-                        <SortAsc size={10} />
-                      ))}
-                  </button>
-                ))}
-              </div>
-            </div>
+        <div className="flex w-full flex-wrap items-center gap-1">
+          <div className="contents">
+            <Tooltip content="Refresh directory" position="top">
+              <button
+                type="button"
+                onClick={() => {
+                  if (path && path.trim()) {
+                    // Bypass the cached directory listing.
+                    loadDirectoryData(path, true);
+                  }
+                }}
+                disabled={isLoading || !path || !path.trim()}
+                className="qimchi-dark-hover-plain qimchi-dark-hover-accent px-1.5 py-1 text-[#6ea030] bg-[var(--qimchi-accent-light-bg)] hover:bg-[var(--qimchi-accent-header-bg)] rounded disabled:opacity-50 transition-colors"
+                aria-label="Refresh directory"
+              >
+                <RefreshCw size={15} className={isLoading ? "animate-spin" : ""} />
+              </button>
+            </Tooltip>
 
-            {/* Row 2: Toolbar buttons */}
-            <div className="flex items-center justify-center w-full gap-1">
-              {showLiveOnly && hiddenLiveMeasurementIds.length > 0 && (
-                <Tooltip
-                  content={`Restore ${hiddenLiveMeasurementIds.length} hidden live measurement${
-                    hiddenLiveMeasurementIds.length === 1 ? "" : "s"
-                  }`}
-                  position="top"
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const count = hiddenLiveIdsRef.current.size;
-                      restoreHiddenLiveMeasurement();
-                      showToast(
-                        `Restored ${count} live measurement${count === 1 ? "" : "s"}`,
-                        "success",
-                      );
-                    }}
-                    className="qimchi-dark-hover-plain inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100"
-                    aria-label="Restore hidden live measurements"
-                  >
-                    <Eye size={16} />
-                    <span>{hiddenLiveMeasurementIds.length}</span>
-                  </button>
-                </Tooltip>
-              )}
+            {/* Expand/Collapse All Toggle */}
+            <Tooltip
+              content={
+                sortBy === "chrono"
+                  ? "Unavailable in chronological view"
+                  : anyFolderExpanded
+                    ? "Collapse all"
+                    : "Expand all"
+              }
+              position="top"
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  if (anyFolderExpanded) {
+                    tree.collapseAll();
+                    expandedNodeIdsRef.current = new Set();
+                    updateDirTreeState({ expandedNodeIds: [] });
+                  } else {
+                    tree.expandAll();
+                    // Read the final set after `expandAll` finishes resolving child nodes.
+                    setTimeout(() => {
+                      const opened = tree
+                        .getItems()
+                        .filter((item) => item.isFolder() && item.isExpanded())
+                        .map((item) => item.getId());
+                      expandedNodeIdsRef.current = new Set(opened);
+                      updateDirTreeState({ expandedNodeIds: opened });
+                    }, 50);
+                  }
+                }}
+                disabled={sortBy === "chrono"}
+                className="qimchi-dark-hover-plain px-1.5 py-1 text-gray-600 hover:bg-blue-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label={anyFolderExpanded ? "Collapse all" : "Expand all"}
+              >
+                {anyFolderExpanded ? <Minimize size={15} /> : <Expand size={15} />}
+              </button>
+            </Tooltip>
 
-              {/* Refresh Button */}
-              <Tooltip content="Refresh directory" position="top">
+            {showLiveOnly && hiddenLiveMeasurementIds.length > 0 && (
+              <Tooltip
+                content={`Restore ${hiddenLiveMeasurementIds.length} hidden live measurement${
+                  hiddenLiveMeasurementIds.length === 1 ? "" : "s"
+                }`}
+                position="top"
+              >
                 <button
                   type="button"
                   onClick={() => {
-                    if (path && path.trim()) {
-                      // Force reload bypassing cache
-                      loadDirectoryData(path, true);
-                    }
+                    const count = hiddenLiveIdsRef.current.size;
+                    restoreHiddenLiveMeasurement();
+                    showToast(
+                      `Restored ${count} live measurement${count === 1 ? "" : "s"}`,
+                      "success",
+                    );
                   }}
-                  disabled={isLoading || !path || !path.trim()}
-                  className="qimchi-dark-hover-plain qimchi-dark-hover-accent px-2 py-1 text-[#6ea030] bg-[var(--qimchi-accent-light-bg)] hover:bg-[var(--qimchi-accent-header-bg)] rounded disabled:opacity-50 transition-colors"
-                  title="Refresh directory"
+                  className="qimchi-dark-hover-plain inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-1.5 py-1 text-xs text-blue-700 hover:bg-blue-100"
+                  aria-label="Restore hidden live measurements"
                 >
-                  <RefreshCw size={16} className={isLoading ? "animate-spin" : ""} />
+                  <Eye size={15} />
+                  <span>{hiddenLiveMeasurementIds.length}</span>
                 </button>
               </Tooltip>
+            )}
+          </div>
 
-              {/* Expand/Collapse All Toggle */}
+          <div className="flex-1" />
+
+          <div className="contents">
+            <Tooltip content="Toggle filters" position="top">
+              <button
+                ref={setFilterButtonEl}
+                type="button"
+                onClick={() => {
+                  const next = !showFilters;
+                  updateDirTreeState({ showFilters: next });
+                  if (!next) setTagMenuOpen(false);
+                }}
+                className={`px-1.5 py-1 rounded ${
+                  showFilters
+                    ? "bg-blue-100 text-blue-800"
+                    : "qimchi-dark-hover-plain text-gray-600 hover:bg-blue-200 rounded transition-colors"
+                }`}
+                aria-label="Toggle filters"
+              >
+                <Filter size={15} />
+              </button>
+            </Tooltip>
+
+            <div className="flex items-stretch" role="group" aria-label="Sort directory">
+              <RibbonFlyout
+                label="Choose sort"
+                placement="bottom"
+                orientation="vertical"
+                buttonClassName="flex items-center gap-1 rounded-r-none border border-gray-300 px-1.5 py-1 text-xs text-gray-700"
+                icon={
+                  <>
+                    <ArrowUpDown size={13} />
+                    <span className="capitalize">{sortBy === "timestamp" ? "Date" : sortBy}</span>
+                  </>
+                }
+              >
+                {(close) =>
+                  (["name", "timestamp", "size", "chrono"] as const).map((sort) => (
+                    <button
+                      key={sort}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={sortBy === sort}
+                      onClick={() => {
+                        selectSort(sort);
+                        close();
+                      }}
+                      className={`flex min-w-24 items-center rounded px-1.5 py-1 text-left text-xs capitalize ${
+                        sortBy === sort
+                          ? "bg-blue-100 text-blue-800"
+                          : "qimchi-dark-hover-plain text-gray-700 hover:bg-gray-100"
+                      }`}
+                    >
+                      {sort === "timestamp" ? "Date" : sort}
+                    </button>
+                  ))
+                }
+              </RibbonFlyout>
               <Tooltip
                 content={
                   sortBy === "chrono"
-                    ? "Unavailable in chronological view"
-                    : anyFolderExpanded
-                      ? "Collapse all"
-                      : "Expand all"
+                    ? "Chronological order is always newest first"
+                    : sortDirection === "asc"
+                      ? "Ascending"
+                      : "Descending"
                 }
                 position="top"
               >
                 <button
                   type="button"
-                  onClick={() => {
-                    if (anyFolderExpanded) {
-                      tree.collapseAll();
-                      expandedNodeIdsRef.current = new Set();
-                      updateDirTreeState({ expandedNodeIds: [] });
-                    } else {
-                      tree.expandAll();
-                      // expandAll resolves children as it goes, so read the
-                      // opened set back once it settles rather than guessing.
-                      setTimeout(() => {
-                        const opened = tree
-                          .getItems()
-                          .filter((item) => item.isFolder() && item.isExpanded())
-                          .map((item) => item.getId());
-                        expandedNodeIdsRef.current = new Set(opened);
-                        updateDirTreeState({ expandedNodeIds: opened });
-                      }, 50);
-                    }
-                  }}
+                  onClick={toggleSortDirection}
                   disabled={sortBy === "chrono"}
-                  className="qimchi-dark-hover-plain px-2 py-1 text-gray-600 hover:bg-blue-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  title={
-                    sortBy === "chrono"
-                      ? "Unavailable in chronological view"
-                      : anyFolderExpanded
-                        ? "Collapse all"
-                        : "Expand all"
-                  }
+                  className="qimchi-dark-hover-plain flex h-full items-center rounded-r border border-l-0 border-gray-300 px-2 text-gray-600 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label={sortDirection === "asc" ? "Ascending" : "Descending"}
                 >
-                  {anyFolderExpanded ? <Minimize size={16} /> : <Expand size={16} />}
-                </button>
-              </Tooltip>
-
-              {/* Explorer Filters */}
-              <Tooltip content="Toggle filters" position="top">
-                <button
-                  type="button"
-                  onClick={() => updateDirTreeState({ showFilters: !showFilters })}
-                  className={`px-2 py-1 rounded ${
-                    showFilters
-                      ? "bg-blue-100 text-blue-800"
-                      : "qimchi-dark-hover-plain text-gray-600 hover:bg-blue-200 rounded transition-colors"
-                  }`}
-                  title="Toggle filters"
-                >
-                  <Filter size={16} />
-                </button>
-              </Tooltip>
-
-              {/* Add all selected to basket button */}
-              <Tooltip
-                content={
-                  getSelectedNodes().filter((n) => n.type === "file").length === 0
-                    ? "Select files first"
-                    : selectedInBasket()
-                      ? "All selected files already in basket"
-                      : `Add ${
-                          getSelectedNodes().filter((n) => n.type === "file").length
-                        } selected file${
-                          getSelectedNodes().filter((n) => n.type === "file").length > 1 ? "s" : ""
-                        } to basket`
-                }
-                position="top"
-              >
-                <button
-                  type="button"
-                  onClick={handleAddAllSelectedToBasket}
-                  disabled={
-                    getSelectedNodes().filter((n) => n.type === "file").length === 0 ||
-                    selectedInBasket()
-                  }
-                  className="qimchi-dark-hover-plain px-2 py-1 text-gray-600 hover:bg-green-200 rounded disabled:opacity-50 transition-colors"
-                  title="Add all selected files to basket"
-                >
-                  <Plus size={16} />
-                </button>
-              </Tooltip>
-
-              {/* Download all selected button */}
-              <Tooltip
-                content={
-                  getSelectedNodes().length === 0
-                    ? "Select items first"
-                    : `Download ${getSelectedNodes().length} selected item${
-                        getSelectedNodes().length > 1 ? "s" : ""
-                      } as ZIP`
-                }
-                position="top"
-              >
-                <button
-                  type="button"
-                  onClick={handleDownloadAllSelected}
-                  disabled={getSelectedNodes().length === 0}
-                  className="qimchi-dark-hover-plain px-2 py-1 text-gray-600 hover:bg-blue-200 rounded disabled:opacity-50 transition-colors"
-                  title="Download all selected items as ZIP"
-                >
-                  <Download size={16} />
-                </button>
-              </Tooltip>
-
-              {/* Bulk library actions over the selected datasets */}
-              {(() => {
-                const n = getSelectedDatasetPaths().length;
-                const disabled = n === 0 || !dbAvailable;
-                const suffix = `${n} dataset${n === 1 ? "" : "s"}`;
-                const reason = !dbAvailable
-                  ? "Library unavailable"
-                  : n === 0
-                    ? "Select datasets first"
-                    : null;
-                return (
-                  <>
-                    <Tooltip content={reason ?? `Heart / unheart ${suffix}`} position="top">
-                      <button
-                        type="button"
-                        onClick={handleBulkHeart}
-                        disabled={disabled}
-                        className="qimchi-dark-hover-plain px-2 py-1 text-gray-600 hover:bg-red-200 rounded disabled:opacity-50 transition-colors"
-                        title={reason ?? `Heart / unheart ${suffix}`}
-                      >
-                        <Heart size={16} />
-                      </button>
-                    </Tooltip>
-                    <Tooltip content={reason ?? `Trash / restore ${suffix}`} position="top">
-                      <button
-                        type="button"
-                        onClick={handleBulkTrash}
-                        disabled={disabled}
-                        className="qimchi-dark-hover-plain px-2 py-1 text-gray-600 hover:bg-amber-200 rounded disabled:opacity-50 transition-colors"
-                        title={reason ?? `Trash / restore ${suffix}`}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </Tooltip>
-                    <Tooltip content={reason ?? `Tag ${suffix}`} position="top">
-                      <button
-                        type="button"
-                        onClick={(e) => setBulkTagAnchor(bulkTagAnchor ? null : e.currentTarget)}
-                        disabled={disabled}
-                        className="qimchi-dark-hover-plain px-2 py-1 text-gray-600 hover:bg-indigo-200 rounded disabled:opacity-50 transition-colors"
-                        title={reason ?? `Tag ${suffix}`}
-                      >
-                        <TagIcon size={16} />
-                      </button>
-                    </Tooltip>
-                  </>
-                );
-              })()}
-
-              {/* Dataset cycling buttons */}
-              <Tooltip
-                content={
-                  isCyclingEnabled()
-                    ? `Previous dataset (${getCurrentDatasetIndex() + 1}/${getTotalDatasets()})`
-                    : "Add exactly one dataset to basket to enable cycling"
-                }
-                position="top"
-              >
-                <button
-                  type="button"
-                  onClick={() => handleCycleDataset("prev")}
-                  disabled={!isCyclingEnabled()}
-                  className="qimchi-dark-hover-plain px-2 py-1 text-gray-600 hover:bg-purple-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                  title="Previous dataset"
-                >
-                  <MoveUp size={16} />
-                </button>
-              </Tooltip>
-
-              <Tooltip
-                content={
-                  isCyclingEnabled()
-                    ? `Next dataset (${getCurrentDatasetIndex() + 1}/${getTotalDatasets()})`
-                    : "Add exactly one dataset to basket to enable cycling"
-                }
-                position="top"
-              >
-                <button
-                  type="button"
-                  onClick={() => handleCycleDataset("next")}
-                  disabled={!isCyclingEnabled()}
-                  className="qimchi-dark-hover-plain px-2 py-1 text-gray-600 hover:bg-purple-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                  title="Next dataset"
-                >
-                  <MoveDown size={16} />
+                  {sortDirection === "asc" ? <SortAsc size={13} /> : <SortDesc size={13} />}
                 </button>
               </Tooltip>
             </div>
+
+            {/* Add all selected to basket button */}
+            <Tooltip
+              content={
+                getSelectedNodes().filter((n) => n.type === "file").length === 0
+                  ? "Select files first"
+                  : selectedInBasket()
+                    ? "All selected files already in basket"
+                    : `Add ${
+                        getSelectedNodes().filter((n) => n.type === "file").length
+                      } selected file${
+                        getSelectedNodes().filter((n) => n.type === "file").length > 1 ? "s" : ""
+                      } to basket`
+              }
+              position="top"
+            >
+              <button
+                type="button"
+                onClick={handleAddAllSelectedToBasket}
+                disabled={
+                  getSelectedNodes().filter((n) => n.type === "file").length === 0 ||
+                  selectedInBasket()
+                }
+                className="qimchi-dark-hover-plain px-1.5 py-1 text-gray-600 hover:bg-green-200 rounded disabled:opacity-50 transition-colors"
+                aria-label="Add all selected files to basket"
+              >
+                <Plus size={15} />
+              </button>
+            </Tooltip>
+
+            {/* Dataset cycling buttons */}
+            <Tooltip
+              content={
+                isCyclingEnabled()
+                  ? `Previous dataset (${getCurrentDatasetIndex() + 1}/${getTotalDatasets()})`
+                  : "Add exactly one dataset to basket to enable cycling"
+              }
+              position="top"
+            >
+              <button
+                type="button"
+                onClick={() => handleCycleDataset("prev")}
+                disabled={!isCyclingEnabled()}
+                className="qimchi-dark-hover-plain px-1.5 py-1 text-gray-600 hover:bg-purple-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                aria-label="Previous dataset"
+              >
+                <MoveUp size={15} />
+              </button>
+            </Tooltip>
+
+            <Tooltip
+              content={
+                isCyclingEnabled()
+                  ? `Next dataset (${getCurrentDatasetIndex() + 1}/${getTotalDatasets()})`
+                  : "Add exactly one dataset to basket to enable cycling"
+              }
+              position="top"
+            >
+              <button
+                type="button"
+                onClick={() => handleCycleDataset("next")}
+                disabled={!isCyclingEnabled()}
+                className="qimchi-dark-hover-plain px-1.5 py-1 text-gray-600 hover:bg-purple-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                aria-label="Next dataset"
+              >
+                <MoveDown size={15} />
+              </button>
+            </Tooltip>
+
+            <div className="w-1" />
+
+            {/* Bulk library actions over the selected datasets and folders */}
+            {(() => {
+              const n = getSelectedLibraryPaths().length;
+              const disabled = n === 0 || !dbAvailable;
+              const noun = getSelectedFolderPaths().length > 0 ? "item" : "dataset";
+              const suffix = `${n} ${noun}${n === 1 ? "" : "s"}`;
+              const reason = !dbAvailable
+                ? "Library unavailable"
+                : n === 0
+                  ? "Select datasets or folders first"
+                  : null;
+              return (
+                <>
+                  <Tooltip content={reason ?? `Tag ${suffix}`} position="top">
+                    <button
+                      type="button"
+                      onClick={(e) => setBulkTagAnchor(bulkTagAnchor ? null : e.currentTarget)}
+                      disabled={disabled}
+                      className="qimchi-dark-hover-plain px-1.5 py-1 text-gray-600 hover:bg-indigo-200 rounded disabled:opacity-50 transition-colors"
+                      aria-label={reason ?? `Tag ${suffix}`}
+                    >
+                      <TagIcon size={15} />
+                    </button>
+                  </Tooltip>
+                  <Tooltip content={reason ?? `Trash / restore ${suffix}`} position="top">
+                    <button
+                      type="button"
+                      onClick={handleBulkTrash}
+                      disabled={disabled}
+                      className="qimchi-dark-hover-plain px-1.5 py-1 text-gray-600 hover:bg-amber-200 rounded disabled:opacity-50 transition-colors"
+                      aria-label={reason ?? `Trash / restore ${suffix}`}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </Tooltip>
+                  <Tooltip content={reason ?? `Heart / unheart ${suffix}`} position="top">
+                    <button
+                      type="button"
+                      onClick={handleBulkHeart}
+                      disabled={disabled}
+                      className="qimchi-dark-hover-plain px-1.5 py-1 text-gray-600 hover:bg-red-200 rounded disabled:opacity-50 transition-colors"
+                      aria-label={reason ?? `Heart / unheart ${suffix}`}
+                    >
+                      <Heart size={15} />
+                    </button>
+                  </Tooltip>
+                </>
+              );
+            })()}
+
+            <Tooltip
+              content={
+                getSelectedNodes().length === 0
+                  ? "Select items first"
+                  : `Download ${getSelectedNodes().length} selected item${
+                      getSelectedNodes().length > 1 ? "s" : ""
+                    } as ZIP`
+              }
+              position="top"
+            >
+              <button
+                type="button"
+                onClick={handleDownloadAllSelected}
+                disabled={getSelectedNodes().length === 0}
+                className="qimchi-dark-hover-plain px-1.5 py-1 text-gray-600 hover:bg-blue-200 rounded disabled:opacity-50 transition-colors"
+                aria-label="Download all selected items as ZIP"
+              >
+                <Download size={15} />
+              </button>
+            </Tooltip>
           </div>
         </div>
 
@@ -1705,112 +1814,108 @@ const DirTree = ({
           </div>
         )}
 
-        {/* Filter Controls */}
-        {showFilters && (
-          <div className="p-1 bg-gray-50 rounded-md">
-            <div className="flex items-center space-x-2">
-              <div className="flex space-x-1 w-full justify-center items-center">
-                {(["all", "folder", "dataset"] as const).map((filter) => (
+        {showFilters &&
+          filterButtonEl &&
+          createPortal(
+            <div
+              ref={filterMenuRef}
+              className="fixed z-[1500] w-56 rounded-md border border-gray-200 bg-gray-50 p-1 shadow-lg dark:border-gray-700"
+              style={(() => {
+                const rect = filterButtonEl.getBoundingClientRect();
+                return {
+                  top: Math.min(rect.bottom + 4, window.innerHeight - 220),
+                  left: Math.min(rect.left, window.innerWidth - 232),
+                };
+              })()}
+              role="menu"
+              aria-label="Explorer filters"
+            >
+              <div className="flex flex-col gap-1">
+                <Tooltip content="Show only hearted measurements" position="right">
                   <button
                     type="button"
-                    key={filter}
-                    onClick={() => updateDirTreeState({ filterBy: filter })}
-                    className={`px-2 py-1 text-xs rounded ${
-                      filterBy === filter
+                    onClick={() => setFilterHeartedOnly(!filterHeartedOnly)}
+                    disabled={!dbAvailable}
+                    className={`flex w-full items-center gap-2 rounded px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${
+                      filterHeartedOnly
+                        ? "bg-red-100 text-red-700"
+                        : "bg-white text-gray-600 hover:bg-gray-100"
+                    }`}
+                  >
+                    <Heart
+                      size={14}
+                      className={filterHeartedOnly ? "fill-red-500 text-red-500" : ""}
+                    />
+                    <span>Hearted</span>
+                  </button>
+                </Tooltip>
+                <Tooltip content="Show only trashed measurements" position="right">
+                  <button
+                    type="button"
+                    onClick={() => setShowTrashed(!showTrashed)}
+                    disabled={!dbAvailable}
+                    className={`flex w-full items-center gap-2 rounded px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${
+                      showTrashed
                         ? "bg-blue-100 text-blue-800"
                         : "bg-white text-gray-600 hover:bg-gray-100"
                     }`}
                   >
-                    {filter === "all"
-                      ? "All"
-                      : filter === "dataset"
-                        ? "DATASET"
-                        : filter.toUpperCase()}
+                    <Trash2 size={14} />
+                    <span>Trashed</span>
                   </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Row 2 -- library filters: hearted / trashed / tags. Kept separate
-                from the node-type row above: those pick WHAT KIND of node to
-                show, these filter by the user's own annotations. */}
-            <div className="mt-1 flex flex-wrap gap-1 justify-center items-center">
-              <button
-                type="button"
-                onClick={() => setFilterHeartedOnly(!filterHeartedOnly)}
-                disabled={!dbAvailable}
-                title="Show only hearted measurements"
-                className={`flex items-center gap-1 px-2 py-1 text-xs rounded disabled:opacity-40 disabled:cursor-not-allowed ${
-                  filterHeartedOnly
-                    ? "bg-red-100 text-red-700"
-                    : "bg-white text-gray-600 hover:bg-gray-100"
-                }`}
-              >
-                <Heart size={12} className={filterHeartedOnly ? "fill-red-500 text-red-500" : ""} />
-                Hearted
-              </button>
-              <button
-                type="button"
-                onClick={() => setHideTrashed(!hideTrashed)}
-                disabled={!dbAvailable}
-                title="Hide trashed measurements"
-                className={`flex items-center gap-1 px-2 py-1 text-xs rounded disabled:opacity-40 disabled:cursor-not-allowed ${
-                  hideTrashed
-                    ? "bg-blue-100 text-blue-800"
-                    : "bg-white text-gray-600 hover:bg-gray-100"
-                }`}
-              >
-                <Trash2 size={12} />
-                Hide Trash
-              </button>
-              {/* Tag filter: a dropdown rather than a chip row, because tags are
-                  Gmail-style labels that accumulate without bound. */}
-              {libraryTags.length > 0 && (
-                <button
-                  ref={tagFilterBtnRef}
-                  type="button"
-                  onClick={() => setTagMenuOpen((open) => !open)}
-                  disabled={!dbAvailable}
-                  title="Filter by tags"
-                  className={`flex items-center gap-1 px-2 py-1 text-xs rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                    selectedTagIds.length > 0
-                      ? "bg-indigo-100 text-indigo-800 border-indigo-300"
-                      : "bg-white text-gray-600 border-gray-200 hover:bg-gray-100"
-                  }`}
-                >
-                  <TagIcon size={12} />
-                  Tags
-                  {selectedTagIds.length > 0 && ` (${selectedTagIds.length})`}
-                  <ChevronDown size={12} />
-                </button>
-              )}
-            </div>
-
-            {/* Selected tags stay visible as removable chips so an active
-                filter is never hidden inside a closed menu. */}
-            {libraryTags.length > 0 && (
-              <div className="mt-1 flex flex-col items-center gap-1">
-                {selectedTagIds.length > 0 && (
-                  <div className="flex flex-wrap gap-1 justify-center">
-                    {libraryTags
-                      .filter((tag) => selectedTagIds.includes(tag.id))
-                      .map((tag) => (
-                        <button
-                          key={tag.id}
-                          type="button"
-                          onClick={() => toggleSelectedTag(tag.id)}
-                          title={`Remove filter: ${tag.name}`}
-                          className="px-2 py-0.5 text-[11px] rounded-full border bg-indigo-100 text-indigo-800 border-indigo-300 hover:bg-indigo-200"
-                        >
-                          #{tag.name} &times;
-                        </button>
-                      ))}
-                  </div>
+                </Tooltip>
+                {libraryTags.length > 0 && (
+                  <Tooltip content="Filter by tags" position="right">
+                    <button
+                      ref={tagFilterBtnRef}
+                      type="button"
+                      onClick={() => setTagMenuOpen((open) => !open)}
+                      disabled={!dbAvailable}
+                      className={`flex w-full items-center gap-2 rounded border px-2 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                        selectedTagIds.length > 0
+                          ? "border-indigo-300 bg-indigo-100 text-indigo-800"
+                          : "border-gray-200 bg-white text-gray-600 hover:bg-gray-100"
+                      }`}
+                    >
+                      <TagIcon size={14} />
+                      <span>Tagged</span>
+                      {selectedTagIds.length > 0 && ` (${selectedTagIds.length})`}
+                      <ChevronDown size={12} className="ml-auto" />
+                    </button>
+                  </Tooltip>
                 )}
               </div>
-            )}
-          </div>
-        )}
+
+              {/* Selected tags stay visible as removable chips so an active
+                filter is never hidden inside a closed menu. */}
+              {libraryTags.length > 0 && (
+                <div className="mt-1 flex flex-col items-center gap-1">
+                  {selectedTagIds.length > 0 && (
+                    <div className="flex flex-wrap gap-1 justify-center">
+                      {libraryTags
+                        .filter((tag) => selectedTagIds.includes(tag.id))
+                        .map((tag) => (
+                          <Tooltip
+                            key={tag.id}
+                            content={`Remove filter: ${tag.name}`}
+                            position="top"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => toggleSelectedTag(tag.id)}
+                              className="rounded-full border border-indigo-300 bg-indigo-100 px-2 py-0.5 text-[11px] text-indigo-800 hover:bg-indigo-200"
+                            >
+                              #{tag.name} &times;
+                            </button>
+                          </Tooltip>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>,
+            document.body,
+          )}
       </div>
 
       {/* Scrollable Tree View - Always Virtualized */}
@@ -2039,8 +2144,6 @@ interface TreeItemComponentProps {
 
 const TreeItemComponent = ({
   item,
-  onAddToBasket,
-  onRemoveBasketItem,
   onOpenNotes,
   onOpenSampleNotes,
   onDownload,
@@ -2070,6 +2173,23 @@ const TreeItemComponent = ({
   const displayName = isDatasetLeafNode ? formatQanaryDatasetName(nodeData.name) : nodeData.name;
   // Library (heart/trash) state for this node, keyed by normalized path.
   const libState = useLibraryStore((s) => s.statesByPath[normalizePath(nodeData.path)]);
+  // Inside a trashed folder: shown as trashed, but only the folder can restore it.
+  const inTrashedFolder = useLibraryStore(
+    (s) => !libState?.trashed && inheritedState(s.statesByPath, nodeData.path).trashed,
+  );
+  const inHeartedFolder = useLibraryStore(
+    (s) =>
+      !libState?.hearted &&
+      inheritedState(s.statesByPath, nodeData.path).hearted &&
+      !effectiveState(s.statesByPath, nodeData.path).trashed,
+  );
+  const isEffectivelyTrashed = Boolean(libState?.trashed || inTrashedFolder);
+  const isEffectivelyHearted = useLibraryStore(
+    (s) => effectiveState(s.statesByPath, nodeData.path).hearted,
+  );
+  const hasMarks = Boolean(
+    libState?.hearted || libState?.trashed || (libState?.tags?.length ?? 0) > 0,
+  );
   const toggleHeart = useLibraryStore((s) => s.toggleHeart);
   const toggleTrash = useLibraryStore((s) => s.toggleTrash);
   const allTags = useLibraryStore((s) => s.tags);
@@ -2141,10 +2261,157 @@ const TreeItemComponent = ({
         return <DatabaseIcon size={16} className="text-[var(--qimchi-icon-sqlite)]" />;
       case "csv":
         return <Table size={16} className="text-[var(--qimchi-icon-csv)]" />;
+      case "matlab":
+        return <Grid3x3 size={16} className="text-[var(--qimchi-icon-matlab)]" />;
       default:
         return <DatabaseIcon size={16} className="text-[var(--qimchi-icon-generic)]" />;
     }
   };
+
+  const copyMenu = (kind: "filename" | "folder name") => (
+    <RibbonFlyout
+      label="Copy"
+      icon={
+        isFNameCopied || isPathCopied ? (
+          <Check size={14} className="text-green-600" />
+        ) : (
+          <Copy size={14} className="text-gray-400" />
+        )
+      }
+      buttonClassName="p-1 hover:bg-blue-50"
+    >
+      {(close) => (
+        <>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={async (event) => {
+              event.stopPropagation();
+              await copyFNameToClipboard(nodeData.name);
+              close();
+            }}
+            className="qimchi-dark-hover-plain rounded px-2 py-1 text-xs text-gray-700 hover:bg-gray-100"
+          >
+            {kind === "filename" ? "Filename" : "Folder name"}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={async (event) => {
+              event.stopPropagation();
+              await copyPathToClipboard(nodeData.path);
+              close();
+            }}
+            className="qimchi-dark-hover-plain rounded px-2 py-1 text-xs text-gray-700 hover:bg-gray-100"
+          >
+            Path
+          </button>
+        </>
+      )}
+    </RibbonFlyout>
+  );
+
+  const libraryButtons = (
+    <>
+      <Tooltip
+        content={
+          isEffectivelyTrashed
+            ? "Restore before hearting"
+            : inHeartedFolder
+              ? "Hearted by parent folder"
+              : libState?.hearted
+                ? "Unheart"
+                : "Heart"
+        }
+        position="top"
+        className="order-4"
+      >
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleHeart(nodeData.path, isFolder);
+          }}
+          disabled={inHeartedFolder || isEffectivelyTrashed}
+          className={`qimchi-dark-hover-plain group/heart p-1 rounded transition-colors shrink-0 ${
+            isEffectivelyHearted
+              ? "text-red-500 hover:bg-red-50"
+              : "text-gray-400 hover:text-red-500 hover:bg-red-50"
+          }`}
+          aria-label={
+            isEffectivelyTrashed
+              ? "Restore before hearting"
+              : inHeartedFolder
+                ? "Heart inherited from parent folder"
+                : libState?.hearted
+                  ? "Remove heart"
+                  : "Heart"
+          }
+        >
+          {isEffectivelyHearted ? (
+            <>
+              <Heart size={14} className="fill-red-500 text-red-500 group-hover/heart:hidden" />
+              <HeartCrack size={14} className="hidden text-red-500 group-hover/heart:block" />
+            </>
+          ) : (
+            <Heart size={14} />
+          )}
+        </button>
+      </Tooltip>
+
+      <Tooltip content={libState?.trashed ? "Restore" : "Trash"} position="top" className="order-3">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleTrash(nodeData.path, isFolder);
+          }}
+          className={`qimchi-dark-hover-plain p-1 rounded transition-colors shrink-0 ${
+            libState?.trashed
+              ? // Restore is the one thing left to do on a trashed row:
+                // re-enabled against the row's pointer-events:none, and
+                // muted rather than red, since nothing is being deleted.
+                "qimchi-trashed-interactive text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+              : "text-gray-400 hover:text-red-600 hover:bg-red-50"
+          }`}
+          aria-label={libState?.trashed ? "Restore from trash" : "Trash"}
+        >
+          <Trash2 size={14} />
+        </button>
+      </Tooltip>
+
+      <Tooltip content="Tags" position="top" className="order-2">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            const el = e.currentTarget as HTMLElement;
+            setTagAnchor((a) => (a ? null : el));
+          }}
+          className={`qimchi-dark-hover-plain p-1 rounded transition-colors shrink-0 ${
+            (libState?.tags?.length ?? 0) > 0
+              ? "text-indigo-600 hover:bg-indigo-50"
+              : "text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"
+          }`}
+          aria-label="Edit tags"
+        >
+          <TagIcon size={14} />
+        </button>
+      </Tooltip>
+      {tagAnchor && (
+        <TagPopover
+          anchorEl={tagAnchor}
+          tags={allTags}
+          currentTagIds={libState?.tags ?? []}
+          onToggle={(tagId) => toggleTag(nodeData.path, tagId, isFolder)}
+          onCreate={createTag}
+          onRename={renameTag}
+          onDelete={deleteTag}
+          onClose={() => setTagAnchor(null)}
+        />
+      )}
+    </>
+  );
 
   return (
     <div
@@ -2157,10 +2424,14 @@ const TreeItemComponent = ({
               ? "border-l-blue-500 bg-blue-100"
               : "border-transparent"
       } ${draggedItem === nodeData.id ? "dragging opacity-50" : ""} ${
-        libState?.trashed ? "qimchi-trashed pointer-events-none" : ""
+        isEffectivelyTrashed && !isFolder
+          ? "qimchi-trashed pointer-events-none"
+          : isEffectivelyTrashed
+            ? "qimchi-trashed"
+            : ""
       }`}
       data-level={item.getItemMeta().level}
-      draggable={true} // Allow both files and folders to be draggable
+      draggable={!isEffectivelyTrashed}
       onDragStart={(e) => onDragStart(e, nodeData)}
       onDragEnd={onDragEnd}
       onDoubleClick={(e) => onDoubleClick(e, nodeData)}
@@ -2230,7 +2501,7 @@ const TreeItemComponent = ({
                 isDatasetPath(nodeData.path)
                   ? "qimchi-tree-dataset font-medium"
                   : "qimchi-tree-folder"
-              } ${libState?.trashed ? "qimchi-trashed" : ""}`}
+              } ${isEffectivelyTrashed ? "qimchi-trashed" : ""}`}
             >
               {renderExplorerDisplayName()}
             </span>
@@ -2275,35 +2546,7 @@ const TreeItemComponent = ({
             </Tooltip>
           )}
 
-          {/* Copy filename button */}
-          <Tooltip content="Copy filename" position="top">
-            <button
-              type="button"
-              onClick={async (e) => {
-                e.stopPropagation();
-                await copyFNameToClipboard(nodeData.name);
-              }}
-              className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors shrink-0"
-              aria-label={`Copy filename: ${nodeData.name}`}
-            >
-              {isFNameCopied ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
-            </button>
-          </Tooltip>
-
-          {/* Copy full path button */}
-          <Tooltip content="Copy full path" position="top">
-            <button
-              type="button"
-              onClick={async (e) => {
-                e.stopPropagation();
-                await copyPathToClipboard(nodeData.path);
-              }}
-              className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors shrink-0"
-              aria-label={`Copy full path: ${nodeData.path}`}
-            >
-              {isPathCopied ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
-            </button>
-          </Tooltip>
+          {copyMenu("filename")}
 
           {/* Download Button - for dataset files */}
           {isDatasetPath(nodeData.path) && (
@@ -2322,97 +2565,12 @@ const TreeItemComponent = ({
             </Tooltip>
           )}
 
-          {/* Heart / Trash Buttons - dataset leaves (qanary measurements) */}
-          {isDatasetLeafNode && (
-            <Tooltip content={libState?.hearted ? "Unheart" : "Heart"} position="top">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleHeart(nodeData.path);
-                }}
-                className={`qimchi-dark-hover-plain group/heart p-1 rounded transition-colors shrink-0 ${
-                  libState?.hearted
-                    ? "text-red-500 hover:bg-red-50"
-                    : "text-gray-400 hover:text-red-500 hover:bg-red-50"
-                }`}
-                aria-label={libState?.hearted ? "Remove heart" : "Heart"}
-              >
-                {libState?.hearted ? (
-                  <>
-                    <Heart
-                      size={14}
-                      className="fill-red-500 text-red-500 group-hover/heart:hidden"
-                    />
-                    <HeartCrack size={14} className="hidden text-red-500 group-hover/heart:block" />
-                  </>
-                ) : (
-                  <Heart size={14} />
-                )}
-              </button>
-            </Tooltip>
-          )}
-
-          {isDatasetLeafNode && (
-            <Tooltip content={libState?.trashed ? "Restore" : "Trash"} position="top">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleTrash(nodeData.path);
-                }}
-                className={`qimchi-dark-hover-plain p-1 rounded transition-colors shrink-0 ${
-                  libState?.trashed
-                    ? // Restore is the one thing left to do on a trashed row:
-                      // re-enabled against the row's pointer-events:none, and
-                      // muted rather than red, since nothing is being deleted.
-                      "qimchi-trashed-interactive text-gray-400 hover:text-gray-600 hover:bg-gray-100"
-                    : "text-gray-400 hover:text-red-600 hover:bg-red-50"
-                }`}
-                aria-label={libState?.trashed ? "Restore from trash" : "Trash"}
-              >
-                <Trash2 size={14} />
-              </button>
-            </Tooltip>
-          )}
-
-          {/* Tags Button + popover - dataset leaves */}
-          {isDatasetLeafNode && (
-            <Tooltip content="Tags" position="top">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const el = e.currentTarget as HTMLElement;
-                  setTagAnchor((a) => (a ? null : el));
-                }}
-                className={`qimchi-dark-hover-plain p-1 rounded transition-colors shrink-0 ${
-                  (libState?.tags?.length ?? 0) > 0
-                    ? "text-indigo-600 hover:bg-indigo-50"
-                    : "text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"
-                }`}
-                aria-label="Edit tags"
-              >
-                <TagIcon size={14} />
-              </button>
-            </Tooltip>
-          )}
-          {tagAnchor && (
-            <TagPopover
-              anchorEl={tagAnchor}
-              tags={allTags}
-              currentTagIds={libState?.tags ?? []}
-              onToggle={(tagId) => toggleTag(nodeData.path, tagId)}
-              onCreate={createTag}
-              onRename={renameTag}
-              onDelete={deleteTag}
-              onClose={() => setTagAnchor(null)}
-            />
-          )}
+          {/* Heart / Trash / Tag buttons - dataset leaves (qanary measurements) */}
+          {isDatasetLeafNode && libraryButtons}
 
           {/* Open Notes Button - any dataset leaf except sqlite container nodes */}
           {isDatasetLeafNode && (
-            <Tooltip content="Open notes" position="top">
+            <Tooltip content="Open notes" position="top" className="order-1">
               <button
                 type="button"
                 onClick={(e) => {
@@ -2441,65 +2599,19 @@ const TreeItemComponent = ({
                 <FolderOpenIcon size={14} />
               </button>
             </Tooltip>
-          ) : (
-            /* Add/Remove Basket Button - only for non-container files */
-            <Tooltip content={isInBasket ? "Remove from basket" : "Add to basket"} position="top">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (isInBasket) {
-                    onRemoveBasketItem?.(nodeData.id);
-                  } else {
-                    onAddToBasket?.(nodeData);
-                  }
-                }}
-                className={`qimchi-dark-hover-plain p-1 rounded transition-colors shrink-0 ${
-                  isInBasket
-                    ? "text-red-500 hover:text-red-700 hover:bg-red-50"
-                    : "text-gray-400 hover:text-blue-600 hover:bg-blue-100"
-                }`}
-                aria-label={isInBasket ? "Remove from basket" : "Add to basket"}
-              >
-                {isInBasket ? <Minus size={14} /> : <Plus size={14} />}
-              </button>
-            </Tooltip>
-          )}
+          ) : null}
         </div>
       )}
 
       {/* For Folders */}
       {isFolder && (
-        <div className="qimchi-row-actions flex items-center opacity-0 group-hover:opacity-100 transition-opacity mr-1">
-          {/* Copy folder name button */}
-          <Tooltip content="Copy folder name" position="top">
-            <button
-              type="button"
-              onClick={async (e) => {
-                e.stopPropagation();
-                await copyFNameToClipboard(nodeData.name);
-              }}
-              className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors shrink-0"
-              aria-label={`Copy folder name: ${nodeData.name}`}
-            >
-              {isFNameCopied ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
-            </button>
-          </Tooltip>
-
-          {/* Copy full path button */}
-          <Tooltip content="Copy folder path" position="top">
-            <button
-              type="button"
-              onClick={async (e) => {
-                e.stopPropagation();
-                await copyPathToClipboard(nodeData.path);
-              }}
-              className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors shrink-0"
-              aria-label={`Copy folder path: ${nodeData.path}`}
-            >
-              {isPathCopied ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
-            </button>
-          </Tooltip>
+        <div
+          className={`qimchi-row-actions flex items-center transition-opacity mr-1 ${
+            // A marked folder keeps its marks in view, like a dataset row.
+            hasMarks ? "" : "opacity-0 group-hover:opacity-100"
+          }`}
+        >
+          {copyMenu("folder name")}
 
           {/* Download folder button */}
           <Tooltip content="Download folder as ZIP" position="top">
@@ -2532,6 +2644,8 @@ const TreeItemComponent = ({
               </button>
             </Tooltip>
           )}
+
+          {libraryButtons}
         </div>
       )}
     </div>

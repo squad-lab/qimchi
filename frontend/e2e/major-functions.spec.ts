@@ -190,10 +190,7 @@ async function loadExplorer(page: Page) {
 }
 
 async function addDatasetToBasket(page: Page, displayedName: string) {
-  const datasetRow = page
-    .getByText(displayedName, { exact: true })
-    .locator("xpath=ancestor::div[@data-level][1]");
-  await datasetRow.getByRole("button", { name: "Add to basket" }).click();
+  await page.getByText(displayedName, { exact: true }).dblclick();
 }
 
 test.beforeEach(async ({ page }) => {
@@ -222,25 +219,30 @@ test("switches theme and restores it after reload", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Switch to light theme" })).toBeVisible();
 });
 
-test("loads, searches, refreshes and navigates the Explorer", async ({ page }) => {
+test("loads, searches, refreshes and navigates the Explorer", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const state = await mockApplicationApi(page);
   await loadExplorer(page);
 
   await expect(page.getByText("1-40d7d11d*.zarr", { exact: true })).toBeVisible();
   await expect(page.getByText("2-acde1234*.nc", { exact: true })).toBeVisible();
-  await expect(
-    page.getByRole("button", {
-      name: "Copy filename: 1-40d7d11d-cbd9-48f4-9921-1ae6ac3a67fa.zarr",
-    }),
-  ).toBeVisible();
+  // A shortened name still copies in full.
+  await page
+    .getByRole("treeitem", { name: /1-40d7d11d/ })
+    .getByRole("button", { name: "Copy" })
+    .click();
+  await page.getByRole("menuitem", { name: "Filename" }).click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe("1-40d7d11d-cbd9-48f4-9921-1ae6ac3a67fa.zarr");
 
   await page.getByPlaceholder("Search files and folders...").fill("sweep");
   await expect(page.getByText("sweep.zarr", { exact: true })).toBeVisible();
   await expect(page.getByText("run.nc", { exact: true })).toBeHidden();
-  await page.getByTitle("Clear search").click();
+  await page.getByRole("button", { name: "Clear search" }).click();
   await expect(page.getByText("run.nc", { exact: true })).toBeVisible();
 
-  await page.getByTitle("Refresh directory").click();
+  await page.getByRole("button", { name: "Refresh directory" }).click();
   await expect.poll(() => state.loadRequests.length).toBeGreaterThanOrEqual(2);
 
   await page.getByText("sample-a", { exact: true }).dblclick();

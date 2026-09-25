@@ -260,7 +260,7 @@ const Explorer = ({
           <button
             type="button"
             onClick={handleLoadFolder}
-            className="bg-[#6ea030] hover:bg-[#5a8526] text-white px-4 py-2 rounded-r transition-colors focus:outline-none focus:ring focus:ring-[#8DC63F] flex items-center justify-center"
+            className="border border-[#6ea030] hover:border-[#5a8526] bg-[#6ea030] hover:bg-[#5a8526] text-white px-4 py-2 rounded-r shadow-sm transition-colors focus:outline-none focus:ring focus:ring-[#8DC63F] flex items-center justify-center"
             title="Load folder"
           >
             <Folder size={20} />
@@ -284,7 +284,7 @@ const Explorer = ({
         </Tooltip>
       </div>
       {/* Directory tree - only show when path is provided */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden">
         {isLive || (submittedPath && submittedPath.trim()) ? (
           <DirTree
             key={submittedPath}
