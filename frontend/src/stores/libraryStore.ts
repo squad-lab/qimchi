@@ -30,13 +30,62 @@ interface PathState {
   tags: number[];
 }
 
+/** A path takes on hearts, trash and tags from its ancestor folders */
+export const inheritedState = (
+  statesByPath: Record<string, PathState>,
+  path: string,
+): { hearted: boolean; trashed: boolean; tags: number[] } => {
+  const key = normalizePath(path);
+  const inherited = { hearted: false, trashed: false, tags: [] as number[] };
+  for (const [ancestor, state] of Object.entries(statesByPath)) {
+    if (!key.startsWith(`${ancestor}/`)) continue;
+    inherited.hearted ||= state.hearted;
+    inherited.trashed ||= state.trashed;
+    for (const tag of state.tags) if (!inherited.tags.includes(tag)) inherited.tags.push(tag);
+  }
+  return inherited;
+};
+
+/** Resolve the visible heart/trash state, with trash taking precedence. */
+export const effectiveState = (
+  statesByPath: Record<string, PathState>,
+  path: string,
+): { hearted: boolean; trashed: boolean } => {
+  const own = statesByPath[normalizePath(path)];
+  const inherited = inheritedState(statesByPath, path);
+  const trashed = Boolean(own?.trashed || inherited.trashed);
+  return {
+    hearted: !trashed && Boolean(own?.hearted || inherited.hearted),
+    trashed,
+  };
+};
+
+/** Whether a path or any of its parent folders is trashed. */
+export const isPathTrashed = (statesByPath: Record<string, PathState>, path: string): boolean => {
+  return effectiveState(statesByPath, path).trashed;
+};
+
+const withClearedHearts = (
+  statesByPath: Record<string, PathState>,
+  paths: string[],
+): Record<string, PathState> => {
+  if (paths.length === 0) return statesByPath;
+  const updated = { ...statesByPath };
+  for (const path of paths) {
+    const key = normalizePath(path);
+    const state = updated[key];
+    if (state?.hearted) updated[key] = { ...state, hearted: false };
+  }
+  return updated;
+};
+
 interface LibraryStore {
   // normalized path -> state (measurements that are hearted/trashed/tagged OR
   // registered this session)
   statesByPath: Record<string, PathState>;
   tags: Tag[]; // all of the user's tags
   filterHeartedOnly: boolean;
-  hideTrashed: boolean;
+  showTrashed: boolean;
   selectedTagIds: number[]; // active tag filter (match ANY)
 
   // False when the backend's library DB failed to start. Plotting still works;
@@ -46,37 +95,49 @@ interface LibraryStore {
 
   checkDbStatus: () => Promise<void>;
   fetchStates: () => Promise<void>;
-  register: (path: string, attrs?: Record<string, unknown>) => Promise<LibraryState>;
-  toggleHeart: (path: string) => Promise<void>;
-  toggleTrash: (path: string) => Promise<void>;
+  /** `folder` marks a folder rather than a measurement; the backend keys it by path. */
+  register: (
+    path: string,
+    attrs?: Record<string, unknown>,
+    folder?: boolean,
+  ) => Promise<LibraryState>;
+  toggleHeart: (path: string, folder?: boolean) => Promise<void>;
+  toggleTrash: (path: string, folder?: boolean) => Promise<void>;
   createTag: (name: string) => Promise<Tag | undefined>;
   deleteTag: (id: number) => Promise<void>;
   /** Rename a tag; returns the error message when the name is taken. */
   renameTag: (id: number, name: string) => Promise<string | undefined>;
-  toggleTag: (path: string, tagId: number) => Promise<void>;
+  toggleTag: (path: string, tagId: number, folder?: boolean) => Promise<void>;
 
-  // Bulk actions over a DirTree multi-selection (set, not toggle).
-  applyHeartMany: (paths: string[], hearted: boolean) => Promise<void>;
-  applyTrashMany: (paths: string[], trashed: boolean) => Promise<void>;
-  applyTagMany: (paths: string[], tagId: number, add: boolean) => Promise<void>;
+  // Bulk actions over a DirTree multi-selection (set, not toggle). `folderPaths`
+  // says which of `paths` are folders.
+  applyHeartMany: (paths: string[], hearted: boolean, folderPaths?: string[]) => Promise<void>;
+  applyTrashMany: (paths: string[], trashed: boolean, folderPaths?: string[]) => Promise<void>;
+  applyTagMany: (
+    paths: string[],
+    tagId: number,
+    add: boolean,
+    folderPaths?: string[],
+  ) => Promise<void>;
   /** @internal shared driver for the applyXMany actions */
   _applyMany: (
     paths: string[],
     action: (uuid: string) => Promise<(state: PathState) => PathState>,
+    folderPaths?: string[],
   ) => Promise<void>;
 
   toggleSelectedTag: (id: number) => void;
   clearSelectedTags: () => void;
   getStateForPath: (path: string) => PathState | undefined;
   setFilterHeartedOnly: (value: boolean) => void;
-  setHideTrashed: (value: boolean) => void;
+  setShowTrashed: (value: boolean) => void;
 }
 
 export const useLibraryStore = create<LibraryStore>((set, get) => ({
   statesByPath: {},
   tags: [],
   filterHeartedOnly: false,
-  hideTrashed: false,
+  showTrashed: false,
   selectedTagIds: [],
   dbAvailable: true,
   dbError: null,
@@ -118,9 +179,9 @@ export const useLibraryStore = create<LibraryStore>((set, get) => ({
     }
   },
 
-  register: async (path, attrs) => {
+  register: async (path, attrs, folder = false) => {
     if (!get().dbAvailable) return { uuid: null, hearted: false, trashed: false };
-    const state = await registerMeasurement(path, attrs);
+    const state = await registerMeasurement(path, attrs, folder);
     if (state.uuid) {
       const key = normalizePath(path);
       set((s) => ({
@@ -138,11 +199,11 @@ export const useLibraryStore = create<LibraryStore>((set, get) => ({
     return state;
   },
 
-  toggleHeart: async (path) => {
+  toggleHeart: async (path, folder = false) => {
     const key = normalizePath(path);
     let current = get().statesByPath[key];
     if (!current) {
-      const registered = await get().register(path);
+      const registered = await get().register(path, undefined, folder);
       if (!registered.uuid) return; // unidentifiable dataset: no-op
       current = get().statesByPath[key];
     }
@@ -164,27 +225,44 @@ export const useLibraryStore = create<LibraryStore>((set, get) => ({
     }
   },
 
-  toggleTrash: async (path) => {
+  toggleTrash: async (path, folder = false) => {
     const key = normalizePath(path);
     let current = get().statesByPath[key];
     if (!current) {
-      const registered = await get().register(path);
+      const registered = await get().register(path, undefined, folder);
       if (!registered.uuid) return;
       current = get().statesByPath[key];
     }
     if (!current) return;
     const next = !current.trashed;
+    const optimisticHearted = next ? false : current.hearted;
     set((s) => ({
-      statesByPath: { ...s.statesByPath, [key]: { ...current!, trashed: next } },
+      statesByPath: {
+        ...s.statesByPath,
+        [key]: { ...current!, hearted: optimisticHearted, trashed: next },
+      },
     }));
     try {
-      await setTrash(current.uuid, next);
+      const saved = await setTrash(current.uuid, next);
+      set((s) => ({
+        statesByPath: withClearedHearts(
+          {
+            ...s.statesByPath,
+            [key]: {
+              ...current!,
+              hearted: saved?.hearted ?? optimisticHearted,
+              trashed: saved?.trashed ?? next,
+            },
+          },
+          saved?.unhearted_paths ?? [],
+        ),
+      }));
     } catch (error) {
       console.error("Failed to set trash:", error);
       set((s) => ({
         statesByPath: {
           ...s.statesByPath,
-          [key]: { ...current!, trashed: !next },
+          [key]: current!,
         },
       }));
     }
@@ -246,11 +324,11 @@ export const useLibraryStore = create<LibraryStore>((set, get) => ({
     });
   },
 
-  toggleTag: async (path, tagId) => {
+  toggleTag: async (path, tagId, folder = false) => {
     const key = normalizePath(path);
     let current = get().statesByPath[key];
     if (!current) {
-      const registered = await get().register(path);
+      const registered = await get().register(path, undefined, folder);
       if (!registered.uuid) return;
       current = get().statesByPath[key];
     }
@@ -271,36 +349,58 @@ export const useLibraryStore = create<LibraryStore>((set, get) => ({
   // toggling would flip some on and some off, which is never what you want.
   // The caller decides the target state from the selection (see DirTree).
 
-  applyHeartMany: async (paths, hearted) => {
-    await get()._applyMany(paths, async (uuid) => {
-      await setHeart(uuid, hearted);
-      return (st) => ({ ...st, hearted });
-    });
+  applyHeartMany: async (paths, hearted, folderPaths) => {
+    await get()._applyMany(
+      paths,
+      async (uuid) => {
+        await setHeart(uuid, hearted);
+        return (st) => ({ ...st, hearted });
+      },
+      folderPaths,
+    );
   },
 
-  applyTrashMany: async (paths, trashed) => {
-    await get()._applyMany(paths, async (uuid) => {
-      await setTrash(uuid, trashed);
-      return (st) => ({ ...st, trashed });
-    });
+  applyTrashMany: async (paths, trashed, folderPaths) => {
+    await get()._applyMany(
+      paths,
+      async (uuid) => {
+        const saved = await setTrash(uuid, trashed);
+        if (saved?.unhearted_paths?.length) {
+          set((s) => ({
+            statesByPath: withClearedHearts(s.statesByPath, saved.unhearted_paths ?? []),
+          }));
+        }
+        return (st) => ({
+          ...st,
+          hearted: saved?.hearted ?? (trashed ? false : st.hearted),
+          trashed: saved?.trashed ?? trashed,
+        });
+      },
+      folderPaths,
+    );
   },
 
-  applyTagMany: async (paths, tagId, add) => {
-    await get()._applyMany(paths, async (uuid) => {
-      const tags = await tagMeasurement(uuid, tagId, add);
-      return (st) => ({ ...st, tags });
-    });
+  applyTagMany: async (paths, tagId, add, folderPaths) => {
+    await get()._applyMany(
+      paths,
+      async (uuid) => {
+        const tags = await tagMeasurement(uuid, tagId, add);
+        return (st) => ({ ...st, tags });
+      },
+      folderPaths,
+    );
   },
 
   /** Resolve each path to a registered uuid, run `action`, then patch state. */
-  _applyMany: async (paths, action) => {
+  _applyMany: async (paths, action, folderPaths = []) => {
     if (!get().dbAvailable) return;
+    const folders = new Set(folderPaths.map(normalizePath));
     for (const path of paths) {
       const key = normalizePath(path);
       let current = get().statesByPath[key];
       if (!current) {
         try {
-          const registered = await get().register(path);
+          const registered = await get().register(path, undefined, folders.has(key));
           if (!registered.uuid) continue; // unidentifiable dataset: skip
         } catch (error) {
           console.error("Failed to register during bulk action:", path, error);
@@ -336,5 +436,5 @@ export const useLibraryStore = create<LibraryStore>((set, get) => ({
   getStateForPath: (path) => get().statesByPath[normalizePath(path)],
 
   setFilterHeartedOnly: (value) => set({ filterHeartedOnly: value }),
-  setHideTrashed: (value) => set({ hideTrashed: value }),
+  setShowTrashed: (value) => set({ showTrashed: value }),
 }));

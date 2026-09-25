@@ -19,8 +19,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from sqlalchemy import func
+from pydantic import BaseModel, Field
+from sqlalchemy import func, or_, update
 from sqlmodel import Session, select
 
 from .db_models import (
@@ -34,7 +34,7 @@ from .db_models import (
 )
 from .logger import logger
 from .shared.db import require_db, session_scope
-from .shared.identity import resolve_from_attrs, resolve_identity
+from .shared.identity import folder_uuid, resolve_from_attrs, resolve_identity
 
 # Every library endpoint needs the database; require_db turns a failed startup
 # migration into a 503 with the reason, rather than an opaque 500.
@@ -61,12 +61,15 @@ class RegisterRequest(BaseModel):
     path: str
     # The attrs already fetched by /load-attrs/ (avoids re-loading the dataset).
     attrs: dict | None = None
+    # A folder rather than a measurement: keyed by its path.
+    folder: bool = False
 
 
 class StateOut(BaseModel):
     uuid: str | None = None
     hearted: bool = False
     trashed: bool = False
+    unhearted_paths: list[str] = Field(default_factory=list)
 
 
 class HeartRequest(BaseModel):
@@ -375,13 +378,17 @@ def library_metadata(dataset_path: Path, dataset_uuid: str | None = None) -> dic
 # measurement runs, so their attrs genuinely change.
 
 
+# Increment when loader changes require invalidating cached /load-attrs/ payloads.
+_ATTRS_CACHE_VERSION = 2
+
+
 def _fingerprint(path: str) -> str | None:
     """Cheap change signature for a dataset (None if it can't be stat'd)."""
     try:
         st = Path(path).stat()
     except OSError:
         return None
-    return f"{st.st_mtime_ns}:{st.st_size}"
+    return f"{st.st_mtime_ns}:{st.st_size}:v{_ATTRS_CACHE_VERSION}"
 
 
 def _is_cacheable(path: str) -> bool:
@@ -528,6 +535,26 @@ def _register(
         )
 
 
+def _register_folder(path: str) -> StateOut:
+    if not Path(path).is_dir():
+        raise HTTPException(status_code=404, detail=f"No folder at {path}")
+    uuid = folder_uuid(path)
+    with session_scope() as session:
+        folder = session.get(Measurement, uuid)
+        if folder is None:
+            folder = Measurement(uuid=uuid, uuid_origin="folder-path")
+            session.add(folder)
+        folder.abs_path = path
+        folder.source_format = "folder"
+        folder.last_opened = _utcnow()
+        state = session.get(MeasurementState, (uuid, LOCAL_USER_ID))
+        return StateOut(
+            uuid=uuid,
+            hearted=bool(state.hearted) if state else False,
+            trashed=bool(state.trashed) if state else False,
+        )
+
+
 def _set_heart(uuid: str, hearted: bool) -> StateOut:
     with session_scope() as session:
         if session.get(Measurement, uuid) is None:
@@ -538,14 +565,58 @@ def _set_heart(uuid: str, hearted: bool) -> StateOut:
         return StateOut(uuid=uuid, hearted=hearted, trashed=bool(state.trashed))
 
 
+def _unheart_folder_descendants(session: Session, folder_path: str) -> list[str]:
+    """Clear descendant hearts in one statement and return their paths."""
+    base = folder_path.rstrip("/\\")
+    prefixes = (f"{base}/", f"{base}\\")
+    descendants = session.exec(
+        select(Measurement.uuid, Measurement.abs_path)
+        .join(MeasurementState, MeasurementState.uuid == Measurement.uuid)
+        .where(
+            MeasurementState.user_id == LOCAL_USER_ID,
+            MeasurementState.hearted == True,  # noqa: E712
+            or_(
+                Measurement.abs_path.startswith(prefixes[0], autoescape=True),
+                Measurement.abs_path.startswith(prefixes[1], autoescape=True),
+            ),
+        )
+    ).all()
+    if not descendants:
+        return []
+
+    uuids = [uuid for uuid, _path in descendants]
+    session.execute(
+        update(MeasurementState)
+        .where(
+            MeasurementState.user_id == LOCAL_USER_ID,
+            MeasurementState.uuid.in_(uuids),
+        )
+        .values(hearted=False, updated_at=_utcnow())
+    )
+    return [path for _uuid, path in descendants if path is not None]
+
+
 def _set_trash(uuid: str, trashed: bool) -> StateOut:
     with session_scope() as session:
-        if session.get(Measurement, uuid) is None:
+        measurement = session.get(Measurement, uuid)
+        if measurement is None:
             raise HTTPException(status_code=404, detail=f"Unknown measurement {uuid}")
         state = _get_state_row(session, uuid)
         state.trashed = trashed
+        unhearted_paths: list[str] = []
+        if trashed:
+            state.hearted = False
+            if measurement.source_format == "folder" and measurement.abs_path:
+                unhearted_paths = _unheart_folder_descendants(
+                    session, measurement.abs_path
+                )
         state.updated_at = _utcnow()
-        return StateOut(uuid=uuid, hearted=bool(state.hearted), trashed=trashed)
+        return StateOut(
+            uuid=uuid,
+            hearted=bool(state.hearted),
+            trashed=trashed,
+            unhearted_paths=unhearted_paths,
+        )
 
 
 def _list_states() -> list[MeasurementStateOut]:
@@ -713,8 +784,12 @@ async def register(req: RegisterRequest) -> StateOut:
     signature has to be derived.
     """
     try:
+        if req.folder:
+            return await asyncio.to_thread(_register_folder, req.path)
         uuid, origin, attrs = await _resolve(req.path, req.attrs)
         return await asyncio.to_thread(_register, req.path, attrs, uuid, origin)
+    except HTTPException:
+        raise
     except Exception:
         logger.exception("library.register failed for %s", req.path)
         raise HTTPException(status_code=500, detail="Failed to register measurement")

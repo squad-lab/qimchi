@@ -135,9 +135,11 @@ async def test_library_route_workflow_preserves_state_and_tags(tmp_path):
 
     assert hearted.hearted is True
     assert trashed.trashed is True
+    assert trashed.hearted is False
     assert assigned == [tag.id]
     states = await library.states()
     assert states[0].uuid == registered.uuid
+    assert states[0].hearted is False
     assert states[0].tags == [tag.id]
 
     renamed = await library.rename_tag(
@@ -183,3 +185,95 @@ async def test_register_without_an_identity_is_a_safe_noop(monkeypatch):
     monkeypatch.setattr(library, "_resolve", no_identity)
     result = await library.register(library.RegisterRequest(path="unreadable.nc"))
     assert result == library.StateOut()
+
+
+@pytest.mark.asyncio
+async def test_a_folder_can_be_hearted_trashed_and_tagged(tmp_path, monkeypatch):
+    async def must_not_load(*_args):
+        raise AssertionError("a folder is not loaded as a dataset")
+
+    monkeypatch.setattr(library, "_resolve", must_not_load)
+    folder = tmp_path / "cooldown-3"
+    folder.mkdir()
+
+    registered = await library.register(
+        library.RegisterRequest(path=str(folder), folder=True)
+    )
+    assert registered.uuid
+    again = await library.register(
+        library.RegisterRequest(path=str(folder), folder=True)
+    )
+    assert again.uuid == registered.uuid
+
+    await library.heart(library.HeartRequest(uuid=registered.uuid, hearted=True))
+    tag = await library.create_tag(library.CreateTagRequest(name="good fridge"))
+    await library.tag_measurement(
+        library.TagMeasurementRequest(uuid=registered.uuid, tag_id=tag.id)
+    )
+
+    [state] = await library.states()
+    assert state.abs_path == str(folder)
+    assert state.hearted is True
+    assert state.tags == [tag.id]
+
+    trashed = await library.trash(
+        library.TrashRequest(uuid=registered.uuid, trashed=True)
+    )
+    assert trashed.trashed is True and trashed.hearted is False
+
+
+@pytest.mark.asyncio
+async def test_trashing_a_folder_unhearts_registered_descendants_in_one_call(tmp_path):
+    folder = tmp_path / "cooldown"
+    folder.mkdir()
+    child = folder / "run.nc"
+    child.write_bytes(b"data")
+    similarly_named = tmp_path / "cooldown-old"
+    similarly_named.mkdir()
+    sibling = similarly_named / "other.nc"
+    sibling.write_bytes(b"data")
+
+    registered_folder = await library.register(
+        library.RegisterRequest(path=str(folder), folder=True)
+    )
+    registered_child = await library.register(
+        library.RegisterRequest(
+            path=str(child), attrs={"Measurement ID": "folder-child"}
+        )
+    )
+    registered_sibling = await library.register(
+        library.RegisterRequest(
+            path=str(sibling), attrs={"Measurement ID": "folder-sibling"}
+        )
+    )
+    await library.heart(library.HeartRequest(uuid=registered_child.uuid, hearted=True))
+    await library.heart(
+        library.HeartRequest(uuid=registered_sibling.uuid, hearted=True)
+    )
+
+    trashed = await library.trash(
+        library.TrashRequest(uuid=registered_folder.uuid, trashed=True)
+    )
+
+    assert trashed.unhearted_paths == [str(child)]
+    child_state = await library.register(
+        library.RegisterRequest(
+            path=str(child), attrs={"Measurement ID": "folder-child"}
+        )
+    )
+    sibling_state = await library.register(
+        library.RegisterRequest(
+            path=str(sibling), attrs={"Measurement ID": "folder-sibling"}
+        )
+    )
+    assert child_state.hearted is False
+    assert sibling_state.hearted is True
+
+
+@pytest.mark.asyncio
+async def test_a_folder_that_is_not_there_is_refused(tmp_path):
+    with pytest.raises(HTTPException) as missing:
+        await library.register(
+            library.RegisterRequest(path=str(tmp_path / "gone"), folder=True)
+        )
+    assert missing.value.status_code == 404

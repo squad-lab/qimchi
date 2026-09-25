@@ -1,8 +1,5 @@
 // API service for the Qimchi library (per-measurement heart/trash/tag state).
-// Backed by the /library/* endpoints (see backend/api/library.py). Keyed on a
-// measurement UUID resolved by the backend (qanary "Measurement ID", QCoDeS
-// run guid, or a content signature); only datasets it cannot identify return a
-// null uuid. Endpoints return 503 when the library DB failed to start.
+// Backed by the /library/* endpoints (see backend/api/library.py).
 import axios from "axios";
 
 import { PROD_BACKEND_URL } from "../config";
@@ -13,6 +10,7 @@ export interface LibraryState {
   uuid: string | null;
   hearted: boolean;
   trashed: boolean;
+  unhearted_paths?: string[];
 }
 
 export interface MeasurementStateOut {
@@ -54,10 +52,12 @@ export async function getDbStatus(): Promise<DbStatus> {
 export async function registerMeasurement(
   path: string,
   attrs?: Record<string, unknown>,
+  folder = false,
 ): Promise<LibraryState> {
   const { data } = await axios.post<LibraryState>(`${API_BASE_URL}/library/register`, {
     path,
     attrs,
+    ...(folder ? { folder } : {}),
   });
   return data;
 }

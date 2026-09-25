@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { normalizePath, useLibraryStore } from "./libraryStore";
+import {
+  effectiveState,
+  inheritedState,
+  isPathTrashed,
+  normalizePath,
+  useLibraryStore,
+} from "./libraryStore";
 
 vi.mock("../services/libraryAPI", () => ({
   createTag: vi.fn(),
@@ -17,6 +23,7 @@ vi.mock("../services/libraryAPI", () => ({
 
 import {
   createTag as apiCreateTag,
+  registerMeasurement,
   setHeart,
   setTrash,
   tagMeasurement,
@@ -31,7 +38,7 @@ beforeEach(() => {
     statesByPath: {},
     tags: [],
     filterHeartedOnly: false,
-    hideTrashed: false,
+    showTrashed: false,
     selectedTagIds: [],
     dbAvailable: true,
     dbError: null,
@@ -130,6 +137,24 @@ describe("toggleHeart", () => {
 });
 
 describe("toggleTrash", () => {
+  it("unhearts a measurement when trashing it", async () => {
+    useLibraryStore.setState({
+      statesByPath: { [KEY]: { uuid: "u1", hearted: true, trashed: false, tags: [] } },
+    });
+    vi.mocked(setTrash).mockResolvedValue({
+      uuid: "u1",
+      hearted: false,
+      trashed: true,
+    } as never);
+
+    await useLibraryStore.getState().toggleTrash(RUN);
+
+    expect(useLibraryStore.getState().statesByPath[KEY]).toMatchObject({
+      hearted: false,
+      trashed: true,
+    });
+  });
+
   it("updates immediately and rolls back on failure", async () => {
     useLibraryStore.setState({
       statesByPath: { [KEY]: { uuid: "u1", hearted: false, trashed: false, tags: [] } },
@@ -243,5 +268,116 @@ describe("bulk actions", () => {
 
     expect(tagMeasurement).toHaveBeenCalledTimes(2);
     expect(useLibraryStore.getState().statesByPath[KEY].tags).toEqual([7]);
+  });
+
+  it("unhearts measurements when moving them to trash", async () => {
+    useLibraryStore.setState({
+      statesByPath: {
+        [KEY]: { uuid: "u1", hearted: true, trashed: false, tags: [] },
+        [KEY2]: { uuid: "u2", hearted: true, trashed: false, tags: [] },
+      },
+    });
+    vi.mocked(setTrash).mockImplementation(async (uuid) => ({
+      uuid,
+      hearted: false,
+      trashed: true,
+    }));
+
+    await useLibraryStore.getState().applyTrashMany([KEY, KEY2], true);
+
+    expect(useLibraryStore.getState().statesByPath[KEY].hearted).toBe(false);
+    expect(useLibraryStore.getState().statesByPath[KEY2].hearted).toBe(false);
+  });
+});
+
+describe("folders", () => {
+  const FOLDER = "C:/data/cooldown";
+  const CHILD = `${FOLDER}/day2/run.zarr`;
+
+  it("registers a folder as a folder the first time it is marked", async () => {
+    vi.mocked(registerMeasurement).mockResolvedValue({
+      uuid: "f1",
+      hearted: false,
+      trashed: false,
+    } as never);
+    vi.mocked(setHeart).mockResolvedValue(undefined as never);
+
+    await useLibraryStore.getState().toggleHeart("C:\\data\\cooldown", true);
+
+    expect(registerMeasurement).toHaveBeenCalledWith("C:\\data\\cooldown", undefined, true);
+    expect(setHeart).toHaveBeenCalledWith("f1", true);
+    expect(useLibraryStore.getState().statesByPath[FOLDER].hearted).toBe(true);
+  });
+
+  it("applies descendant hearts cleared by the folder trash request", async () => {
+    useLibraryStore.setState({
+      statesByPath: {
+        [FOLDER]: { uuid: "f1", hearted: false, trashed: false, tags: [] },
+        [CHILD]: { uuid: "u1", hearted: true, trashed: false, tags: [] },
+      },
+    });
+    vi.mocked(setTrash).mockResolvedValue({
+      uuid: "f1",
+      hearted: false,
+      trashed: true,
+      unhearted_paths: ["C:\\data\\cooldown\\day2\\run.zarr"],
+    });
+
+    await useLibraryStore.getState().toggleTrash(FOLDER, true);
+
+    expect(setTrash).toHaveBeenCalledTimes(1);
+    expect(useLibraryStore.getState().statesByPath[CHILD].hearted).toBe(false);
+  });
+
+  it("registers only the selected folders as folders in a bulk action", async () => {
+    vi.mocked(registerMeasurement).mockImplementation(async (path) => ({
+      uuid: String(path),
+      hearted: false,
+      trashed: false,
+    }));
+    vi.mocked(setHeart).mockResolvedValue(undefined as never);
+
+    await useLibraryStore.getState().applyHeartMany([FOLDER, KEY], true, [FOLDER]);
+
+    expect(registerMeasurement).toHaveBeenCalledWith(FOLDER, undefined, true);
+    expect(registerMeasurement).toHaveBeenCalledWith(KEY, undefined, false);
+  });
+
+  it("passes a folder's marks to everything inside it", () => {
+    const states = {
+      [FOLDER]: { uuid: "f1", hearted: true, trashed: false, tags: [3] },
+      "C:/data/cooldown/day2": { uuid: "f2", hearted: false, trashed: true, tags: [4] },
+    };
+
+    expect(inheritedState(states, "C:\\data\\cooldown\\day2\\run.zarr")).toEqual({
+      hearted: true,
+      trashed: true,
+      tags: [3, 4],
+    });
+    // A folder does not inherit from itself, nor from a sibling with a longer name.
+    expect(inheritedState(states, FOLDER).hearted).toBe(false);
+    expect(inheritedState(states, "C:/data/cooldown-old/run.zarr").hearted).toBe(false);
+  });
+
+  it("treats a path as trashed when it or any parent folder is trashed", () => {
+    const states = {
+      [FOLDER]: { uuid: "f1", hearted: false, trashed: true, tags: [] },
+      "C:/data/other/run.zarr": { uuid: "u1", hearted: false, trashed: true, tags: [] },
+    };
+
+    expect(isPathTrashed(states, "C:/data/cooldown/day2/run.zarr")).toBe(true);
+    expect(isPathTrashed(states, "C:/data/other/run.zarr")).toBe(true);
+    expect(isPathTrashed(states, "C:/data/cooldown-old/run.zarr")).toBe(false);
+  });
+
+  it("suppresses an effective heart below a trashed folder", () => {
+    const path = "C:/data/cooldown/day2/run.zarr";
+    const states = {
+      [FOLDER]: { uuid: "f1", hearted: false, trashed: true, tags: [] },
+      [path]: { uuid: "u1", hearted: true, trashed: false, tags: [] },
+    };
+
+    expect(effectiveState(states, path)).toEqual({ hearted: false, trashed: true });
+    expect(states[path].hearted).toBe(true);
   });
 });
