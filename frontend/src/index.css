@@ -155,6 +155,7 @@ select {
 /* Layer stack, in paint order. These are the only values that matter across
    component boundaries; anything local to a card stays well below them.
      1000  Plotly modebar (below)
+     1100  LineCut pop-up (LineCutPopup.tsx)
      1500  full-window Explorer (ExplorerLayer.tsx)
      1600  Explorer tag/filter popovers
      2001+ modals, incrementing per open (getNextGlobalModalZ)
@@ -248,6 +249,30 @@ select {
 .notes-markdown-editor .w-md-editor-toolbar svg {
   width: 15px;
   height: 15px;
+}
+
+.dark .notes-markdown-editor {
+  --color-fg-default: #fff;
+  --color-prettylights-syntax-constant: #fff;
+}
+
+.dark .notes-markdown-editor,
+.dark .notes-markdown-editor .w-md-editor-content,
+.dark .notes-markdown-editor .w-md-editor-area,
+.dark .notes-markdown-editor .w-md-editor-text,
+.dark .notes-markdown-editor .w-md-editor-text-input,
+.dark .notes-markdown-editor .w-md-editor-text-pre {
+  background-color: #23262d !important;
+}
+
+.dark .notes-markdown-editor .w-md-editor-text-pre > code,
+.dark .notes-markdown-editor .w-md-editor-text-input {
+  color: #fff !important;
+  caret-color: #fff;
+}
+
+.dark .notes-markdown-editor .w-md-editor-text-input {
+  -webkit-text-fill-color: #fff !important;
 }
 
 /* ============================================================
@@ -352,6 +377,7 @@ select {
   --qimchi-icon-qcodes: #17a5a5;
   --qimchi-icon-sqlite: #2fa86a;
   --qimchi-icon-csv: #e2803c;
+  --qimchi-icon-matlab: #e0567a;
   --qimchi-icon-generic: #6cb33f;
 }
 
@@ -770,7 +796,7 @@ select {
   border-color: #3a2d45;
 }
 
-/* cyan / fuchsia (Explorer format tags: Quantify, xarray DataTree) */
+/* cyan / fuchsia / rose (Explorer format tags: Quantify, xarray DataTree, MATLAB) */
 .dark .bg-cyan-50,
 .dark .bg-cyan-50\/50 {
   background-color: #16292e;
@@ -790,6 +816,16 @@ select {
 }
 .dark .text-fuchsia-600 {
   color: #d18ade;
+}
+.dark .bg-rose-50,
+.dark .bg-rose-50\/50 {
+  background-color: #2e1f24;
+}
+.dark .border-rose-100 {
+  border-color: #4a2d36;
+}
+.dark .text-rose-600 {
+  color: #e0869e;
 }
 
 /* red */

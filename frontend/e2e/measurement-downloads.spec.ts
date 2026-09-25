@@ -96,7 +96,7 @@ test("downloads the Explorer multi-selection", async ({ page }) => {
   await page.getByText("sweep.zarr", { exact: true }).click({ modifiers: ["Control"] });
 
   const { browserDownload, request } = await expectPostDownload(page, "/download-multiple/", () =>
-    page.getByTitle("Download all selected items as ZIP").click(),
+    page.getByRole("button", { name: "Download all selected items as ZIP" }).click(),
   );
 
   expect(request.postDataJSON()).toEqual({
@@ -106,7 +106,7 @@ test("downloads the Explorer multi-selection", async ({ page }) => {
 });
 
 test("downloads one measurement from its Basket action", async ({ page }) => {
-  await page.getByRole("button", { name: "Add to basket" }).first().click();
+  await page.getByText("run.nc", { exact: true }).dblclick();
   await expect(page.getByRole("button", { name: "Download run.nc" })).toBeVisible();
 
   const { browserDownload, request } = await expectPostDownload(page, "/download-multiple/", () =>
@@ -118,8 +118,8 @@ test("downloads one measurement from its Basket action", async ({ page }) => {
 });
 
 test("downloads every measurement in the Basket", async ({ page }) => {
-  await page.getByRole("button", { name: "Add to basket" }).nth(0).click();
-  await page.getByRole("button", { name: "Add to basket" }).nth(0).click();
+  await page.getByText("run.nc", { exact: true }).dblclick();
+  await page.getByText("sweep.zarr", { exact: true }).dblclick();
   await expect(page.getByTitle("Remove")).toHaveCount(2);
 
   const { browserDownload, request } = await expectPostDownload(page, "/download-selected/", () =>

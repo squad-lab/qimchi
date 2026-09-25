@@ -40,7 +40,7 @@ test("the basket stops at 50 measurements and says why", async ({ page }) => {
 
   await page.getByText(name(0), { exact: true }).click();
   await page.keyboard.press("Control+KeyA");
-  await page.getByTitle("Add all selected files to basket").click();
+  await page.getByRole("button", { name: "Add all selected files to basket" }).click();
 
   await expect(
     page.getByText("The basket holds at most 50 measurements. Remove some before adding more."),

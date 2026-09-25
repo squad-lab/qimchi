@@ -1,14 +1,15 @@
 import React, { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import axios from "axios";
-import { Save, AlertCircle, Check, Clock, Loader2, NotebookPen } from "lucide-react";
+import { Save, AlertCircle, Check, Clock, Loader2, NotebookPen, Copy } from "lucide-react";
 
 // Local imports
 // Load the editor and its parsers only when Notes opens.
 const MarkdownEditor = React.lazy(() => import("./MarkdownEditor"));
 import { BasketItem } from "./Basket";
 import { PROD_BACKEND_URL } from "../config";
-import { themeClasses } from "../theme";
 import { isDatasetPath, isSqliteContainerPath } from "../utils/datasetPaths";
+import Tooltip from "./Tooltip";
+import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 
 interface DroppedItem {
   id: string;
@@ -92,6 +93,7 @@ export default function Notes({
   const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const notesContainerRef = useRef<HTMLDivElement | null>(null);
+  const { copyToClipboard: copyPath, isCopied: isPathCopied } = useCopyToClipboard();
 
   // Auto-save delay in milliseconds
   const AUTO_SAVE_DELAY = 2000;
@@ -734,7 +736,7 @@ export default function Notes({
         };
       case "saved":
         return {
-          icon: <Check className="w-4 h-4 text-green-500" />,
+          icon: <Check className="w-4 h-4 text-blue-500" />,
           text: lastSavedAt ? `Saved ${formatTimeAgo(lastSavedAt)}` : "Saved",
         };
       case "error":
@@ -765,16 +767,10 @@ export default function Notes({
       ref={notesContainerRef}
     >
       {/* Header */}
-      <div
-        className={`p-3 border-b ${themeClasses.accentHeaderBg} ${themeClasses.accentBorderLight}`}
-      >
-        <div className="flex flex-col space-y-2">
-          {/* Row 1: Sample + Measurement selectors */}
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-[11px] text-[var(--qimchi-panel-title-fg)] opacity-80 mb-1">
-                Sample / Database
-              </label>
+      <div className="border-b border-gray-200 bg-gray-50 p-3">
+        <div className="flex items-center gap-3">
+          <div className="grid min-w-0 flex-1 grid-cols-2 gap-2">
+            <Tooltip content="Sample / Database" position="top">
               <select
                 value={selectedSampleKey || ""}
                 aria-label="Select sample notes"
@@ -786,7 +782,7 @@ export default function Notes({
                     handleSelectionChange(null);
                   });
                 }}
-                className={`w-full px-2 py-1.5 text-sm bg-white border border-gray-300 rounded-md focus:outline-none focus:ring-2 ${themeClasses.accentFocusRing}`}
+                className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 disabled={sampleGroups.length === 0 || isSwitchingSelection}
               >
                 {sampleGroups.length === 0 ? (
@@ -799,12 +795,9 @@ export default function Notes({
                   ))
                 )}
               </select>
-            </div>
+            </Tooltip>
 
-            <div>
-              <label className="block text-[11px] text-[var(--qimchi-panel-title-fg)] opacity-80 mb-1">
-                Measurement
-              </label>
+            <Tooltip content="Measurement" position="top">
               <select
                 value={selectedScope === "sample" ? "__sample__" : selectedItemId || ""}
                 aria-label="Select measurement notes"
@@ -820,7 +813,7 @@ export default function Notes({
                     handleSelectionChange(value || null);
                   });
                 }}
-                className={`w-full px-2 py-1.5 text-sm bg-white border border-gray-300 rounded-md focus:outline-none focus:ring-2 ${themeClasses.accentFocusRing}`}
+                className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 disabled={!selectedSample || isSwitchingSelection}
               >
                 {!selectedSample ? (
@@ -840,63 +833,42 @@ export default function Notes({
                   </>
                 )}
               </select>
-            </div>
+            </Tooltip>
           </div>
 
           {selectedTarget && (
-            <div className="text-[11px] text-[var(--qimchi-panel-title-fg)] opacity-75 truncate">
-              {selectedScope === "sample"
-                ? selectedSample?.kind === "qcodes"
-                  ? `${selectedSample.sampleName} -> Overall database notes`
-                  : `${selectedSample?.cryostatName}/${selectedSample?.sampleName} -> ${selectedSample?.pooledFilename}`
-                : selectedTarget.path}
-            </div>
+            <>
+              <div className="h-9 w-px shrink-0 bg-gray-300" role="separator" />
+              {canEdit &&
+                (() => {
+                  const { icon, text } = getSaveIconAndText();
+                  const savedAt = lastSavedAt
+                    ? ` · Last saved ${formatLastSaved(lastSavedAt)}`
+                    : "";
+                  return (
+                    <Tooltip content={`${text}${savedAt}`} position="top">
+                      <span
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded text-gray-600"
+                        aria-label={`${text}${savedAt}`}
+                        role="status"
+                      >
+                        {icon}
+                      </span>
+                    </Tooltip>
+                  );
+                })()}
+              <Tooltip content={`Copy Path "${selectedTarget.path}"`} position="top">
+                <button
+                  type="button"
+                  onClick={() => void copyPath(selectedTarget.path)}
+                  className="qimchi-dark-hover-plain flex h-9 w-9 shrink-0 items-center justify-center rounded text-gray-600 hover:bg-gray-200"
+                  aria-label={`Copy Path "${selectedTarget.path}"`}
+                >
+                  {isPathCopied ? <Check size={15} /> : <Copy size={15} />}
+                </button>
+              </Tooltip>
+            </>
           )}
-
-          {/* Row 2: Left Last Saved, Right Autosave indicator */}
-          <div className="flex items-center justify-between">
-            {datasetItems.length > 0 && (
-              <div className="text-xs text-[var(--qimchi-panel-title-fg)]">
-                {lastSavedAt ? (
-                  <span>
-                    <span className="font-medium text-[var(--qimchi-panel-title-fg)] mr-2">
-                      Last Saved:
-                    </span>
-                    <span className="text-[var(--qimchi-panel-title-fg)] opacity-75">
-                      {formatLastSaved(lastSavedAt)}
-                    </span>
-                  </span>
-                ) : (
-                  <span className="text-[var(--qimchi-panel-title-fg)] opacity-75">
-                    Last Saved: -
-                  </span>
-                )}
-              </div>
-            )}
-
-            <div>
-              {canEdit && (
-                <div className="flex items-center space-x-3">
-                  <div className="flex items-center space-x-1 text-xs text-[var(--qimchi-panel-title-fg)] bg-white/50 dark:bg-black/20 px-2 py-1 rounded-md">
-                    {(() => {
-                      const { icon, text } = getSaveIconAndText();
-                      return (
-                        <>
-                          {icon}
-                          <span>{text}</span>
-                        </>
-                      );
-                    })()}
-                  </div>
-                  {isSwitchingSelection && (
-                    <span className="text-[10px] text-[var(--qimchi-panel-title-fg)] opacity-75">
-                      saving before switch...
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
         </div>
       </div>
 
@@ -915,24 +887,20 @@ export default function Notes({
         {loading && !hasUnsavedChanges ? (
           <div className="flex items-center justify-center p-8">
             <div className="text-center">
-              <Loader2 className={`w-6 h-6 animate-spin ${themeClasses.accentIcon} mx-auto mb-2`} />
+              <Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin text-blue-500" />
               <p className="text-gray-600">Loading notes...</p>
             </div>
           </div>
         ) : hasTarget ? (
           <div
-            className={`h-full bg-white m-2 rounded-lg border shadow-sm relative ${
-              isDragOver
-                ? `border-2 border-dashed ${themeClasses.accentBorder} ${themeClasses.accentLightBg}`
-                : "border-gray-200"
+            className={`relative m-0 h-full rounded-lg border bg-white shadow-sm ${
+              isDragOver ? "border-2 border-dashed border-blue-400 bg-blue-50" : "border-gray-200"
             }`}
           >
             {isDragOver && (
-              <div
-                className={`absolute inset-0 flex items-center justify-center ${themeClasses.accentOverlay} rounded-lg pointer-events-none z-10`}
-              >
-                <div className={`text-center ${themeClasses.accentText}`}>
-                  <NotebookPen className={`w-8 h-8 mx-auto mb-2 ${themeClasses.accentIcon}`} />
+              <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-blue-100/80">
+                <div className="text-center text-blue-700">
+                  <NotebookPen className="mx-auto mb-2 h-8 w-8 text-blue-600" />
                   <p className="text-sm font-medium">Drop datasets here</p>
                   <p className="text-xs">Their paths will be added to your notes</p>
                 </div>

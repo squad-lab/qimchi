@@ -1,4 +1,5 @@
-import { Panel, PanelResizeHandle } from "react-resizable-panels";
+import { useEffect, useRef } from "react";
+import { Panel, PanelResizeHandle, type ImperativePanelHandle } from "react-resizable-panels";
 
 // Local imports
 import Notes from "./Notes";
@@ -50,6 +51,14 @@ const Sidebar = ({
     setSidebarCollapsed,
     setNotesCollapsed,
   } = useSidebarStore();
+  const panelRef = useRef<ImperativePanelHandle>(null);
+
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    if (sidebarCollapsed && !panel.isCollapsed()) panel.collapse();
+    if (!sidebarCollapsed && panel.isCollapsed()) panel.expand();
+  }, [sidebarCollapsed]);
 
   const handleSelectNode = (node: TreeNode) => {
     onSelectNode(node);
@@ -81,15 +90,16 @@ const Sidebar = ({
     <>
       {/* Sidebar body: exactly one section, full height */}
       <Panel
+        ref={panelRef}
         defaultSize={defaultWidth}
         collapsible
-        // TODOLATER: Remove if the skip is annoying.
-        minSize={sidebarCollapsed ? 0 : 18}
-        className={`${sidebarCollapsed ? "max-w-0" : ""}`}
-        style={{ display: sidebarCollapsed ? "none" : "block" }}
+        collapsedSize={0}
+        minSize={18}
+        onCollapse={() => setSidebarCollapsed(true)}
+        onExpand={() => setSidebarCollapsed(false)}
       >
         <div className="flex flex-col h-full">
-          <div className="flex-1 overflow-hidden bg-gray-100">
+          <div className="flex-1 overflow-hidden bg-gray-100" data-tour="sidebar">
             <ExplorerLayer expanded={explorerExpanded} style={explorerStyle}>
               <Explorer
                 onSelectNode={handleSelectNode}
@@ -122,10 +132,7 @@ const Sidebar = ({
           <BrandingFooter />
         </div>
       </Panel>
-      <PanelResizeHandle
-        className="w-1.5 bg-gray-300 hover:bg-blue-500 transition-colors"
-        style={{ display: sidebarCollapsed ? "none" : "block" }}
-      />
+      <PanelResizeHandle className="w-1.5 bg-gray-300 hover:bg-blue-500 transition-colors" />
     </>
   );
 };

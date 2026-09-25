@@ -251,7 +251,7 @@ const Toast: React.FC<ToastProps> = ({
       `}
     >
       {styles.icon}
-      <span className="flex-1 text-sm font-medium">{message}</span>
+      <span className="min-w-0 flex-1 text-sm font-medium wrap-anywhere">{message}</span>
       {action && (
         <button
           type="button"

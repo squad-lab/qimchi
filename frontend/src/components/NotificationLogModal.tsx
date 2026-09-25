@@ -75,7 +75,7 @@ const NotificationLogEntry: React.FC<{
         <div className="shrink-0">{getIcon(log.type)}</div>
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2">
-            <p className="text-sm font-medium wrap-break-word leading-tight">{log.message}</p>
+            <p className="min-w-0 text-sm font-medium wrap-anywhere leading-tight">{log.message}</p>
             {hasMetadata && (
               <div className="text-slate-400 mt-0.5">
                 {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -119,7 +119,9 @@ const NotificationLogEntry: React.FC<{
               }
             />
           ) : (
-            <pre className="whitespace-pre-wrap font-mono text-[11px]">{String(log.metadata)}</pre>
+            <pre className="whitespace-pre-wrap wrap-anywhere font-mono text-[11px]">
+              {String(log.metadata)}
+            </pre>
           )}
         </div>
       )}
@@ -223,10 +225,11 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
   };
 
   return (
-    <div ref={wrapperRef} className="fixed inset-0 pointer-events-none">
+    <div ref={wrapperRef} className="fixed inset-0 pointer-events-none" data-closes-on-escape>
       <Rnd
         default={{
-          x: window.innerWidth - 384 - 28,
+          // Bottom left, just clear of the sidebar rail.
+          x: 48,
           y: window.innerHeight - 550 - 28,
           width: 384,
           height: 550,
@@ -314,7 +317,7 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
           </div>
 
           {/* Body */}
-          <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-slate-50">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-2 bg-slate-50">
             {filteredLogs.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-slate-400">
                 <History size={32} className="mb-2 opacity-30" />

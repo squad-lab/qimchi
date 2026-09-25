@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 
 interface TooltipProps {
@@ -98,6 +98,27 @@ const Tooltip: React.FC<TooltipProps> = ({
   }, [position]);
 
   // No rAF: we compute position before mounting the tooltip so it doesn't flash at 0,0
+
+  // Keep a long tooltip inside the window: shift it back by however far it spills over.
+  useLayoutEffect(() => {
+    const tooltip = tooltipRef.current;
+    const container = portalRef.current;
+    if (!isVisible || !tooltip || !container) return;
+    const MARGIN = 8;
+    const rect = tooltip.getBoundingClientRect();
+    const shift = (start: number, end: number, limit: number) =>
+      start < MARGIN ? MARGIN - start : end > limit - MARGIN ? limit - MARGIN - end : 0;
+    const dx = shift(rect.left, rect.right, window.innerWidth);
+    const dy = shift(rect.top, rect.bottom, window.innerHeight);
+    if (dx) {
+      const left = parseFloat(container.style.getPropertyValue("--tooltip-left")) || 0;
+      container.style.setProperty("--tooltip-left", `${left + dx}px`);
+    }
+    if (dy) {
+      const top = parseFloat(container.style.getPropertyValue("--tooltip-top")) || 0;
+      container.style.setProperty("--tooltip-top", `${top + dy}px`);
+    }
+  }, [isVisible, content]);
 
   // When tooltip mounts, set aria-hidden appropriately
   useEffect(() => {

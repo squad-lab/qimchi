@@ -22,6 +22,7 @@ import {
   ShoppingBasket,
   NotebookPen,
   TriangleAlert,
+  Grid3x3,
 } from "lucide-react";
 
 // Local imports
@@ -623,6 +624,8 @@ const Basket = ({
         return <Database size={15} className="text-emerald-600 shrink-0" />;
       case "csv":
         return <Table size={15} className="text-orange-600 shrink-0" />;
+      case "matlab":
+        return <Grid3x3 size={15} className="text-rose-600 shrink-0" />;
       default:
         return <Database size={15} className="text-green-500 shrink-0" />;
     }
@@ -643,6 +646,8 @@ const Basket = ({
         return "Type: SQLite";
       case "csv":
         return "Type: CSV/TXT/DAT";
+      case "matlab":
+        return "Type: MATLAB";
       default:
         return "Type: Unknown";
     }

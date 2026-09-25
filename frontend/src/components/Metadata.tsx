@@ -461,10 +461,10 @@ const Metadata = ({ basketItems }: MetadataProps) => {
   return (
     <>
       {/* Metadata section */}
-      <div className="font-medium p-2 m-2 h-full flex flex-col">
-        {/* Header with search and expand/collapse all button - Fixed at top */}
+      <div className="flex h-full flex-col font-medium">
+        {/* Header with search and expand/collapse controls. */}
         {basketItems.filter((item) => item.type === "file").length > 0 && (
-          <div className="mb-4 p-3 bg-white border border-gray-300 rounded-lg shrink-0">
+          <div className="shrink-0 border-b border-gray-200 bg-gray-50 p-3">
             {/* Loading progress indicator */}
             {loadingMetadata.size > 0 && (
               <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded-md">
@@ -486,7 +486,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
             )}
 
             {/* Search bar */}
-            <div className="flex items-center gap-2 mb-3">
+            <div className="mb-2 flex items-center gap-2">
               <div className="relative flex-1">
                 <Search
                   size={16}
@@ -497,18 +497,21 @@ const Metadata = ({ basketItems }: MetadataProps) => {
                   placeholder="Search metadata..."
                   value={searchInput}
                   onChange={(e) => updateMetadataState({ searchInput: e.target.value })}
-                  className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 text-sm"
                 />
                 {searchInput && (
-                  <button
-                    onClick={() => {
-                      updateMetadataState({ searchInput: "", searchQuery: "" });
-                    }}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                    title="Clear search"
-                  >
-                    <X size={16} />
-                  </button>
+                  <Tooltip content="Clear search" position="top">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateMetadataState({ searchInput: "", searchQuery: "" });
+                      }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      aria-label="Clear metadata search"
+                    >
+                      <X size={16} />
+                    </button>
+                  </Tooltip>
                 )}
               </div>
             </div>
@@ -537,31 +540,23 @@ const Metadata = ({ basketItems }: MetadataProps) => {
                   </span>
                 )}
               </div>
-              <button
-                onClick={toggleAllCards}
-                className="flex items-center gap-2 px-3 py-1 text-sm bg-gray-200 hover:bg-gray-300 transition-colors rounded-md"
-                title="Toggle all metadata cards"
-              >
-                {(() => {
-                  const fileItems = basketItems.filter((item) => item.type === "file");
-                  const fileItemIds = fileItems.map((item) => item.id);
-                  const allCollapsed = fileItemIds.every((id) => collapsedCards.has(id));
-
-                  return allCollapsed ? (
-                    <Tooltip content="Expand all">
-                      <span className="flex items-center p-1" title="Expand all">
-                        <Expand size={16} />
-                      </span>
-                    </Tooltip>
-                  ) : (
-                    <Tooltip content="Collapse all">
-                      <span className="flex items-center p-1" title="Collapse all">
-                        <Minimize size={16} />
-                      </span>
-                    </Tooltip>
-                  );
-                })()}
-              </button>
+              {(() => {
+                const fileItems = basketItems.filter((item) => item.type === "file");
+                const allCollapsed = fileItems.every((item) => collapsedCards.has(item.id));
+                const label = allCollapsed ? "Expand all" : "Collapse all";
+                return (
+                  <Tooltip content={label} position="top">
+                    <button
+                      type="button"
+                      onClick={toggleAllCards}
+                      className="qimchi-dark-hover-plain flex h-8 w-8 items-center justify-center rounded bg-gray-200 text-gray-600 transition-colors hover:bg-gray-300"
+                      aria-label={`${label} metadata cards`}
+                    >
+                      {allCollapsed ? <Expand size={16} /> : <Minimize size={16} />}
+                    </button>
+                  </Tooltip>
+                );
+              })()}
             </div>
           </div>
         )}
@@ -580,7 +575,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
             the pane -- otherwise the empty-state message centres in the top
             half instead of the whole panel. */}
         <div
-          className={`overflow-y-auto min-h-0 ${
+          className={`min-h-0 overflow-y-auto p-3 ${
             basketItems.filter((item) => item.type === "file").length > 0 ? "flex-1" : "hidden"
           }`}
         >
@@ -604,7 +599,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
                 return (
                   <div
                     key={itemId}
-                    className="mb-4 border border-gray-300 rounded-lg overflow-hidden bg-blue-50"
+                    className="mb-2 overflow-hidden rounded-lg border border-gray-300 bg-blue-50 last:mb-0"
                   >
                     {/* Search Result Card Header */}
                     <div
@@ -720,7 +715,7 @@ const MetadataCard = memo(
     const jsonTheme =
       useThemeStore((state) => state.theme) === "dark" ? metadataDarkTheme : metadataCustomTheme;
     return (
-      <div className="mb-4 border border-gray-300 rounded-lg overflow-hidden">
+      <div className="mb-2 overflow-hidden rounded-lg border border-gray-300 last:mb-0">
         {/* Card Header */}
         <div
           className="bg-gray-200 p-3 cursor-pointer hover:bg-gray-300 transition-colors flex items-center justify-between"
