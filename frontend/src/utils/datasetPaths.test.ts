@@ -84,6 +84,7 @@ describe("detectDatasetKind", () => {
     expect(detectDatasetKind("C:/data/run.h5")).toBe("hdf5");
     expect(detectDatasetKind("C:/data/run.hdf5")).toBe("hdf5");
     expect(detectDatasetKind("C:/data/experiments.db")).toBe("sqlite");
+    expect(detectDatasetKind("C:/data/sweep.mat")).toBe("matlab");
     expect(detectDatasetKind("memory://abc")).toBe("zarr");
   });
 

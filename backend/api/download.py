@@ -317,6 +317,7 @@ async def download_multiple_datasets(data: PathsData) -> FileResponse:
                     ".csv",
                     ".txt",
                     ".dat",
+                    ".mat",
                 }
                 if file_path.suffix in dataset_extensions or file_path.name.endswith(
                     ".zarr"
@@ -376,6 +377,7 @@ async def download_multiple_datasets(data: PathsData) -> FileResponse:
                         "*.csv",
                         "*.txt",
                         "*.dat",
+                        "*.mat",
                     ]
                     for ext in dataset_extensions:
                         for ds_file in dir_path.glob(ext):
@@ -467,6 +469,7 @@ async def download_folder(path: PathData) -> FileResponse:
                 "*.csv",
                 "*.txt",
                 "*.dat",
+                "*.mat",
             ]
             for ext in dataset_extensions:
                 for ds_path in path.glob(ext):

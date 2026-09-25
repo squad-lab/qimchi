@@ -375,6 +375,61 @@ def _normalize_cf_label_attrs(dataset: xr.Dataset) -> None:
             var.attrs.setdefault("unit", var.attrs["units"])
 
 
+_COMPLEX_PARTS = (
+    ("amplitude", np.abs, None),
+    ("phase", np.angle, "rad"),
+    ("real", np.real, None),
+    ("imag", np.imag, None),
+)
+
+
+def split_complex_variables(dataset: xr.Dataset) -> xr.Dataset:
+    """
+    Replace each complex data variable with amplitude, phase, real, and imaginary
+    variables at the same position. Source metadata preserves content identity.
+
+    Args:
+        dataset (xr.Dataset): The loaded dataset. It is not modified.
+
+    Returns:
+        xr.Dataset: The same dataset when nothing is complex, else a new one.
+
+    """
+    if not any(var.dtype.kind == "c" for var in dataset.data_vars.values()):
+        return dataset
+
+    data_vars: Dict[Any, xr.DataArray] = {}
+    for name, var in dataset.data_vars.items():
+        if var.dtype.kind != "c":
+            data_vars[name] = var
+            continue
+        label = var.attrs.get("label") or str(name)
+        for suffix, func, part_unit in _COMPLEX_PARTS:
+            part_name = f"{name}_{suffix}"
+            if part_name in dataset.variables:
+                continue
+            part = xr.apply_ufunc(func, var, dask="allowed", keep_attrs=True)
+            part.attrs.pop("long_name", None)
+            part.attrs["label"] = f"{label} ({suffix})"
+            if part_unit is not None:
+                part.attrs["unit"] = part_unit
+                part.attrs.pop("units", None)
+            part.attrs["complex_source"] = str(name)
+            part.attrs["complex_dtype"] = str(var.dtype)
+            data_vars[part_name] = part
+
+    split = xr.Dataset(data_vars, coords=dataset.coords, attrs=dataset.attrs)
+    split.encoding = dict(dataset.encoding)
+    return split
+
+
+def _with_real_parts(loaded: LoadedData) -> LoadedData:
+    if loaded.kind != "dataset":
+        return loaded
+    split = split_complex_variables(loaded.obj)
+    return loaded if split is loaded.obj else replace(loaded, obj=split)
+
+
 def _load_xarray_dataset(path: Path, fmt: str) -> xr.Dataset:
     """
     Load dataset through xarray's load APIs.
@@ -584,6 +639,8 @@ def _detect_filesystem_format(path: Path) -> str:
         return "dat"
     if suffix in {".sqlite", ".db"}:
         return "sqlite"
+    if suffix == ".mat":
+        return "matlab"
     return "unknown"
 
 
@@ -631,6 +688,228 @@ def _load_flat_table_dataset(path: Path) -> xr.Dataset:
     dataset.attrs["qimchi_tabular_row_dim"] = row_dim
     dataset.attrs["qimchi_all_columns"] = columns
 
+    return dataset
+
+
+def _trim_nan_padding(array: np.ndarray) -> np.ndarray:
+    """Remove trailing all-NaN slices from oversized preallocated MATLAB arrays."""
+    if array.dtype.kind not in "fc" or array.ndim < 2:
+        return array
+    for axis in range(array.ndim):
+        other = tuple(i for i in range(array.ndim) if i != axis)
+        filled = np.flatnonzero(~np.all(np.isnan(array), axis=other))
+        if filled.size and filled[-1] + 1 < array.shape[axis]:
+            array = np.take(array, np.arange(filled[-1] + 1), axis=axis)
+    return np.squeeze(array)
+
+
+def _is_axis_like(array: np.ndarray) -> bool:
+    if array.ndim != 1 or array.size < 2 or array.dtype.kind not in "fiu":
+        return False
+    steps = np.diff(array.astype(float))
+    return bool(np.all(steps > 0) or np.all(steps < 0))
+
+
+def _flatten_mat_values(
+    values: Dict[str, Any],
+    prefix: str,
+    arrays: Dict[str, np.ndarray],
+    attrs: Dict[str, Any],
+) -> None:
+    """Split loadmat output into numeric arrays and scalar/text metadata."""
+    for key, value in values.items():
+        name = f"{prefix}{key}"
+        if isinstance(value, dict):
+            _flatten_mat_values(value, f"{name}.", arrays, attrs)
+        elif isinstance(value, str):
+            attrs[name] = value
+        elif isinstance(value, (bool, int, float, np.number, np.bool_)):
+            attrs[name] = value.item() if isinstance(value, np.generic) else value
+        elif isinstance(value, np.ndarray) and value.dtype.kind in "biufc":
+            if value.size == 1:
+                attrs[name] = value.item()
+            elif value.size > 1:
+                arrays[name] = value
+        elif isinstance(value, (list, np.ndarray)) and all(
+            isinstance(item, str) for item in value
+        ):
+            attrs[name] = [str(item) for item in value]
+        else:
+            logger.debug(f"_load_matlab_dataset | skipping '{name}' ({type(value)})")
+
+
+_MAT73_SKIPPED_CLASSES = {"function_handle", "sparse", "opaque"}
+
+
+def _is_mat73(path: Path) -> bool:
+    """Detect MATLAB v7.3 files by their text header or HDF5 signature."""
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(512 + 8)
+    except OSError:
+        return False
+    return head.startswith(b"MATLAB 7.3") or head[512:520] == b"\x89HDF\r\n\x1a\n"
+
+
+def _mat73_value(file: Any, node: Any, name: str) -> Any:
+    """
+    Decode a v7.3 HDF5 node into the value produced by ``scipy.io.loadmat``
+    with ``squeeze_me`` and ``simplify_cells`` enabled.
+
+    Transpose MATLAB arrays, decode UTF-16 text, map groups to structs, and
+    dereference cells. Return None for unsupported or empty values.
+
+    """
+    import h5py
+
+    matlab_class = node.attrs.get("MATLAB_class", b"")
+    if isinstance(matlab_class, bytes):
+        matlab_class = matlab_class.decode("ascii", errors="replace")
+
+    if isinstance(node, h5py.Group):
+        if "MATLAB_sparse" in node.attrs or matlab_class != "struct":
+            logger.debug(f"_load_matlab_dataset | skipping '{name}' ({matlab_class})")
+            return None
+        fields = {}
+        for key, child in node.items():
+            value = _mat73_value(file, child, f"{name}.{key}")
+            if value is not None:
+                fields[key] = value
+        return fields
+
+    if (
+        node.attrs.get("MATLAB_empty", 0)
+        or matlab_class in _MAT73_SKIPPED_CLASSES
+        or "MATLAB_object_decode" in node.attrs
+    ):
+        logger.debug(f"_load_matlab_dataset | skipping '{name}' ({matlab_class})")
+        return None
+
+    data = node[()]
+    if node.dtype == h5py.ref_dtype or matlab_class == "cell":
+        items = [
+            _mat73_value(file, file[ref], f"{name}{{{index}}}")
+            for index, ref in enumerate(np.asarray(data).T.ravel())
+        ]
+        return [item for item in items if item is not None]
+
+    array = np.asarray(data).T
+    if array.dtype.names and {"real", "imag"} <= set(array.dtype.names):
+        array = array["real"] + 1j * array["imag"]
+    if matlab_class == "char":
+        rows = np.atleast_2d(array)
+        text = ["".join(map(chr, row)).rstrip("\x00") for row in rows]
+        return text[0] if len(text) == 1 else text
+    if matlab_class == "logical":
+        array = array.astype(bool)
+    array = np.squeeze(array)
+    return array[()] if array.ndim == 0 else array
+
+
+def _read_mat73(path: Path) -> tuple[Dict[str, Any], str]:
+    """Return decoded variables and the text header from a v7.3 MAT-file."""
+    try:
+        import h5py
+    except ImportError as exc:
+        raise UnsupportedDatasetFormatError(
+            f"Reading MATLAB v7.3 files needs h5py; re-save '{path.name}' "
+            "with save(..., '-v7') or install Qimchi's dataset extras"
+        ) from exc
+
+    with path.open("rb") as handle:
+        header = handle.read(116).decode("latin-1", errors="replace").strip()
+    values: Dict[str, Any] = {}
+    try:
+        with h5py.File(path, "r") as file:
+            for name, node in file.items():
+                # Internal MATLAB objects and cell payloads use reserved #...# names.
+                if name.startswith("#"):
+                    continue
+                value = _mat73_value(file, node, name)
+                if value is not None:
+                    values[name] = value
+    except Exception as exc:
+        raise DatasetResolutionError(
+            f"Failed to read MATLAB v7.3 file '{path}': {exc}"
+        ) from exc
+    return values, header
+
+
+def _load_matlab_dataset(path: Path) -> xr.Dataset:
+    """
+    Load a MATLAB .mat file (v4 to v7.3) into an xarray Dataset.
+
+    Infer the layout because MAT files do not define a dataset schema:
+
+    - Strictly monotonic 1-D arrays with a length no other such array shares
+      become dimension coordinates.
+    - Every other numeric array becomes a data variable, its axes matched to
+      those coordinates by length. Arrays that cannot be matched unambiguously
+      get their own `<name>_dim_<i>` dimensions.
+    - Scalars, strings and struct fields become attributes; numeric arrays in
+      structs become variables named `struct.field`.
+
+    Args:
+        path (Path): Path to the .mat file.
+
+    Returns:
+        xr.Dataset: The loaded dataset.
+
+    Raises:
+        UnsupportedDatasetFormatError: For a v7.3 file when h5py is missing.
+        DatasetResolutionError: If the file cannot be read or holds no arrays.
+
+    """
+    if _is_mat73(path):
+        raw, header = _read_mat73(path)
+    else:
+        import scipy.io
+
+        try:
+            raw = scipy.io.loadmat(str(path), squeeze_me=True, simplify_cells=True)
+        except NotImplementedError:
+            # Fall back when the producer uses a nonstandard v7.3 header.
+            raw, header = _read_mat73(path)
+        except Exception as exc:
+            raise DatasetResolutionError(
+                f"Failed to read MATLAB file '{path}': {exc}"
+            ) from exc
+        else:
+            header = raw.pop("__header__", b"")
+            raw.pop("__version__", None)
+            raw.pop("__globals__", None)
+
+    arrays: Dict[str, np.ndarray] = {}
+    attrs: Dict[str, Any] = {}
+    _flatten_mat_values(raw, "", arrays, attrs)
+    if not arrays:
+        raise DatasetResolutionError(f"MATLAB file holds no numeric arrays: {path}")
+    arrays = {name: _trim_nan_padding(array) for name, array in arrays.items()}
+
+    axes = {name: array for name, array in arrays.items() if _is_axis_like(array)}
+    axis_lengths = [array.size for array in axes.values()]
+    dim_for_length = {
+        array.size: name
+        for name, array in axes.items()
+        if axis_lengths.count(array.size) == 1
+    }
+
+    dataset = xr.Dataset(
+        coords={name: (name, arrays[name]) for name in dim_for_length.values()}
+    )
+    for name, array in arrays.items():
+        if name in dataset.coords:
+            continue
+        dims = [dim_for_length.get(length) for length in array.shape]
+        if None in dims or len(set(dims)) != len(dims):
+            dims = [f"{name}_dim_{i}" for i in range(array.ndim)]
+        dataset[name] = (dims, array)
+
+    if isinstance(header, bytes):
+        header = header.decode("latin-1", errors="replace")
+    if header:
+        attrs["mat_header"] = header.strip()
+    dataset.attrs.update(attrs)
     return dataset
 
 
@@ -1784,6 +2063,51 @@ class FlatFmtProvider:
         return self.load_sync(ref)
 
 
+class MatlabProvider:
+    """
+    Load MATLAB v4-v7 files with scipy.io.loadmat.
+
+    See `_load_matlab_dataset` for how the file's arrays are laid out.
+
+    """
+
+    name = "matlab_provider"
+    _suffixes = {".mat"}
+
+    def supports(self, ref: str) -> bool:
+        return Path(ref).suffix.lower() in self._suffixes and not is_memory_reference(
+            ref
+        )
+
+    def resolve_disk_path(self, ref: str) -> str:
+        path = Path(ref)
+        if not path.exists() or not path.is_file():
+            raise DatasetResolutionError(f"Dataset file not found: {path}")
+        return str(path)
+
+    def load_sync(self, ref: str) -> LoadedData:
+        path = Path(self.resolve_disk_path(ref))
+        dataset = _load_matlab_dataset(path)
+        _annotate_dataset(
+            dataset,
+            source_ref=ref,
+            actual_path=str(path),
+            loaded_from="disk",
+        )
+        return LoadedData(
+            kind="dataset",
+            obj=dataset,
+            source_ref=ref,
+            actual_path=str(path),
+            format="matlab",
+            loaded_from="disk",
+            metadata={},
+        )
+
+    async def load_async(self, ref: str) -> LoadedData:
+        return await asyncio.to_thread(self.load_sync, ref)
+
+
 # NOTE: These are the default built-in providers.
 # NOTE: Custom providers can be registered at runtime and
 # will take precedence over these based on registration order.
@@ -1791,6 +2115,7 @@ _BUILTIN_PROVIDERS: list[DataProvider] = [
     LiveMemoryProvider(),
     QcodesSqliteProvider(),
     FlatFmtProvider(),
+    MatlabProvider(),
     DataTreeProvider(),
     NetcdfHdf5Provider(),
     FilesystemXarrayProvider(),
@@ -1837,12 +2162,12 @@ def resolve_to_disk_path(ref: str) -> str:
 
 def load_data_sync(ref: str) -> LoadedData:
     provider = _select_provider(ref)
-    return provider.load_sync(ref)
+    return _with_real_parts(provider.load_sync(ref))
 
 
 async def load_data_async(ref: str) -> LoadedData:
     provider = _select_provider(ref)
-    return await provider.load_async(ref)
+    return _with_real_parts(await provider.load_async(ref))
 
 
 def load_dataset_sync(ref: str) -> xr.Dataset:

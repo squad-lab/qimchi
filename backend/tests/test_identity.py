@@ -186,3 +186,22 @@ def test_unreadable_dataset_does_not_raise():
             raise OSError("disk gone")
 
     assert resolve_identity({}, Exploding()) == (None, None)
+
+
+def test_content_uuid_survives_the_complex_split():
+    from api.data_loader import split_complex_variables
+
+    x = np.linspace(0, 1, 16)
+    ds = xr.Dataset(
+        data_vars={"iq": (("voltage",), np.exp(1j * x))},
+        coords={"voltage": x},
+    )
+    assert content_uuid(split_complex_variables(ds)) == content_uuid(ds)
+
+
+def test_a_folder_is_identified_by_where_it_is(tmp_path):
+    from api.shared.identity import folder_uuid
+
+    here = tmp_path / "data"
+    assert folder_uuid(str(here)) == folder_uuid(str(here) + "/")
+    assert folder_uuid(str(here)) != folder_uuid(str(tmp_path / "other"))

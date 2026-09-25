@@ -17,9 +17,11 @@ const DATASET_EXTENSIONS = [
   ".csv",
   ".txt",
   ".dat",
+  ".mat",
 ] as const;
-const DATASET_TAGS = ["zarr", "netcdf", "hdf5", "qcodes", "sqlite", "csv"] as const;
-export type DatasetKind = "zarr" | "netcdf" | "hdf5" | "qcodes" | "sqlite" | "csv" | "unknown";
+const DATASET_TAGS = ["zarr", "netcdf", "hdf5", "qcodes", "sqlite", "csv", "matlab"] as const;
+export type DatasetKind =
+  "zarr" | "netcdf" | "hdf5" | "qcodes" | "sqlite" | "csv" | "matlab" | "unknown";
 
 const normalizeDatasetPath = (path: string): string => path.split("#", 1)[0].toLowerCase();
 
@@ -57,6 +59,7 @@ export const detectDatasetKind = (path: string, tags?: string[]): DatasetKind =>
     if (tags.includes("qcodes") || tags.includes("qcodes-run")) return "qcodes";
     if (tags.includes("sqlite")) return "sqlite";
     if (tags.includes("csv")) return "csv";
+    if (tags.includes("matlab")) return "matlab";
   }
 
   if (isMemoryPath(path)) {
@@ -71,6 +74,7 @@ export const detectDatasetKind = (path: string, tags?: string[]): DatasetKind =>
   if (lower.endsWith(".csv") || lower.endsWith(".txt") || lower.endsWith(".dat")) {
     return "csv";
   }
+  if (lower.endsWith(".mat")) return "matlab";
 
   return "unknown";
 };

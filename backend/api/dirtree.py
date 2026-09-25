@@ -306,6 +306,7 @@ def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
     - `.zarr` directories
     - `.nc`, `.h5`, `.hdf5` files
     - `.csv`, `.txt`, `.dat` files
+    - `.mat` MATLAB files
     - `.db` - QCoDeS SQLite databases with special handling to list runs as children
     - `.sqlite` - Container SQLite databases with multiple measurements
 
@@ -413,6 +414,8 @@ def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
         "txt",
         "-e",
         "dat",
+        "-e",
+        "mat",
         ".",
         str(path),
     ]
@@ -456,10 +459,10 @@ def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
     # If paths is empty, raise an error
     if not paths:
         logger.error(
-            f"get_directory_tree_zarr | No supported datasets (.zarr/.nc/.h5/.hdf5/.db/.sqlite/.csv/.txt/.dat) found at this level. MAX_DEPTH={MAX_DEPTH} may be too low."
+            f"get_directory_tree_zarr | No supported datasets (.zarr/.nc/.h5/.hdf5/.db/.sqlite/.csv/.txt/.dat/.mat) found at this level. MAX_DEPTH={MAX_DEPTH} may be too low."
         )
         raise RuntimeError(
-            f"No supported datasets (.zarr/.nc/.h5/.hdf5/.db/.sqlite/.csv/.txt/.dat) found at this level. MAX_DEPTH={MAX_DEPTH} may be too low."
+            f"No supported datasets (.zarr/.nc/.h5/.hdf5/.db/.sqlite/.csv/.txt/.dat/.mat) found at this level. MAX_DEPTH={MAX_DEPTH} may be too low."
         )
 
     # Build nodes map - start with root node only
@@ -495,6 +498,7 @@ def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
                 ".csv",
                 ".txt",
                 ".dat",
+                ".mat",
             }:
                 dataset_items.append((item, st))
             else:
@@ -557,6 +561,8 @@ def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
                     fmt = "sqlite"
                 elif suffix in {".csv", ".txt", ".dat"}:
                     fmt = "csv"  # CONCERN: Or, we could use "flat" ?
+                elif suffix == ".mat":
+                    fmt = "matlab"
                 else:
                     continue
                 size = st.st_size

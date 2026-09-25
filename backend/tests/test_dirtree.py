@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from api import dirtree
@@ -193,6 +195,30 @@ async def test_get_directory_tree_includes_flat_tables(tmp_path, monkeypatch):
     assert child_paths[str(csv_file.resolve())]["tags"] == ["csv"]
     assert child_paths[str(txt_file.resolve())]["tags"] == ["csv"]
     assert child_paths[str(dat_file.resolve())]["tags"] == ["csv"]
+
+
+@pytest.mark.asyncio
+async def test_get_directory_tree_includes_matlab_files(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    root.mkdir(parents=True)
+    mat_file = root / "sweep.mat"
+    mat_file.write_bytes(b"MATLAB 5.0 MAT-file")
+
+    monkeypatch.setattr(dirtree, "FD_EXEC", "fdfind")
+
+    def _mock_subprocess_run(cmd, **kwargs):
+        stdout = b""
+        if "-t" in cmd and "f" in cmd:
+            assert "mat" in cmd
+            stdout = f"{mat_file.resolve()}\n".encode("utf-8")
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr=b"")
+
+    monkeypatch.setattr(dirtree.subprocess, "run", _mock_subprocess_run)
+
+    tree = await dirtree.get_directory_tree_zarr(str(root), max_depth=2)
+
+    child_paths = {child.get("path"): child for child in tree.get("children", [])}
+    assert child_paths[str(mat_file.resolve())]["tags"] == ["matlab"]
 
 
 @pytest.mark.asyncio

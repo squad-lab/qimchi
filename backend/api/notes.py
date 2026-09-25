@@ -410,7 +410,16 @@ def _build_initial_sample_pool_body(sample_dir: Path, when: datetime) -> str:
 
     try:
         measurement_paths = []
-        for ext in ["*.zarr", "*.nc", "*.h5", "*.hdf5", "*.csv", "*.txt", "*.dat"]:
+        for ext in [
+            "*.zarr",
+            "*.nc",
+            "*.h5",
+            "*.hdf5",
+            "*.csv",
+            "*.txt",
+            "*.dat",
+            "*.mat",
+        ]:
             for p in sample_dir.rglob(ext):
                 if ext == "*.zarr" and not p.is_dir():
                     continue

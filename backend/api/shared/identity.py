@@ -28,6 +28,7 @@ identical dims and variables -- so the signature also samples the coordinate
 from __future__ import annotations
 
 import hashlib
+import os
 import uuid
 
 import numpy as np
@@ -52,6 +53,19 @@ _IDENTITY_ATTRS = (
     "exp_name",
     "sample_name",
 )
+
+
+def folder_uuid(path: str) -> str:
+    """
+    The UUID of a folder, derived from where it is.
+
+    A folder has no content to identify it by, so unlike a measurement its
+    hearts, trash and tags stay behind if it is renamed or moved.
+
+    """
+    normalized = os.path.normcase(os.path.abspath(path)).replace("\\", "/").rstrip("/")
+    return str(uuid.uuid5(QIMCHI_NAMESPACE, f"folder:{normalized}"))
+
 
 # How many values to sample from each end of a coordinate axis.
 _EDGE = 8
@@ -110,12 +124,17 @@ def dataset_signature(ds: xr.Dataset) -> str:
     )
 
     for label, names in (("vars", ds.data_vars), ("coords", ds.coords)):
-        entries = []
-        for name in sorted(map(str, names)):
+        entries: dict[str, str] = {}
+        for name in map(str, names):
             da = ds[name]
             shape = "x".join(str(int(s)) for s in da.shape)
-            entries.append(f"{name}:{da.dtype}:{shape}")
-        parts.append(f"{label}:" + ",".join(entries))
+            dtype = da.dtype
+            # Parts split from a complex variable are signed as that variable.
+            if label == "vars" and "complex_source" in da.attrs:
+                name = str(da.attrs["complex_source"])
+                dtype = da.attrs.get("complex_dtype")
+            entries[name] = f"{name}:{dtype}:{shape}"
+        parts.append(f"{label}:" + ",".join(entries[k] for k in sorted(entries)))
 
     attrs = []
     for key in sorted(_IDENTITY_ATTRS):

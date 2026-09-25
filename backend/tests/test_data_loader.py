@@ -1,5 +1,6 @@
 import asyncio
 import sqlite3
+import sys
 import threading
 from contextlib import nullcontext
 from pathlib import Path
@@ -892,3 +893,231 @@ def test_an_unreadable_qcodes_database_still_reports_why(tmp_path, monkeypatch):
 
     with pytest.raises(sqlite3.DatabaseError):
         data_loader._read_qcodes_sqlite(db, "SELECT run_id FROM runs")
+
+
+def test_complex_variables_are_split_into_real_parts(tmp_path, monkeypatch):
+    nc_path = tmp_path / "iq.nc"
+    nc_path.write_text("placeholder")
+    signal = np.array([1 + 1j, -2 + 0j], dtype=np.complex64)
+    ds = xr.Dataset(
+        data_vars={
+            "iq": (("x",), signal, {"unit": "V"}),
+            "temp": (("x",), [0.1, 0.2]),
+        },
+        coords={"x": [0, 1]},
+    )
+    monkeypatch.setattr(data_loader, "_load_xarray_dataset", lambda *_args: ds)
+
+    split = data_loader.load_data_sync(str(nc_path)).obj
+
+    assert list(split.data_vars) == [
+        "iq_amplitude",
+        "iq_phase",
+        "iq_real",
+        "iq_imag",
+        "temp",
+    ]
+    np.testing.assert_allclose(split["iq_amplitude"], np.abs(signal))
+    np.testing.assert_allclose(split["iq_phase"], np.angle(signal))
+    np.testing.assert_allclose(split["iq_imag"], [1.0, 0.0])
+    assert split["iq_amplitude"].attrs["unit"] == "V"
+    assert split["iq_phase"].attrs["unit"] == "rad"
+    assert all(split[v].dtype.kind == "f" for v in split.data_vars)
+
+
+def test_datasets_without_complex_variables_are_returned_as_is():
+    ds = xr.Dataset(data_vars={"signal": (("x",), [1.0, 2.0])}, coords={"x": [0, 1]})
+    assert data_loader.split_complex_variables(ds) is ds
+
+
+# --- MATLAB .mat support ---
+
+
+def test_matlab_provider_infers_grid_from_monotonic_vectors(tmp_path):
+    import scipy.io
+
+    x = np.linspace(0.0, 1.0, 4)
+    y = np.linspace(-2.0, 2.0, 3)
+    z = np.arange(5.0)
+    signal = np.random.default_rng(0).random((3, 4, 5))
+    # Preallocated larger than needed; only the first column was filled.
+    peak = np.full((5, 5), np.nan)
+    peak[:, 0] = [3.0, 1.0, 4.0, 1.0, 5.0]
+    path = tmp_path / "run.mat"
+    scipy.io.savemat(
+        path,
+        {
+            "x": x,
+            "y": y,
+            "z": z,
+            "signal": signal,
+            "peak": peak,
+            "gain": 2.5,
+            "sample": "flake A",
+            "setup": {"fridge": "bluefors", "tc": 0.3},
+        },
+    )
+
+    loaded = data_loader.load_data_sync(str(path))
+    ds = loaded.obj
+
+    assert loaded.format == "matlab"
+    assert loaded.loaded_from == "disk"
+    assert set(ds.coords) == {"x", "y", "z"}
+    assert ds["signal"].dims == ("y", "x", "z")
+    np.testing.assert_allclose(ds["signal"].values, signal)
+    assert ds["peak"].dims == ("z",)
+    np.testing.assert_allclose(ds["peak"].values, peak[:, 0])
+    assert ds.attrs["gain"] == 2.5
+    assert ds.attrs["sample"] == "flake A"
+    assert ds.attrs["setup.fridge"] == "bluefors"
+    assert ds.attrs["setup.tc"] == 0.3
+    assert ds.attrs["mat_header"].startswith("MATLAB 5.0 MAT-file")
+    assert ds.attrs["path"] == str(path)
+
+
+def test_matlab_provider_gives_ambiguous_arrays_their_own_dims(tmp_path):
+    import scipy.io
+
+    path = tmp_path / "square.mat"
+    # Two axes of one length: neither can claim the dimension.
+    scipy.io.savemat(
+        path,
+        {"a": np.arange(3.0), "b": np.arange(3.0) * 2, "m": np.ones((3, 3))},
+    )
+
+    ds = data_loader.load_data_sync(str(path)).obj
+
+    assert ds["m"].dims == ("m_dim_0", "m_dim_1")
+    assert ds["a"].dims == ("a_dim_0",)
+
+
+def _write_mat73(path, variables):
+    """Write a minimal HDF5 layout compatible with MATLAB v7.3 files."""
+    import h5py
+
+    def put(parent, file, name, value):
+        if isinstance(value, dict):
+            group = parent.create_group(name)
+            group.attrs["MATLAB_class"] = np.bytes_("struct")
+            for key, field in value.items():
+                put(group, file, key, field)
+            return
+        if isinstance(value, list):
+            refs_group = file.require_group("#refs#")
+            refs = []
+            for index, item in enumerate(value):
+                put(refs_group, file, f"{name}_{index}", item)
+                refs.append(refs_group[f"{name}_{index}"].ref)
+            node = parent.create_dataset(
+                name, data=np.array([refs], dtype=h5py.ref_dtype).T
+            )
+            node.attrs["MATLAB_class"] = np.bytes_("cell")
+            return
+        if isinstance(value, str):
+            codes = np.array([[ord(c) for c in value]], dtype=np.uint16)
+            node = parent.create_dataset(name, data=codes.T)
+            node.attrs["MATLAB_class"] = np.bytes_("char")
+            node.attrs["MATLAB_int_decode"] = np.int32(2)
+            return
+        array = np.asarray(value)
+        if array.size == 0:
+            node = parent.create_dataset(name, data=np.array([0, 0], dtype=np.uint64))
+            node.attrs["MATLAB_class"] = np.bytes_("double")
+            node.attrs["MATLAB_empty"] = np.uint8(1)
+            return
+        # MATLAB stores vectors as 1xN matrices.
+        matlab = array.reshape(1, -1) if array.ndim <= 1 else array
+        if np.iscomplexobj(matlab):
+            stored = np.empty(matlab.T.shape, dtype=[("real", "<f8"), ("imag", "<f8")])
+            stored["real"], stored["imag"] = matlab.T.real, matlab.T.imag
+            matlab_class = "double"
+        elif matlab.dtype == bool:
+            stored, matlab_class = matlab.T.astype(np.uint8), "logical"
+        else:
+            stored = matlab.T
+            matlab_class = {"float64": "double", "float32": "single"}.get(
+                str(matlab.dtype), str(matlab.dtype)
+            )
+        node = parent.create_dataset(name, data=stored)
+        node.attrs["MATLAB_class"] = np.bytes_(matlab_class)
+
+    with h5py.File(path, "w", userblock_size=512) as file:
+        for name, value in variables.items():
+            put(file, file, name, value)
+    header = b"MATLAB 7.3 MAT-file, Platform: PCWIN64, Created on: Wed Sep 24 12:00:00 2026 HDF5 schema 1.00 ."
+    with open(path, "r+b") as handle:
+        handle.write(header.ljust(116, b" ") + b"\x00" * 8 + b"\x00\x02IM")
+
+
+def test_matlab_v73_files_load_like_v7_files(tmp_path):
+    import scipy.io
+
+    rng = np.random.default_rng(1)
+    variables = {
+        "x": np.linspace(0.0, 1.0, 4),
+        "y": np.linspace(-2.0, 2.0, 3),
+        "z": np.arange(5.0),
+        "signal": rng.random((3, 4, 5)),
+        "trace": rng.random(4),
+        "gain": 2.5,
+        "sample": "flake A",
+        "setup": {"fridge": "bluefors", "tc": 0.3},
+    }
+    v7, v73 = tmp_path / "v7.mat", tmp_path / "v73.mat"
+    scipy.io.savemat(v7, variables)
+    _write_mat73(v73, variables)
+
+    expected = data_loader.load_data_sync(str(v7)).obj
+    loaded = data_loader.load_data_sync(str(v73))
+    ds = loaded.obj
+
+    assert loaded.format == "matlab"
+    assert ds["signal"].dims == expected["signal"].dims == ("y", "x", "z")
+    assert set(ds.coords) == set(expected.coords)
+    assert set(ds.data_vars) == set(expected.data_vars)
+    for name in ds.variables:
+        np.testing.assert_allclose(ds[name].values, expected[name].values)
+    for key in ("gain", "sample", "setup.fridge", "setup.tc"):
+        assert ds.attrs[key] == expected.attrs[key]
+    assert ds.attrs["mat_header"].startswith("MATLAB 7.3 MAT-file")
+
+
+def test_matlab_v73_reads_complex_logical_integer_cell_and_text_values(tmp_path):
+    f = np.linspace(4e9, 5e9, 6)
+    iq = np.exp(1j * np.linspace(0, np.pi, 6))
+    path = tmp_path / "rf.mat"
+    _write_mat73(
+        path,
+        {
+            "f": f,
+            "iq": iq,
+            "mask": np.array([True, False, True, True, False, True]),
+            "counts": np.array([3, 1, 4, 1, 5, 9], dtype=np.int32),
+            "gates": ["P1", "P2"],
+            "note": "cooldown 3",
+            "unused": np.zeros((0, 0)),
+        },
+    )
+
+    ds = data_loader.load_data_sync(str(path)).obj
+
+    assert "unused" not in ds.variables
+    assert ds.attrs["gates"] == ["P1", "P2"]
+    assert ds.attrs["note"] == "cooldown 3"
+    assert ds["counts"].dtype == np.int32
+    np.testing.assert_array_equal(ds["counts"].values, [3, 1, 4, 1, 5, 9])
+    np.testing.assert_array_equal(ds["mask"].values, [1, 0, 1, 1, 0, 1])
+    # The common loader still splits complex variables into real-valued parts.
+    amplitude = next(name for name in ds.data_vars if "iq" in name and "amp" in name)
+    np.testing.assert_allclose(ds[amplitude].values, np.abs(iq))
+    assert ds[amplitude].dims == ("f",)
+
+
+def test_matlab_v73_without_h5py_says_what_to_do(tmp_path, monkeypatch):
+    path = tmp_path / "big.mat"
+    _write_mat73(path, {"x": np.arange(3.0)})
+    monkeypatch.setitem(sys.modules, "h5py", None)
+
+    with pytest.raises(data_loader.UnsupportedDatasetFormatError, match="-v7"):
+        data_loader.load_data_sync(str(path))
