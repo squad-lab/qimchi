@@ -18,8 +18,10 @@ import {
   MoveHorizontal,
   Ruler,
   AlertTriangle,
+  ListOrdered,
   Crosshair,
 } from "lucide-react";
+import { createPortal } from "react-dom";
 import { Rnd } from "react-rnd";
 
 // Local imports
@@ -27,9 +29,17 @@ import "./FiltersModal.css";
 import { useToast } from "../../hooks/useToast";
 import NumericInput from "../NumericInput";
 import type { FilterSettings, AppliedFilter, SliderConfig } from "../../components/interfaces";
+import {
+  sliderIndexOf,
+  sliderSteps,
+  sliderText,
+  sliderValueAt,
+  visibleSliders,
+} from "../../utils/sliders";
 import { ApplyButton, formatTitleWithUUID, getPlotTypeIcon, LogChartIcon } from "./UtilComponents";
 import Tooltip from "../Tooltip";
 import RadialDial from "./RadialDial";
+import AppliedFilterOrder from "./AppliedFilterOrder";
 import { FILTER_LABELS } from "../../utils/filterNames";
 
 type BGCorrPoint = {
@@ -287,6 +297,35 @@ const DEFAULT_FILTER_OPTIONS = {
   },
 };
 
+const settingsFromAppliedFilters = (
+  currentFilters: AppliedFilter[],
+  previous: FilterSettings = {},
+): { settings: FilterSettings; order: string[] } => {
+  const settings: FilterSettings = {};
+  for (const [key, config] of Object.entries(previous)) {
+    (settings as Record<string, unknown>)[key] =
+      config && typeof config === "object"
+        ? { ...(config as Record<string, unknown>), enabled: false }
+        : false;
+  }
+
+  const order: string[] = [];
+  for (const filter of currentFilters) {
+    order.push(filter.name);
+    if (typeof filter.options === "object" && filter.options !== null) {
+      const existing = settings[filter.name as keyof FilterSettings];
+      (settings as Record<string, unknown>)[filter.name] = {
+        ...(existing && typeof existing === "object" ? existing : {}),
+        enabled: true,
+        ...filter.options,
+      };
+    } else {
+      (settings as Record<string, unknown>)[filter.name] = true;
+    }
+  }
+  return { settings, order };
+};
+
 // z-index manager shared across modals
 const getNextGlobalModalZ = (): number => {
   if (typeof window === "undefined") return 2000;
@@ -308,8 +347,11 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   onRequestBGCorr,
   xAxisIsMeasured = false,
 }) => {
-  const [localFilterSettings, setLocalFilterSettings] = useState<FilterSettings>({});
-  const [filterOrder, setFilterOrder] = useState<string[]>([]);
+  const initialFilters = useRef(settingsFromAppliedFilters(currentFilters));
+  const [localFilterSettings, setLocalFilterSettings] = useState<FilterSettings>(
+    initialFilters.current.settings,
+  );
+  const [filterOrder, setFilterOrder] = useState<string[]>(initialFilters.current.order);
 
   // Slider state
   const [localSliders, setLocalSliders] = useState<Record<string, SliderConfig>>(currentSliders);
@@ -318,11 +360,6 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   useEffect(() => {
     setLocalSliders(currentSliders);
   }, [currentSliders]);
-
-  // Flag to prevent useEffect from triggering during local filter application
-  const isApplyingLocalFilters = useRef(false);
-  // Flag to prevent debounced filter application during toggle operations
-  const isTogglingFilter = useRef(false);
 
   // Get filter keys relevant to plotType, plus sliders if available
   const filterKeys = Object.keys(FILTER_DEFINITIONS).filter((key) => {
@@ -334,14 +371,16 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
 
   // Add sliders as a tab if there are any available - put it at the top
   const hasSliders = Object.keys(availableSliders).length > 0;
-  const allTabs = hasSliders ? ["sliders", ...filterKeys] : filterKeys;
+  const allTabs = [...(hasSliders ? ["sliders"] : []), "applied", ...filterKeys];
 
   const unavailableReason = (key: string): string | null =>
     xAxisIsMeasured && NEEDS_A_SWEPT_X[key]
       ? `Unavailable for this plot. ${NEEDS_A_SWEPT_X[key]} Here, X is measured data.`
       : null;
 
-  const [activeTab, setActiveTab] = useState<string>(allTabs[0] || "diff");
+  const [activeTab, setActiveTab] = useState<string>(
+    hasSliders ? "sliders" : filterKeys[0] || "diff",
+  );
   const [isDragging, setIsDragging] = useState(false);
 
   // Debounce ref to prevent excessive API calls
@@ -377,80 +416,36 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
     setZIndexLocal(next);
   };
 
-  // Initialize filter settings from current filters
+  // Sync parent state only while closed. While open, local edits may be newer
+  // than an in-flight request's response.
   useEffect(() => {
-    // Skip if we're in the middle of applying local filter changes
-    if (isApplyingLocalFilters.current) {
-      console.log("FiltersModal: Skipping currentFilters sync - applying local filters");
-      return;
-    }
-
+    if (isOpen) return;
     setLocalFilterSettings((prevSettings) => {
-      const settings: FilterSettings = { ...prevSettings }; // Preserve existing settings
-      const order: string[] = [];
-
-      // First, mark all existing filters as disabled
-      Object.keys(settings).forEach((key) => {
-        const config = settings[key as keyof FilterSettings];
-        if (config && typeof config === "object" && "enabled" in config) {
-          (config as Record<string, unknown>).enabled = false;
-        }
-      });
-
-      // Then enable and update settings for current filters
-      currentFilters.forEach((filter) => {
-        order.push(filter.name);
-        if (typeof filter.options === "object" && filter.options !== null) {
-          const existingSetting = settings[filter.name as keyof FilterSettings];
-          const existingOptions =
-            existingSetting && typeof existingSetting === "object" && "enabled" in existingSetting
-              ? (existingSetting as Record<string, unknown>)
-              : {};
-
-          (settings as Record<string, unknown>)[filter.name] = {
-            ...existingOptions, // Preserve existing settings
-            enabled: true,
-            ...filter.options,
-          };
-        } else {
-          (settings as Record<string, unknown>)[filter.name] = true;
-        }
-      });
-
-      setFilterOrder(order);
-      return settings;
+      const synced = settingsFromAppliedFilters(currentFilters, prevSettings);
+      setFilterOrder(synced.order);
+      return synced.settings;
     });
-  }, [currentFilters]);
+  }, [currentFilters, isOpen]);
 
-  // Initialize slider settings from current and available sliders
   useEffect(() => {
     if (isOpen) {
-      const updatedSliders = { ...currentSliders };
-
-      // Add any available sliders that aren't already in currentSliders
-      Object.keys(availableSliders).forEach((key) => {
-        if (!updatedSliders[key]) {
-          updatedSliders[key] = {
-            ...availableSliders[key],
-            value: availableSliders[key].min,
-          };
-        }
-      });
-
-      setLocalSliders(updatedSliders);
+      setLocalSliders(visibleSliders(availableSliders, currentSliders));
     }
   }, [isOpen, currentSliders, availableSliders]);
 
   const updateFilterSetting = (filterKey: string, setting: string, value: unknown) => {
     setLocalFilterSettings((prev) => {
       const newSettings = { ...prev };
-      if (!newSettings[filterKey as keyof FilterSettings]) {
+      const existing = newSettings[filterKey as keyof FilterSettings];
+      if (!existing || typeof existing !== "object") {
         const defaultOptions =
           DEFAULT_FILTER_OPTIONS[filterKey as keyof typeof DEFAULT_FILTER_OPTIONS];
         (newSettings as Record<string, unknown>)[filterKey] = {
           ...defaultOptions,
           enabled: false, // Start disabled when creating new config
         };
+      } else {
+        (newSettings as Record<string, unknown>)[filterKey] = { ...existing };
       }
       const filterConfig = (newSettings as Record<string, Record<string, unknown>>)[filterKey];
       if (filterConfig && typeof filterConfig === "object") {
@@ -482,10 +477,6 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
 
   const toggleFilter = (filterKey: string) => {
     const wasEnabled = isFilterEnabled(filterKey);
-
-    // Set flags to prevent useEffect and debounced calls from triggering during toggle
-    isApplyingLocalFilters.current = true;
-    isTogglingFilter.current = true;
 
     // Build the new filter list immediately based on current state and toggle action
     const appliedFilters: AppliedFilter[] = [];
@@ -557,12 +548,6 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
 
     // Apply filters first (single call)
     onApplyFilters(appliedFilters);
-
-    // Reset flags after a delay to allow state updates to complete
-    setTimeout(() => {
-      isApplyingLocalFilters.current = false;
-      isTogglingFilter.current = false;
-    }, 50); // Shorter delay - just enough for React state updates
 
     // Then update state (no additional calls since we removed the logic from state setters)
     setLocalFilterSettings((prev) => {
@@ -698,7 +683,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
     sliderDebounceTimeoutRef.current = setTimeout(() => {
       const appliedFilters = buildAppliedFilters();
       onApplyFilters(appliedFilters, updatedSliders);
-    }, 80); // Balanced slider debounce - responsive but not excessive
+    }, 50);
   };
 
   const resetSlider = (key: string) => {
@@ -734,10 +719,10 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   };
 
   // Helper function to build applied filters from current state
-  const buildAppliedFilters = (): AppliedFilter[] => {
+  const buildAppliedFilters = (order: string[] = filterOrder): AppliedFilter[] => {
     const appliedFilters: AppliedFilter[] = [];
 
-    filterOrder.forEach((fKey) => {
+    order.forEach((fKey) => {
       const filterConfig = localFilterSettings[fKey as keyof FilterSettings];
       const filterEnabled =
         typeof filterConfig === "boolean"
@@ -767,6 +752,15 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
     });
 
     return appliedFilters;
+  };
+
+  const appliedOrder = filterOrder.filter((key) => isFilterEnabled(key));
+
+  // Reorder enabled filters without discarding settings for disabled filters.
+  const reorderFilters = (order: string[]) => {
+    const next = [...order, ...filterOrder.filter((key) => !order.includes(key))];
+    setFilterOrder(next);
+    onApplyFilters(buildAppliedFilters(next));
   };
 
   const handleExport = () => {
@@ -902,7 +896,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
 
   if (!isOpen) return null;
 
-  return (
+  // Render in <body> to avoid clipping or transforms inherited from the plot tile.
+  return createPortal(
     <div ref={wrapperRef} className="fixed inset-0 pointer-events-none">
       <Rnd
         default={{
@@ -920,6 +915,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
         onPointerDown={() => bringToFront()}
       >
         <div
+          data-tour="filters-panel"
           className={`bg-gray-100 rounded-lg shadow-2xl border-2 w-full h-full overflow-hidden flex flex-col transition-colors ${
             isDragging ? "border-blue-500 bg-blue-50" : "border-gray-300"
           }`}
@@ -993,6 +989,38 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
             <div className="w-2/5 border-r-2 border-gray-300 bg-gray-50 flex flex-col">
               <div className="flex-1 overflow-y-auto" role="tablist">
                 {allTabs.map((key) => {
+                  if (key === "applied") {
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => setActiveTab(key)}
+                        // Use the section-tab style rather than the individual-filter style.
+                        className={`w-full px-3 py-2.5 text-sm font-medium transition-colors flex items-center gap-2 border-b-2 border-gray-300 ${
+                          activeTab === key
+                            ? "text-blue-600 bg-blue-50 border-l-4 border-l-blue-600 shadow-inner dark:text-blue-300 dark:border-l-blue-400"
+                            : "qimchi-dark-hover-plain text-blue-700 hover:text-blue-800 hover:bg-blue-50 bg-linear-to-r from-blue-50 to-sky-50 border-l-2 border-l-blue-300 dark:from-blue-950/50 dark:to-sky-950/30 dark:text-blue-300 dark:hover:text-blue-200 dark:border-l-blue-700"
+                        }`}
+                        aria-controls={`tab-panel-${key}`}
+                        role="tab"
+                      >
+                        <ListOrdered
+                          size={18}
+                          className={
+                            appliedOrder.length > 0
+                              ? "text-blue-600 dark:text-blue-300"
+                              : "text-blue-400 dark:text-blue-500"
+                          }
+                        />
+                        <span className="text-left flex-1 font-semibold">Applied</span>
+                        {appliedOrder.length > 0 && (
+                          <span className="rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white">
+                            {appliedOrder.length}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  }
+
                   if (key === "sliders") {
                     // Special handling for sliders tab
                     const hasActiveSliders = Object.keys(localSliders).length > 0;
@@ -1002,15 +1030,19 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                         onClick={() => setActiveTab(key)}
                         className={`w-full px-3 py-2.5 text-sm font-medium transition-colors flex items-center gap-2 border-b border-gray-200 ${
                           activeTab === key
-                            ? "text-blue-600 bg-blue-50 border-l-4 border-l-blue-600 shadow-inner"
-                            : "text-purple-700 hover:text-purple-800 hover:bg-purple-50 bg-linear-to-r from-purple-50 to-indigo-50 border-l-2 border-l-purple-300"
+                            ? "text-blue-600 bg-blue-50 border-l-4 border-l-blue-600 shadow-inner dark:text-blue-300 dark:border-l-blue-400"
+                            : "qimchi-dark-hover-plain text-purple-700 hover:text-purple-800 hover:bg-purple-50 bg-linear-to-r from-purple-50 to-indigo-50 border-l-2 border-l-purple-300 dark:from-purple-950/50 dark:to-indigo-950/30 dark:text-purple-300 dark:hover:text-purple-200 dark:border-l-purple-700"
                         }`}
                         aria-controls={`tab-panel-${key}`}
                         role="tab"
                       >
                         <MoveHorizontal
                           size={18}
-                          className={hasActiveSliders ? "text-purple-600" : "text-purple-400"}
+                          className={
+                            hasActiveSliders
+                              ? "text-purple-600 dark:text-purple-300"
+                              : "text-purple-400 dark:text-purple-500"
+                          }
                         />
                         <span className="text-left flex-1 font-semibold">Sliders</span>
                         {hasActiveSliders && (
@@ -1050,7 +1082,13 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                       />
                       <span className="text-left flex-1">{filterDef.name}</span>
                       {isEnabled && !reason && (
-                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                        // One-based position in the applied filter order.
+                        <span
+                          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-green-600 text-[10px] font-bold text-white"
+                          aria-label={`Applied ${appliedOrder.indexOf(key) + 1} of ${appliedOrder.length}`}
+                        >
+                          {appliedOrder.indexOf(key) + 1}
+                        </span>
                       )}
                     </button>
                   );
@@ -1074,6 +1112,34 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
             >
               {(() => {
                 // Special handling for sliders tab
+                if (activeTab === "applied") {
+                  return (
+                    <div className="h-full flex flex-col">
+                      <div className="mb-3 flex items-center gap-2">
+                        <ListOrdered size={22} className="text-gray-600" />
+                        <h3 className="text-lg font-semibold text-gray-800">Applied</h3>
+                      </div>
+                      {appliedOrder.length > 0 ? (
+                        <>
+                          <p className="mb-3 text-xs text-gray-500">
+                            Filters run from top to bottom. Drag a filter or use its arrows to
+                            reorder it.
+                          </p>
+                          <AppliedFilterOrder
+                            order={appliedOrder}
+                            onReorder={reorderFilters}
+                            onRemove={toggleFilter}
+                          />
+                        </>
+                      ) : (
+                        <p className="text-sm text-gray-500">
+                          No filters are applied. Choose one from the list and press Apply.
+                        </p>
+                      )}
+                    </div>
+                  );
+                }
+
                 if (activeTab === "sliders") {
                   const sliderKeys = Object.keys(localSliders);
 
@@ -1134,7 +1200,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                     </label>
                                     <div className="flex items-center space-x-2">
                                       <span className="text-sm text-gray-500 font-mono bg-white px-2 py-1 rounded">
-                                        {slider.value.toFixed(6)}
+                                        {sliderText(available, slider.value)}
                                       </span>
                                       <button
                                         onClick={() => resetSlider(key)}
@@ -1149,13 +1215,16 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                   <div className="space-y-2">
                                     <input
                                       type="range"
-                                      title={`${key} slider value: ${slider.value.toFixed(6)}`}
-                                      min={available.min}
-                                      max={available.max}
-                                      step={available.step}
-                                      value={slider.value}
+                                      title={`${key} slider value: ${sliderText(available, slider.value)}`}
+                                      min={0}
+                                      max={sliderSteps(available)}
+                                      step={1}
+                                      value={sliderIndexOf(available, slider.value)}
                                       onChange={(e) =>
-                                        updateSliderValue(key, parseFloat(e.target.value))
+                                        updateSliderValue(
+                                          key,
+                                          sliderValueAt(available, Number(e.target.value)),
+                                        )
                                       }
                                       className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
                                       style={{
@@ -1172,8 +1241,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                     />
 
                                     <div className="flex justify-between text-xs text-gray-400">
-                                      <span>{available.min.toFixed(6)}</span>
-                                      <span>{available.max.toFixed(6)}</span>
+                                      <span>{sliderText(available, available.min)}</span>
+                                      <span>{sliderText(available, available.max)}</span>
                                     </div>
                                   </div>
                                 </div>
@@ -1800,7 +1869,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
           )}
         </div>
       </Rnd>
-    </div>
+    </div>,
+    document.body,
   );
 };
 
