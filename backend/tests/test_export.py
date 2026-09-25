@@ -816,7 +816,7 @@ def test_a_long_filter_chain_wraps_inside_the_image():
 
     lines = figure.layout.annotations[-1].text.split("<br>")
     filter_lines = lines[
-        lines.index(next(l for l in lines if "Applied Filters" in l)) :
+        lines.index(next(line for line in lines if "Applied Filters" in line)) :
     ]
     assert len(filter_lines) > 1
     left = figure.layout.margin.l or 80
