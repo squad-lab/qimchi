@@ -66,6 +66,7 @@ const TagFilterMenu = ({ anchorEl, tags, selectedTagIds, onToggle, onClear, onCl
   return createPortal(
     <div
       ref={ref}
+      data-explorer-tag-filter
       style={{ top: pos.top, left: pos.left }}
       className="fixed z-[1600] w-56 rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
       role="dialog"

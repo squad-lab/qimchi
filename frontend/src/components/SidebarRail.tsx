@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import {
   FolderTree,
   NotebookPen,
@@ -6,12 +7,12 @@ import {
   PanelLeftOpen,
   Radio,
   Lightbulb,
-  ZoomIn,
-  ZoomOut,
+  Compass,
   History,
   Sun,
   Moon,
   Settings,
+  Bug,
   Download,
   PackageCheck,
   LucideIcon,
@@ -25,6 +26,7 @@ import { useThemeStore } from "../stores/themeStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { ZOOM_STEPS } from "../settings/userSettings";
 import { useToast } from "../hooks/useToast";
+import { useWalkthroughStore } from "../walkthrough/walkthroughStore";
 import { useUpdateStore } from "../stores/updateStore";
 
 interface SidebarRailProps {
@@ -48,12 +50,12 @@ const railSections: {
 ];
 
 const railButtonBaseClass =
-  "relative flex h-9 w-full shrink-0 items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8cc63e] focus-visible:ring-inset";
+  "relative flex h-9 w-full shrink-0 items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8cc63e] focus-visible:ring-inset";
 
 // Plain rail buttons opt into the dark hover remap; the active tab does not,
 // because it carries its own themed hover (see --qimchi-panel-title-*).
 const railPlainButtonClass =
-  "qimchi-dark-hover-plain text-gray-500 hover:bg-gray-200 hover:text-gray-700";
+  "qimchi-dark-hover-plain text-gray-500 transition-colors hover:bg-gray-200 hover:text-gray-700";
 
 // The ladder Chromium uses for Ctrl+/Ctrl-, so the steps feel like the
 // browser's own zoom rather than an arbitrary percentage.
@@ -80,12 +82,32 @@ const SidebarRail = ({ onOpenHelp, onOpenSettings }: SidebarRailProps) => {
   const update = useUpdateStore((state) => state.state);
   const showUpdateReady = useUpdateStore((state) => state.showReady);
   const downloadPercent = Math.round(update.progress * 100);
+  const isDesktopApp = typeof window !== "undefined" && Boolean(window.pywebview?.api);
 
   // Alt+1..4 open a pane directly, in rail order.
   useShortcut("show-explorer", () => setActiveSection("explorer"));
   useShortcut("show-metadata", () => setActiveSection("metadata"));
   useShortcut("show-notes", () => setActiveSection("notes"));
   useShortcut("show-live", () => setActiveSection("live"));
+
+  useEffect(() => {
+    const handleZoomShortcut = (event: KeyboardEvent) => {
+      // Ctrl on Windows and Linux, Cmd on macOS.
+      if (!window.pywebview?.api || !(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const direction =
+        event.key === "+" || event.key === "=" || event.code === "NumpadAdd"
+          ? 1
+          : event.key === "-" || event.code === "NumpadSubtract"
+            ? -1
+            : null;
+      if (direction === null) return;
+      event.preventDefault();
+      const current = useSettingsStore.getState().settings.general.zoom;
+      useSettingsStore.getState().update(["general", "zoom"], nextZoom(current, direction));
+    };
+    window.addEventListener("keydown", handleZoomShortcut);
+    return () => window.removeEventListener("keydown", handleZoomShortcut);
+  }, []);
 
   return (
     // Always visible, even when the sidebar body is collapsed.
@@ -112,40 +134,29 @@ const SidebarRail = ({ onOpenHelp, onOpenSettings }: SidebarRailProps) => {
         );
       })}
 
+      <div className="mx-auto h-px w-6 shrink-0 bg-gray-300" role="separator" />
+
+      <Tooltip content="Help & Tips (Shift+H)" position="right">
+        <button
+          onClick={() => onOpenHelp?.()}
+          className={`${railButtonBaseClass} qimchi-dark-hover-plain group text-amber-600 hover:bg-amber-100 hover:text-amber-700`}
+          aria-label="Help and tips"
+        >
+          <Lightbulb size={17} className="transition-colors group-hover:fill-amber-200" />
+        </button>
+      </Tooltip>
+
+      <Tooltip content="Take the walkthrough" position="right">
+        <button
+          onClick={() => useWalkthroughStore.getState().start()}
+          className={`${railButtonBaseClass} qimchi-dark-hover-plain text-blue-600 hover:bg-blue-100 hover:text-blue-700`}
+          aria-label="Take the walkthrough"
+        >
+          <Compass size={17} />
+        </button>
+      </Tooltip>
+
       <div className="flex-1" />
-
-      {/* App zoom -- the desktop build has no browser chrome to zoom from */}
-      <Tooltip content="Zoom in" position="right">
-        <button
-          onClick={() => setZoomLevel(nextZoom(zoomLevel, 1))}
-          disabled={zoomLevel >= ZOOM_STEPS[ZOOM_STEPS.length - 1]}
-          className={`${railButtonBaseClass} ${railPlainButtonClass} disabled:opacity-40 disabled:cursor-not-allowed`}
-          aria-label="Zoom in"
-        >
-          <ZoomIn size={16} />
-        </button>
-      </Tooltip>
-
-      <Tooltip content="Reset zoom to 100%" position="right">
-        <button
-          onClick={() => setZoomLevel(1)}
-          className={`${railButtonBaseClass} ${railPlainButtonClass} text-[10px] font-medium tabular-nums`}
-          aria-label={`Zoom ${Math.round(zoomLevel * 100)} percent, reset to 100 percent`}
-        >
-          {Math.round(zoomLevel * 100)}
-        </button>
-      </Tooltip>
-
-      <Tooltip content="Zoom out" position="right">
-        <button
-          onClick={() => setZoomLevel(nextZoom(zoomLevel, -1))}
-          disabled={zoomLevel <= ZOOM_STEPS[0]}
-          className={`${railButtonBaseClass} ${railPlainButtonClass} disabled:opacity-40 disabled:cursor-not-allowed`}
-          aria-label="Zoom out"
-        >
-          <ZoomOut size={16} />
-        </button>
-      </Tooltip>
 
       <Tooltip content={isDark ? "Switch to light theme" : "Switch to dark theme"} position="right">
         <button
@@ -157,14 +168,32 @@ const SidebarRail = ({ onOpenHelp, onOpenSettings }: SidebarRailProps) => {
         </button>
       </Tooltip>
 
-      <Tooltip content="Help & Tips (Shift+H)" position="right">
-        <button
-          onClick={() => onOpenHelp?.()}
-          className={`${railButtonBaseClass} qimchi-dark-hover-plain group text-amber-600 hover:bg-amber-100 hover:text-amber-700`}
-          aria-label="Help and tips"
+      {isDesktopApp && (
+        <Tooltip
+          content={`Zoom ${Math.round(zoomLevel * 100)}%. Ctrl/Cmd with + or − changes it; click to reset`}
+          position="right"
         >
-          <Lightbulb size={17} className="transition-colors group-hover:fill-amber-200" />
-        </button>
+          <button
+            onClick={() => setZoomLevel(1)}
+            className={`${railButtonBaseClass} ${railPlainButtonClass} text-[10px] font-medium tabular-nums`}
+            aria-label={`Zoom ${Math.round(zoomLevel * 100)} percent, reset to 100 percent`}
+          >
+            {Math.round(zoomLevel * 100)}
+          </button>
+        </Tooltip>
+      )}
+
+      <div className="mx-auto h-px w-6 shrink-0 bg-gray-300" role="separator" />
+      <Tooltip content="Report a bug" position="right">
+        <a
+          href="https://gitlab.com/squad-lab/qimchi/-/work_items/new?type=Issue&initialCreationContext=list-route"
+          target="_blank"
+          rel="noreferrer"
+          className={`${railButtonBaseClass} ${railPlainButtonClass}`}
+          aria-label="Report a bug on GitLab"
+        >
+          <Bug size={17} />
+        </a>
       </Tooltip>
 
       <Tooltip content="Settings (Shift+S)" position="right">

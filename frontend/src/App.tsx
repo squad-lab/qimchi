@@ -24,6 +24,10 @@ import { useToast } from "./hooks/useToast";
 import { BASKET_FULL_MESSAGE, MAX_BASKET_ITEMS } from "./utils/basketLimit";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useSettingsSync } from "./hooks/useSettingsSync";
+import Walkthrough from "./walkthrough/Walkthrough";
+import { useWalkthroughStore } from "./walkthrough/walkthroughStore";
+import { isHeldBackByWalkthrough } from "./walkthrough/steps";
+import { isPathTrashed, useLibraryStore } from "./stores/libraryStore";
 
 // Browser default, and what the rem-based Tailwind scales assume at 100%.
 const BASE_FONT_SIZE_PX = 16;
@@ -52,7 +56,7 @@ const AppContent: React.FC = () => {
 
     // Theme changes touch many elements that normally animate hover/state
     // colors. Disable those transitions for this style flush so the entire UI
-    // switches as one frame instead of showing a low-contrast mixed theme.
+    // switches as one frame.
     root.classList.add("qimchi-theme-switching");
     root.classList.toggle("dark", theme === "dark");
     void root.offsetWidth;
@@ -62,14 +66,7 @@ const AppContent: React.FC = () => {
   // App zoom, as root font size rather than CSS `zoom`.
   //
   // `zoom` puts layout into a scaled coordinate space while pointer events and
-  // getBoundingClientRect stay in the viewport's, so anything that mixes the
-  // two lands in the wrong place: our tooltips, react-rnd's drag maths, and
-  // Plotly's hover labels. Only the first is ours to fix.
-  //
-  // Root font size has no second coordinate space. Tailwind's spacing and type
-  // scales are rem-based, so the UI scales and every pointer position stays
-  // exactly where the browser says it is. The trade-off is that arbitrary
-  // pixel values (h-[166px] and friends) keep their size.
+  // getBoundingClientRect stay in the viewport's.
   useLayoutEffect(() => {
     document.documentElement.style.fontSize = `${BASE_FONT_SIZE_PX * zoomLevel}px`;
   }, [zoomLevel]);
@@ -174,6 +171,21 @@ const AppContent: React.FC = () => {
         return false;
       }
 
+      if (isHeldBackByWalkthrough(item.path)) {
+        showToast("Not yet! This one is a surprise for later in the walkthrough.", "info", 4000);
+        return false;
+      }
+
+      if (isPathTrashed(useLibraryStore.getState().statesByPath, item.path)) {
+        showToast(
+          "Restore this measurement or its parent folder before adding it to the Basket.",
+          "warning",
+          4000,
+          "Trashed measurement",
+        );
+        return false;
+      }
+
       const current = basketItemsRef.current;
       if (current.some((existing) => existing.id === item.id)) {
         return false;
@@ -260,6 +272,52 @@ const AppContent: React.FC = () => {
     setLoadingAttributes((prev) => new Set(prev).add(itemId));
   };
 
+  const addDatasetToBasket = (item: BasketItem) => {
+    if (!handleAddToBasket(item)) return;
+    handleStartLoadingAttributes(item.id);
+    axios
+      .post(`${PROD_BACKEND_URL}/load-attrs/`, { path: item.path })
+      .then((response) => handleUpdateBasketItemAttributes(item.id, response.data))
+      .catch((error) => {
+        console.error("Attribute load failed:", error);
+        setLoadingAttributes((prev) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        });
+      });
+  };
+  const addDatasetToBasketRef = useRef(addDatasetToBasket);
+  addDatasetToBasketRef.current = addDatasetToBasket;
+
+  const registerWalkthrough = useWalkthroughStore((state) => state.registerBridge);
+  const walkthroughActive = useWalkthroughStore((state) => state.active);
+  useEffect(() => {
+    useWalkthroughStore.getState().setPaused(isHelpOpen || isSettingsOpen);
+  }, [isHelpOpen, isSettingsOpen]);
+  // Close Help and Settings when the walkthrough starts.
+  useEffect(() => {
+    if (!walkthroughActive) return;
+    setIsHelpOpen(false);
+    setIsSettingsOpen(false);
+  }, [walkthroughActive]);
+  useEffect(
+    () =>
+      registerWalkthrough({
+        addToBasket: (item) => addDatasetToBasketRef.current(item),
+        basketItems: () => basketItemsRef.current,
+        removeFromBasket: (id) => {
+          basketItemsRef.current = basketItemsRef.current.filter((item) => item.id !== id);
+          setBasketItems(basketItemsRef.current);
+        },
+        clearBasket: () => {
+          basketItemsRef.current = [];
+          setBasketItems([]);
+        },
+      }),
+    [registerWalkthrough],
+  );
+
   // Cycling handler that will be passed to both Sidebar and Viewer
   const handleCycleDataset = (direction: "prev" | "next") => {
     // This is intentionally empty - the actual cycling is handled by DirTree
@@ -295,26 +353,13 @@ const AppContent: React.FC = () => {
     if (datasetParam && isDatasetPath(datasetParam)) {
       const name =
         datasetParam.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop() || datasetParam;
-      const item: BasketItem = {
+      addDatasetToBasket({
         id: datasetParam,
         name,
         path: datasetParam,
         type: "file",
         tags: [detectDatasetKind(datasetParam)],
-      };
-      if (!handleAddToBasket(item)) return;
-      handleStartLoadingAttributes(item.id);
-      axios
-        .post(`${PROD_BACKEND_URL}/load-attrs/`, { path: datasetParam })
-        .then((response) => handleUpdateBasketItemAttributes(item.id, response.data))
-        .catch((error) => {
-          console.error("Deep-link attribute load failed:", error);
-          setLoadingAttributes((prev) => {
-            const next = new Set(prev);
-            next.delete(item.id);
-            return next;
-          });
-        });
+      });
     }
     // Run once on mount; handlers are stable for this purpose.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -369,7 +414,16 @@ const AppContent: React.FC = () => {
           }
         />
       </ErrorBoundary>
-      <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
+      <HelpModal
+        isOpen={isHelpOpen}
+        onClose={() => setIsHelpOpen(false)}
+        walkthroughActive={walkthroughActive}
+        onStartWalkthrough={() => {
+          setIsHelpOpen(false);
+          // Resume an active walkthrough; start a new one otherwise.
+          if (!walkthroughActive) useWalkthroughStore.getState().start();
+        }}
+      />
       <SettingsModal
         isOpen={isSettingsOpen}
         initialSection={settingsSection}
@@ -379,6 +433,7 @@ const AppContent: React.FC = () => {
         }}
       />
       <UpdateDialog />
+      <Walkthrough />
     </>
   );
 };

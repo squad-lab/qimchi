@@ -73,19 +73,26 @@ test.describe("sidebar rail", () => {
     );
   });
 
+  // The rail's zoom controls are desktop-only; in a browser, zoom is set in Settings.
+  const setZoom = async (page: Page, zoom: string) => {
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("dialog", { name: "Settings" }).getByLabel("Zoom").selectOption(zoom);
+    await page.keyboard.press("Escape");
+  };
+
   test("zooms the app and resets to 100%", async ({ page }) => {
     expect(await rootFontSize(page)).toBe("16px");
 
-    await page.getByRole("button", { name: "Zoom in" }).click();
-    const zoomed = await rootFontSize(page);
-    expect(parseFloat(zoomed)).toBeGreaterThan(16);
+    await setZoom(page, "1.25");
+    await expect.poll(() => rootFontSize(page)).toBe("20px");
 
-    await page.getByRole("button", { name: /^Zoom .* reset/ }).click();
-    expect(await rootFontSize(page)).toBe("16px");
+    await setZoom(page, "1");
+    await expect.poll(() => rootFontSize(page)).toBe("16px");
   });
 
   test("keeps the zoom across a reload", async ({ page }) => {
-    await page.getByRole("button", { name: "Zoom out" }).click();
+    await setZoom(page, "0.9");
+    await expect.poll(() => rootFontSize(page)).toBe("14.4px");
     const zoomed = await rootFontSize(page);
 
     await page.reload({ waitUntil: "domcontentloaded" });
@@ -149,7 +156,7 @@ test.describe("help search", () => {
     await expect(search).toBeVisible();
 
     await search.fill("dark");
-    await expect(page.getByText(/result(s)? --/)).toBeVisible();
+    await expect(page.getByText(/\d+ results? ·/)).toBeVisible();
 
     // Opening a result returns to the section view, scrolled to the match.
     // Scoped to the results: "dark" also names the rail's theme toggle.
@@ -165,6 +172,6 @@ test.describe("help search", () => {
     await page.keyboard.press("Shift+H");
     await page.getByPlaceholder("Search help...").fill("zzzzzzzz");
 
-    await expect(page.getByText(/No help matches/)).toBeVisible();
+    await expect(page.getByText(/No results for/)).toBeVisible();
   });
 });

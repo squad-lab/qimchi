@@ -31,6 +31,7 @@
     "@uiw/react-md-editor": "^4.1.0",
     "axios": "^1.14.0",
     "buffer": "^6.0.3",
+    "driver.js": "^1.8.0",
     "katex": "^0.16.44",
     "lucide-react": "^0.577.0",
     "mathjax": "^4.1.3",

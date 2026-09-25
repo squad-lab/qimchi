@@ -25,11 +25,15 @@ import {
   Trash2,
   Tag as TagIcon,
   Settings as SettingsIcon,
+  Grid3x3,
+  Compass,
+  AlertTriangle,
 } from "lucide-react";
 import SectionedModal from "./SectionedModal";
+import { OBLIQUE_CUT_CAVEAT } from "../utils/lineCut";
 import { buildHelpIndex, searchHelp, HelpEntry, HelpSearchResult } from "./helpSearch";
 
-// Section Definitions
+// Help sections
 interface HelpSection {
   id: string;
   label: string;
@@ -37,7 +41,7 @@ interface HelpSection {
   content: React.ReactNode;
 }
 
-// Content
+// Section content
 const ExplorerHelp = memo(() => (
   <div className="space-y-4 text-sm text-gray-700">
     <div>
@@ -45,36 +49,55 @@ const ExplorerHelp = memo(() => (
         <FolderTree size={20} className="text-blue-600" />
         Explorer
       </h3>
-      <p className="text-gray-600 mb-4">
-        Browse and navigate your file system to find datasets. Built-in formats and measurement
-        sources include:
-      </p>
+
+      <div className="mb-4 p-3 rounded-lg border shadow-sm text-amber-800 bg-amber-50/50 border-amber-100">
+        <h4 className="font-semibold mb-1 flex items-center gap-1.5">
+          <Compass size={14} className="shrink-0" />
+          New to Qimchi?
+        </h4>
+        <p className="text-xs leading-relaxed">
+          Take the walkthrough, from the button at the top of this window or the compass just below
+          Help on the rail. It is a short guided tour.
+        </p>
+      </div>
 
       <div className="space-y-2 mb-4">
-        <h4 className="font-medium text-gray-800">Sidebar layout</h4>
-        <ul className="space-y-1.5 text-gray-600">
-          <li className="flex gap-2">
-            <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-            The narrow icon rail on the far left switches between Explorer, Metadata, Notes and Live
-            -- one is shown at a time, filling the sidebar. Alt+1 to Alt+4 open them directly
+        <h4 className="font-medium text-gray-800">Sidebar Layout</h4>
+        <ul className="space-y-2 text-gray-600">
+          <li className="flex gap-2 leading-relaxed">
+            <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+            <span>
+              Use the icon rail on the far left to switch between Explorer, Metadata, Notes and
+              Live. Alt+1 through Alt+4 open these sections directly
+            </span>
           </li>
-          <li className="flex gap-2">
-            <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-            Clicking the section that is already open leaves it open. Use the button at the bottom
-            of the rail (or Shift+E) to collapse and re-open the whole sidebar
+          <li className="flex gap-2 leading-relaxed">
+            <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+            <span>
+              Use the button at the bottom of the rail, or Shift+E, to collapse or reopen the
+              sidebar
+            </span>
           </li>
-          <li className="flex gap-2">
-            <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-            The expand button next to the folder button (or Shift+F) opens the Explorer across the
-            whole window. Esc, Shift+F, or the same button returns it to the sidebar
+          <li className="flex gap-2 leading-relaxed">
+            <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+            <span>
+              Use the expand button beside the folder button, or Shift+F, to open Explorer across
+              the window. Press Esc or Shift+F to return it to the sidebar
+            </span>
           </li>
-          <li className="flex gap-2">
-            <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-            Rows show a modified-date column whenever the Explorer is wide enough -- either expanded
-            or with the sidebar dragged wider
+          <li className="flex gap-2 leading-relaxed">
+            <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+            <span>
+              The modified date appears when Explorer is wide enough, either in expanded view or
+              after you widen the sidebar
+            </span>
           </li>
         </ul>
       </div>
+
+      <p className="text-gray-600 mb-4">
+        Browse your file system and open datasets from these formats and measurement sources:
+      </p>
 
       <div className="grid grid-cols-1 @min-[460px]/panel:grid-cols-2 @min-[860px]/panel:grid-cols-3 gap-2 mb-4">
         <div className="flex items-center gap-2 p-2 bg-violet-50/50 rounded-lg border border-violet-100">
@@ -105,35 +128,39 @@ const ExplorerHelp = memo(() => (
           <Table size={16} className="text-orange-600" />
           <span className="text-xs font-semibold">CSV / TXT / DAT</span>
         </div>
+        <div className="flex items-center gap-2 p-2 bg-rose-50/50 rounded-lg border border-rose-100">
+          <Grid3x3 size={16} className="text-rose-600" />
+          <span className="text-xs font-semibold">MATLAB (.mat)</span>
+        </div>
         <div className="flex items-center gap-2 p-2 bg-fuchsia-50/50 rounded-lg border border-fuchsia-100">
           <FileArchive size={16} className="text-fuchsia-600" />
           <span className="text-xs font-semibold">xarray DataTree</span>
         </div>
       </div>
       <p className="text-xs text-gray-500">
-        Quantify runs are recognized inside their HDF5 datasets and can also be streamed live with
+        Qimchi recognises Quantify runs inside HDF5 datasets. They can also be streamed live with
         qimchi-connect. DataTree nodes can be browsed inside Zarr, NetCDF, and HDF5 containers.
       </p>
     </div>
 
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Navigation</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Double-click a folder to navigate into it
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Double-click a folder to navigate into it</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Double-click an SQLite container to browse its datasets
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Double-click an SQLite container to browse its datasets</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Type in the path bar to navigate directly to any location
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Type in the path bar to navigate directly to any location</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Use Ctrl/Shift+Click for multi-selection
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Use Ctrl+Click or Shift+Click to select multiple items</span>
         </li>
       </ul>
     </div>
@@ -144,53 +171,70 @@ const ExplorerHelp = memo(() => (
         Hearts, Trash &amp; Tags
       </h4>
       <p className="text-gray-600">
-        Mark measurements so you can find them again. These are saved to your Qimchi library and
-        follow a measurement even if you rename or move its file.
+        Mark measurements so they are easy to find later. Hearts, trash status and tags are stored
+        in your Qimchi library and stay with a measurement if its file is renamed or moved.
       </p>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <Heart size={14} className="shrink-0 mt-0.5 text-red-500" />
-          Heart a measurement from its row in the tree
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <Heart size={14} className="shrink-0 mt-1 text-red-500" />
+          <span>Use the heart on a row to mark a measurement as a favourite</span>
         </li>
-        <li className="flex gap-2">
-          <Trash2 size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Trash hides it from view without touching the file on disk
+        <li className="flex gap-2 leading-relaxed">
+          <Trash2 size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Trash hides a measurement without deleting its file</span>
         </li>
-        <li className="flex gap-2">
-          <TagIcon size={14} className="shrink-0 mt-0.5 text-indigo-500" />
-          Tags are your own labels &mdash; a measurement can carry several
+        <li className="flex gap-2 leading-relaxed">
+          <TagIcon size={14} className="shrink-0 mt-1 text-indigo-500" />
+          <span>Add one or more tags to organise a measurement</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Select several with Ctrl/Shift+Click, then use the heart, trash or tag buttons in the
-          toolbar to apply to all of them at once
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Select several measurements with Ctrl+Click or Shift+Click, then apply a heart, trash or
+            tag action from the toolbar
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Folders can be hearted, trashed and tagged too, and everything inside a folder counts as
+            marked when you filter. Unlike a measurement, a folder loses its marks if you rename or
+            move it
+          </span>
         </li>
       </ul>
 
       <h4 className="font-medium text-gray-800 pt-2">Filtering</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            Open the funnel icon in the toolbar for the filter row:{" "}
-            <span className="font-semibold">Hearted</span>,{" "}
-            <span className="font-semibold">Hide Trash</span> and{" "}
-            <span className="font-semibold">Tags</span>
+            <span>
+              Select the funnel in the toolbar to show filters for{" "}
+              <span className="font-semibold">Hearted</span>,{" "}
+              <span className="font-semibold">Trashed</span> and{" "}
+              <span className="font-semibold">Tagged</span>
+            </span>
           </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Trashed shows only measurements that have been moved to trash</span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            The <span className="font-semibold">Tags</span> dropdown is searchable; picking several
-            matches measurements carrying <span className="italic">any</span> of them
+            <span>
+              Search the <span className="font-semibold">Tagged</span> dropdown or select several
+              tags. A measurement matches if it has <span className="italic">any</span> selected tag
+            </span>
           </span>
         </li>
       </ul>
 
-      <h4 className="font-medium text-gray-800 pt-2">Searching by tag</h4>
+      <h4 className="font-medium text-gray-800 pt-2">Searching by Tag</h4>
       <p className="text-gray-600">
-        You can also filter by tag straight from the search box, combined with an ordinary name
-        search:
+        You can combine tag filters with a name search in the search box:
       </p>
       <div className="space-y-1.5 rounded-lg border border-gray-200 bg-gray-50 p-2.5 font-mono text-xs text-gray-700">
         <div>
@@ -213,111 +257,124 @@ const ExplorerHelp = memo(() => (
         </div>
       </div>
       <p className="text-xs text-gray-500">
-        A tag name that doesn&apos;t exist matches nothing, so check the spelling if results
-        disappear. Tags typed here combine with any picked in the Tags dropdown.
+        An unknown tag returns no results. Tags entered here are combined with selections from the
+        Tagged dropdown.
       </p>
     </div>
 
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Adding to Basket</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Drag individual datasets to the Basket
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Drag individual datasets to the Basket</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Drag a folder to add all its dataset children to the Basket
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Drag a folder to add all its dataset children to the Basket</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Double-click a dataset to toggle it in/out of the Basket
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Double-click a dataset to add it to or remove it from the Basket</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <span>
-            Use the <span className="font-mono bg-gray-100 px-1 rounded">+</span> button in item
-            context menus
-          </span>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Select several files, then use Add in the Explorer toolbar</span>
         </li>
       </ul>
     </div>
 
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Sorting & Filtering</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Sort by Name, Date, Size, or Chrono (newest-first flat list)
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Choose Name, Date, Size or Chrono from the Sort menu. The second Sort button changes the
+            direction; Chrono is always newest first
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Filter by All, Dataset only, or Folder only
-        </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Use the search bar to filter by name or path
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Use the search bar to filter by name or path</span>
         </li>
       </ul>
     </div>
 
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Dataset Cycling</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          When exactly one dataset is in the Basket, use the ↑/↓ arrow buttons to cycle through
-          datasets in the current view
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            When exactly one dataset is in the Basket, use the ↑/↓ arrow buttons to cycle through
+            datasets in the current view
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Existing plots automatically update to the new dataset
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Existing plots automatically update to the new dataset</span>
         </li>
       </ul>
     </div>
 
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Live Measurements</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Pick the Live tab (Radio icon) in the sidebar rail to see only active live measurements,
-          auto-refreshed every second. It is the Explorer in live mode, so the Explorer tab switches
-          straight back to browsing files
-        </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            Use <strong>Hide from Live Measurements</strong> to ignore an unwanted ongoing run. This
-            only changes your local view; it does not stop the measurement or mark it finished.
+            Select Live in the sidebar rail to show active measurements. Select Explorer to return
+            to your files
           </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          New live measurements are added to the Basket automatically (turn this off under Settings
-          &gt; Live)
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Select <strong>Hide from Live Measurements</strong> to remove an active run from this
+            list. This does not stop the measurement or mark it as finished.
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />A live plot refreshes
-          as fast as the machine can serve it, never faster than once every 750 ms and never slower
-          than every 5 s. A big measurement therefore settles into a steady rhythm instead of
-          queueing requests it would only drop
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            New live measurements are added to the Basket automatically. You can turn this off under
+            Settings &gt; Live
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Those refresh times are summarised into the app log every couple of minutes -- search it
-          for &quot;live refresh&quot; to see what this machine sustains. It stays on the machine
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            A live plot adjusts its refresh rate to the workload, from once every 300 ms to once
+            every 5 seconds. You can change the fastest rate under Settings &gt; Live
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>Show only live and pinned plots</strong>, on the Viewer&apos;s ribbon, hides
+            every other plot without removing it. Select it again to show them all
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Refresh statistics are written to the local app log every few minutes. Search for
+            &quot;live refresh&quot; to view them
+          </span>
         </li>
       </ul>
     </div>
 
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Drag to Notes</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Drag datasets from Explorer directly to the Notes panel to insert their paths into the
-          current note
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Drag datasets from Explorer directly to the Notes panel to insert their paths into the
+            current note
+          </span>
         </li>
       </ul>
     </div>
@@ -332,31 +389,31 @@ const BasketHelp = memo(() => (
         Basket
       </h3>
       <p className="text-gray-600 mb-3">
-        The Basket holds the datasets you're currently working with. Select dataset cards to define
-        the plotting scope for the Composer. Adding one to an empty Viewer creates its default
-        plots, as set under Settings &gt; Plots &gt; Plotting behaviour: a HeatMap when its
-        variables allow one, otherwise a LinePlot. Adding one while the Viewer has plots recreates
-        those plots, with their filters, for the new measurement -- so a default you removed stays
-        removed. Only when none of them fit its variables does it get its default plots. The Basket
-        holds up to 50 datasets; while it is full, a caution icon appears under the Basket icon, and
-        further datasets are refused until you remove some.
+        The Basket holds the datasets in your current workspace. Select one or more cards to choose
+        which datasets the Composer will plot. The Basket can hold up to 50 datasets.
+      </p>
+      <p className="text-gray-600 mb-3">
+        When the Viewer is empty, adding a dataset creates the default plots selected under Settings
+        &gt; Plots. If plots are already open, Qimchi recreates compatible plots and their filters
+        for the new measurement. It uses the defaults only when none of the open plots are
+        compatible.
       </p>
     </div>
 
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Dataset Cards</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Click a card to select it as the active plotting dataset
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Click a card to select it as the active plotting dataset</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Ctrl/Cmd+Click to multi-select datasets for composite plots
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Use Ctrl/Cmd+Click to select multiple datasets for composite plots</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Drag datasets directly into the Basket drop zone to add them
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Drag datasets directly into the Basket drop zone to add them</span>
         </li>
       </ul>
     </div>
@@ -374,40 +431,46 @@ const BasketHelp = memo(() => (
           <SquareFunction size={12} /> Dependent
         </div>
       </div>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Drag chips to Composer drop zones (X, Y, Z axes)
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Drag chips to Composer drop zones (X, Y, Z axes)</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Double-click a chip to auto-fill the next empty Composer axis
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Double-click a chip to auto-fill the next empty Composer axis</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Gray chips are not shared across selected datasets and cannot be added to the Composer
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Gray chips are not shared across selected datasets and cannot be added to the Composer
+          </span>
         </li>
       </ul>
     </div>
 
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Basket Actions</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Click the Basket ribbon outside its action buttons to collapse or expand the pane
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Click the Basket ribbon outside its action buttons to collapse or expand the pane
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Use the Trash icon to clear all datasets from the Basket
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Use the Trash icon to clear all datasets from the Basket</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Use the Download icon to download all Basket datasets as a ZIP
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Use the Download icon to download all Basket datasets as a ZIP</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Per-item: copy filename, download, open notes, or remove
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Use a dataset&apos;s menu to copy its filename, download it, open its notes or remove it
+          </span>
         </li>
       </ul>
     </div>
@@ -422,52 +485,51 @@ const MetadataHelp = memo(() => (
         Metadata
       </h3>
       <p className="text-gray-600 mb-3">
-        View and search detailed technical parameters for any dataset in your Basket. Metadata is
-        automatically fetched from the backend when a file is added.
+        View and search metadata for datasets in your Basket. Qimchi loads the metadata when you add
+        a dataset.
       </p>
 
       <div className="space-y-3">
         <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
           <h4 className="font-semibold text-gray-800 mb-1 flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-            Automatic Loading
+            Loading
           </h4>
           <p className="text-xs leading-relaxed">
-            Metadata cards appear automatically for file items in your basket. A blue progress bar
-            tracks loading status for multiple concurrent requests.
+            Each dataset has its own metadata card. A blue progress bar shows the combined loading
+            progress when several datasets are being loaded.
           </p>
         </div>
 
         <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
           <h4 className="font-semibold text-gray-800 mb-1 flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-            Global Search
+            Search
           </h4>
           <p className="text-xs leading-relaxed">
-            Use the search bar to find specific values across all loaded metadata. Results highlight
-            the exact key-value match and the navigation path (e.g., Sweeps → ...).
+            Search keys and values across all loaded metadata. Each result shows the match and its
+            path, such as Sweeps → Gate voltage.
           </p>
         </div>
 
         <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
           <h4 className="font-semibold text-gray-800 mb-1 flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-            Interactive JSON View
+            JSON Tree
           </h4>
           <p className="text-xs leading-relaxed">
-            Deeply nested parameters are displayed in an interactive tree. You can expand/collapse
-            sections and copy values directly to your clipboard.
+            Expand or collapse nested sections and copy values to the clipboard.
           </p>
         </div>
 
         <div className="p-3 rounded-lg border shadow-sm text-amber-800 bg-amber-50/50 border-amber-100">
           <h4 className="font-semibold mb-1 flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-            Performance Note
+            Search Results
           </h4>
           <p className="text-xs leading-relaxed">
-            When searching, cards are automatically minimized to keep the view clean and responsive.
-            Use the toggle buttons to peek into specific re-collapsed results.
+            While searching, cards collapse to show matching entries. Expand a card to inspect its
+            surrounding metadata.
           </p>
         </div>
       </div>
@@ -483,105 +545,116 @@ const ComposerHelp = memo(() => (
         Plot Composer
       </h3>
       <p className="text-gray-600 mb-3">
-        The Composer maps dataset variables to plot axes to generate LinePlots or HeatMaps.
+        Assign dataset variables to axes, then create a LinePlot or HeatMap.
       </p>
     </div>
 
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Plot Types</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>LinePlot:</strong> X (any field, max 1) + Y (dependents, multiple OK)
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>LinePlot:</strong> one X field and one or more dependent Y fields
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>HeatMap:</strong> X (any, max 1) + Y (any, multiple) + Z (dependents, multiple)
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>HeatMap:</strong> one X field, one Y field and one or more dependent Z fields
+          </span>
         </li>
       </ul>
     </div>
 
     <div className="space-y-2">
-      <h4 className="font-medium text-gray-800">Dependent Against Dependent</h4>
+      <h4 className="font-medium text-gray-800">Measured Variables as Axes</h4>
       <p className="text-gray-600 mb-2">
-        An axis can hold a measured quantity, not just a swept one -- a current against a measured
-        gate voltage, say. The two only have to have been swept together, which means sharing a
-        sweep axis. Dependents that do not share it are greyed out in the Basket once the first
-        field is on an axis, as coordinates already are.
+        An axis can use a measured variable, such as plotting current against a measured gate
+        voltage. The variables must share the same sweep dimension. After you choose an axis,
+        incompatible fields are greyed out in the Basket.
       </p>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>LinePlot:</strong> any two variables swept together, in the order they were
-          measured -- a sweep that doubles back is drawn as it happened, not sorted
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>LinePlot:</strong> plot any two variables from the same sweep. Points remain in
+            measurement order, even when the sweep changes direction
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>HeatMap:</strong> one axis may be measured, the other must be swept. Two measured
-          axes trace a path rather than a grid, so there is no heat map to draw
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>HeatMap:</strong> one axis may be measured, but the other must be a swept
+            coordinate. Two measured axes describe a path rather than a grid
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />A dependent that
-          varies over more than one sweep -- a value per point of a 2-D measurement -- has no single
-          axis to be, and is refused
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            A variable that changes across more than one sweep dimension cannot be used as a single
+            axis
+          </span>
         </li>
       </ul>
     </div>
 
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Adding Fields</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Drag chips from Basket cards into the X, Y, or Z drop zones
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Drag chips from Basket cards into the X, Y, or Z drop zones</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Double-click chips to auto-fill axes sequentially (X → Y → Z)
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Double-click a chip to fill the next available axis (X → Y → Z)</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Invalid drops show a red border and an error message
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Invalid drops show a red border and an error message</span>
         </li>
       </ul>
     </div>
 
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Multi-Dataset Plotting</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Multi-select dataset cards in the Basket to plot them all at once
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Multi-select dataset cards in the Basket to plot them all at once</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Only datasets that share the required variables will be plotted
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Qimchi plots only datasets that contain the required variables</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Incompatible datasets are skipped with a warning notification
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>A notification lists any incompatible datasets that were skipped</span>
         </li>
       </ul>
     </div>
 
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Clearing</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Click the Composer ribbon outside its action buttons to collapse or expand the pane
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Click the Composer ribbon outside its action buttons to collapse or expand the pane
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Use the X button on individual fields to remove them
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Use the X button on individual fields to remove them</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Click "Clear" on a drop zone to remove all fields from that axis
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Select Clear on a drop zone to remove every field from that axis</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Use Alt+Shift+C to clear all Composer fields
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Use Alt+Shift+C to clear all Composer fields</span>
         </li>
       </ul>
     </div>
@@ -596,132 +669,204 @@ const ViewerHelp = memo(() => (
         Viewer
       </h3>
       <p className="text-gray-600 mb-3">
-        The Viewer displays your plots. Each plot is interactive and has its own controls for
-        filtering, appearance, and export.
+        View and interact with plots, apply filters, adjust their appearance and export results.
       </p>
     </div>
 
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Reading a Plot</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Axis titles are typeset, units and all, and carry the engineering prefix that suits the
-          range -- mV rather than 0.001 V
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Axis titles show units with an engineering prefix suited to the visible range, such as
+            mV instead of 0.001 V
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Hovering a point shows each value with its own prefix, so a small one reads 508 µV rather
-          than 0.000508. The prefix is chosen per value, so it need not match the axis
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Hover labels format each value separately with no more than two decimal places. Their
+            prefixes may differ from the axis prefixes
+          </span>
         </li>
       </ul>
     </div>
 
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Plot Controls</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Click a plot to select it (highlighted border); use 1–9 keys to select by index
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Select a plot by clicking it or by pressing its number from 1 to 9</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>Filters (F):</strong> Apply signal processing (diff, smoothing, BG corr…). A
-          derivative, a smoothing window and a fit line all read X as a swept variable, so they are
-          greyed out on a plot whose X axis holds measured data, with the reason on hover
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>Filters (F):</strong> Apply differentiation, smoothing, background correction
+            and other processing. Filters that require an ordered sweep are unavailable when X
+            contains measured data; hover over one to see why
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>Appearance (A):</strong> Colorscale, axis labels, range, title
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Filters run in the order you applied them, shown in the Filters panel&apos;s Applied
+            section. Drag a filter there, or use its arrows, to change the order, and the plot is
+            redrawn with the new order
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>Maximize (M):</strong> Expand a plot to full panel view
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>Sliders:</strong> When a plotted variable varies over more dimensions than the
+            plot shows, Filters has a slider for each of the others. Dimensions labelled with text
+            step through their labels
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>Swap Axes (S):</strong> Transpose X and Y axes on HeatMaps
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Complex-valued variables appear as four: their amplitude, phase (in radians), real and
+            imaginary parts
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>BG Corr (B):</strong> Toggle background correction overlay
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>Appearance (A):</strong> Change the colorscale, labels, ranges and title
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>LineCut (Shift+X):</strong> Interactive line cut on HeatMaps
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>Maximize (M):</strong> Expand a plot to fill the Viewer
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>Reset (R):</strong> Restore the original data, axes, filters and zoom, and return
-          the appearance to your defaults from Settings
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>Swap Axes (S):</strong> Exchange the X and Y axes of a HeatMap
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>Export → Notes (N):</strong> Export current plot image to Notes
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>Background correction (B):</strong> Open it from Filters, or press B to toggle
+            its interactive overlay
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>Export → Disk (E):</strong> Save the plot as PNG/SVG
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>LineCut (Shift+X):</strong> Inspect a horizontal, vertical or oblique slice of a
+            HeatMap. Press X, Y or O to choose. For an oblique cut, click where it starts and then
+            where it ends. Right-click the heat map to lock the cut in place, and right-click again
+            to let it follow the pointer. The preview opens in a pop-up beside the plot; expand it
+            to the full window from its header
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>Width (↔):</strong> Set this plot&apos;s width to 33, 50, 66 or 100%
+        <li className="flex gap-2 leading-relaxed">
+          <AlertTriangle size={14} className="shrink-0 mt-1 text-amber-500" />
+          <span>{OBLIQUE_CUT_CAVEAT}</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          <strong>Move (grip handle):</strong> Drag onto another plot to rearrange, or use the arrow
-          keys while the handle is focused
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>Reset (R):</strong> Restore the original data, axes, filters and zoom, and
+            return the appearance to your defaults from Settings
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>Export → Notes (N):</strong> Add the current plot image to Notes
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>Export → Disk (E):</strong> Save the plot as PNG/SVG
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>Export → Copy:</strong> Copy the plot to the clipboard as a PNG, exactly as it
+            is shown
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>Width (↔):</strong> Set this plot&apos;s width to 33, 50, 66 or 100%
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>Move (grip handle):</strong> Drag the plot to a new position, or focus the
+            handle and use the arrow keys
+          </span>
         </li>
       </ul>
     </div>
 
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Paint Mode</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Hold Shift and click a plot&apos;s Filters or Appearance button to choose it as the Paint
-          source
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Hold Shift and select a plot&apos;s Filters or Appearance button to use that plot as the
+            Paint source
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          In Paint mode, Shift+Click other plots to apply copied settings
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>In Paint mode, Shift+Click another plot to apply the copied settings</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Incompatible plot types (e.g., HeatMap → LinePlot) show an error
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Qimchi reports settings that cannot be applied to the target plot type</span>
         </li>
       </ul>
     </div>
 
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Layout Controls</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Pin a plot to keep it on its current measurement while Next/Prev updates the other plots
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Pin a plot to keep its current measurement while Next and Previous update the others
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Use the 33 / 50 / 66 / 100 buttons to set plot width for all plots, or a plot&apos;s own
-          width button (↔) for that plot alone
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Set the width of all plots to 33%, 50%, 66% or 100%, or use a plot&apos;s width button
+            (↔) to change only that plot
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Drag a plot&apos;s grip handle onto another plot to move it there, or focus the handle and
-          use the arrow keys. Plots keep their own widths when moved
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Drag a plot&apos;s grip handle to rearrange it, or focus the handle and use the arrow
+            keys. Moving a plot does not change its width
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          50% forces side-by-side display of two plots
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Set the width to 50% to place two plots side by side</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Squarify button enforces a 1:1 aspect ratio on all plots
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Squarify gives every plot a 1:1 aspect ratio</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          "Clear All Plots" removes all plots; Alt+Shift+V shortcut also works
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Clear All Plots, or press Alt+Shift+V, to remove every plot</span>
         </li>
       </ul>
     </div>
@@ -736,57 +881,71 @@ const NotesHelp = memo(() => (
         Notes
       </h3>
       <p className="text-gray-600 mb-3">
-        A markdown-based note-taking panel linked to your datasets. Notes are stored in
-        Qimchi&apos;s local library so every supported dataset type, including QCoDeS runs, can have
-        notes.
+        Write Markdown notes for any supported dataset, including QCoDeS runs. Notes are stored in
+        Qimchi&apos;s local library.
       </p>
     </div>
 
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Working with Notes</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Open a note for a dataset via the NotebookPen icon in the Basket or Explorer
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Use the note icon in the Basket or Explorer to open a dataset&apos;s note</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Drag dataset paths from the Explorer directly into the Notes panel to insert them as links
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Drag dataset paths from the Explorer directly into the Notes panel to insert them as
+            links
+          </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Send plot images from the Viewer to Notes via a plot&apos;s Export → Notes (N)
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Use Export → Notes on a plot, or press N, to add its image to the note</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Changes auto-save after two seconds; Ctrl/Cmd+S saves immediately
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Changes auto-save after two seconds; Ctrl/Cmd+S saves immediately</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Choose Pooled sample notes to keep a shared rolling note for all measurements in a sample
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Hover over the save-status icon to see when the note was last saved</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Existing Markdown sidecars are imported automatically; when sidecar mirroring is enabled,
-          Qimchi also writes an updated .md copy with YAML frontmatter
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Use the copy button beside the autosave status to copy the note path</span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Choose Pooled sample notes to share one running note across all measurements in a sample
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Qimchi imports existing Markdown sidecars. If sidecar mirroring is enabled, it also
+            writes an updated .md file with YAML front matter
+          </span>
         </li>
       </ul>
     </div>
 
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Formatting</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Notes support standard Markdown: headers, bold, italic, lists, code blocks, tables
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Use standard Markdown for headings, emphasis, lists, code blocks and tables</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Images sent from the Viewer are saved in a subfolder and linked in the note
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Images sent from the Viewer are saved in a subfolder and linked in the note</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Toggle between Edit and Preview modes using the tab switcher
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Switch between Edit and Preview with the tabs above the note</span>
         </li>
       </ul>
     </div>
@@ -801,45 +960,39 @@ const SettingsHelp = memo(() => (
         Settings
       </h3>
       <p className="text-gray-600 mb-3">
-        Open Settings from the gear on the sidebar rail, or with Shift+S. Settings are saved to the
-        Qimchi database, so they follow you across restarts, and every change takes effect at once.
+        Open Settings from the sidebar rail or press Shift+S. Changes take effect immediately and
+        are saved across restarts.
       </p>
-      <ul className="list-disc space-y-1.5 pl-5">
+      <ul className="list-disc space-y-2 pl-5 leading-relaxed">
         <li>
-          <strong>General</strong>: theme (System follows your operating system), zoom and plot
-          width. The rail and Viewer buttons change the same settings.
+          <strong>General</strong>: choose the theme, interface zoom and default plot width. The
+          System theme follows your operating system
         </li>
         <li>
-          <strong>Plots</strong>: the plotting behaviour -- which plots adding a measurement to an
-          empty Viewer creates (by default a HeatMap when its variables allow one, otherwise a
-          LinePlot) -- and whether plots are kept square. Once the Viewer has plots, new
-          measurements get copies of those instead.
+          <strong>Plots</strong>: choose which plots are created for a new measurement, whether
+          custom plots are recreated and whether plots use a square aspect ratio
         </li>
         <li>
-          <strong>Explorer</strong>, <strong>Live</strong> and <strong>Export</strong>: the sort
-          order, whether new live measurements join the basket, and which images an export writes.
+          <strong>Explorer</strong>, <strong>Live</strong> and <strong>Export</strong>: set the sort
+          order, automatic Basket additions and exported image formats
         </li>
         <li>
-          <strong>Updates</strong> (desktop app): the running version, a button to check for a new
-          one, and whether to check at startup and include preview releases. An update downloads in
-          the background while you keep working; once it is ready, Qimchi asks to install it, and
-          &ldquo;Remind me at next launch&rdquo; keeps the download for next time. While an update
-          downloads or waits to be installed, an icon on the sidebar rail shows it.
+          <strong>Updates</strong> (desktop app): check for updates, include preview releases and
+          control automatic checks. Downloads continue in the background, and the sidebar rail shows
+          their status
         </li>
         <li>
-          <strong>HeatMap</strong> and <strong>LinePlot</strong>: the default appearance of each
-          plot type. A change reaches every plot straight away, except where that plot has its own
-          value from its Appearance panel. A plot&apos;s Reset returns it to these defaults.
+          <strong>HeatMap</strong> and <strong>LinePlot</strong>: set the default appearance for
+          each plot type. Per-plot Appearance settings override these defaults; Reset restores them
         </li>
       </ul>
       <p className="mt-3 text-gray-600">
-        The upload and download buttons in the Settings title bar import and export your settings as
-        a JSON file, to move them to another machine or keep a copy. Importing replaces every
-        setting; anything missing from the file returns to its default.
+        Use the buttons in the Settings title bar to import or export a JSON settings file.
+        Importing replaces all settings; missing values return to their defaults.
       </p>
       <p className="mt-3 text-gray-600">
-        If the database is unavailable, Settings mentions it; changes then apply to the open window
-        only.
+        If the database is unavailable, Settings displays a warning and changes apply only to the
+        current window.
       </p>
     </div>
   </div>
@@ -853,9 +1006,9 @@ const DesktopHelp = memo(() => (
         Desktop App
       </h3>
       <p className="text-gray-600 mb-3">
-        The Qimchi desktop app is a single self-contained executable — it runs a local server inside
-        a native window, with no separate Python/Node install. The features below are unique to it
-        and don't apply when Qimchi is opened in a normal web browser.
+        The desktop app runs Qimchi and its local server in one native application. It does not
+        require a separate Python or Node installation. The features below are not available in a
+        regular web browser.
       </p>
       <div className="p-3 rounded-lg border shadow-sm text-amber-800 bg-amber-50/50 border-amber-100">
         <h4 className="font-semibold mb-1 flex items-center gap-1.5">
@@ -863,8 +1016,8 @@ const DesktopHelp = memo(() => (
           Alpha
         </h4>
         <p className="text-xs leading-relaxed">
-          The desktop build is an early/alpha release. If something looks off, the debug log (see
-          below) is the first place to check.
+          The desktop build is an alpha release. If something goes wrong, check the logs described
+          below.
         </p>
       </div>
     </div>
@@ -872,20 +1025,21 @@ const DesktopHelp = memo(() => (
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800 flex items-center gap-1.5">
         <FolderOpen size={15} className="text-[#6ea030]" />
-        Open folder (native dialog)
+        Open a Folder
       </h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            Click the green <span className="font-mono bg-gray-100 px-1 rounded">Load folder</span>{" "}
-            button in the Explorer to open your operating system's folder picker and browse to a
-            data directory
+            <span>
+              Select <span className="font-mono bg-gray-100 px-1 rounded">Load folder</span> in
+              Explorer, then choose a data directory from the system dialog
+            </span>
           </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          You can still type a path into the bar and press Enter, as in the browser version
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>You can also enter a path directly and press Enter</span>
         </li>
       </ul>
     </div>
@@ -893,36 +1047,47 @@ const DesktopHelp = memo(() => (
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800 flex items-center gap-1.5">
         <Download size={15} className="text-blue-500" />
-        Image export saves to Downloads
+        Export Images
       </h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            Exporting plot images (<span className="font-mono bg-gray-100 px-1 rounded">E</span>)
-            saves a ZIP straight to your{" "}
-            <span className="font-mono bg-gray-100 px-1 rounded">Downloads</span> folder — the
-            success toast shows the exact path
+            <span>
+              Exporting plot images (<span className="font-mono bg-gray-100 px-1 rounded">E</span>)
+              saves a ZIP to your{" "}
+              <span className="font-mono bg-gray-100 px-1 rounded">Downloads</span>
+              folder. The notification shows the full path
+            </span>
           </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          The individual PNG/SVG files are also written next to the dataset
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Qimchi also writes the individual PNG and SVG files beside the dataset</span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          On the first export, a one-time copy of Chrome may be downloaded if no system
-          Chrome/Chromium is found — it's required by the image renderer
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            To export every plot at once, use the export button on the Viewer&apos;s ribbon. You get
+            one ZIP with a ZIP for each plot inside, each exported with its own zoom and filters
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            If no compatible Chrome or Chromium installation is available, Qimchi downloads a
+            private copy for image rendering on the first export
+          </span>
         </li>
       </ul>
     </div>
 
     <div className="space-y-2">
-      <h4 className="font-medium text-gray-800">Persistent settings</h4>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
-          Your Basket, plots, and panel layout persist across restarts
+      <h4 className="font-medium text-gray-800">Persistent Settings</h4>
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Your Basket, plots, and panel layout persist across restarts</span>
         </li>
       </ul>
     </div>
@@ -933,38 +1098,46 @@ const DesktopHelp = memo(() => (
         App data — <span className="font-mono bg-gray-100 px-1 rounded">~/.qimchi</span>
       </h4>
       <p className="text-gray-600 mb-1 text-xs">
-        Everything the desktop app stores lives under{" "}
-        <span className="font-mono bg-gray-100 px-1 rounded">~/.qimchi</span> (i.e.{" "}
+        The desktop app stores its data under{" "}
+        <span className="font-mono bg-gray-100 px-1 rounded">~/.qimchi</span> ({" "}
         <span className="font-mono bg-gray-100 px-1 rounded">%USERPROFILE%\.qimchi</span> on
         Windows):
       </p>
-      <ul className="space-y-1.5 text-gray-600">
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            <span className="font-mono bg-gray-100 px-1 rounded">webview/</span> — saved settings
-            &amp; layout
+            <span>
+              <span className="font-mono bg-gray-100 px-1 rounded">webview/</span> — saved settings
+              &amp; layout
+            </span>
           </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            <span className="font-mono bg-gray-100 px-1 rounded">logs/</span> — backend and desktop
-            startup/runtime logs for troubleshooting
+            <span>
+              <span className="font-mono bg-gray-100 px-1 rounded">logs/</span> — backend and
+              desktop logs
+            </span>
           </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            <span className="font-mono bg-gray-100 px-1 rounded">qimchi.db</span> — library marks,
-            tags, notes, and cached metadata
+            <span>
+              <span className="font-mono bg-gray-100 px-1 rounded">qimchi.db</span> — library marks,
+              tags, notes, and cached metadata
+            </span>
           </span>
         </li>
-        <li className="flex gap-2">
-          <ChevronRight size={14} className="shrink-0 mt-0.5 text-blue-500" />
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            <span className="font-mono bg-gray-100 px-1 rounded">chrome/</span> — the downloaded
-            browser used for image export
+            <span>
+              <span className="font-mono bg-gray-100 px-1 rounded">chrome/</span> — the downloaded
+              browser used for image export
+            </span>
           </span>
         </li>
       </ul>
@@ -980,7 +1153,7 @@ const KeyboardHelp = memo(() => (
         Keyboard Shortcuts
       </h3>
       <p className="text-gray-600 mb-3">
-        All shortcuts are global unless noted. Esc closes any open modal or mode.
+        Shortcuts work throughout Qimchi unless noted. Esc closes the current modal or mode.
       </p>
     </div>
 
@@ -1010,7 +1183,8 @@ const KeyboardHelp = memo(() => (
           ["Shift+M", "Toggle Metadata Panel"],
           ["Shift+N", "Toggle Notes Panel"],
           ["Shift+R", "Refresh Directory"],
-          ["Esc", "Close modals / exit modes"],
+          ["Ctrl/Cmd + / −", "Zoom in / out (desktop app)"],
+          ["Esc", "Close modals / exit modes / leave the walkthrough"],
         ].map(([key, desc]) => (
           <div key={key} className="contents">
             <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-800 text-xs self-start">
@@ -1037,6 +1211,8 @@ const KeyboardHelp = memo(() => (
           ["B", "Toggle BG Correction"],
           ["S", "Swap X/Y axes"],
           ["Shift+X", "Enter LineCut mode (HeatMap)"],
+          ["X / Y / O", "Cut horizontally, vertically or obliquely (in LineCut)"],
+          ["Right-click", "Lock or unlock the cut (in LineCut)"],
           ["R", "Reset plot data, filters, appearance and zoom"],
           ["N", "Send plot to Notes"],
           ["E", "Export plot images"],
@@ -1054,7 +1230,7 @@ const KeyboardHelp = memo(() => (
   </div>
 ));
 
-// Sections Array
+// Section list
 const HELP_SECTIONS: HelpSection[] = [
   {
     id: "explorer",
@@ -1112,12 +1288,14 @@ const HELP_SECTIONS: HelpSection[] = [
   },
 ];
 
-// Modal Component
 interface HelpModalProps {
   isOpen: boolean;
   onClose: () => void;
-  /** Optional: open directly to this section id */
+  /** Section to show when the modal opens. */
   initialSection?: string;
+  onStartWalkthrough?: () => void;
+  /** Whether this modal has paused an active walkthrough. */
+  walkthroughActive?: boolean;
 }
 
 // Render an entry's text with the matched characters marked.
@@ -1156,16 +1334,20 @@ const HighlightedText = ({ text, positions }: { text: string; positions: number[
   return <>{pieces}</>;
 };
 
-const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
+const HelpModal = ({
+  isOpen,
+  onClose,
+  initialSection,
+  onStartWalkthrough,
+  walkthroughActive = false,
+}: HelpModalProps) => {
   const [activeSection, setActiveSection] = useState(initialSection ?? HELP_SECTIONS[0].id);
   const [query, setQuery] = useState("");
   const [highlightIndex, setHighlightIndex] = useState(0);
 
   const contentRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  // Built on the first search rather than at mount: walking every section costs
-  // nothing noticeable, but there is no reason to pay it for users who never
-  // search.
+  // Build the index only when search is used.
   const indexRef = useRef<HelpEntry[] | null>(null);
   const pendingScrollRef = useRef<string | null>(null);
 
@@ -1182,14 +1364,11 @@ const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
   // Escape backs out of a search first; a second press closes the modal.
   const handleEscape = () => (query ? setQuery("") : onClose());
 
-  // Sync when initialSection changes (e.g., opened from a specific button)
   const activeContent = useMemo(() => {
     return HELP_SECTIONS.find((s) => s.id === activeSection)?.content;
   }, [activeSection]);
 
-  // After jumping to a section, find the block whose text matches the chosen
-  // result and flash it. Matching on text keeps the static help JSX free of
-  // ids that would have to be kept in step with the index.
+  // Find and briefly highlight the selected search result.
   useEffect(() => {
     const target = pendingScrollRef.current;
     if (!target || !contentRef.current) return;
@@ -1243,6 +1422,17 @@ const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
       onSelectSection={setActiveSection}
       navLabel="Help sections"
       contentRef={contentRef}
+      headerActions={
+        onStartWalkthrough && (
+          <button
+            onClick={onStartWalkthrough}
+            className="mr-2 flex items-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm ring-1 ring-amber-700/40 transition-colors hover:bg-amber-700 dark:bg-amber-500 dark:text-gray-900 dark:hover:bg-amber-400"
+          >
+            <Compass size={15} />
+            {walkthroughActive ? "Back to the walkthrough" : "Take the walkthrough"}
+          </button>
+        )
+      }
       toolbar={
         <div className="relative">
           <Search
@@ -1274,13 +1464,13 @@ const HelpModal = ({ isOpen, onClose, initialSection }: HelpModalProps) => {
       {query.trim() ? (
         results.length === 0 ? (
           <div className="pt-8 text-center text-sm text-gray-500">
-            No help matches &ldquo;{query}&rdquo;
+            No results for &ldquo;{query}&rdquo;
           </div>
         ) : (
           <div className="space-y-1" role="group" aria-label="Help search results">
             <p className="mb-2 text-xs text-gray-500">
-              {results.length} result{results.length === 1 ? "" : "s"} -- Enter to open, arrows to
-              move
+              {results.length} result{results.length === 1 ? "" : "s"} · Press Enter to open; use
+              the arrow keys to move
             </p>
             {results.map((result, index) => (
               <button

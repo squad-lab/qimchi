@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 # Local imports
 from api import (
+    demo,
     dirtree,
     download,
     export,
@@ -206,6 +207,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        demo.shutdown()
         try:
             pool = getattr(app.state, "export_pool", None)
             if pool:
@@ -275,6 +277,7 @@ app.include_router(export.router)
 app.include_router(live_measurements.router)
 app.include_router(library.router)
 app.include_router(settings.router)
+app.include_router(demo.router)
 
 
 # Root route to serve the SPA (only when FastAPI serves static files)
