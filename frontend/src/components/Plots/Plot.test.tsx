@@ -99,6 +99,19 @@ describe("Plot", () => {
     await waitFor(() => expect(plotly.relayout).toHaveBeenCalled(), { timeout: 3000 });
   });
 
+  it("never offers to upload the chart, even when a saved config asks for it", async () => {
+    const saved = { ...plotJson, config: { showSendToCloud: true } };
+    render(<Plot plotJson={saved as never} />);
+    await waitFor(() => expect(plotly.react).toHaveBeenCalled(), { timeout: 3000 });
+
+    expect(plotly.react).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ showSendToCloud: false }),
+    );
+  });
+
   it("does not purge a plot that was never drawn", () => {
     // Unmounting before the container has been measured draws nothing.
     render(<Plot plotJson={plotJson as never} />).unmount();

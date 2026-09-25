@@ -5,6 +5,7 @@ import { PlotAPI, PlotRequest } from "../../services/plotAPI";
 import type { AttrData, SliderConfig, PlotConfiguration } from "../../components/interfaces";
 import { useToast } from "../../hooks/useToast";
 import { usePlotStore } from "../../stores/plotStore";
+import { useSettingsStore } from "../../stores/settingsStore";
 import { withSavedTransforms } from "../../utils/savedTransforms";
 import {
   createLiveRefreshRecorder,
@@ -23,8 +24,9 @@ type CreatePlotOptions = {
   skipIfPending?: boolean;
 };
 
-const MEMORY_REFRESH_INTERVAL_MS = 750;
 const MAX_MEMORY_REFRESH_INTERVAL_MS = 5000;
+// Read the current refresh interval on every cycle.
+const minRefreshMs = () => useSettingsStore.getState().settings.live.minRefreshMs;
 
 const inferSourceFromPath = (path: string): "memory" | "disk" =>
   path.startsWith("memory://") ? "memory" : "disk";
@@ -164,6 +166,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
           filters_opts: plotConfig.filters_opts || {},
           slider: plotConfig.slider || {},
           swap_xy: isAxesSwappedRef.current,
+          cut: plotConfig.cut,
         };
 
         const response = await PlotAPI.createPlots(request);
@@ -276,6 +279,12 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
           // Keep the existing plot and silently skip this refresh cycle.
         } else {
           const errorMsg = response.message || "No plots created";
+          // Remove plots rejected as permanently invalid by the backend.
+          if (response.invalid && !plotJsonRef.current) {
+            showToast(errorMsg, "error", 6000);
+            onRemove(plotConfig.id);
+            return;
+          }
           setError(errorMsg);
           if (!options.silent) {
             showToast(`Failed to create plot: ${errorMsg}`, "error", 5000, "Plotter", {
@@ -317,7 +326,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         fetchInFlight.current = false;
       }
     },
-    [showToast],
+    [showToast, onRemove],
   ); // No dependency on currentConfig, use ref instead
 
   const handleConfigUpdate = useCallback((updates: Partial<PlotConfiguration>) => {
@@ -429,13 +438,11 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
             pointsInPlot(plotJsonRef.current),
           );
           if (summary) void reportLiveRefresh(summary);
-          scheduleNext(
-            Math.min(MAX_MEMORY_REFRESH_INTERVAL_MS, Math.max(MEMORY_REFRESH_INTERVAL_MS, elapsed)),
-          );
+          scheduleNext(Math.min(MAX_MEMORY_REFRESH_INTERVAL_MS, Math.max(minRefreshMs(), elapsed)));
         }
       }, delay);
     };
-    scheduleNext(MEMORY_REFRESH_INTERVAL_MS);
+    scheduleNext(minRefreshMs());
 
     return () => {
       cancelled = true;
@@ -472,15 +479,15 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
 
   if (error) {
     return (
-      <div className="relative min-h-[400px] flex items-center justify-center bg-red-50 rounded-lg border border-red-200">
-        <div className="text-center max-w-md">
+      <div className="relative min-h-[400px] flex items-center justify-center bg-red-50 rounded-lg border border-red-200 p-4 overflow-hidden">
+        <div className="text-center w-full max-w-md min-w-0 break-words">
           <p className="text-red-700 font-medium">Failed to create plot</p>
           <p className="text-red-600 text-sm mt-1 mb-2">{error}</p>
 
           {/* Show current plot configuration for debugging */}
           <div className="text-xs text-gray-600 bg-gray-100 p-2 rounded mb-3">
-            <div>
-              <strong>Dataset:</strong> {currentConfig.fpath.split("/").pop()}
+            <div className="break-all" title={currentConfig.fpath}>
+              <strong>Dataset:</strong> {currentConfig.fpath.split(/[\\/]/).pop()}
             </div>
             <div>
               <strong>Variables:</strong> [{currentConfig.indeps.join(", ")}] → [

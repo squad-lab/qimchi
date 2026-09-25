@@ -1,18 +1,22 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 // Local imports
 import type { AppliedFilter, PlotConfiguration } from "../components/interfaces";
 import { usePlotStore } from "../stores/plotStore";
 import { isMemoryPath, isDatasetPath } from "../utils/datasetPaths";
 
+const pinnedFirst = (plots: PlotConfiguration[]): PlotConfiguration[] => [
+  ...plots.filter((plot) => plot.pinned),
+  ...plots.filter((plot) => !plot.pinned),
+];
+
 export interface UsePlotCollectionReturn {
   plotConfigs: PlotConfiguration[];
-  /** Add one plot at the FRONT (newest first, matching the Basket). */
+  /** Add one plot after any pinned plots. */
   addPlot: (config: Omit<PlotConfiguration, "id">) => void;
   /**
-   * Add several plots at the front as one group, preserving their order
-   * within the group. Calling addPlot in a loop would reverse them, since
-   * each call prepends -- use this for the auto-generated default plots.
+   * Add several plots after any pinned plots, preserving their order within
+   * the group. Use this for auto-generated default plots.
    */
   addPlots: (configs: Omit<PlotConfiguration, "id">[]) => void;
   removePlot: (id: string) => void;
@@ -37,6 +41,11 @@ export interface UsePlotCollectionReturn {
 
 export const usePlotCollection = (): UsePlotCollectionReturn => {
   const [plotConfigs, setPlotConfigs] = useState<PlotConfiguration[]>([]);
+
+  // Plot IDs are session-scoped, so discard state left by earlier sessions.
+  useEffect(() => {
+    usePlotStore.getState().keepOnly([]);
+  }, []);
 
   const inferSourceFromPath = useCallback((path: string): "memory" | "disk" => {
     return isMemoryPath(path) ? "memory" : "disk";
@@ -98,16 +107,16 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
     (configs: Omit<PlotConfiguration, "id">[]) => {
       if (configs.length === 0) return;
       const built = configs.map((config, index) => buildPlot(config, index));
-      // Newest group first, original order preserved inside the group.
-      setPlotConfigs((prev) => [...built, ...prev]);
+      // Pinned plots stay first; the new group leads the remaining plots.
+      setPlotConfigs((prev) => pinnedFirst([...built, ...prev]));
     },
     [buildPlot],
   );
 
   const addPlot = useCallback(
     (config: Omit<PlotConfiguration, "id">) => {
-      // Newest first, matching the Basket's newest-on-the-left ordering.
-      setPlotConfigs((prev) => [buildPlot(config, 0), ...prev]);
+      // Pinned plots stay first; the new plot leads the remaining plots.
+      setPlotConfigs((prev) => pinnedFirst([buildPlot(config, 0), ...prev]));
     },
     [buildPlot],
   );
@@ -126,12 +135,14 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
       const rest = prev.filter((candidate) => candidate.id !== id);
       const index = Math.max(0, Math.min(rest.length, toIndex));
       if (prev[index] === plot) return prev;
-      return [...rest.slice(0, index), plot, ...rest.slice(index)];
+      return pinnedFirst([...rest.slice(0, index), plot, ...rest.slice(index)]);
     });
   }, []);
 
   const setPlotPinned = useCallback((id: string, pinned: boolean) => {
-    setPlotConfigs((prev) => prev.map((plot) => (plot.id === id ? { ...plot, pinned } : plot)));
+    setPlotConfigs((prev) =>
+      pinnedFirst(prev.map((plot) => (plot.id === id ? { ...plot, pinned } : plot))),
+    );
   }, []);
 
   const clearPlots = useCallback(() => {
@@ -226,7 +237,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
           });
 
         // Newest first, consistent with addPlot/addPlots.
-        return [...replacements, ...repointed];
+        return pinnedFirst([...replacements, ...repointed]);
       });
     },
     [buildPlot, inferSourceFromPath, plotShape, toMemoryPath],

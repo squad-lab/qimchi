@@ -31,6 +31,7 @@ type Props = {
   onRelayout?: (relayoutData: Record<string, unknown>) => void;
   onClick?: (event: Plotly.PlotMouseEvent) => void;
   onHover?: (event: Plotly.PlotMouseEvent) => void;
+  compact?: boolean;
 };
 
 /**
@@ -140,6 +141,21 @@ const forgetTypesetMath = (): void => {
   }
 };
 
+// The tick relayouts made below, so the relayout listener can tell them from
+// the user's own edits. A new unit prefix renames the axis title, and passing
+// that on as a title edit redrew the plot, which reticked it, and so on forever.
+const ownRelayouts = new WeakMap<HTMLDivElement, Record<string, unknown>>();
+
+const isOwnRelayout = (node: HTMLDivElement, event: Record<string, unknown>): boolean => {
+  const own = ownRelayouts.get(node);
+  if (!own) return false;
+  const keys = Object.keys(event);
+  const same = (key: string) => JSON.stringify(own[key]) === JSON.stringify(event[key]);
+  if (keys.length === 0 || !keys.every((key) => key in own && same(key))) return false;
+  ownRelayouts.delete(node);
+  return true;
+};
+
 /** Rebuild engineering ticks for the visible axis ranges. */
 const retickForCurrentRange = (node: HTMLDivElement, layout: Partial<Layout>): void => {
   const units = unitMetaFromLayout(layout);
@@ -168,7 +184,10 @@ const retickForCurrentRange = (node: HTMLDivElement, layout: Partial<Layout>): v
   }
 
   // Plotly accepts dotted paths that its Layout type omits.
-  if (Object.keys(update).length) void Plotly.relayout(node, update as Partial<Layout>);
+  if (Object.keys(update).length) {
+    ownRelayouts.set(node, update);
+    void Plotly.relayout(node, update as Partial<Layout>);
+  }
 };
 
 type AxisWithTicks = {
@@ -211,442 +230,457 @@ const sameTicks = (current: unknown[] | undefined, next: number[]): boolean => {
   });
 };
 
-const PlotComponent: React.FC<Props> = React.memo(({ plotJson, onRelayout, onClick, onHover }) => {
-  // Defer plot JSON updates to reduce flickering during rapid appearance changes
-  const deferredPlotJson = useDeferredValue(plotJson);
-  const appTheme = useThemeStore((state) => state.theme);
-  const plotTheme = appTheme === "dark" ? darkTheme : lightTheme;
+const PlotComponent: React.FC<Props> = React.memo(
+  ({ plotJson, onRelayout, onClick, onHover, compact = false }) => {
+    // Defer rapid plot updates to avoid flicker.
+    const deferredPlotJson = useDeferredValue(plotJson);
+    const appTheme = useThemeStore((state) => state.theme);
+    const plotTheme = appTheme === "dark" ? darkTheme : lightTheme;
 
-  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-  const plotRef = useRef<HTMLDivElement>(null);
-  const plottedNodeRef = useRef<HTMLDivElement | null>(null);
-  const plotContainerRef = useRef<HTMLDivElement>(null);
-  const lastPlotStructureRef = useRef<string>("");
-  // Let the stable relayout listener read the current layout.
-  const layoutBaseRef = useRef<Partial<Layout>>({});
-  const dataRevisionRef = useRef<number>(0);
-  // Distinguish a size-only update from changed plot data.
-  const lastRenderRef = useRef<{
-    data: Data[];
-    layout: Partial<Layout>;
-    config: Partial<Config>;
-  } | null>(null);
+    const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+    const plotRef = useRef<HTMLDivElement>(null);
+    const plottedNodeRef = useRef<HTMLDivElement | null>(null);
+    const plotContainerRef = useRef<HTMLDivElement>(null);
+    const lastPlotStructureRef = useRef<string>("");
+    // Let the stable relayout listener read the current layout.
+    const layoutBaseRef = useRef<Partial<Layout>>({});
+    const dataRevisionRef = useRef<number>(0);
+    // Distinguish a size-only update from changed plot data.
+    const lastRenderRef = useRef<{
+      data: Data[];
+      layout: Partial<Layout>;
+      config: Partial<Config>;
+    } | null>(null);
 
-  // Keep a ref to the latest onRelayout callback so the listener never needs
-  // to be re-registered when the parent re-creates the callback function.
-  const onRelayoutRef = useRef(onRelayout);
-  const relayoutListenerRef = useRef<((event: Plotly.PlotRelayoutEvent) => void) | null>(null);
-  // Synchronous ref update – safe to do during render.
-  onRelayoutRef.current = onRelayout;
+    // Keep the listener stable while using the latest callback.
+    const onRelayoutRef = useRef(onRelayout);
+    const relayoutListenerRef = useRef<((event: Plotly.PlotRelayoutEvent) => void) | null>(null);
+    onRelayoutRef.current = onRelayout;
 
-  const onClickRef = useRef(onClick);
-  onClickRef.current = onClick;
-  const clickListenerRef = useRef<((event: Plotly.PlotMouseEvent) => void) | null>(null);
+    const onClickRef = useRef(onClick);
+    onClickRef.current = onClick;
+    const clickListenerRef = useRef<((event: Plotly.PlotMouseEvent) => void) | null>(null);
 
-  const onHoverRef = useRef(onHover);
-  onHoverRef.current = onHover;
-  const hoverListenerRef = useRef<((event: Plotly.PlotMouseEvent) => void) | null>(null);
+    const onHoverRef = useRef(onHover);
+    onHoverRef.current = onHover;
+    const hoverListenerRef = useRef<((event: Plotly.PlotMouseEvent) => void) | null>(null);
+    const listenersNodeRef = useRef<HTMLDivElement | null>(null);
 
-  // Wait for a measurable container before drawing.
-  const plotDrawn = dimensions.width > 0 && dimensions.height > 0;
-
-  // Create a structural hash to detect when plot needs full recreation vs just data update
-  const plotStructureHash = useMemo(() => {
-    return JSON.stringify({
-      dataLength: deferredPlotJson.data?.length || 0,
-      traceTypes: deferredPlotJson.data?.map((d) => d.type) || [],
-      layoutKeys: Object.keys(deferredPlotJson.layout || {}).sort(),
-      hasConfig: !!deferredPlotJson.config,
-    });
-  }, [deferredPlotJson.data, deferredPlotJson.layout, deferredPlotJson.config]);
-
-  // Check if structure changed significantly
-  const structureChanged = plotStructureHash !== lastPlotStructureRef.current;
-
-  // Keep dimensions separate so resizing can use relayout.
-  const layoutBase: Partial<Layout> = useMemo(() => {
-    const themedLayout = applyThemeToLayout(deferredPlotJson.layout, plotTheme);
-    return {
-      ...themedLayout,
-      autosize: true,
-      plot_bgcolor: "rgba(0,0,0,0)",
-      paper_bgcolor: "rgba(0,0,0,0)",
-      xaxis: {
-        ...themedLayout.xaxis,
-        ticks: "outside" as const,
-        showline: true,
-        mirror: true,
-        automargin: true,
-        zeroline: false,
-        linewidth: 2,
-        // The Appearance grid toggle sets this; figures without one stay gridless.
-        showgrid: themedLayout.xaxis?.showgrid ?? false,
-        // Match the minor-grid default to the major grid.
-        minor: {
-          ...themedLayout.xaxis?.minor,
-          showgrid: themedLayout.xaxis?.minor?.showgrid ?? themedLayout.xaxis?.showgrid ?? false,
-        },
-        linecolor: plotTheme.colors.text,
-      },
-      yaxis: {
-        ...themedLayout.yaxis,
-        ticks: "outside" as const,
-        showline: true,
-        mirror: true,
-        automargin: true,
-        zeroline: false,
-        linewidth: 2,
-        // The Appearance grid toggle sets this; figures without one stay gridless.
-        showgrid: themedLayout.yaxis?.showgrid ?? false,
-        // Match the minor-grid default to the major grid.
-        minor: {
-          ...themedLayout.yaxis?.minor,
-          showgrid: themedLayout.yaxis?.minor?.showgrid ?? themedLayout.yaxis?.showgrid ?? false,
-        },
-        linecolor: plotTheme.colors.text,
-      },
-    };
-  }, [deferredPlotJson.layout, plotTheme]);
-
-  layoutBaseRef.current = layoutBase;
-
-  const enhancedLayout: Partial<Layout> = useMemo(
-    () => ({
-      ...layoutBase,
-      width: dimensions.width || undefined,
-      height: dimensions.height || undefined,
-    }),
-    [layoutBase, dimensions.width, dimensions.height],
-  );
-
-  const enhancedConfig: Partial<Config> = useMemo(
-    () => ({
-      editable: true,
-      edits: {
-        annotationTail: true,
-        annotationText: true,
-        annotationPosition: true,
-        axisTitleText: true,
-        // Heatmap titles are rendered by the MathJax-safe annotation above
-        // the colorbar. The native title is intentionally blank, so enabling
-        // its editor exposes Plotly's "Click to enter Colorscale title"
-        // placeholder behind the real title. This only covers trace-level
-        // colorbars -- a layout `coloraxis` one is routed to axisTitleText by
-        // Plotly, so its placeholder is hidden in PlotWrapper.css instead.
-        colorbarTitleText: false,
-        colorbarPosition: true,
-        titleText: false,
-      },
-      responsive: true,
-      displaylogo: false,
-      displayModeBar: "hover",
-      modeBarButtonsToAdd: [],
-      // Omit dimensions to export at the current plot size.
-      toImageButtonOptions: {
-        format: "svg" as const,
-        filename: "plot",
-        scale: 2,
-      },
-      ...deferredPlotJson.config,
-      // Fit equations and derivative labels are supplied as TeX by the
-      // backend. Keep Plotly's own SVG MathJax conversion enabled even when
-      // an older saved plot config did not know about this setting.
-      typesetMath: true,
-    }),
-    [deferredPlotJson.config],
-  );
-
-  // Function to update plot using Plotly.react for efficient updates
-  const updatePlot = useCallback(async () => {
-    if (!plotRef.current || dimensions.width === 0 || dimensions.height === 0) {
-      return;
-    }
-
-    try {
-      // A size-only update can reuse the existing traces.
-      const rendered = lastRenderRef.current;
-      const sizeOnly =
-        plottedNodeRef.current === plotRef.current &&
-        !structureChanged &&
-        rendered !== null &&
-        rendered.data === deferredPlotJson.data &&
-        rendered.layout === layoutBase &&
-        rendered.config === enhancedConfig;
-
-      if (sizeOnly) {
-        await Plotly.relayout(plotRef.current, {
-          width: dimensions.width,
-          height: dimensions.height,
-        });
-        retickForCurrentRange(plotRef.current, layoutBase);
-        forgetTypesetMath();
-        return true;
-      }
-
-      if (structureChanged) {
-        lastPlotStructureRef.current = plotStructureHash;
-        dataRevisionRef.current = 0; // Reset data revision for new structure
-      }
-
-      // Plotly v4 supports MathJax v3/v4 directly. Wait for the configured
-      // tex-svg component so its first render can typeset axis titles and fit
-      // annotations instead of racing MathJax startup.
-      const mathJax = (window as any).MathJax;
-      if (mathJax?.startup?.promise) {
-        await mathJax.startup.promise;
-      }
-
-      // Bump datarevision only when trace data changed.
-      const layoutToRender = { ...enhancedLayout };
-      if (
-        !structureChanged &&
-        lastPlotStructureRef.current &&
-        rendered?.data !== deferredPlotJson.data
-      ) {
-        dataRevisionRef.current += 1;
-        layoutToRender.datarevision = dataRevisionRef.current;
-      }
-
-      // Use Plotly.react - it automatically determines whether to create or update
-      await Plotly.react(plotRef.current, deferredPlotJson.data, layoutToRender, enhancedConfig);
-      plottedNodeRef.current = plotRef.current;
-      retickForCurrentRange(plotRef.current, layoutBase);
-      forgetTypesetMath();
-      lastRenderRef.current = {
-        data: deferredPlotJson.data,
-        layout: layoutBase,
-        config: enhancedConfig,
-      };
-      enableMathAxisTitleEditing(plotRef.current);
-
-      // Register interaction listeners as soon as Plotly is ready. MathJax's
-      // optional follow-up typesetting can wait indefinitely when one of its
-      // external workers fails, but that must never disable plot interaction.
-      if (!relayoutListenerRef.current) {
-        const plotEl = plotRef.current as any;
-        if (typeof plotEl.on === "function") {
-          const handler = (event: Plotly.PlotRelayoutEvent) => {
-            const node = plottedNodeRef.current;
-            if (node) retickForCurrentRange(node, layoutBaseRef.current);
-            onRelayoutRef.current?.(event as Record<string, unknown>);
-          };
-          relayoutListenerRef.current = handler;
-          plotEl.on("plotly_relayout", handler);
-        }
-      }
-
-      if (!clickListenerRef.current) {
-        const plotEl = plotRef.current as any;
-        if (typeof plotEl.on === "function") {
-          const handler = (event: Plotly.PlotMouseEvent) => {
-            onClickRef.current?.(event);
-          };
-          clickListenerRef.current = handler;
-          plotEl.on("plotly_click", handler);
-        }
-      }
-
-      if (!hoverListenerRef.current) {
-        const plotEl = plotRef.current as any;
-        if (typeof plotEl.on === "function") {
-          const handler = (event: Plotly.PlotMouseEvent) => {
-            onHoverRef.current?.(event);
-          };
-          hoverListenerRef.current = handler;
-          plotEl.on("plotly_hover", handler);
-        }
-      }
-
-      // Explicitly typeset dynamic Plotly content after every react/update.
-      // Plotly handles its own math, while this pass catches any labels or
-      // annotations inserted during the update cycle.
-      if (typeof mathJax?.typesetPromise === "function") {
+    // Purge the old Plotly node when a collapsed container removes it.
+    const attachPlotNode = useCallback((node: HTMLDivElement | null) => {
+      const previous = plottedNodeRef.current;
+      if (previous && previous !== node) {
         try {
-          await mathJax.typesetPromise([plotRef.current]);
+          Plotly.purge(previous);
         } catch (error) {
-          // Plotly has already rendered its own MathJax groups. A secondary
-          // page-level typeset failure must not disable plot interactions.
-          console.warn("[Plot] Additional MathJax typeset failed", error);
+          console.warn("[Plot] Error purging a replaced plot:", error);
         }
-      } else {
-        console.warn("[Plot] MathJax tex-svg component is not available");
+        plottedNodeRef.current = null;
       }
+      plotRef.current = node;
+    }, []);
 
-      enableMathAxisTitleEditing(plotRef.current);
-      return true;
-    } catch (error) {
-      console.error("[Plot] Error updating plot:", error);
-      return false;
-    }
-  }, [
-    deferredPlotJson.data,
-    layoutBase,
-    enhancedLayout,
-    enhancedConfig,
-    dimensions.width,
-    dimensions.height,
-    structureChanged,
-    plotStructureHash,
-  ]);
+    // Wait for a measurable container before drawing.
+    const plotDrawn = dimensions.width > 0 && dimensions.height > 0;
 
-  // Update plot when data or layout changes
-  useEffect(() => {
-    updatePlot();
-  }, [updatePlot]);
-
-  // MathJax replaces its SVG groups asynchronously, including after a title
-  // edit triggers Plotly.react. Re-attach the title click bridge whenever
-  // those groups are replaced.
-  useEffect(() => {
-    const plotElement = plotRef.current;
-    if (!plotElement) return;
-
-    let animationFrame: number | null = null;
-    const observer = new MutationObserver(() => {
-      if (animationFrame !== null) return;
-      animationFrame = window.requestAnimationFrame(() => {
-        animationFrame = null;
-        enableMathAxisTitleEditing(plotElement);
+    // Hash the fields that require a full redraw when they change.
+    const plotStructureHash = useMemo(() => {
+      return JSON.stringify({
+        dataLength: deferredPlotJson.data?.length || 0,
+        traceTypes: deferredPlotJson.data?.map((d) => d.type) || [],
+        layoutKeys: Object.keys(deferredPlotJson.layout || {}).sort(),
+        hasConfig: !!deferredPlotJson.config,
       });
-    });
-    observer.observe(plotElement, { childList: true, subtree: true });
-    const clickHandler = (event: MouseEvent) => forwardMathAxisTitleClick(plotElement, event);
-    plotElement.addEventListener("click", clickHandler, true);
-    enableMathAxisTitleEditing(plotElement);
+    }, [deferredPlotJson.data, deferredPlotJson.layout, deferredPlotJson.config]);
 
-    return () => {
-      observer.disconnect();
-      plotElement.removeEventListener("click", clickHandler, true);
-      if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
-    };
-    // The observer reconnects the title bridge after Plotly redraws it.
-  }, [plotDrawn]);
+    const structureChanged = plotStructureHash !== lastPlotStructureRef.current;
 
-  // Clean up the plotly_relayout listener when the component unmounts.
-  // The listener itself is registered inside updatePlot after Plotly initialises,
-  // so there is exactly one listener per mounted Plot instance.
-  useEffect(() => {
-    return () => {
-      const plotEl = plottedNodeRef.current as any;
-      if (plotEl && relayoutListenerRef.current && typeof plotEl.off === "function") {
-        plotEl.off("plotly_relayout", relayoutListenerRef.current);
-        relayoutListenerRef.current = null;
-      }
-      if (plotEl && clickListenerRef.current && typeof plotEl.off === "function") {
-        plotEl.off("plotly_click", clickListenerRef.current);
-        clickListenerRef.current = null;
-      }
-      if (plotEl && hoverListenerRef.current && typeof plotEl.off === "function") {
-        plotEl.off("plotly_hover", hoverListenerRef.current);
-        hoverListenerRef.current = null;
-      }
-    };
-  }, []);
+    // Keep dimensions separate so resizing can use relayout.
+    const layoutBase: Partial<Layout> = useMemo(() => {
+      const themedLayout = applyThemeToLayout(deferredPlotJson.layout, plotTheme);
+      return {
+        ...themedLayout,
+        autosize: true,
+        plot_bgcolor: "rgba(0,0,0,0)",
+        paper_bgcolor: "rgba(0,0,0,0)",
+        xaxis: {
+          ...themedLayout.xaxis,
+          ticks: "outside" as const,
+          showline: true,
+          mirror: true,
+          automargin: true,
+          zeroline: false,
+          linewidth: 2,
+          // The Appearance grid toggle sets this; figures without one stay gridless.
+          showgrid: themedLayout.xaxis?.showgrid ?? false,
+          // Match the minor-grid default to the major grid.
+          minor: {
+            ...themedLayout.xaxis?.minor,
+            showgrid: themedLayout.xaxis?.minor?.showgrid ?? themedLayout.xaxis?.showgrid ?? false,
+          },
+          linecolor: plotTheme.colors.text,
+        },
+        yaxis: {
+          ...themedLayout.yaxis,
+          ticks: "outside" as const,
+          showline: true,
+          mirror: true,
+          automargin: true,
+          zeroline: false,
+          linewidth: 2,
+          // The Appearance grid toggle sets this; figures without one stay gridless.
+          showgrid: themedLayout.yaxis?.showgrid ?? false,
+          // Match the minor-grid default to the major grid.
+          minor: {
+            ...themedLayout.yaxis?.minor,
+            showgrid: themedLayout.yaxis?.minor?.showgrid ?? themedLayout.yaxis?.showgrid ?? false,
+          },
+          linecolor: plotTheme.colors.text,
+        },
+      };
+    }, [deferredPlotJson.layout, plotTheme]);
 
-  useEffect(() => {
-    // Defer off-screen resizes until the plot becomes visible.
-    let visible = true;
-    let resizePending = false;
-    let hasMeasured = false;
+    layoutBaseRef.current = layoutBase;
 
-    const updateDimensions = () => {
-      if (!plotContainerRef.current) return;
-      if (!visible && hasMeasured) {
-        resizePending = true;
+    const enhancedLayout: Partial<Layout> = useMemo(
+      () => ({
+        ...layoutBase,
+        width: dimensions.width || undefined,
+        height: dimensions.height || undefined,
+      }),
+      [layoutBase, dimensions.width, dimensions.height],
+    );
+
+    const enhancedConfig: Partial<Config> = useMemo(
+      () => ({
+        editable: true,
+        edits: {
+          annotationTail: true,
+          annotationText: true,
+          annotationPosition: true,
+          axisTitleText: true,
+          // Heatmap colorbar titles use the MathJax annotation. Enabling the
+          // empty native title exposes Plotly's placeholder behind it. The
+          // layout coloraxis placeholder is hidden in PlotWrapper.css.
+          colorbarTitleText: false,
+          colorbarPosition: true,
+          titleText: false,
+        },
+        responsive: true,
+        displaylogo: false,
+        displayModeBar: "hover",
+        modeBarButtonsToAdd: [],
+        // Omit dimensions to export at the current plot size.
+        toImageButtonOptions: {
+          format: "svg" as const,
+          filename: "plot",
+          scale: 2,
+        },
+        ...deferredPlotJson.config,
+        // Fit equations and derivative labels are supplied as TeX by the
+        // backend. Keep Plotly's own SVG MathJax conversion enabled even when
+        // an older saved plot config did not know about this setting.
+        typesetMath: true,
+        // Disable Plotly's default upload-to-Chart-Studio action.
+        showSendToCloud: false,
+      }),
+      [deferredPlotJson.config],
+    );
+
+    const updatePlot = useCallback(async () => {
+      // Capture the target because the component may unmount while awaiting Plotly or MathJax.
+      const node = plotRef.current;
+      if (!node || dimensions.width === 0 || dimensions.height === 0) {
         return;
       }
-      resizePending = false;
-      hasMeasured = true;
 
-      const { offsetWidth, offsetHeight } = plotContainerRef.current;
-      const newWidth = offsetWidth;
-      const newHeight = Math.max(250, offsetHeight - 20);
-
-      // Ignore subpixel layout noise.
-      setDimensions((prev) => {
-        if (Math.abs(prev.width - newWidth) > 5 || Math.abs(prev.height - newHeight) > 5) {
-          return { width: newWidth, height: newHeight };
-        }
-        return prev;
-      });
-    };
-
-    // Debounced update function
-    let timeoutId: ReturnType<typeof setTimeout>;
-    const debouncedUpdate = () => {
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(updateDimensions, 150);
-    };
-
-    // Resize shortly before the plot enters the viewport.
-    const visibilityObserver = new IntersectionObserver(
-      (entries) => {
-        visible = entries.some((entry) => entry.isIntersecting);
-        if (visible && resizePending) updateDimensions();
-      },
-      { rootMargin: "400px" },
-    );
-    if (plotContainerRef.current) visibilityObserver.observe(plotContainerRef.current);
-
-    // Initial measurement
-    const timer = setTimeout(updateDimensions, 100);
-
-    // Use ResizeObserver for container resize detection
-    const resizeObserver = new ResizeObserver(() => {
-      debouncedUpdate();
-    });
-
-    if (plotContainerRef.current) {
-      resizeObserver.observe(plotContainerRef.current);
-    }
-
-    // Window resize backup
-    window.addEventListener("resize", debouncedUpdate);
-
-    return () => {
-      clearTimeout(timer);
-      clearTimeout(timeoutId);
-      window.removeEventListener("resize", debouncedUpdate);
-      resizeObserver.disconnect();
-      visibilityObserver.disconnect();
-    };
-  }, []);
-
-  // Purge on unmount. Without it Plotly's drag handlers and the trace data
-  // stay reachable from detached SVG nodes, so a closed plot keeps its memory.
-  useEffect(
-    () => () => {
-      const plotted = plottedNodeRef.current;
-      plottedNodeRef.current = null;
-      if (!plotted) return;
       try {
-        Plotly.purge(plotted);
-      } catch (error) {
-        console.warn("[Plot] Error purging plot on unmount:", error);
-      }
-    },
-    [],
-  );
+        // A size-only update can reuse the existing traces.
+        const rendered = lastRenderRef.current;
+        const sizeOnly =
+          plottedNodeRef.current === node &&
+          !structureChanged &&
+          rendered !== null &&
+          rendered.data === deferredPlotJson.data &&
+          rendered.layout === layoutBase &&
+          rendered.config === enhancedConfig;
 
-  return (
-    <div ref={plotContainerRef} className="w-full h-full min-h-[400px]">
-      {plotDrawn && (
-        <div
-          ref={plotRef}
-          className="qimchi-plot"
-          style={{
-            width: "100%",
-            height: "100%",
-          }}
-        />
-      )}
-    </div>
-  );
-});
+        if (sizeOnly) {
+          await Plotly.relayout(node, {
+            width: dimensions.width,
+            height: dimensions.height,
+          });
+          retickForCurrentRange(node, layoutBase);
+          forgetTypesetMath();
+          return true;
+        }
+
+        if (structureChanged) {
+          lastPlotStructureRef.current = plotStructureHash;
+          dataRevisionRef.current = 0; // Reset data revision for new structure
+        }
+
+        // Wait for MathJax's tex-svg component before the first render.
+        const mathJax = (window as any).MathJax;
+        if (mathJax?.startup?.promise) {
+          await mathJax.startup.promise;
+        }
+        if (plotRef.current !== node) return false;
+
+        // Bump datarevision only when trace data changed.
+        const layoutToRender = { ...enhancedLayout };
+        if (
+          !structureChanged &&
+          lastPlotStructureRef.current &&
+          rendered?.data !== deferredPlotJson.data
+        ) {
+          dataRevisionRef.current += 1;
+          layoutToRender.datarevision = dataRevisionRef.current;
+        }
+
+        await Plotly.react(node, deferredPlotJson.data, layoutToRender, enhancedConfig);
+        if (plotRef.current !== node) return false;
+        plottedNodeRef.current = node;
+        retickForCurrentRange(node, layoutBase);
+        forgetTypesetMath();
+        lastRenderRef.current = {
+          data: deferredPlotJson.data,
+          layout: layoutBase,
+          config: enhancedConfig,
+        };
+        enableMathAxisTitleEditing(node);
+
+        // Register interactions before optional MathJax work, which may stall.
+        // A replacement node needs a fresh set of listeners.
+        if (listenersNodeRef.current !== node) {
+          relayoutListenerRef.current = null;
+          clickListenerRef.current = null;
+          hoverListenerRef.current = null;
+          listenersNodeRef.current = node;
+        }
+        if (!relayoutListenerRef.current) {
+          const plotEl = node as any;
+          if (typeof plotEl.on === "function") {
+            const handler = (event: Plotly.PlotRelayoutEvent) => {
+              const node = plottedNodeRef.current;
+              if (node && isOwnRelayout(node, event as Record<string, unknown>)) return;
+              if (node) retickForCurrentRange(node, layoutBaseRef.current);
+              onRelayoutRef.current?.(event as Record<string, unknown>);
+            };
+            relayoutListenerRef.current = handler;
+            plotEl.on("plotly_relayout", handler);
+          }
+        }
+
+        if (!clickListenerRef.current) {
+          const plotEl = node as any;
+          if (typeof plotEl.on === "function") {
+            const handler = (event: Plotly.PlotMouseEvent) => {
+              onClickRef.current?.(event);
+            };
+            clickListenerRef.current = handler;
+            plotEl.on("plotly_click", handler);
+          }
+        }
+
+        if (!hoverListenerRef.current) {
+          const plotEl = node as any;
+          if (typeof plotEl.on === "function") {
+            const handler = (event: Plotly.PlotMouseEvent) => {
+              onHoverRef.current?.(event);
+            };
+            hoverListenerRef.current = handler;
+            plotEl.on("plotly_hover", handler);
+          }
+        }
+
+        // Typeset labels and annotations inserted during this update.
+        if (typeof mathJax?.typesetPromise === "function") {
+          try {
+            await mathJax.typesetPromise([node]);
+          } catch (error) {
+            // Plotly's own math is already rendered; this optional pass may fail safely.
+            console.warn("[Plot] Additional MathJax typeset failed", error);
+          }
+        } else {
+          console.warn("[Plot] MathJax tex-svg component is not available");
+        }
+
+        if (plotRef.current !== node) return false;
+        enableMathAxisTitleEditing(node);
+        return true;
+      } catch (error) {
+        console.error("[Plot] Error updating plot:", error);
+        return false;
+      }
+    }, [
+      deferredPlotJson.data,
+      layoutBase,
+      enhancedLayout,
+      enhancedConfig,
+      dimensions.width,
+      dimensions.height,
+      structureChanged,
+      plotStructureHash,
+    ]);
+
+    useEffect(() => {
+      updatePlot();
+    }, [updatePlot]);
+
+    // MathJax replaces its SVG groups asynchronously, including after a title
+    // edit triggers Plotly.react. Re-attach the title click bridge whenever
+    // those groups are replaced.
+    useEffect(() => {
+      const plotElement = plotRef.current;
+      if (!plotElement) return;
+
+      let animationFrame: number | null = null;
+      const observer = new MutationObserver(() => {
+        if (animationFrame !== null) return;
+        animationFrame = window.requestAnimationFrame(() => {
+          animationFrame = null;
+          enableMathAxisTitleEditing(plotElement);
+        });
+      });
+      observer.observe(plotElement, { childList: true, subtree: true });
+      const clickHandler = (event: MouseEvent) => forwardMathAxisTitleClick(plotElement, event);
+      plotElement.addEventListener("click", clickHandler, true);
+      enableMathAxisTitleEditing(plotElement);
+
+      return () => {
+        observer.disconnect();
+        plotElement.removeEventListener("click", clickHandler, true);
+        if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
+      };
+    }, [plotDrawn]);
+
+    // The listener is registered after Plotly initializes and removed on unmount.
+    useEffect(() => {
+      return () => {
+        const plotEl = plottedNodeRef.current as any;
+        if (plotEl && relayoutListenerRef.current && typeof plotEl.off === "function") {
+          plotEl.off("plotly_relayout", relayoutListenerRef.current);
+          relayoutListenerRef.current = null;
+        }
+        if (plotEl && clickListenerRef.current && typeof plotEl.off === "function") {
+          plotEl.off("plotly_click", clickListenerRef.current);
+          clickListenerRef.current = null;
+        }
+        if (plotEl && hoverListenerRef.current && typeof plotEl.off === "function") {
+          plotEl.off("plotly_hover", hoverListenerRef.current);
+          hoverListenerRef.current = null;
+        }
+      };
+    }, []);
+
+    useEffect(() => {
+      // Defer off-screen resizes until the plot becomes visible.
+      let visible = true;
+      let resizePending = false;
+      let hasMeasured = false;
+
+      const updateDimensions = () => {
+        if (!plotContainerRef.current) return;
+        if (!visible && hasMeasured) {
+          resizePending = true;
+          return;
+        }
+        resizePending = false;
+        hasMeasured = true;
+
+        const { offsetWidth, offsetHeight } = plotContainerRef.current;
+        const newWidth = offsetWidth;
+        const newHeight = compact ? Math.max(120, offsetHeight) : Math.max(250, offsetHeight - 20);
+
+        // Ignore subpixel layout noise.
+        setDimensions((prev) => {
+          if (Math.abs(prev.width - newWidth) > 5 || Math.abs(prev.height - newHeight) > 5) {
+            return { width: newWidth, height: newHeight };
+          }
+          return prev;
+        });
+      };
+
+      let timeoutId: ReturnType<typeof setTimeout>;
+      const debouncedUpdate = () => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(updateDimensions, 150);
+      };
+
+      // Resize shortly before the plot enters the viewport.
+      const visibilityObserver = new IntersectionObserver(
+        (entries) => {
+          visible = entries.some((entry) => entry.isIntersecting);
+          if (visible && resizePending) updateDimensions();
+        },
+        { rootMargin: "400px" },
+      );
+      if (plotContainerRef.current) visibilityObserver.observe(plotContainerRef.current);
+
+      const timer = setTimeout(updateDimensions, 100);
+
+      const resizeObserver = new ResizeObserver(() => {
+        debouncedUpdate();
+      });
+
+      if (plotContainerRef.current) {
+        resizeObserver.observe(plotContainerRef.current);
+      }
+
+      // ResizeObserver can miss browser-level layout changes.
+      window.addEventListener("resize", debouncedUpdate);
+
+      return () => {
+        clearTimeout(timer);
+        clearTimeout(timeoutId);
+        window.removeEventListener("resize", debouncedUpdate);
+        resizeObserver.disconnect();
+        visibilityObserver.disconnect();
+      };
+    }, [compact]);
+
+    // Purge on unmount. Without it Plotly's drag handlers and the trace data
+    // stay reachable from detached SVG nodes, so a closed plot keeps its memory.
+    useEffect(
+      () => () => {
+        const plotted = plottedNodeRef.current;
+        plottedNodeRef.current = null;
+        if (!plotted) return;
+        try {
+          Plotly.purge(plotted);
+        } catch (error) {
+          console.warn("[Plot] Error purging plot on unmount:", error);
+        }
+      },
+      [],
+    );
+
+    return (
+      <div ref={plotContainerRef} className={`w-full h-full ${compact ? "" : "min-h-[400px]"}`}>
+        {plotDrawn && (
+          <div
+            ref={attachPlotNode}
+            className="qimchi-plot"
+            style={{
+              width: "100%",
+              height: "100%",
+            }}
+          />
+        )}
+      </div>
+    );
+  },
+);
 
 // Custom comparison function to prevent unnecessary re-renders
 // Only re-render if the plot structure or significant layout properties change
 const plotPropsAreEqual = (prevProps: Props, nextProps: Props): boolean => {
+  // Re-render when interaction callbacks change even if the figure is unchanged.
+  if (prevProps.onHover !== nextProps.onHover || prevProps.onClick !== nextProps.onClick) {
+    return false;
+  }
+
   // Quick reference check first
   if (prevProps.plotJson === nextProps.plotJson) {
     return true;
@@ -701,11 +735,6 @@ const plotPropsAreEqual = (prevProps: Props, nextProps: Props): boolean => {
   const prevLayoutStr = JSON.stringify(prevLayout);
   const nextLayoutStr = JSON.stringify(nextLayout);
   if (prevLayoutStr !== nextLayoutStr) {
-    return false;
-  }
-
-  // Check callback references so PlotComponent updates its refs when mode changes (LineCut, BGCorr)
-  if (prevProps.onHover !== nextProps.onHover || prevProps.onClick !== nextProps.onClick) {
     return false;
   }
 

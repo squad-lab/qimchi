@@ -331,10 +331,10 @@ const PlotContainer: React.FC<PlotContainerProps> = ({
             <PlotTile
               key={config.id}
               id={config.id}
-              className={`flex-grow rounded-lg ${draggingId === config.id ? "" : "transition-shadow"} ${
+              className={`relative flex-grow rounded-lg ${
                 selectedPlotId === config.id
-                  ? "ring-2 ring-inset ring-blue-500 shadow-md"
-                  : "ring-1 ring-inset ring-transparent"
+                  ? "after:pointer-events-none after:absolute after:inset-0 after:z-10 after:rounded-lg after:border-2 after:border-blue-500"
+                  : ""
               }`}
               onClick={() => onSelectPlot?.(config.id)}
               style={{

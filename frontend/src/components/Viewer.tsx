@@ -2,12 +2,21 @@ import axios from "axios";
 import { PROD_BACKEND_URL } from "../config";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Panel } from "react-resizable-panels";
-import { ChartScatter, CopyPlus, Radio, Trash2 } from "lucide-react";
+import {
+  ChartScatter,
+  CopyPlus,
+  ImageDown,
+  Loader2,
+  Radio,
+  RulerDimensionLine,
+  Trash2,
+} from "lucide-react";
 
 // Local imports
 import Basket, { BasketFieldSelection, BasketItem } from "./Basket";
 import { TreeNode } from "./treeUtils";
 import { AttrData } from "./interfaces";
+import { axisCombinations, missingAxesMessage } from "../utils/composerAxes";
 import PlotComposer, {
   ComposerSelectionSnapshot,
   PlotComposerHandle,
@@ -15,11 +24,13 @@ import PlotComposer, {
 } from "./PlotComposer";
 import PlotContainer from "./PlotContainer";
 import { usePlotCollection } from "../hooks/usePlotCollection";
+import { collectPlotExports, exportManyPlotImages } from "../services/exportAPI";
 import { usePlotStore } from "../stores/plotStore";
 import { useSidebarStore } from "../stores/sidebarStore";
 import SectionRibbon, { ribbonButtonClass } from "./SectionRibbon";
 import { useToast } from "../hooks/useToast";
 import Tooltip from "./Tooltip";
+import RibbonFlyout from "./Plots/RibbonFlyout";
 import {
   generateAutoPlotConfigs,
   replicatePlots,
@@ -36,6 +47,7 @@ import { isDatasetPath, isMemoryPath } from "../utils/datasetPaths";
 import { finishArchiveDownload } from "../utils/download";
 import { useSettingsStore } from "../stores/settingsStore";
 import { PLOT_WIDTHS, type PlotWidthPercent } from "../settings/userSettings";
+import { useWalkthroughStore } from "../walkthrough/walkthroughStore";
 
 interface ViewerProps {
   defaultWidth?: number; // In percentage (0-100)
@@ -73,6 +85,21 @@ const Viewer = ({
     updatePlotDataSource,
   } = usePlotCollection();
   const { getPlotState } = usePlotStore();
+
+  const plotConfigsRef = useRef(plotConfigs);
+  plotConfigsRef.current = plotConfigs;
+  const registerWalkthrough = useWalkthroughStore((state) => state.registerBridge);
+  useEffect(
+    () =>
+      registerWalkthrough({
+        plots: () => plotConfigsRef.current,
+        addPlot,
+        removePlot,
+        clearPlots,
+        clearComposer: () => composerActionRef.current?.clearComposer(),
+      }),
+    [registerWalkthrough, addPlot, removePlot, clearPlots],
+  );
   const {
     sidebarCollapsed,
     metadataCollapsed,
@@ -87,7 +114,7 @@ const Viewer = ({
   const plotWidthPercent = useSettingsStore((state) => state.settings.general.plotWidth);
   const isSquareModeGlobal = useSettingsStore((state) => state.settings.plots.squarify);
   const recreateCustomPlots = useSettingsStore((state) => state.settings.plots.recreateCustomPlots);
-  // Hide non-live plots without removing them.
+  // Preserve hidden plot state while displaying only live or pinned plots.
   const liveOnlyPlots = useSidebarStore((state) => state.liveOnlyPlots);
   const setLiveOnlyPlots = useSidebarStore((state) => state.setLiveOnlyPlots);
   const plottingBehaviour = useSettingsStore((state) => state.settings.plots.plottingBehaviour);
@@ -433,10 +460,50 @@ const Viewer = ({
   // does not share the chosen coordinate cannot be plotted against it.
   const shownPlotConfigs = useMemo(
     () =>
-      liveOnlyPlots ? plotConfigs.filter((config) => config.source === "memory") : plotConfigs,
+      liveOnlyPlots
+        ? plotConfigs.filter((config) => config.pinned || config.source === "memory")
+        : plotConfigs,
     [liveOnlyPlots, plotConfigs],
   );
   const hiddenPlotCount = plotConfigs.length - shownPlotConfigs.length;
+
+  const [exportingAll, setExportingAll] = useState(false);
+  const handleExportAll = async () => {
+    const plots = collectPlotExports(shownPlotConfigs.map((plot) => plot.id));
+    if (plots.length === 0) {
+      showToast("There are no drawn plots to export yet.", "warning");
+      return;
+    }
+    setExportingAll(true);
+    showToast(
+      `Exporting ${plots.length} plot${plots.length === 1 ? "" : "s"}. This may take a moment.`,
+      "info",
+    );
+    try {
+      const outcome = await exportManyPlotImages(plots);
+      const where = outcome.savedTo
+        ? `Saved to ${outcome.savedTo}`
+        : `Downloaded ${outcome.filename}`;
+      const failures = outcome.failures ?? [];
+      if (failures.length > 0) {
+        showToast(
+          `${where}, but ${failures.length} plot${failures.length === 1 ? "" : "s"} could not be exported: ${failures.join("; ")}`,
+          "warning",
+          8000,
+        );
+      } else {
+        showToast(where, "success");
+      }
+    } catch (error: any) {
+      console.error("Export of all plots failed:", error);
+      showToast(
+        error.response?.data?.message || error.message || "Failed to export the plots",
+        "error",
+      );
+    } finally {
+      setExportingAll(false);
+    }
+  };
 
   const [composerIndeps, setComposerIndeps] = useState<string[]>([]);
   const handleComposerSelectionChange = useCallback((snapshot: ComposerSelectionSnapshot) => {
@@ -547,7 +614,7 @@ const Viewer = ({
 
   const handleCreatePlot = (snapshot: ComposerSelectionSnapshot) => {
     if (!snapshot.hasRequiredAxes) {
-      showToast("Select required X and Y fields before plotting.", "warning");
+      showToast(missingAxesMessage(snapshot), "warning");
       return;
     }
 
@@ -562,35 +629,40 @@ const Viewer = ({
       return;
     }
 
-    const eligibility = getEligibleDatasetsForComposer(currentlySelected, {
-      indeps: snapshot.indeps,
-      deps: snapshot.deps,
+    let created = 0;
+    let skipped = false;
+    axisCombinations(snapshot).forEach(({ indeps, deps }) => {
+      const eligibility = getEligibleDatasetsForComposer(currentlySelected, {
+        indeps,
+        deps,
+        plotType: snapshot.plotType,
+      });
+      if (eligibility.ineligible.length > 0 || eligibility.unknown.length > 0) skipped = true;
+
+      eligibility.eligible.forEach((dataset) => {
+        const sourceByPath: "memory" | "disk" = isMemoryPath(dataset.path) ? "memory" : "disk";
+        created += 1;
+        addPlot({
+          // Mark Composer plots for replication to measurements added later.
+          origin: "custom",
+          fpath: dataset.path,
+          indeps,
+          deps,
+          plotType: snapshot.plotType,
+          source: sourceByPath,
+          preferredSource: sourceByPath,
+        });
+      });
     });
 
-    if (eligibility.eligible.length === 0) {
+    if (created === 0) {
       showToast("No selected datasets can be plotted with the current composer settings.", "error");
       return;
     }
 
-    eligibility.eligible.forEach((dataset) => {
-      const sourceByPath: "memory" | "disk" = isMemoryPath(dataset.path) ? "memory" : "disk";
-
-      addPlot({
-        // Composer-built: mark custom so it is replicated onto measurements
-        // added later (see replicatePlots).
-        origin: "custom",
-        fpath: dataset.path,
-        indeps: snapshot.indeps,
-        deps: snapshot.deps,
-        plotType: snapshot.plotType,
-        source: sourceByPath,
-        preferredSource: sourceByPath,
-      });
-    });
-
-    if (eligibility.ineligible.length > 0 || eligibility.unknown.length > 0) {
+    if (skipped) {
       showToast(
-        "Some selected datasets do not share the required indeps/deps and were skipped.",
+        "Some plots were skipped, because not every selected measurement has these fields or they cannot be plotted against each other.",
         "warning",
       );
     }
@@ -624,7 +696,7 @@ const Viewer = ({
     }
 
     const compatibility = isComposerCompatibleWithDataset(
-      { indeps: snapshot.indeps, deps: snapshot.deps },
+      { indeps: snapshot.indeps, deps: snapshot.deps, plotType: snapshot.plotType },
       selectedDataset.attributes,
     );
 
@@ -701,9 +773,9 @@ const Viewer = ({
   return (
     <Panel defaultSize={defaultWidth}>
       <div className="h-full flex flex-col bg-gray-100 border-r shadow-inner">
-        <div ref={containerRef} className="flex flex-col h-full p-2 gap-2">
+        <div ref={containerRef} className="flex flex-col h-full p-2 gap-2" data-tour="viewer">
           {/* Basket Component */}
-          <div ref={basketRef} className="shrink-0">
+          <div ref={basketRef} className="shrink-0" data-tour="basket">
             <Basket
               items={basketItems}
               selectedDatasetIds={effectiveSelectedDatasetIds}
@@ -722,7 +794,11 @@ const Viewer = ({
           </div>
 
           {/* Plot Composer */}
-          <div ref={composerRef} className="shrink-0 border border-gray-200 rounded-lg">
+          <div
+            ref={composerRef}
+            className="shrink-0 border border-gray-200 rounded-lg"
+            data-tour="composer"
+          >
             <PlotComposer
               ref={composerActionRef}
               onCreatePlot={handleCreatePlot}
@@ -735,6 +811,7 @@ const Viewer = ({
           <div
             className="flex-1 bg-white rounded-lg border border-gray-300 flex items-stretch"
             style={{ maxHeight: viewerHeight }}
+            data-tour="plots"
           >
             <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
               {shownPlotConfigs.length > 0 ? (
@@ -757,11 +834,13 @@ const Viewer = ({
                   <div className="text-center">
                     <ChartScatter size={48} className="mx-auto mb-2 opacity-50" />
                     <p>
-                      {hiddenPlotCount > 0 ? "No live plots to display" : "No plots to display"}
+                      {hiddenPlotCount > 0
+                        ? "No live or pinned plots to display"
+                        : "No plots to display"}
                     </p>
                     <p className="text-sm mt-1">
                       {hiddenPlotCount > 0
-                        ? `${hiddenPlotCount} plot(s) hidden while showing live only`
+                        ? `${hiddenPlotCount} plot(s) hidden while showing live and pinned only`
                         : "Create a plot using the composer above"}
                     </p>
                   </div>
@@ -769,24 +848,26 @@ const Viewer = ({
               )}
             </div>
             <SectionRibbon label="Viewer" Icon={ChartScatter} count={plotConfigs.length}>
-              {/* Live plots only */}
+              {/* Live and pinned plots only */}
               <Tooltip
                 content={
                   liveOnlyPlots
                     ? `Show all plots${hiddenPlotCount > 0 ? ` (${hiddenPlotCount} hidden)` : ""}`
-                    : "Show only live plots"
+                    : "Show only live and pinned plots"
                 }
                 position="left"
               >
                 <button
                   onClick={() => setLiveOnlyPlots(!liveOnlyPlots)}
                   className={`flex h-7 w-7 items-center justify-center rounded transition-colors duration-150 ${
-                    liveOnlyPlots ? "bg-blue-50" : "qimchi-dark-hover-plain hover:bg-gray-200"
+                    liveOnlyPlots
+                      ? "animate-pulse bg-red-50 ring-2 ring-inset ring-red-400"
+                      : "qimchi-dark-hover-plain hover:bg-gray-200"
                   }`}
-                  aria-label={liveOnlyPlots ? "Show all plots" : "Show only live plots"}
+                  aria-label={liveOnlyPlots ? "Show all plots" : "Show only live and pinned plots"}
                   aria-pressed={liveOnlyPlots}
                 >
-                  <Radio size={16} className={liveOnlyPlots ? "text-blue-600" : "text-gray-600"} />
+                  <Radio size={16} className={liveOnlyPlots ? "text-red-600" : "text-gray-600"} />
                 </button>
               </Tooltip>
 
@@ -851,13 +932,18 @@ const Viewer = ({
                 </button>
               </Tooltip>
 
-              {/* Size presets - stacked, since the ribbon has no room for a row */}
-              <div className="flex flex-col items-center overflow-hidden rounded border border-gray-200 bg-white">
-                {[33, 50, 66, 100].map((pct, idx) => (
-                  <Tooltip key={pct} content={`${pct}% width (all plots)`} position="left">
+              <RibbonFlyout
+                label="Plot width"
+                icon={<RulerDimensionLine size={16} className="text-gray-600" />}
+              >
+                {(close) =>
+                  PLOT_WIDTHS.map((pct) => (
                     <button
+                      key={pct}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={plotWidthPercent === pct}
                       onClick={() => {
-                        // When applying globally, clear per-plot overrides
                         setPlotWidthPercent(pct);
                         setPerPlotWidthMap({});
                         try {
@@ -869,19 +955,45 @@ const Viewer = ({
                         } catch {
                           /* ignore */
                         }
+                        close();
                       }}
-                      aria-label={`${pct}% width`}
-                      className={`w-7 px-1 py-0.5 text-[10px] font-medium ${
+                      aria-label={`${pct}% width (all plots)`}
+                      className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
                         plotWidthPercent === pct
-                          ? "bg-gray-200"
-                          : "qimchi-dark-hover-plain hover:bg-gray-50"
-                      } ${idx > 0 ? "-mt-px border-t border-gray-200" : ""}`}
+                          ? "bg-blue-100 text-blue-700"
+                          : "qimchi-dark-hover-plain text-gray-700 hover:bg-gray-100"
+                      }`}
                     >
                       {pct}
                     </button>
-                  </Tooltip>
-                ))}
-              </div>
+                  ))
+                }
+              </RibbonFlyout>
+
+              <Tooltip
+                content={
+                  exportingAll
+                    ? "Exporting plots..."
+                    : hiddenPlotCount > 0
+                      ? "Export the shown plots as images"
+                      : "Export all plots as images"
+                }
+                position="left"
+              >
+                <button
+                  onClick={() => void handleExportAll()}
+                  type="button"
+                  disabled={exportingAll || shownPlotConfigs.length === 0}
+                  aria-label="Export all plots"
+                  className={`${ribbonButtonClass} disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  {exportingAll ? (
+                    <Loader2 size={16} className="animate-spin text-gray-600" aria-hidden="true" />
+                  ) : (
+                    <ImageDown size={16} className="text-gray-600" aria-hidden="true" />
+                  )}
+                </button>
+              </Tooltip>
 
               <Tooltip content="Clear All Plots (Alt+Shift+V)" position="left">
                 <button

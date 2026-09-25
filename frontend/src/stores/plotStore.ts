@@ -14,6 +14,8 @@ interface PlotStoreState {
   getPlotState: (plotId: string) => PlotPersistentState | undefined;
   removePlotState: (plotId: string) => void;
   clearAllStates: () => void;
+  /** Remove saved state for plots outside the supplied set. */
+  keepOnly: (plotIds: string[]) => void;
 }
 
 export const usePlotStore = create<PlotStoreState>()(
@@ -87,6 +89,15 @@ export const usePlotStore = create<PlotStoreState>()(
 
       clearAllStates: () => {
         set({ plotStates: {} });
+      },
+
+      keepOnly: (plotIds: string[]) => {
+        const keep = new Set(plotIds);
+        set((state) => ({
+          plotStates: Object.fromEntries(
+            Object.entries(state.plotStates).filter(([id]) => keep.has(id)),
+          ),
+        }));
       },
     }),
     {

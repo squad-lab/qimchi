@@ -45,4 +45,19 @@ describe("usePlotCollection", () => {
 
     expect(usePlotStore.getState().plotStates).toEqual({});
   });
+
+  it("keeps pinned plots at the start of the list", () => {
+    const { result } = renderHook(() => usePlotCollection());
+    act(() => result.current.addPlots([config, { ...config, deps: ["other"] }]));
+    const pinnedId = result.current.plotConfigs[1].id;
+
+    act(() => result.current.setPlotPinned(pinnedId, true));
+    expect(result.current.plotConfigs[0].id).toBe(pinnedId);
+
+    act(() => result.current.addPlot({ ...config, deps: ["new"] }));
+    expect(result.current.plotConfigs[0].id).toBe(pinnedId);
+
+    act(() => result.current.movePlot(pinnedId, result.current.plotConfigs.length - 1));
+    expect(result.current.plotConfigs[0].id).toBe(pinnedId);
+  });
 });

@@ -6,20 +6,22 @@ import {
   Minimize2,
   Palette,
   X,
-  Filter,
+  Lock,
+  Download,
   RotateCcw,
   Paintbrush,
   ImageDown,
   ImagePlus,
   ArrowLeftRight,
-  Crosshair,
+  PocketKnife,
   Scissors,
-  Split,
+  ScissorsLineDashed,
   Pin,
   PinOff,
-  Download,
-  MoveHorizontal,
+  RulerDimensionLine,
   GripVertical,
+  ClipboardCopy,
+  AlertTriangle,
 } from "lucide-react";
 
 import { Data, Layout, Config } from "plotly.js";
@@ -32,6 +34,10 @@ import { PlotAPI, type TransformPlotRequest } from "../../services/plotAPI";
 import { PROD_BACKEND_URL } from "../../config";
 import "./PlotWrapper.css";
 import PlotComponent from "./Plot";
+import LineCutGuide from "./LineCutGuide";
+import LineCutPopup from "./LineCutPopup";
+import { useLineCutStore } from "../../stores/lineCutStore";
+import { plotToPng } from "../../utils/plotImage";
 import AppearanceModal from "./AppearanceModal";
 import FiltersModal from "./FiltersModal";
 import type { AppliedFilter } from "../../components/interfaces";
@@ -53,8 +59,21 @@ import { useShortcut } from "../../hooks/useGlobalShortcuts";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { filterLabel } from "../../utils/filterNames";
 import RibbonFlyout from "./RibbonFlyout";
+import {
+  exportPlotImages,
+  registerPlotExport,
+  type PlotExportPayload,
+} from "../../services/exportAPI";
 import { PLOT_WIDTHS } from "../../settings/userSettings";
 import { engineeringPresentation, unitMetaFromLayout } from "./engineeringTicks";
+import {
+  cutPlotAxis,
+  OBLIQUE_CUT_CAVEAT,
+  sampleLineCut,
+  unrotatePoint,
+  type CutPoint,
+  type RotationMeta,
+} from "../../utils/lineCut";
 
 type PlotlyJSON = {
   data: Data[];
@@ -63,6 +82,10 @@ type PlotlyJSON = {
 };
 
 type PlotLiveStatus = "live" | "paused" | "error" | "completed";
+
+type LineCutMode = "x" | "y" | "oblique";
+
+type QimchiAxesMeta = Partial<Record<"x" | "y", { variable?: string; dependent?: boolean }>>;
 
 class SupersededTransformError extends Error {}
 
@@ -185,6 +208,34 @@ const getColorscaleData = (
   return builtInMap[key] || key.charAt(0).toUpperCase() + key.slice(1);
 };
 
+// Retain line-compatible filters and map axis-specific differences to 1D diff.
+const LINE_CUT_FILTERS = new Set([
+  "diff",
+  "savgol",
+  "sma",
+  "normalize",
+  "log_scale",
+  "transform",
+  "polyfit",
+  "bg_corr_constant",
+  "bg_corr_linear",
+]);
+
+const lineCutFilters = (
+  appliedFilters: AppliedFilter[],
+): { filters_order: string[]; filters_opts: Record<string, unknown> } => {
+  const filters_order: string[] = [];
+  const filters_opts: Record<string, unknown> = {};
+  appliedFilters.forEach((filter) => {
+    const name = filter.name === "diff_x" || filter.name === "diff_y" ? "diff" : filter.name;
+    if (LINE_CUT_FILTERS.has(name) && !filters_order.includes(name)) {
+      filters_order.push(name);
+      filters_opts[name] = filter.options ?? {};
+    }
+  });
+  return { filters_order, filters_opts };
+};
+
 // Matplotlib-style "_r" names select the reversed map; Plotly reverses via reversescale.
 const isReversedColorscale = (name: string): boolean => /_r$/i.test(name);
 
@@ -286,7 +337,11 @@ const PlotWrapper: React.FC<Props> = ({
     }),
     [customizedPlotJson],
   );
-  const [isHoveredOrFocused, setIsHoveredOrFocused] = useState(false);
+  // Tracked apart so losing focus (a clicked button turning disabled while it
+  // works) does not hide the ribbon from a pointer that is still on the plot.
+  const [isHovered, setIsHovered] = useState(false);
+  const [isFocusWithin, setIsFocusWithin] = useState(false);
+  const isHoveredOrFocused = isHovered || isFocusWithin;
   const [relayoutData, setRelayoutData] = useState<Record<string, unknown> | null>(null);
   const [activePlotRef, setActivePlotRef] = useState<string | undefined>(plotRef);
 
@@ -406,90 +461,39 @@ const PlotWrapper: React.FC<Props> = ({
     setCustomizedPlotJson(retainEditedColorbarTitle);
   }, []);
 
-  // Save plot as PNG, PDF & SVG
+  // Capture the current plot state for backend export.
+  const exportPayload = useStableCallback((): PlotExportPayload | null =>
+    plotConfig && customizedPlotJson
+      ? {
+          plot_json: exportPlotJson,
+          fpath: plotConfig.fpath,
+          relayout_data: relayoutData,
+          applied_filters: appliedFilters,
+          measurement_info: measurementInfo,
+          title: plotTitle,
+        }
+      : null,
+  );
+  useEffect(() => {
+    if (!plotConfig?.id) return;
+    return registerPlotExport(plotConfig.id, exportPayload);
+  }, [plotConfig?.id, exportPayload]);
+
+  // Save plot as PNG & SVG
   const handleSavePlotImages = async () => {
-    if (!plotConfig || !customizedPlotJson) {
+    const payload = exportPayload();
+    if (!payload) {
       showToast("No plot configuration or plot data available.", "error");
       return;
     }
 
     try {
       showToast("Starting export... This may take a moment.", "info");
-
-      // Step 1: Start the export task
-      const startResponse = await axios.post(
-        `${PROD_BACKEND_URL}/export-plot-images`,
-        {
-          plot_json: exportPlotJson,
-          fpath: plotConfig.fpath,
-          relayout_data: relayoutData,
-          applied_filters: appliedFilters,
-          measurement_info: measurementInfo,
-        },
-        {
-          headers: { "Content-Type": "application/json" },
-        },
+      const outcome = await exportPlotImages(payload);
+      showToast(
+        outcome.savedTo ? `Saved to ${outcome.savedTo}` : `Downloaded ${outcome.filename}`,
+        "success",
       );
-
-      if (startResponse.status !== 202 || !startResponse.data.task_id) {
-        throw new Error(startResponse.data.message || "Failed to start export");
-      }
-
-      const taskId = startResponse.data.task_id;
-
-      // Step 2: Poll for completion
-      const pollInterval = 500; // 500ms
-      const maxPolls = 120; // 60 seconds max
-      let pollCount = 0;
-
-      while (pollCount < maxPolls) {
-        await new Promise((resolve) => setTimeout(resolve, pollInterval));
-        pollCount++;
-
-        const statusResponse = await axios.get(
-          `${PROD_BACKEND_URL}/export-plot-images/status/${taskId}`,
-        );
-
-        const status = statusResponse.data.status;
-
-        if (status === "completed") {
-          const filename = statusResponse.data.zip_filename || "plot_images.zip";
-
-          // Desktop mode: the backend already wrote the zip to disk (WebView2
-          // can't save browser downloads), so just report where it landed.
-          const savedTo: string | undefined = statusResponse.data.saved_to;
-          if (savedTo) {
-            showToast(`Saved to ${savedTo}`, "success");
-            return;
-          }
-
-          // Browser mode: download the zip via a blob + anchor click.
-          const downloadUrl = `${PROD_BACKEND_URL}${statusResponse.data.download_url}`;
-          const downloadResponse = await axios.get(downloadUrl, {
-            responseType: "blob",
-          });
-
-          const blob = new Blob([downloadResponse.data], {
-            type: "application/zip",
-          });
-          const url = window.URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = filename;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          window.URL.revokeObjectURL(url);
-
-          showToast(`Downloaded ${filename}`, "success");
-          return;
-        } else if (status === "failed") {
-          throw new Error(statusResponse.data.error || "Export failed");
-        }
-        // status === "pending", continue polling
-      }
-
-      throw new Error("Export timed out after 60 seconds");
     } catch (error: any) {
       console.error("Export error:", error);
       showToast(
@@ -497,6 +501,29 @@ const PlotWrapper: React.FC<Props> = ({
         "error",
       );
     }
+  };
+
+  // Render the current Plotly view and copy it to the clipboard.
+  const exportScale = useSettingsStore((state) => state.settings.export.scale);
+  const handleCopyToClipboard = () => {
+    const graph = plotContainerRef.current?.querySelector<HTMLElement>(".js-plotly-plot");
+    if (!graph) {
+      showToast("The plot is not drawn yet.", "warning");
+      return;
+    }
+    if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+      showToast("This browser does not allow copying images to the clipboard.", "error");
+      return;
+    }
+    const image = plotToPng(graph, exportScale ?? 2);
+    // Start the clipboard write within the click's user-activation window.
+    navigator.clipboard
+      .write([new ClipboardItem({ "image/png": image })])
+      .then(() => showToast("Copied the plot to the clipboard.", "success"))
+      .catch((error: unknown) => {
+        console.error("Clipboard copy failed:", error);
+        showToast("Could not copy the plot to the clipboard.", "error");
+      });
   };
 
   // Save light/dark PNGs and append markdown to notes
@@ -584,8 +611,12 @@ const PlotWrapper: React.FC<Props> = ({
 
   // LineCut state
   const [isLineCutActive, setIsLineCutActive] = useState(false);
-  const [lineCutAxis, setLineCutAxis] = useState<"x" | "y" | null>(null);
+  // The mode names the fixed axis: x is vertical and y is horizontal.
+  const [lineCutAxis, setLineCutAxis] = useState<LineCutMode | null>(null);
+  const [obliqueStart, setObliqueStart] = useState<CutPoint | null>(null);
   const [lineCutPreviewJson, setLineCutPreviewJson] = useState<PlotlyJSON | null>(null);
+  // A right-click holds the cut where it is until the next right-click.
+  const [isLineCutLocked, setIsLineCutLocked] = useState(false);
   const [hoverData, setHoverData] = useState<{
     x: number;
     y: number;
@@ -602,10 +633,9 @@ const PlotWrapper: React.FC<Props> = ({
     xIndex: number;
     yIndex: number;
   } | null>(null);
-  const lastLineCutAxisRef = useRef<"x" | "y" | null>(null);
+  const lastLineCutAxisRef = useRef<LineCutMode | null>(null);
 
   const shiftHeld = usePainterStore((s) => s.shiftHeld);
-  const lineCutForcedWidthRef = useRef(false);
 
   const dispatchPlotWidthPreset = useCallback(
     (percent: number) => {
@@ -629,23 +659,52 @@ const PlotWrapper: React.FC<Props> = ({
     }
   }, [lineCutAxis]);
 
-  const resolvedLineCutAxis = lineCutAxis ?? lastLineCutAxisRef.current ?? ("x" as const);
+  const resolvedLineCutAxis = lineCutAxis ?? lastLineCutAxisRef.current ?? ("y" as const);
 
-  // Keyboard listeners for LineCut mode selection (X/Y keys)
   useEffect(() => {
-    if (!isLineCutActive || (!isHoveredOrFocused && !isMaximized)) return;
+    if (!isLineCutActive) setObliqueStart(null);
+  }, [isLineCutActive]);
+
+  const measuredAxisMessage = useStableCallback((): string | null => {
+    const axes = (customizedPlotJson.layout as { meta?: { qimchi_axes?: QimchiAxesMeta } })?.meta
+      ?.qimchi_axes;
+    return axes?.x?.dependent || axes?.y?.dependent
+      ? "An oblique cut needs both axes to be swept, and one of this heat map's axes is measured."
+      : null;
+  });
+
+  const selectLineCutMode = useStableCallback((mode: LineCutMode) => {
+    const refusal = mode === "oblique" ? measuredAxisMessage() : null;
+    if (refusal) {
+      showToast(refusal, "warning");
+      return;
+    }
+    setLineCutAxis(mode);
+    setObliqueStart(null);
+    setLineCutPreviewJson(null);
+  });
+
+  // Route the global X/Y/O shortcuts to the active LineCut plot.
+  useEffect(() => {
+    if (!isLineCutActive) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (
+        e.ctrlKey ||
+        e.metaKey ||
+        e.altKey ||
+        e.shiftKey ||
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement ||
         (e.target as HTMLElement).isContentEditable
       ) {
         return;
       }
       const key = e.key.toLowerCase();
-      if (key === "x") setLineCutAxis("y");
-      else if (key === "y") setLineCutAxis("x");
+      if (key === "x") selectLineCutMode("y");
+      else if (key === "y") selectLineCutMode("x");
+      else if (key === "o") selectLineCutMode("oblique");
       else if (key === "escape") {
         setIsLineCutActive(false);
         setLineCutAxis(null);
@@ -657,7 +716,32 @@ const PlotWrapper: React.FC<Props> = ({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isLineCutActive, isHoveredOrFocused, isMaximized]);
+  }, [isLineCutActive, selectLineCutMode]);
+
+  // Activating another plot ends this plot's LineCut session.
+  const activeLineCutPlot = useLineCutStore((state) => state.activePlotId);
+  const lineCutOwnerId = plotConfig?.id ?? null;
+  useEffect(() => {
+    const { activePlotId, setActivePlot } = useLineCutStore.getState();
+    if (isLineCutActive) setActivePlot(lineCutOwnerId);
+    else if (activePlotId === lineCutOwnerId) setActivePlot(null);
+  }, [isLineCutActive, lineCutOwnerId]);
+  useEffect(() => {
+    if (isLineCutActive && activeLineCutPlot && activeLineCutPlot !== lineCutOwnerId) {
+      setIsLineCutActive(false);
+      setLineCutAxis(null);
+      setLineCutPreviewJson(null);
+    }
+    // Local toggles perform their own cleanup.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeLineCutPlot]);
+  useEffect(
+    () => () => {
+      const { activePlotId, setActivePlot } = useLineCutStore.getState();
+      if (activePlotId === lineCutOwnerId) setActivePlot(null);
+    },
+    [lineCutOwnerId],
+  );
 
   // Ref to track isApplyingFilters for effects that shouldn't re-run when this flag changes
   const isApplyingFiltersRef = useRef<boolean>(isApplyingFilters);
@@ -912,10 +996,34 @@ const PlotWrapper: React.FC<Props> = ({
         return "Intensity";
       };
 
+      let slice: number[];
+      let coords: number[];
+      let title: string;
+      // Plot the preview against the heat-map axis traversed by the cut.
+      let alongAxis: "x" | "y";
+      if (activeAxis === "oblique") {
+        if (!obliqueStart) return null;
+        const end = { x: pointX, y: pointY };
+        if (end.x === obliqueStart.x && end.y === obliqueStart.y) return null;
+        const cut = sampleLineCut(zRows, xArr, yArr, obliqueStart, end);
+        alongAxis = cutPlotAxis(xArr, yArr, obliqueStart, end);
+        slice = cut.values;
+        coords = alongAxis === "x" ? cut.x : cut.y;
+        title =
+          `Cut from (${obliqueStart.x.toFixed(2)}, ${obliqueStart.y.toFixed(2)})` +
+          ` to (${end.x.toFixed(2)}, ${end.y.toFixed(2)})`;
+      } else {
+        slice = activeAxis === "x" ? zRows.map((row) => row[xIndex]) : zRows[yIndex] || [];
+        alongAxis = activeAxis === "x" ? "y" : "x";
+        coords = alongAxis === "y" ? yArr : xArr;
+        title =
+          activeAxis === "x"
+            ? `Slice at X = ${pointX.toFixed(2)}`
+            : `Slice at Y = ${pointY.toFixed(2)}`;
+      }
+
       // Pair each value with its coordinate before dropping unmeasured (NaN)
       // points, so a gap does not shift the rest of the line.
-      const slice = activeAxis === "x" ? zRows.map((row) => row[xIndex]) : zRows[yIndex] || [];
-      const coords = activeAxis === "x" ? yArr : xArr;
       const previewX: number[] = [];
       const previewY: number[] = [];
       slice.forEach((value, i) => {
@@ -924,11 +1032,6 @@ const PlotWrapper: React.FC<Props> = ({
         previewY.push(value);
       });
       if (previewY.length === 0) return null;
-
-      const title =
-        activeAxis === "x"
-          ? `Slice at X = ${pointX.toFixed(2)}`
-          : `Slice at Y = ${pointY.toFixed(2)}`;
 
       return {
         data: [
@@ -949,7 +1052,7 @@ const PlotWrapper: React.FC<Props> = ({
           xaxis: {
             title: {
               text:
-                activeAxis === "x"
+                alongAxis === "y"
                   ? getTitleText(customizedPlotJson.layout?.yaxis)
                   : getTitleText(customizedPlotJson.layout?.xaxis),
               font: { size: 14 },
@@ -974,7 +1077,7 @@ const PlotWrapper: React.FC<Props> = ({
   // Handle Heatmap Hover for LineCut Preview
   const handlePlotHover = useCallback(
     (event: any) => {
-      if (!isLineCutActive || !event.points || !event.points[0]) {
+      if (!isLineCutActive || isLineCutLocked || !event.points || !event.points[0]) {
         return;
       }
 
@@ -1011,13 +1114,43 @@ const PlotWrapper: React.FC<Props> = ({
         setHoverData(nextHoverData);
         lastHoverDataRef.current = nextHoverData;
 
-        setLineCutPreviewJson(buildLineCutPreview(pointX, pointY, fallbackXIndex, fallbackYIndex));
+        // Low priority, so drawing the preview never holds up the pointer.
+        const preview = buildLineCutPreview(pointX, pointY, fallbackXIndex, fallbackYIndex);
+        startTransition(() => setLineCutPreviewJson(preview));
       } catch (err: any) {
         console.error("LineCut preview generation error:", err);
       }
     },
-    [isLineCutActive, buildLineCutPreview],
+    [isLineCutActive, isLineCutLocked, buildLineCutPreview],
   );
+
+  const toggleLineCutLock = useStableCallback((cell: CutPoint) => {
+    if (isLineCutLocked) {
+      setIsLineCutLocked(false);
+      return;
+    }
+    const held = {
+      x: cell.x,
+      y: cell.y,
+      xIndex: getClosestIndex(lineCutCells.xs, cell.x, 0),
+      yIndex: getClosestIndex(lineCutCells.ys, cell.y, 0),
+    };
+    setHoverData(held);
+    lastHoverDataRef.current = held;
+    try {
+      setLineCutPreviewJson(buildLineCutPreview(held.x, held.y, held.xIndex, held.yIndex));
+    } catch (err) {
+      console.error("LineCut preview generation error:", err);
+    }
+    setIsLineCutLocked(true);
+  });
+
+  // Nothing is left to hold once LineCut ends or an oblique cut loses its start.
+  useEffect(() => {
+    if (!isLineCutActive || (lineCutAxis === "oblique" && !obliqueStart)) {
+      setIsLineCutLocked(false);
+    }
+  }, [isLineCutActive, lineCutAxis, obliqueStart]);
 
   // Rebuild the preview at the locked position when the data changes (a live
   // measurement refreshing) or the cut direction is toggled.
@@ -1029,21 +1162,26 @@ const PlotWrapper: React.FC<Props> = ({
     } catch (err) {
       console.error("LineCut preview generation error:", err);
     }
-  }, [isLineCutActive, buildLineCutPreview, customizedPlotJson, lineCutAxis]);
+  }, [isLineCutActive, buildLineCutPreview, customizedPlotJson, lineCutAxis, obliqueStart]);
 
   // A locked hover position is in the old axes' coordinates after a swap. Its
   // guide line would stretch the autoranged axes and squash the heatmap.
   const clearLineCutHover = useCallback(() => {
+    setIsLineCutLocked(false);
     setHoverData(null);
     lastHoverDataRef.current = null;
+    setObliqueStart(null);
     setLineCutPreviewJson(null);
   }, []);
 
   const handleLineCutClick = useCallback(
     async (event?: Plotly.PlotMouseEvent) => {
       if (!isLineCutActive) return;
+      // Plotly reports right-clicks as clicks too; those lock the cut instead.
+      if ((event?.event as MouseEvent | undefined)?.button === 2) return;
       const activeAxis = lineCutAxis ?? lastLineCutAxisRef.current;
-      const clickedPoint = event?.points?.[0];
+      // A held cut is kept wherever the click lands.
+      const clickedPoint = isLineCutLocked ? undefined : event?.points?.[0];
 
       let clickSelection: {
         x: number;
@@ -1115,6 +1253,17 @@ const PlotWrapper: React.FC<Props> = ({
         return;
       }
 
+      if (activeAxis === "oblique") {
+        if (!obliqueStart) {
+          setObliqueStart({ x: activeHoverData.x, y: activeHoverData.y });
+          return;
+        }
+        if (activeHoverData.x === obliqueStart.x && activeHoverData.y === obliqueStart.y) {
+          showToast("The cut starts here, so click somewhere else to end it.", "warning");
+          return;
+        }
+      }
+
       try {
         showToast("Creating persistent LinePlot...", "info");
 
@@ -1176,6 +1325,74 @@ const PlotWrapper: React.FC<Props> = ({
               : areAxesSwapped
                 ? yVar
                 : xVar;
+
+        // Convert cuts on a rotated heat map to endpoint-based cuts in source coordinates.
+        const layoutMeta = (
+          customizedPlotJson.layout as {
+            meta?: { qimchi_axes?: QimchiAxesMeta; qimchi_rotation?: RotationMeta };
+          }
+        )?.meta;
+        const rotation = layoutMeta?.qimchi_rotation;
+        let cutLine: [CutPoint, CutPoint] | null = null;
+        if (activeAxis === "oblique" && obliqueStart) {
+          cutLine = [obliqueStart, { x: activeHoverData.x, y: activeHoverData.y }];
+        } else if (rotation) {
+          const refusal = measuredAxisMessage();
+          if (refusal) {
+            showToast(refusal, "warning");
+            return;
+          }
+          const { x: xs, y: ys } = lastLineCutAxisDomainsRef.current;
+          if (xs.length < 2 || ys.length < 2) {
+            throw new Error("the heat map's axes are not known yet");
+          }
+          cutLine =
+            activeAxis === "x"
+              ? [
+                  { x: activeHoverData.x, y: ys[0] },
+                  { x: activeHoverData.x, y: ys[ys.length - 1] },
+                ]
+              : [
+                  { x: xs[0], y: activeHoverData.y },
+                  { x: xs[xs.length - 1], y: activeHoverData.y },
+                ];
+        }
+
+        if (cutLine) {
+          const [start, end] = rotation
+            ? cutLine.map((point) => unrotatePoint(rotation, point))
+            : cutLine;
+          const xAxisVar = layoutMeta?.qimchi_axes?.x?.variable ?? displayXVar;
+          const yAxisVar = layoutMeta?.qimchi_axes?.y?.variable ?? displayYVar;
+
+          const cutSliders: Record<string, SliderConfig> = { ...sliderConfig };
+          delete cutSliders[xAxisVar];
+          delete cutSliders[yAxisVar];
+
+          onAddPlot({
+            origin: "custom",
+            fpath: plotConfig.fpath,
+            indeps: [xAxisVar, yAxisVar],
+            deps: plotConfig.deps,
+            plotType: "LinePlot",
+            cut: {
+              start: { [xAxisVar]: start.x, [yAxisVar]: start.y },
+              end: { [xAxisVar]: end.x, [yAxisVar]: end.y },
+            },
+            source: plotConfig.source,
+            preferredSource: plotConfig.preferredSource,
+            slider: cutSliders,
+            ...lineCutFilters(appliedFilters),
+          });
+
+          setObliqueStart(null);
+          showToast(
+            `LinePlot created along the cut from (${start.x.toFixed(2)}, ` +
+              `${start.y.toFixed(2)}) to (${end.x.toFixed(2)}, ${end.y.toFixed(2)})`,
+            "success",
+          );
+          return;
+        }
 
         const cutVar = activeAxis === "x" ? displayXVar : displayYVar;
         const remainVar = activeAxis === "x" ? displayYVar : displayXVar;
@@ -1250,34 +1467,6 @@ const PlotWrapper: React.FC<Props> = ({
         delete nextSliders[remainVar];
         nextSliders[cutVar] = normalizedCutSlider;
 
-        const valid1DFilters = new Set([
-          "diff",
-          "savgol",
-          "sma",
-          "normalize",
-          "log_scale",
-          "transform",
-          "polyfit",
-          "bg_corr_constant",
-          "bg_corr_linear",
-        ]);
-
-        const filtersOrder: string[] = [];
-        const filtersOpts: Record<string, unknown> = {};
-
-        appliedFilters.forEach((filter) => {
-          let name = filter.name;
-          // Translate 2D diff to 1D diff
-          if (name === "diff_x" || name === "diff_y") {
-            name = "diff";
-          }
-
-          if (valid1DFilters.has(name) && !filtersOrder.includes(name)) {
-            filtersOrder.push(name);
-            filtersOpts[name] = filter.options ?? {};
-          }
-        });
-
         onAddPlot({
           // Saved LineCuts are custom plots.
           origin: "custom",
@@ -1288,8 +1477,7 @@ const PlotWrapper: React.FC<Props> = ({
           source: plotConfig.source,
           preferredSource: plotConfig.preferredSource,
           slider: nextSliders,
-          filters_order: filtersOrder,
-          filters_opts: filtersOpts,
+          ...lineCutFilters(appliedFilters),
         });
 
         showToast(`LinePlot created at ${cutVar}=${cutVal.toFixed(2)}`, "success");
@@ -1299,14 +1487,16 @@ const PlotWrapper: React.FC<Props> = ({
     },
     [
       isLineCutActive,
+      isLineCutLocked,
       lineCutAxis,
+      obliqueStart,
       hoverData,
       areAxesSwapped,
       appliedFilters,
       availableSliders,
-      customizedPlotJson.layout?.xaxis,
-      customizedPlotJson.layout?.yaxis,
+      customizedPlotJson.layout,
       getClosestIndex,
+      measuredAxisMessage,
       onAddPlot,
       plotConfig,
       sliderConfig,
@@ -1357,14 +1547,8 @@ const PlotWrapper: React.FC<Props> = ({
 
           console.log("Loaded filters from plot config:", filtersFromConfig);
 
-          // Set the filters and trigger reapplication by clearing and resetting them
-          setAppliedFilters([]);
-          setTimeout(() => {
-            setAppliedFilters(filtersFromConfig);
-            if (plotConfig.id) {
-              setPlotFilters(plotConfig.id, filtersFromConfig);
-            }
-          }, 100);
+          setAppliedFilters(filtersFromConfig);
+          setPlotFilters(plotConfig.id, filtersFromConfig);
         }
 
         if (plotConfig.slider && Object.keys(plotConfig.slider).length > 0) {
@@ -1848,11 +2032,27 @@ const PlotWrapper: React.FC<Props> = ({
 
   // Apply current appearance settings when a new plot loads or when appearance settings change
   // Use useMemo to prevent unnecessary re-calculations
+  // Temporary color scale preview from the Appearance panel.
+  const [previewColorscale, setPreviewColorscale] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isAppearanceModalOpen) setPreviewColorscale(null);
+  }, [isAppearanceModalOpen]);
+  const displayedAppearance = useMemo(
+    () =>
+      previewColorscale && appearanceSettings.hmap
+        ? {
+            ...appearanceSettings,
+            hmap: { ...appearanceSettings.hmap, colorscale: previewColorscale },
+          }
+        : appearanceSettings,
+    [appearanceSettings, previewColorscale],
+  );
+
   const customizedPlotJsonMemo = useMemo(() => {
-    const result = applyAppearanceSettings(basePlotJson, appearanceSettings);
+    const result = applyAppearanceSettings(basePlotJson, displayedAppearance);
     // console.log(`[PlotWrapper] Calculated new customizedPlotJsonMemo`);
     return result;
-  }, [basePlotJson, appearanceSettings, applyAppearanceSettings]);
+  }, [basePlotJson, displayedAppearance, applyAppearanceSettings]);
 
   // Update customized plot JSON only when memo changes (but not during filter operations)
   // Use React 18's concurrent features to batch updates and prevent intermediate renders
@@ -2105,8 +2305,9 @@ const PlotWrapper: React.FC<Props> = ({
         } else {
           // Filter-only changes - use filter API directly
           if (filters.length === 0) {
-            // No filters - check if we have sliders to apply
-            if (sliders && Object.keys(sliders).length > 0) {
+            // Keep the current slider slice when the last filter is removed.
+            const keptSliders = sliders && Object.keys(sliders).length > 0 ? sliders : sliderConfig;
+            if (Object.keys(keptSliders).length > 0) {
               // No filters but have sliders - use slider API to get sliced data without filters
               try {
                 if (!plotConfig) {
@@ -2120,7 +2321,7 @@ const PlotWrapper: React.FC<Props> = ({
                   plot_ref: activePlotRef,
                   filters_order: [],
                   filters_opts: {},
-                  slider: sliders,
+                  slider: keptSliders,
                   swap_xy: shouldSwapAxes,
                 });
 
@@ -2139,7 +2340,7 @@ const PlotWrapper: React.FC<Props> = ({
                 startTransition(() => {
                   flushSync(() => {
                     setAppliedFilters(filters); // This should be empty array for this path
-                    setSliderConfig(sliders);
+                    setSliderConfig(keptSliders);
                     setBasePlotJson(result.plot_json);
                     setCustomizedPlotJson(slicedWithAppearance);
                   });
@@ -2153,9 +2354,12 @@ const PlotWrapper: React.FC<Props> = ({
                   // );
                   setIsApplyingFilters(false);
                 }, 100);
-                lastAppliedSliders.current = { ...sliders };
+                lastAppliedSliders.current = { ...keptSliders };
 
-                showToast("Filters reset, sliders maintained", "success");
+                showToast(
+                  sliders ? "Filters cleared; slider positions preserved" : "Filters cleared",
+                  "success",
+                );
               } catch (error) {
                 if (error instanceof SupersededTransformError) throw error;
                 console.error("Error applying sliders after filter reset:", error);
@@ -2227,10 +2431,11 @@ const PlotWrapper: React.FC<Props> = ({
               showToast("Filters cleared", "success");
             }
 
+            // Preserve slider values when only filters change.
             handleUpdateConfig({
               filters_order: [],
               filters_opts: {},
-              slider: sliders && Object.keys(sliders).length > 0 ? sliders : {},
+              slider: keptSliders,
             });
           } else {
             // Filters changed, sliders did not.
@@ -2268,7 +2473,7 @@ const PlotWrapper: React.FC<Props> = ({
             handleUpdateConfig({
               filters_order: filtersOrder,
               filters_opts: filtersOpts,
-              slider: {},
+              slider: sliders || sliderConfig,
             });
           }
         }
@@ -2365,6 +2570,7 @@ const PlotWrapper: React.FC<Props> = ({
         indeps: plotConfig.indeps,
         deps: plotConfig.deps,
         plotType: plotConfig.plotType,
+        cut: plotConfig.cut,
         filters_order: [], // Start with no filters
         filters_opts: {},
         slider: {},
@@ -2476,6 +2682,7 @@ const PlotWrapper: React.FC<Props> = ({
                 indeps: plotConfig.indeps,
                 deps: plotConfig.deps,
                 plotType: plotConfig.plotType,
+                cut: plotConfig.cut,
                 filters_order: filtersOrder,
                 filters_opts: filtersOpts,
                 slider: isSliderChange ? sliderConfig : {},
@@ -2603,20 +2810,7 @@ const PlotWrapper: React.FC<Props> = ({
   }, [plotConfig?.fpath, updateDataSource, isApplyingFilters]);
 
   const handleMaximize = () => {
-    setIsMaximized((prev) => {
-      const next = !prev;
-      // Leaving maximized mode should also leave LineCut so layout resets.
-      if (!next) {
-        setIsLineCutActive(false);
-        setLineCutAxis(null);
-        setLineCutPreviewJson(null);
-        if (lineCutForcedWidthRef.current) {
-          dispatchPlotWidthPreset(50);
-          lineCutForcedWidthRef.current = false;
-        }
-      }
-      return next;
-    });
+    setIsMaximized((prev) => !prev);
   };
 
   const handleAppearanceSettingsOpen = () => {
@@ -2638,6 +2832,17 @@ const PlotWrapper: React.FC<Props> = ({
     onFiltersModalOpenChange?.(false);
   };
 
+  // Close plot panels when requested by the walkthrough.
+  useEffect(() => {
+    const closePanels = () => {
+      setIsAppearanceModalOpen(false);
+      setIsFiltersModalOpen(false);
+      onFiltersModalOpenChange?.(false);
+    };
+    window.addEventListener("qimchi:close-plot-panels", closePanels);
+    return () => window.removeEventListener("qimchi:close-plot-panels", closePanels);
+  }, [onFiltersModalOpenChange]);
+
   useShortcut("escape", () => {
     if (isFiltersModalOpen) {
       handleFiltersModalClose();
@@ -2653,10 +2858,6 @@ const PlotWrapper: React.FC<Props> = ({
       setIsLineCutActive(false);
       setLineCutAxis(null);
       setLineCutPreviewJson(null);
-      if (lineCutForcedWidthRef.current) {
-        dispatchPlotWidthPreset(50);
-        lineCutForcedWidthRef.current = false;
-      }
     }
     if (isMaximized) {
       handleMaximize();
@@ -2666,17 +2867,10 @@ const PlotWrapper: React.FC<Props> = ({
   const enterLineCutMode = useCallback(() => {
     if (!isHeatmapPlot || isApplyingFilters) return;
     setIsLineCutActive(true);
-    setLineCutAxis("x");
+    setLineCutAxis("y");
+    lastLineCutAxisRef.current = "y";
     setLineCutPreviewJson(null);
-
-    if (!isMaximized) {
-      setIsMaximized(true);
-      dispatchPlotWidthPreset(100);
-      lineCutForcedWidthRef.current = true;
-    }
-
-    showToast("LineCut active. Default mode: Vertical (X). Press X/Y to switch.", "info");
-  }, [isHeatmapPlot, isApplyingFilters, isMaximized, dispatchPlotWidthPreset, showToast]);
+  }, [isHeatmapPlot, isApplyingFilters]);
 
   const toggleLineCutMode = useCallback(() => {
     if (isLineCutActive) {
@@ -2717,6 +2911,7 @@ const PlotWrapper: React.FC<Props> = ({
           indeps: plotConfig.indeps,
           deps: plotConfig.deps,
           plotType: plotConfig.plotType,
+          cut: plotConfig.cut,
           filters_order: [],
           filters_opts: {},
           slider: {},
@@ -3042,86 +3237,27 @@ const PlotWrapper: React.FC<Props> = ({
     };
   }, [customizedPlotJson, bgCorrPoints, isBGCorrActive, isHeatmapPlot, is3DMode, bgCorrMode]);
 
+  // LineCut draws its guide over the heat map (LineCutGuide), so the figure
+  // itself stays the same while the pointer moves. It also keeps one config
+  // throughout: Plotly redraws from scratch when the config changes, and that
+  // throws away the user's zoom. Editing is off so clicks reach LineCut.
   const plotWithLineCutGuide = useMemo(() => {
     const basePlot = isBGCorrActive ? plotWithBGMarkers : customizedPlotJson;
+    if (!isLineCutActive || !isHeatmapPlot) return basePlot;
+    return { ...basePlot, config: { ...(basePlot.config || {}), editable: false } };
+  }, [isBGCorrActive, plotWithBGMarkers, customizedPlotJson, isLineCutActive, isHeatmapPlot]);
 
-    if (!isLineCutActive || !isHeatmapPlot || !hoverData) {
-      return basePlot;
-    }
-
-    const axisForGuide = lineCutAxis ?? lastLineCutAxisRef.current ?? "x";
-    const normalizedGuideShapes =
-      axisForGuide === "x"
-        ? [
-            {
-              type: "line",
-              xref: "x",
-              yref: "paper",
-              x0: hoverData.x,
-              x1: hoverData.x,
-              y0: 0,
-              y1: 1,
-              editable: false,
-              line: { color: "#ffffff", width: 2.5 },
-            },
-            {
-              type: "line",
-              xref: "x",
-              yref: "paper",
-              x0: hoverData.x,
-              x1: hoverData.x,
-              y0: 0,
-              y1: 1,
-              editable: false,
-              line: { color: "#ef4444", width: 1.5 },
-            },
-          ]
-        : [
-            {
-              type: "line",
-              xref: "paper",
-              yref: "y",
-              x0: 0,
-              x1: 1,
-              y0: hoverData.y,
-              y1: hoverData.y,
-              editable: false,
-              line: { color: "#ffffff", width: 2.5 },
-            },
-            {
-              type: "line",
-              xref: "paper",
-              yref: "y",
-              x0: 0,
-              x1: 1,
-              y0: hoverData.y,
-              y1: hoverData.y,
-              editable: false,
-              line: { color: "#ef4444", width: 1.5 },
-            },
-          ];
-
+  // Cell centres the guide snaps the pointer to.
+  const lineCutCells = useMemo(() => {
+    if (!isLineCutActive || !isHeatmapPlot) return { xs: [], ys: [] };
+    const trace = (customizedPlotJson.data || []).find((t) => t.type === "heatmap") as
+      Record<string, unknown> | undefined;
+    const finite = (values: number[]) => values.filter(Number.isFinite);
     return {
-      ...basePlot,
-      layout: {
-        ...basePlot.layout,
-        shapes: [...(((basePlot.layout as any)?.shapes as any[]) ?? []), ...normalizedGuideShapes],
-      },
-      // Prevent Plotly's shape-edit cursor/handles from stealing LineCut clicks.
-      config: {
-        ...(basePlot.config || {}),
-        editable: false,
-      },
+      xs: finite(toNumericArray(trace?.["x"])),
+      ys: finite(toNumericArray(trace?.["y"])),
     };
-  }, [
-    isBGCorrActive,
-    plotWithBGMarkers,
-    customizedPlotJson,
-    isLineCutActive,
-    isHeatmapPlot,
-    hoverData,
-    lineCutAxis,
-  ]);
+  }, [isLineCutActive, isHeatmapPlot, customizedPlotJson, toNumericArray]);
 
   const handlePlotClick = (event: Plotly.PlotMouseEvent) => {
     if (!isBGCorrActive) return;
@@ -3244,9 +3380,6 @@ const PlotWrapper: React.FC<Props> = ({
     if (!usePainterStore.getState().shiftHeld) deactivatePainter();
   });
 
-  // A stable uirevision keeps the user's zoom when a new figure arrives after
-  // they moved the view (a slow filter result, a live refresh). It changes only
-  // when the old view stops making sense: swapped axes or a new axis type.
   const uiRevision = [
     plotConfig?.id,
     plotConfig?.fpath,
@@ -3255,14 +3388,14 @@ const PlotWrapper: React.FC<Props> = ({
     appearanceSettings.y.maj.type,
     viewResetCount,
   ].join("|");
-  const displayedPlotJson = useMemo(() => {
-    const plot = isBGCorrActive ? plotWithBGMarkers : customizedPlotJson;
-    return { ...plot, layout: { ...plot.layout, uirevision: uiRevision } };
-  }, [isBGCorrActive, plotWithBGMarkers, customizedPlotJson, uiRevision]);
+  const displayedPlotJson = useMemo(
+    () => ({
+      ...plotWithLineCutGuide,
+      layout: { ...plotWithLineCutGuide.layout, uirevision: uiRevision },
+    }),
+    [plotWithLineCutGuide, uiRevision],
+  );
 
-  // Maximized puts the measurement name in its own header bar, so the Plotly
-  // title would say it twice and keep the top margin it was given for it.
-  // Non-maximized cards have no header, so they keep the title.
   const maximizedPlotJson = useMemo(() => {
     if (!isMaximized) {
       return {
@@ -3284,12 +3417,159 @@ const PlotWrapper: React.FC<Props> = ({
     return { ...plotWithLineCutGuide, layout } as typeof plotWithLineCutGuide;
   }, [isMaximized, plotWithLineCutGuide, uiRevision]);
 
+  const lineCutModes = [
+    { mode: "y", key: "X", label: "Horizontal" },
+    { mode: "x", key: "Y", label: "Vertical" },
+    { mode: "oblique", key: "O", label: "Oblique" },
+  ] as const;
+
+  // Reuse the controls beside a maximized heat map and in the Viewer pop-up.
+  const lineCutPanel = (view: "full" | "popup") => (
+    <>
+      <div
+        className={`flex items-center gap-2 border-b border-gray-100 bg-gray-50/50 px-2 py-1.5 dark:bg-gray-900/50 ${
+          view === "popup" ? "linecut-popup-handle cursor-move" : ""
+        }`}
+      >
+        <div
+          role="group"
+          aria-label="LineCut direction"
+          className="flex items-center overflow-hidden rounded-md border border-gray-200 bg-white dark:bg-gray-800"
+        >
+          {lineCutModes.map(({ mode, key, label }, index) => (
+            <Tooltip
+              key={mode}
+              position="bottom"
+              content={
+                mode === "oblique" ? (
+                  <span className="block">
+                    <span className="block font-semibold">
+                      {label} ({key})
+                    </span>
+                    <span className="mt-1 block text-xs opacity-90">{OBLIQUE_CUT_CAVEAT}</span>
+                  </span>
+                ) : (
+                  `${label} (${key})`
+                )
+              }
+            >
+              <button
+                type="button"
+                onClick={() => selectLineCutMode(mode)}
+                aria-pressed={resolvedLineCutAxis === mode}
+                aria-label={label}
+                className={`flex items-center gap-1 px-2.5 py-1 font-mono text-xs font-bold transition-colors ${
+                  index > 0 ? "border-l border-gray-200" : ""
+                } ${
+                  resolvedLineCutAxis === mode
+                    ? "bg-blue-600 text-white"
+                    : "text-gray-600 hover:bg-gray-100 qimchi-dark-hover-plain"
+                }`}
+              >
+                {key}
+                {mode === "oblique" && (
+                  <AlertTriangle
+                    size={14}
+                    strokeWidth={2.25}
+                    className="fill-amber-400 stroke-amber-900 dark:fill-amber-400/15 dark:stroke-amber-400"
+                    aria-hidden
+                  />
+                )}
+              </button>
+            </Tooltip>
+          ))}
+        </div>
+        {isLineCutLocked ? (
+          <Tooltip content="Unlock, so the cut follows the pointer again" position="bottom">
+            <button
+              type="button"
+              onClick={() => setIsLineCutLocked(false)}
+              className="qimchi-dark-hover-plain flex items-center gap-1 rounded-md border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+              aria-label="Unlock the cut"
+            >
+              <Lock size={12} aria-hidden />
+              Locked
+            </button>
+          </Tooltip>
+        ) : (
+          lineCutPreviewJson && (
+            <span className="truncate text-xs text-gray-500">Right-click to lock the cut</span>
+          )
+        )}
+        <div className="flex-1" />
+        {view === "popup" ? (
+          <>
+            <Tooltip content="Expand to the full window" position="bottom">
+              <button
+                type="button"
+                onClick={() => setIsMaximized(true)}
+                className="qimchi-dark-hover-plain rounded p-1 text-gray-500 hover:bg-gray-200 hover:text-gray-700"
+                aria-label="Expand LineCut"
+              >
+                <Maximize2 size={14} />
+              </button>
+            </Tooltip>
+            <Tooltip content="Leave LineCut (Esc)" position="bottom">
+              <button
+                type="button"
+                onClick={() => setIsLineCutActive(false)}
+                className="qimchi-dark-hover-plain rounded p-1 text-gray-500 hover:bg-red-50 hover:text-red-600"
+                aria-label="Leave LineCut"
+              >
+                <X size={14} />
+              </button>
+            </Tooltip>
+          </>
+        ) : null}
+      </div>
+
+      <div className="flex-1 min-h-0 p-2 relative">
+        {lineCutPreviewJson ? (
+          <PlotComponent plotJson={lineCutPreviewJson} compact={view === "popup"} />
+        ) : (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
+            <div className="rounded-full bg-blue-50 p-3">
+              <Scissors size={22} className="text-blue-400" />
+            </div>
+            {resolvedLineCutAxis === "oblique" ? (
+              <p className="max-w-56 text-xs leading-relaxed text-gray-500">
+                {obliqueStart
+                  ? "Now click where the cut should end."
+                  : "Click the heat map where the cut should start."}
+              </p>
+            ) : (
+              <>
+                <p className="text-xs text-gray-500">
+                  Click the heat map to add this cut as a line plot, or right-click to lock it in
+                  place.
+                </p>
+                <dl className="grid grid-cols-[auto_auto] items-center gap-x-2 gap-y-1.5 text-xs text-gray-500">
+                  {lineCutModes.map(({ key, label }) => (
+                    <div key={key} className="contents">
+                      <dt>
+                        <kbd className="inline-block min-w-5 rounded border border-gray-300 bg-white px-1.5 py-0.5 font-mono text-[11px] text-gray-700 shadow-sm">
+                          {key}
+                        </kbd>
+                      </dt>
+                      <dd className="text-left">{label}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+
   // When maximized, render as a modal overlay
   if (isMaximized) {
     return (
       <div
         className="fixed inset-0 z-50 bg-black bg-opacity-50 flex items-center justify-center p-4"
         onClick={handleMaximize}
+        data-closes-on-escape
       >
         <div
           className="bg-white rounded-lg shadow-2xl border border-gray-200 overflow-hidden w-full h-full max-h-full"
@@ -3332,7 +3612,10 @@ const PlotWrapper: React.FC<Props> = ({
 
               {/* LineCut (Heatmaps only) */}
               {isHeatmapPlot && (
-                <Tooltip content="LineCut" position="bottom">
+                <Tooltip
+                  content={isLineCutActive ? "Leave LineCut (Esc)" : "LineCut"}
+                  position="bottom"
+                >
                   <button
                     onClick={toggleLineCutMode}
                     className={`relative p-1.5 rounded transition-colors duration-150 ${
@@ -3340,10 +3623,10 @@ const PlotWrapper: React.FC<Props> = ({
                         ? "bg-blue-100 text-blue-600 border border-blue-600"
                         : "qimchi-dark-hover-plain hover:bg-gray-200"
                     }`}
-                    title="Generate line slices (X/Y keys)"
+                    title="Generate line slices (X/Y/O keys)"
                     disabled={isApplyingFilters}
                   >
-                    <Split
+                    <ScissorsLineDashed
                       size={16}
                       className={isLineCutActive ? "text-blue-600" : "text-gray-600"}
                     />
@@ -3351,37 +3634,22 @@ const PlotWrapper: React.FC<Props> = ({
                 </Tooltip>
               )}
 
-              {/* Background Correction is not available while the expanded
-                  view is dedicated to the LineCut workflow. */}
-              {!isLineCutActive && (
-                <Tooltip content="Background Correction" position="bottom">
-                  <button
-                    onClick={handleBGCorrToggle}
-                    className={`relative p-1.5 rounded transition-colors duration-150 ${
-                      isBGCorrActive
-                        ? "bg-blue-100 text-blue-600 border border-blue-600"
-                        : "qimchi-dark-hover-plain hover:bg-gray-200"
-                    }`}
-                    title="BG Correction (interactive)"
-                    disabled={isApplyingFilters}
-                  >
-                    <Crosshair
-                      size={16}
-                      className={isBGCorrActive ? "text-blue-600" : "text-gray-600"}
-                    />
-                  </button>
-                </Tooltip>
-              )}
-
               <div className="w-px h-6 bg-gray-200 mx-1" />
 
-              <button
-                onClick={handleMaximize}
-                className="qimchi-dark-hover-plain p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
-                title="Restore"
+              <Tooltip
+                content={
+                  isLineCutActive ? "Return to the Viewer with LineCut in a pop-up" : "Restore"
+                }
+                position="bottom"
               >
-                <Minimize2 size={16} className="text-gray-600" />
-              </button>
+                <button
+                  onClick={handleMaximize}
+                  className="qimchi-dark-hover-plain p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
+                  aria-label="Restore"
+                >
+                  <Minimize2 size={16} className="text-gray-600" />
+                </button>
+              </Tooltip>
             </div>
           </div>
 
@@ -3425,6 +3693,17 @@ const PlotWrapper: React.FC<Props> = ({
                         : undefined
                   }
                 />
+                {isLineCutActive && isHeatmapPlot && (
+                  <LineCutGuide
+                    mode={resolvedLineCutAxis}
+                    hovered={hoverData}
+                    start={obliqueStart}
+                    xs={lineCutCells.xs}
+                    ys={lineCutCells.ys}
+                    locked={isLineCutLocked}
+                    onToggleLock={toggleLineCutLock}
+                  />
+                )}
 
                 {/* BG Corr Controls Overlay (Maximized) */}
 
@@ -3556,63 +3835,7 @@ const PlotWrapper: React.FC<Props> = ({
                   className="h-full bg-white border-l border-gray-200 flex flex-col z-30 transition-all duration-300 animate-in slide-in-from-right"
                   style={{ width: "50%" }}
                 >
-                  <div className="flex items-center p-3 border-b border-gray-100 bg-gray-50/50 dark:bg-gray-900/50">
-                    <div className="flex items-center gap-2">
-                      <div className="p-1 px-2 bg-blue-100 text-blue-700 rounded-md text-[10px] font-black uppercase tracking-tighter">
-                        LineCut Preview
-                      </div>
-                      <span className="text-[11px] font-bold text-gray-600 uppercase">
-                        Mode: {resolvedLineCutAxis === "x" ? "Vertical" : "Horizontal"}
-                      </span>
-                      <span className="text-[10px] font-bold text-gray-500 uppercase ml-2 border-l border-gray-200 pl-2">
-                        State:{" "}
-                        {hoverData &&
-                        typeof hoverData.x === "number" &&
-                        typeof hoverData.y === "number"
-                          ? `[${hoverData.x.toFixed(4)}, ${hoverData.y.toFixed(4)}]`
-                          : "None"}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex-1 p-2 relative">
-                    {lineCutPreviewJson ? (
-                      <PlotComponent plotJson={lineCutPreviewJson} />
-                    ) : (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 space-y-3">
-                        <div className="p-4 bg-blue-50 rounded-full animate-pulse">
-                          <Scissors size={24} className="text-blue-400" />
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold text-gray-600">Ready for LineCut</p>
-                          <p className="text-[10px] text-gray-400 mt-1 max-w-[150px]">
-                            Press{" "}
-                            <kbd className="font-sans border px-1 rounded bg-white shadow-sm">
-                              Y
-                            </kbd>{" "}
-                            for Vertical mode or{" "}
-                            <kbd className="font-sans border px-1 rounded bg-white shadow-sm">
-                              X
-                            </kbd>{" "}
-                            for Horizontal mode.
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="p-3 border-t border-gray-100 bg-white">
-                    <div className="text-[12px] text-gray-400 font-medium mb-2 flex items-center gap-1">
-                      <div className="w-1 h-1 rounded-full bg-blue-400"></div>
-                      Click Heatmap to create persistent LinePlot
-                    </div>
-                    <button
-                      onClick={() => setIsLineCutActive(false)}
-                      className="w-full py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-[10px] font-bold rounded-lg transition-colors active:scale-[0.98]"
-                    >
-                      Exit LineCut Mode
-                    </button>
-                  </div>
+                  {lineCutPanel("full")}
                 </div>
               )}
             </div>
@@ -3628,10 +3851,12 @@ const PlotWrapper: React.FC<Props> = ({
       <div
         ref={plotContainerRef}
         className="relative w-full h-full bg-white rounded-lg shadow-md border border-gray-200 overflow-hidden outline-none focus:ring-2 focus:ring-blue-400/50"
-        onMouseEnter={() => setIsHoveredOrFocused(true)}
-        onMouseLeave={() => setIsHoveredOrFocused(false)}
-        onFocus={() => setIsHoveredOrFocused(true)}
-        onBlur={() => setIsHoveredOrFocused(false)}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        onFocus={() => setIsFocusWithin(true)}
+        onBlur={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setIsFocusWithin(false);
+        }}
         tabIndex={0}
         onClick={() => handlePaintTargetClick()}
       >
@@ -3664,6 +3889,20 @@ const PlotWrapper: React.FC<Props> = ({
                 isLineCutActive ? handleLineCutClick : isBGCorrActive ? handlePlotClick : undefined
               }
             />
+            {isLineCutActive && isHeatmapPlot && (
+              <>
+                <LineCutGuide
+                  mode={resolvedLineCutAxis}
+                  hovered={hoverData}
+                  start={obliqueStart}
+                  xs={lineCutCells.xs}
+                  ys={lineCutCells.ys}
+                  locked={isLineCutLocked}
+                  onToggleLock={toggleLineCutLock}
+                />
+                <LineCutPopup anchorRef={plotContainerRef}>{lineCutPanel("popup")}</LineCutPopup>
+              </>
+            )}
 
             {/* BG Corr Controls Overlay */}
 
@@ -3814,74 +4053,53 @@ const PlotWrapper: React.FC<Props> = ({
           {/* Control buttons at bottom */}
           <div className="flex flex-col gap-1 items-center">
             <div className="flex flex-col gap-1 items-center mt-1">
-              {/* This plot's width; the Viewer's buttons set every plot's */}
-              <RibbonFlyout
-                label="Plot width"
-                icon={<MoveHorizontal size={16} className="text-gray-600" />}
-              >
-                {(close) =>
-                  PLOT_WIDTHS.map((percent) => (
+              {isHeatmapPlot && (
+                <>
+                  <Tooltip content="LineCut Tool" position="left">
                     <button
-                      key={percent}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={widthPercent === percent}
-                      aria-label={`${percent}% width (this plot)`}
-                      onClick={() => {
-                        dispatchPlotWidthPreset(percent);
-                        close();
-                      }}
-                      className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
-                        widthPercent === percent
-                          ? "bg-blue-100 text-blue-700"
-                          : "qimchi-dark-hover-plain text-gray-700 hover:bg-gray-100"
+                      onClick={toggleLineCutMode}
+                      className={`relative p-1.5 rounded transition-colors duration-150 ${
+                        isLineCutActive
+                          ? "bg-blue-100 text-blue-600 border border-blue-600"
+                          : "qimchi-dark-hover-plain hover:bg-gray-200"
                       }`}
+                      disabled={isApplyingFilters}
+                      aria-label="LineCut Tool"
                     >
-                      {percent}
+                      <ScissorsLineDashed
+                        size={16}
+                        className={isLineCutActive ? "text-blue-600" : "text-gray-600"}
+                      />
+                      {isLineCutActive && (
+                        <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                        </span>
+                      )}
                     </button>
-                  ))
-                }
-              </RibbonFlyout>
+                  </Tooltip>
 
-              {/* Export: images to disk, or into this measurement's notes */}
-              <RibbonFlyout label="Export" icon={<Download size={16} className="text-gray-600" />}>
-                {(close) => (
-                  <>
-                    <Tooltip content="Export images" position="top">
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          close();
-                          void handleSavePlotImages();
-                        }}
-                        className="qimchi-dark-hover-plain flex items-center gap-1 rounded px-1.5 py-1 hover:bg-gray-100"
-                        title="Export images"
-                        aria-label="Export images"
-                      >
-                        <ImageDown size={16} className="text-gray-600" />
-                        <span className="text-[11px] font-medium text-gray-700">Disk</span>
-                      </button>
-                    </Tooltip>
-                    <Tooltip content="Send to Notes" position="top">
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          close();
-                          void handleSendToNotes();
-                        }}
-                        className="qimchi-dark-hover-plain flex items-center gap-1 rounded px-1.5 py-1 hover:bg-gray-100"
-                        title="Send to Notes"
-                        aria-label="Send to Notes"
-                      >
-                        <ImagePlus size={16} className="text-gray-600" />
-                        <span className="text-[11px] font-medium text-gray-700">Notes</span>
-                      </button>
-                    </Tooltip>
-                  </>
-                )}
-              </RibbonFlyout>
+                  <Tooltip content="Swap X & Y Axes" position="left">
+                    <button
+                      onClick={handleSwapAxes}
+                      className={`relative p-1.5 rounded transition-colors duration-150 ${
+                        areAxesSwapped
+                          ? "bg-blue-100 text-blue-600"
+                          : "qimchi-dark-hover-plain hover:bg-gray-200"
+                      }`}
+                      disabled={isApplyingFilters}
+                      aria-label="Swap X and Y axes"
+                    >
+                      <ArrowLeftRight
+                        size={16}
+                        className={areAxesSwapped ? "text-blue-600" : "text-gray-600"}
+                      />
+                    </button>
+                  </Tooltip>
+
+                  <div className="my-1 h-px w-6 bg-gray-200" role="separator" />
+                </>
+              )}
 
               {/* Appearance Settings */}
               <Tooltip
@@ -3947,7 +4165,7 @@ const PlotWrapper: React.FC<Props> = ({
                   }
                   disabled={isApplyingFilters}
                 >
-                  <Filter
+                  <PocketKnife
                     size={16}
                     className={`text-${shiftHeld && hoverFiltersBtn ? "blue-600" : "gray-600"}`}
                   />
@@ -3971,78 +4189,85 @@ const PlotWrapper: React.FC<Props> = ({
                 </button>
               </Tooltip>
 
-              {/* Swap X & Y Axes (heatmaps only) */}
-              {isHeatmapPlot && (
-                <Tooltip content="Swap X & Y Axes" position="left">
-                  <button
-                    onClick={handleSwapAxes}
-                    className={`relative p-1.5 rounded transition-colors duration-150 ${
-                      areAxesSwapped
-                        ? "bg-blue-100 text-blue-600"
-                        : "qimchi-dark-hover-plain hover:bg-gray-200"
-                    }`}
-                    title="Swap X & Y Axes"
-                    disabled={isApplyingFilters}
-                  >
-                    <ArrowLeftRight
-                      size={16}
-                      className={areAxesSwapped ? "text-blue-600" : "text-gray-600"}
-                    />
-                  </button>
-                </Tooltip>
-              )}
+              <RibbonFlyout label="Export" icon={<Download size={16} className="text-gray-600" />}>
+                {(close) => (
+                  <>
+                    <Tooltip content="Export images" position="top">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          close();
+                          void handleSavePlotImages();
+                        }}
+                        className="qimchi-dark-hover-plain flex items-center gap-1 rounded px-1.5 py-1 hover:bg-gray-100"
+                        aria-label="Export images"
+                      >
+                        <ImageDown size={16} className="text-gray-600" />
+                        <span className="text-[11px] font-medium text-gray-700">Disk</span>
+                      </button>
+                    </Tooltip>
+                    <Tooltip content="Send to Notes" position="top">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          close();
+                          void handleSendToNotes();
+                        }}
+                        className="qimchi-dark-hover-plain flex items-center gap-1 rounded px-1.5 py-1 hover:bg-gray-100"
+                        aria-label="Send to Notes"
+                      >
+                        <ImagePlus size={16} className="text-gray-600" />
+                        <span className="text-[11px] font-medium text-gray-700">Notes</span>
+                      </button>
+                    </Tooltip>
+                    <Tooltip content="Copy as PNG" position="top">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          close();
+                          handleCopyToClipboard();
+                        }}
+                        className="qimchi-dark-hover-plain flex items-center gap-1 rounded px-1.5 py-1 hover:bg-gray-100"
+                        aria-label="Copy to clipboard"
+                      >
+                        <ClipboardCopy size={16} className="text-gray-600" />
+                        <span className="text-[11px] font-medium text-gray-700">Copy</span>
+                      </button>
+                    </Tooltip>
+                  </>
+                )}
+              </RibbonFlyout>
 
-              {/* LineCut (Heatmaps only) */}
-              {isHeatmapPlot && (
-                <Tooltip content="LineCut Tool" position="left">
-                  <button
-                    onClick={toggleLineCutMode}
-                    className={`relative p-1.5 rounded transition-colors duration-150 ${
-                      isLineCutActive
-                        ? "bg-blue-100 text-blue-600 border border-blue-600"
-                        : "qimchi-dark-hover-plain hover:bg-gray-200"
-                    }`}
-                    title="Generate line slices (X/Y keys)"
-                    disabled={isApplyingFilters}
-                  >
-                    <Split
-                      size={16}
-                      className={isLineCutActive ? "text-blue-600" : "text-gray-600"}
-                    />
-                    {isLineCutActive && (
-                      <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-                      </span>
-                    )}
-                  </button>
-                </Tooltip>
-              )}
-
-              {/* Background Correction (LinePlots and Heatmaps) */}
-              <Tooltip content="Background Correction" position="left">
-                <button
-                  onClick={handleBGCorrToggle}
-                  className={`relative p-1.5 rounded transition-colors duration-150 ${
-                    isBGCorrActive
-                      ? "bg-blue-100 text-blue-600 border border-blue-600"
-                      : "qimchi-dark-hover-plain hover:bg-gray-200"
-                  }`}
-                  title="BG Correction (interactive)"
-                  disabled={isApplyingFilters}
-                >
-                  <Crosshair
-                    size={16}
-                    className={isBGCorrActive ? "text-blue-600" : "text-gray-600"}
-                  />
-                  {isBGCorrActive && (
-                    <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-                    </span>
-                  )}
-                </button>
-              </Tooltip>
+              <RibbonFlyout
+                label="Plot width"
+                icon={<RulerDimensionLine size={16} className="text-gray-600" />}
+              >
+                {(close) =>
+                  PLOT_WIDTHS.map((percent) => (
+                    <button
+                      key={percent}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={widthPercent === percent}
+                      aria-label={`${percent}% width (this plot)`}
+                      onClick={() => {
+                        dispatchPlotWidthPreset(percent);
+                        close();
+                      }}
+                      className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                        widthPercent === percent
+                          ? "bg-blue-100 text-blue-700"
+                          : "qimchi-dark-hover-plain text-gray-700 hover:bg-gray-100"
+                      }`}
+                    >
+                      {percent}
+                    </button>
+                  ))
+                }
+              </RibbonFlyout>
 
               {/* Maximize */}
               <Tooltip content="Maximize" position="left">
@@ -4066,6 +4291,7 @@ const PlotWrapper: React.FC<Props> = ({
         settings={appearanceSettings}
         defaults={appearanceDefaults}
         onChange={handleAppearanceSettingsChange}
+        onPreviewColorscale={setPreviewColorscale}
         plotType={plotType}
         plotTitle={plotTitle}
         plotJson={basePlotJson}

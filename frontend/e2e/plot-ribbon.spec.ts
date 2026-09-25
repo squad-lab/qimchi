@@ -10,11 +10,7 @@ async function openBothPlots(page: Page) {
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.goto("/");
   await page.getByRole("button", { name: "Live Measurements" }).click();
-  await page
-    .getByText("live-heat", { exact: true })
-    .locator("xpath=ancestor::div[@data-level][1]")
-    .getByRole("button", { name: "Add to basket" })
-    .click();
+  await page.getByText("live-heat", { exact: true }).dblclick();
   await expect(page.locator(".js-plotly-plot")).toHaveCount(2);
   return settings;
 }
@@ -34,7 +30,9 @@ test("the width button sizes one plot, and the Viewer's buttons size them all", 
   page,
 }) => {
   const settings = await openBothPlots(page);
-  const widthButtons = page.getByRole("button", { name: "Plot width", exact: true });
+  const widthButtons = page
+    .locator("[data-plot-id]")
+    .getByRole("button", { name: "Plot width", exact: true });
   await expect(widthButtons).toHaveCount(2);
 
   // The options stay hidden until the button is pressed.
@@ -49,7 +47,9 @@ test("the width button sizes one plot, and the Viewer's buttons size them all", 
   // A plot's own width is for this session only; it is not a saved setting.
   expect(settings.document).toEqual({ plots: { plottingBehaviour: "both" } });
 
-  await page.getByRole("button", { name: "33% width" }).click();
+  const viewerWidth = page.getByRole("button", { name: "Plot width", exact: true }).last();
+  await viewerWidth.click();
+  await page.getByRole("menuitemradio", { name: "33% width (all plots)" }).click();
   await expect
     .poll(async () => Object.values(await plotWidths(page)))
     .toEqual(["calc(33% - 8px)", "calc(33% - 8px)"]);
@@ -145,4 +145,41 @@ test("plots are rearranged by dragging their handle, and keep their own widths",
   await expect
     .poll(() => plotLayout(page))
     .toEqual(["heatmap calc(100% - 8px)", "scatter calc(50% - 8px)"]);
+});
+
+test("the Viewer exports every plot at once, each as it is shown", async ({ page }) => {
+  await openBothPlots(page);
+  let batch: { plots: { fpath: string; relayout_data: unknown; plot_json: unknown }[] } | null =
+    null;
+  await page.route("**/export-plot-images**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/batch")) {
+      batch = route.request().postDataJSON();
+      await route.fulfill({ status: 202, json: { task_id: "task" } });
+    } else {
+      await route.fulfill({
+        json: { status: "completed", saved_to: "C:/exports/all.zip", exported: 2, failures: [] },
+      });
+    }
+  });
+
+  await page.getByRole("button", { name: "Export all plots" }).click();
+  await expect(page.getByText("Saved to C:/exports/all.zip")).toBeVisible();
+  expect(batch!.plots).toHaveLength(2);
+  expect(batch!.plots.every((plot) => plot.plot_json && plot.fpath)).toBe(true);
+});
+
+test("a plot can be copied to the clipboard as an image", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await openBothPlots(page);
+
+  await page.getByRole("button", { name: "Export", exact: true }).first().click();
+  await page.getByRole("menuitem", { name: "Copy to clipboard" }).click();
+  await expect(page.getByText("Copied the plot to the clipboard.")).toBeVisible();
+
+  const types = await page.evaluate(async () => {
+    const items = await navigator.clipboard.read();
+    return items.flatMap((item) => item.types);
+  });
+  expect(types).toContain("image/png");
 });
