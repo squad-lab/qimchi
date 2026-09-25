@@ -118,6 +118,15 @@ export interface SliderConfig {
   max: number;
   step: number;
   value: number;
+  /** Labels indexed by `value` when a dimension has no numeric coordinates. */
+  labels?: string[];
+}
+
+/** Endpoints and optional sample count for a heat-map line cut. */
+export interface LineCut {
+  start: Record<string, number>;
+  end: Record<string, number>;
+  points?: number;
 }
 
 export interface PlotConfiguration {
@@ -126,6 +135,8 @@ export interface PlotConfiguration {
   indeps: string[];
   deps: string[];
   plotType: "LinePlot" | "HeatMap";
+  /** Optional line cut through the two independent axes. */
+  cut?: LineCut;
   filters_order?: string[];
   filters_opts?: Record<string, unknown>;
   slider?: Record<string, SliderConfig>;

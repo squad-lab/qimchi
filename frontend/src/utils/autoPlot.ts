@@ -265,6 +265,7 @@ export function replicatePlots(
       indeps: [...config.indeps],
       deps: [...config.deps],
       plotType: config.plotType,
+      cut: config.cut,
       filters_order,
       filters_opts,
       slider: config.slider,

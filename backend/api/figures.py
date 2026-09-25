@@ -268,6 +268,27 @@ def axis_dimension(data: Dataset, variable: str) -> str:
     return str(dims[0])
 
 
+def sweep_dimension(data: Dataset, variable: str) -> str:
+    """
+    Resolve the sweep dimension for a line-plot axis.
+
+    For a measured variable spanning multiple dimensions, select the last one
+    in coordinate order and expose the remaining dimensions as sliders.
+
+    """
+    if variable in data.data_vars and len(data.data_vars[variable].dims) > 1:
+        dims = {str(dim) for dim in data.data_vars[variable].dims}
+        ordered = [
+            str(name)
+            for name, coord in data.coords.items()
+            if len(coord.dims) == 1 and str(coord.dims[0]) in dims
+        ]
+        if ordered:
+            return str(data.coords[ordered[-1]].dims[0])
+        return str(data.data_vars[variable].dims[-1])
+    return axis_dimension(data, variable)
+
+
 def axis_values(data: Dataset, variable: str) -> np.ndarray:
     """The 1-D values to plot along an axis, from a coordinate or a dependent."""
     axis_dimension(data, variable)  # raises when it is not a usable axis
@@ -356,10 +377,13 @@ class Line(QimchiFigure):
         independents: list,
         dependents: list,
         theme: dict = DEFAULT_THEME,
+        companion: str | None = None,
     ) -> None:
         super().__init__(
             metadata, data, independents, dependents, theme=theme, num_axes=1
         )
+        # Secondary cut coordinate included in hover data.
+        self.companion = companion
         # logger.debug(f"Line || metadata: {self.metadata}")
         # logger.debug(f"Line || type(metadata): {type(self.metadata)}")
         # logger.debug(f"Line || self.ind: {self.ind}")
@@ -415,9 +439,12 @@ class Line(QimchiFigure):
         self.y_hover = hover_entry(y_definition, "y")
 
         # Plot titles are a display surface: Qanary IDs are shortened here only.
-        plot_title = format_measurement_plot_title(
-            self.meta, f"{dep_var} vs {self.ind[0]}"
+        fallback_title = (
+            f"{dep_var} along a cut in {self.ind[0]} and {self.companion}"
+            if self.companion
+            else f"{dep_var} vs {self.ind[0]}"
         )
+        plot_title = format_measurement_plot_title(self.meta, fallback_title)
 
         layout = {
             "title": {
@@ -566,6 +593,15 @@ class Line(QimchiFigure):
                 f"{sweep_definition['label']}: %{{customdata}}<extra></extra>"
             )
             layout["margin"] = {**layout["margin"], "r": 90}
+        elif self.companion:
+            companion_definition = resolve_axis_definition(
+                self.data, self.metadata, self.companion
+            )
+            traces["customdata"] = axis_values(self.data, self.companion)
+            hover_template = (
+                f"{self.x_hover}<br>{self.y_hover}<br>"
+                f"{hover_entry(companion_definition, 'customdata')}<extra></extra>"
+            )
 
         # Create figure with go.Scatter to preserve data order
         fig = go.Figure(

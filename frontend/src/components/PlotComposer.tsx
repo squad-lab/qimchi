@@ -7,6 +7,7 @@ import SectionRibbon, { ribbonButtonClass } from "./SectionRibbon";
 import { useShortcut } from "../hooks/useGlobalShortcuts";
 import { useSidebarStore } from "../stores/sidebarStore";
 import { useToast } from "../hooks/useToast";
+import { missingAxesMessage } from "../utils/composerAxes";
 
 export interface PlotField {
   id: string;
@@ -30,6 +31,10 @@ export interface ComposerSelectionSnapshot {
   plotType: PlotType;
   indeps: string[];
   deps: string[];
+  /** Field names per axis used to generate plot combinations. */
+  x: string[];
+  y: string[];
+  z: string[];
   hasRequiredAxes: boolean;
   hasAnySelections: boolean;
   fieldSources: string[];
@@ -405,7 +410,13 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
         plotType,
         indeps,
         deps,
-        hasRequiredAxes: xFields.length > 0 && yFields.length > 0,
+        x: xFields.map((field) => field.name),
+        y: yFields.map((field) => field.name),
+        z: zFields.map((field) => field.name),
+        hasRequiredAxes:
+          xFields.length > 0 &&
+          yFields.length > 0 &&
+          (plotType !== "HeatMap" || zFields.length > 0),
         hasAnySelections: allFields.length > 0,
         fieldSources,
       };
@@ -422,7 +433,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
       const snapshot = getComposerSelectionNames();
 
       if (!snapshot.hasRequiredAxes) {
-        showToast("Select required X and Y fields before plotting.", "warning", 3000);
+        showToast(missingAxesMessage(snapshot), "warning", 3000);
         return;
       }
 
@@ -735,7 +746,10 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
         >
           {/* Plot type: icon-only in the ribbon, dropdown opens to the left */}
           <div className="relative">
-            <Tooltip content={`Plot type: ${plotType}`} position="left">
+            <Tooltip
+              content={`Plot type: ${plotType} (L for LinePlot, H for HeatMap)`}
+              position="left"
+            >
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -774,7 +788,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
             )}
           </div>
 
-          <Tooltip content="Plot" position="left">
+          <Tooltip content="Plot (P)" position="left">
             <button
               onClick={(e) => {
                 e.stopPropagation();

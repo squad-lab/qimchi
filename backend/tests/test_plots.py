@@ -466,21 +466,34 @@ def test_a_path_that_is_neither_file_nor_directory_is_rejected(monkeypatch):
     assert plots._validate_paths(["/dev/null"]) is False
 
 
-def test_a_dimension_carrying_labels_rather_than_numbers_gets_no_slider():
-    """
-    A slider needs numbers; some datasets carry string labels on a dimension.
-
-    The dimension is skipped rather than aborting the whole slider config.
-
-    """
+def test_a_dimension_carrying_labels_gets_an_index_slider():
+    """String coordinates produce an index-based slider."""
     dataset = xr.Dataset(
-        {"signal": (("mode", "x"), np.zeros((1, 4)))},
-        coords={"x": [0.0, 1.0, 2.0, 3.0], "mode": ["fast"]},
+        {"signal": (("mode", "x"), np.zeros((3, 4)))},
+        coords={"x": [0.0, 1.0, 2.0, 3.0], "mode": ["fast", "slow", "off"]},
     )
 
     config = plots.gen_slider_config(dataset, ["x"])
 
-    assert config == {}
+    assert config == {
+        "mode": {
+            "min": 0,
+            "max": 2,
+            "step": 1,
+            "value": 0,
+            "labels": ["fast", "slow", "off"],
+        }
+    }
+
+
+def test_a_dimension_without_coordinates_gets_an_index_slider():
+    dataset = xr.Dataset({"signal": (("repeat", "x"), np.arange(8.0).reshape(2, 4))})
+
+    config = plots.gen_slider_config(dataset, ["x"])
+    sliced = plots.apply_data_slicing(dataset, ["x"], {"repeat": {"value": 1}})
+
+    assert config == {"repeat": {"min": 0, "max": 1, "step": 1, "value": 0}}
+    assert sliced["signal"].values.tolist() == [4.0, 5.0, 6.0, 7.0]
 
 
 def test_a_coordinate_with_gaps_still_gets_a_usable_step():
@@ -495,22 +508,83 @@ def test_a_coordinate_with_gaps_still_gets_a_usable_step():
     assert config["sweep"]["step"] == 1.0
 
 
-def test_slicing_a_non_numeric_duplicate_coordinate_returns_the_dataset_whole():
-    """
-    Both the nearest-neighbour path and the manual fallback fail here.
-
-    Duplicate values defeat sel(method="nearest"), and string labels defeat the
-    arithmetic the fallback uses -- the request must still return data.
-
-    """
+def test_a_labelled_dimension_is_sliced_by_position():
     dataset = xr.Dataset(
-        {"signal": (("mode", "x"), np.zeros((3, 4)))},
+        {"signal": (("mode", "x"), np.arange(12.0).reshape(3, 4))},
         coords={"x": [0.0, 1.0, 2.0, 3.0], "mode": ["a", "a", "b"]},
     )
 
-    result = plots.apply_data_slicing(dataset, ["x"], {"mode": {"value": 1.0}})
+    result = plots.apply_data_slicing(dataset, ["x"], {"mode": {"value": 2.0}})
+    clamped = plots.apply_data_slicing(dataset, ["x"], {"mode": {"value": 9}})
 
-    assert result.sizes == {"mode": 3, "x": 4}
+    assert result.sizes == {"x": 4}
+    assert str(result["mode"].values) == "b"
+    assert clamped["signal"].values.tolist() == [8.0, 9.0, 10.0, 11.0]
+
+
+def _fits_and_std() -> xr.Dataset:
+    """Two variables that share the plotted axes but not their other dimensions."""
+    return xr.Dataset(
+        {
+            "fits": (("a", "b", "param"), np.arange(12.0).reshape(2, 2, 3)),
+            "std": (("a", "b", "field"), np.zeros((2, 2, 4))),
+        },
+        coords={
+            "a": [0.0, 1.0],
+            "b": [0.0, 1.0],
+            "param": ["deltaCq", "tau", "c"],
+            "field": [0.0, 1.0, 2.0, 3.0],
+        },
+        attrs={"path": "/data/fits.h5"},
+    )
+
+
+def test_sliders_cover_only_the_plotted_variables_dimensions():
+    dataset = _fits_and_std()
+
+    assert set(plots.gen_slider_config(dataset, ["a", "b"], ["fits"])) == {"param"}
+    assert set(plots.gen_slider_config(dataset, ["a", "b"], ["std"])) == {"field"}
+    assert set(plots.gen_slider_config(dataset, ["a"], ["fits", "std"])) == {
+        "b",
+        "param",
+        "field",
+    }
+
+
+def test_without_dependents_every_unplotted_dimension_gets_a_slider():
+    dataset = _fits_and_std()
+
+    assert set(plots.gen_slider_config(dataset, ["a", "b"])) == {"param", "field"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("plot_type", ["LinePlot", "HeatMap"])
+async def test_a_plot_offers_no_slider_for_another_variables_dimension(
+    tmp_path, monkeypatch, plot_type
+):
+    file = tmp_path / "fits.h5"
+    file.write_bytes(b"x")
+
+    async def load(_path):
+        return _fits_and_std()
+
+    monkeypatch.setattr(plots, "load_dataset_async", load)
+
+    result = await plots.create_plots(
+        PlotRequest(
+            fpaths=[str(file)],
+            indeps=["a", "b"] if plot_type == "HeatMap" else ["a"],
+            deps=["fits"],
+            plotType=plot_type,
+            slider={"param": {"value": 1}, "field": {"value": 2.0}},
+        )
+    )
+
+    assert result.success is True
+    config = result.plots[0]["slider_config"]
+    assert "field" not in config
+    assert config["param"]["value"] == 1
+    assert config["param"]["labels"] == ["deltaCq", "tau", "c"]
 
 
 @pytest.mark.asyncio
@@ -584,25 +658,6 @@ async def test_an_unexpected_failure_becomes_a_response_not_a_traceback(
 
     assert result.success is False
     assert "validator exploded" in result.message
-
-
-def test_slicing_a_dimension_that_has_no_coordinate_leaves_the_dataset_alone():
-    """
-    A QCoDeS run can have a dimension with no coordinate to select along.
-
-    xarray refuses a nearest-neighbour lookup there, and the manual fallback
-    has no values to search, so the dataset comes back unsliced.
-
-    """
-    dataset = xr.Dataset(
-        {"signal": (("repeat", "x"), np.zeros((2, 4)))},
-        coords={"x": [0.0, 1.0, 2.0, 3.0]},
-    )
-    assert "repeat" not in dataset.coords
-
-    result = plots.apply_data_slicing(dataset, ["x"], {"repeat": {"value": 1.0}})
-
-    assert result.sizes == {"repeat": 2, "x": 4}
 
 
 def test_heatmap_colour_range_does_not_leak_between_plots():
@@ -792,7 +847,7 @@ def test_axes_must_have_been_swept_together():
     result = plots.validate_axes([dataset], ["temperature"], ["current"], "LinePlot")
 
     assert not result["valid"]
-    assert "not swept together" in "; ".join(result["errors"])
+    assert "cannot be plotted against" in "; ".join(result["errors"])
 
 
 def test_a_heat_map_axis_pair_on_one_dimension_is_refused():
@@ -807,7 +862,7 @@ def test_a_heat_map_axis_pair_on_one_dimension_is_refused():
     result = plots.validate_axes([dataset], ["x", "measured_x"], ["signal"], "HeatMap")
 
     assert not result["valid"]
-    assert "both run along" in "; ".join(result["errors"])
+    assert "trace a line rather than a grid" in "; ".join(result["errors"])
 
 
 def test_live_refresh_timing_is_written_to_the_app_log(monkeypatch):
@@ -901,3 +956,84 @@ def test_an_ordinary_line_plot_is_left_alone():
 
     assert not trace.get("marker", {}).get("showscale")
     assert "customdata" not in trace
+
+
+def _rf_sweep() -> xr.Dataset:
+    """Magnitude and phase over two sweeps, plus a reading of the outer sweep alone."""
+    volts = np.linspace(-1.0, 0.0, 3)
+    freq = np.linspace(1e8, 4e8, 5)
+    grid = np.arange(15.0).reshape(3, 5)
+    return xr.Dataset(
+        {
+            "s21_mag": (("up_voltages", "f"), grid),
+            "s21_phase": (("up_voltages", "f"), -grid),
+            "lockin": (("up_voltages",), volts * 2),
+        },
+        coords={"up_voltages": volts, "f": freq},
+        attrs={"path": "/data/rf.nc"},
+    )
+
+
+def test_a_measured_axis_over_two_sweeps_runs_along_the_inner_one():
+    assert figures.sweep_dimension(_rf_sweep(), "s21_mag") == "f"
+    assert figures.sweep_dimension(_rf_sweep(), "lockin") == "up_voltages"
+
+
+@pytest.mark.asyncio
+async def test_magnitude_can_be_plotted_against_phase(tmp_path, monkeypatch):
+    file = tmp_path / "rf.nc"
+    file.write_bytes(b"x")
+
+    async def load(_path):
+        return _rf_sweep()
+
+    monkeypatch.setattr(plots, "load_dataset_async", load)
+
+    result = await plots.create_plots(
+        PlotRequest(
+            fpaths=[str(file)],
+            indeps=["s21_mag"],
+            deps=["s21_phase"],
+            plotType="LinePlot",
+        )
+    )
+
+    assert result.success is True, result.message
+    # The outer sweep becomes a slider dimension.
+    assert set(result.plots[0]["slider_config"]) == {"up_voltages"}
+
+
+@pytest.mark.parametrize(
+    ("indeps", "deps"),
+    [
+        (["up_voltages", "lockin"], ["s21_phase"]),  # both follow one sweep
+        (["s21_mag", "f"], ["s21_phase"]),  # a measured axis over two sweeps
+        (["s21_mag", "s21_phase"], ["lockin"]),  # no swept axis at all
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_heat_map_that_cannot_be_drawn_is_reported_as_invalid(
+    tmp_path, monkeypatch, indeps, deps
+):
+    file = tmp_path / "rf.nc"
+    file.write_bytes(b"x")
+
+    async def load(_path):
+        return _rf_sweep()
+
+    monkeypatch.setattr(plots, "load_dataset_async", load)
+
+    result = await plots.create_plots(
+        PlotRequest(fpaths=[str(file)], indeps=indeps, deps=deps, plotType="HeatMap")
+    )
+
+    assert result.success is False
+    assert result.invalid is True
+
+
+@pytest.mark.asyncio
+async def test_a_request_without_dependents_is_invalid():
+    result = await plots.create_plots(
+        PlotRequest(fpaths=["/x.nc"], indeps=["a", "b"], deps=[], plotType="HeatMap")
+    )
+    assert result.invalid is True

@@ -180,6 +180,15 @@ describe("replicatePlots", () => {
     expect(result.plotConfigs[0].filters_opts).toEqual({ scale: { factor: 3 } });
   });
 
+  it("keeps an oblique LineCut's cut", () => {
+    const cut = { start: { gate: 0, bias: 1 }, end: { gate: 2, bias: 3 } };
+    const oblique = { ...config, indeps: ["gate", "bias"], cut };
+
+    const result = replicatePlots(item(["gate", "bias"], ["signal"]), [{ config: oblique }]);
+
+    expect(result.plotConfigs[0].cut).toEqual(cut);
+  });
+
   it("keeps whether the source was a default or a custom plot", () => {
     const auto = { ...config, origin: "auto" as const };
 

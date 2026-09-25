@@ -39,6 +39,14 @@ class NotesData(BaseModel):
     cryostat_name: Optional[str] = None
 
 
+class LineCut(BaseModel):
+    """Endpoints and optional sample count for a heat-map line cut."""
+
+    start: Dict[str, float]
+    end: Dict[str, float]
+    points: Optional[int] = Field(default=None, ge=2, le=2000)
+
+
 class PlotRequest(BaseModel):
     fpaths: List[str]
     indeps: List[str]
@@ -48,6 +56,8 @@ class PlotRequest(BaseModel):
     filters_opts: Dict = Field(default_factory=dict)
     slider: Dict = Field(default_factory=dict)  # For data slicing/selection
     swap_xy: bool = False
+    # Optional line cut through the two independent axes.
+    cut: Optional[LineCut] = None
 
 
 class PlotResponse(BaseModel):
@@ -55,6 +65,8 @@ class PlotResponse(BaseModel):
     success: bool
     message: str = ""
     skip_update: bool = False  # E.g., transient file locks or other transient errors
+    # Marks an invalid request that should not be retried.
+    invalid: bool = False
 
 
 class TransformPlotRequest(BaseModel):

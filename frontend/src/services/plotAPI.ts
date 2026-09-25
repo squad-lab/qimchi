@@ -4,7 +4,7 @@ import { Data, Layout, Config } from "plotly.js";
 
 // Local imports
 import { PROD_BACKEND_URL } from "../config";
-import type { SliderConfig } from "../components/interfaces";
+import type { LineCut, SliderConfig } from "../components/interfaces";
 
 const API_BASE_URL = PROD_BACKEND_URL;
 
@@ -19,6 +19,7 @@ export interface PlotRequest {
   source?: "memory" | "disk"; // Source of the data (memory for live, disk for ended measurements)
   signal?: AbortSignal; // For request cancellation
   swap_xy?: boolean;
+  cut?: LineCut;
 }
 
 // SliderConfig imported from centralized interfaces
@@ -45,6 +46,7 @@ export interface PlotResponse {
   success: boolean;
   message: string;
   skip_update?: boolean; // E.g., transient error
+  invalid?: boolean; // The request is permanently invalid and should not be retried.
 }
 
 export interface TransformPlotRequest {

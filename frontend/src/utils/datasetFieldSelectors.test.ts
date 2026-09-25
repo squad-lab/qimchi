@@ -188,8 +188,13 @@ describe("axisIndependents", () => {
     expect(axisIndependents("measured_gate", attributes)).toEqual(["gate"]);
   });
 
-  it("refuses a dependent that varies over more than one independent", () => {
-    expect(axisIndependents("signal", attributes)).toEqual([]);
+  it("runs a line plot's measured axis over several sweeps along the last of them", () => {
+    expect(axisIndependents("signal", attributes)).toEqual(["bias"]);
+    expect(axisIndependents("signal", attributes, "LinePlot")).toEqual(["bias"]);
+  });
+
+  it("refuses a heat map axis that varies over more than one independent", () => {
+    expect(axisIndependents("signal", attributes, "HeatMap")).toEqual([]);
   });
 
   it("says nothing when the dataset reported no dimension info", () => {
@@ -225,7 +230,23 @@ describe("isComposerCompatibleWithDataset with a dependent on an axis", () => {
     ).toBe(false);
   });
 
-  it("rejects a dependent that varies over more than one independent", () => {
+  it("lets two measured quantities of the same sweeps be plotted against each other", () => {
+    const rf = {
+      independents: ["up_voltages", "f"],
+      dependents: ["mag", "phase"],
+      variable_independents: { mag: ["up_voltages", "f"], phase: ["up_voltages", "f"] },
+    };
+
+    expect(isComposerCompatibleWithDataset({ indeps: ["mag"], deps: ["phase"] }, rf)).toBe(true);
+    expect(
+      isComposerCompatibleWithDataset(
+        { indeps: ["mag", "f"], deps: ["phase"], plotType: "HeatMap" },
+        rf,
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a dependent that does not vary along the axis's sweep", () => {
     const twoDimensional = {
       independents: ["gate", "bias"],
       dependents: ["signal", "current"],

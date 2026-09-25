@@ -804,3 +804,100 @@ def test_the_same_filters_still_run_on_a_swept_axis():
 
     assert not any("swept x axis" in warning for warning in warnings)
     assert result is not figure, "the derivative should have produced a new figure"
+
+
+@pytest.mark.parametrize("with_meta", [True, False])
+def test_rotated_axis_titles_are_valid_tex(heat_figure, with_meta):
+    x = {"label": "Plunger P1", "unit": "mV"}
+    y = {"label": "Plunger P2", "unit": "mV"}
+    heat_figure["layout"]["xaxis"]["title"]["text"] = units.axis_title(x)
+    heat_figure["layout"]["yaxis"]["title"]["text"] = units.axis_title(y)
+    if with_meta:
+        heat_figure["layout"]["meta"] = units.unit_layout_meta(x=x, y=y)
+
+    result, _warnings = filters.apply_filters(
+        ["rotate"], {"rotate": {"angle": 45}}, heat_figure, fig_num_axes=2
+    )
+
+    for axis in ("xaxis", "yaxis"):
+        title = result["layout"][axis]["title"]["text"]
+        assert title.count("$") == 2 and title.startswith("$") and title.endswith("$")
+        assert title.count("{") == title.count("}")
+        assert r"\mathrm{Plunger\ P1}" in title and r"\mathrm{mV}" in title
+    # At 45 degrees, output columns combine x and y equally.
+    assert r"+ 0.707\," in result["layout"]["xaxis"]["title"]["text"]
+    assert result["layout"]["yaxis"]["title"]["text"].startswith(r"$-0.707\,")
+
+
+def test_rotation_drops_the_prefixed_titles_of_the_unrotated_axes(heat_figure):
+    x = {"label": "Plunger P1", "unit": "mV"}
+    y = {"label": "Plunger P2", "unit": "mV"}
+    heat_figure["layout"]["meta"] = units.unit_layout_meta(x=x, y=y)
+    assert "engineering_titles" in heat_figure["layout"]["meta"]["qimchi_units"]["x"]
+
+    result, _warnings = filters.apply_filters(
+        ["rotate"], {"rotate": {"angle": 45}}, heat_figure, fig_num_axes=2
+    )
+
+    for axis in ("x", "y"):
+        definition = result["layout"]["meta"]["qimchi_units"][axis]
+        assert "engineering_titles" not in definition
+        assert definition["unit"] == "mV"
+
+
+def _rotated(z, x, y, angle):
+    figure = {
+        "data": [{"type": "heatmap", "x": list(x), "y": list(y), "z": z.tolist()}],
+        "layout": {
+            "xaxis": {"title": {"text": "X"}},
+            "yaxis": {"title": {"text": "Y"}},
+        },
+    }
+    result, _warnings = filters.apply_filters(
+        ["rotate"], {"rotate": {"angle": angle}}, figure, fig_num_axes=2
+    )
+    return result
+
+
+@pytest.mark.parametrize("angle", [30, 45, 100, -20])
+def test_a_rotated_heat_map_has_coordinates_for_every_cell(angle):
+    x = np.linspace(-0.001, 0.001, 21)
+    y = np.linspace(0.0, 2.6, 27)
+    result = _rotated(np.ones((27, 21)), x, y, angle)
+
+    rows, columns = _axis(result, "y").size, _axis(result, "x").size
+    assert _axis(result, "z").size == rows * columns
+    # Rotation preserves the input axis spacing.
+    np.testing.assert_allclose(np.diff(_axis(result, "x")), x[1] - x[0])
+    np.testing.assert_allclose(np.diff(_axis(result, "y")), y[1] - y[0])
+
+
+@pytest.mark.parametrize("angle", [30, 45, 100, -20])
+@pytest.mark.parametrize("spot", [(4, 5), (20, 14), (13, 10)])
+def test_a_rotated_point_can_be_traced_back_to_the_data(angle, spot):
+    x = np.linspace(-0.001, 0.001, 21)
+    y = np.linspace(0.0, 2.6, 27)
+    z = np.zeros((27, 21))
+    row, col = spot
+    z[row - 1 : row + 2, col - 1 : col + 2] = 1.0
+    result = _rotated(z, x, y, angle)
+
+    rotated = np.nan_to_num(_axis(result, "z")).reshape(
+        _axis(result, "y").size, _axis(result, "x").size
+    )
+    hit_rows, hit_cols = np.nonzero(rotated == 1.0)
+    u = _axis(result, "x")[hit_cols].mean()
+    v = _axis(result, "y")[hit_rows].mean()
+
+    rotation = result["layout"]["meta"]["qimchi_rotation"]
+    rotated_index = [
+        (v - rotation["rows"]["start"]) / rotation["rows"]["step"],
+        (u - rotation["columns"]["start"]) / rotation["columns"]["step"],
+    ]
+    found_row, found_col = (
+        np.array(rotation["matrix"]) @ rotated_index + rotation["offset"]
+    )
+    assert found_row == pytest.approx(row, abs=0.75)
+    assert found_col == pytest.approx(col, abs=0.75)
+    assert rotation["x"] == pytest.approx(list(x))
+    assert rotation["y"] == pytest.approx(list(y))

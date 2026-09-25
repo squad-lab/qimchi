@@ -23,6 +23,8 @@ from .models import (
 )
 from .units import (
     SCALE_QUANTITIES,
+    TITLE_TEMPLATE_KEY,
+    UNIT_META_KEY,
     Unit,
     axis_definition,
     axis_definition_from_figure,
@@ -30,6 +32,7 @@ from .units import (
     divide_units,
     figure_axis_is_dependent,
     inverse_unit,
+    latex_text,
     multiply_units,
     render_unit,
     scale_quantity_label_suffix,
@@ -1394,6 +1397,39 @@ class BackgroundCorrection(Filter):
         self._hmap_update(z_data, fil_name)
 
 
+def _tex_name(label: str) -> str:
+    # Fall back to the TeX axis title when unit metadata is absent.
+    if len(label) > 1 and label.startswith("$") and label.endswith("$"):
+        return "{" + label[1:-1] + "}"
+    escaped = latex_text(label).replace(" ", r"\ ")
+    return rf"\mathrm{{{escaped}}}"
+
+
+def _signed(value: float) -> str:
+    return f"- {abs(value):.3g}" if value < 0 else f"+ {value:.3g}"
+
+
+ROTATION_META_KEY = "qimchi_rotation"
+
+
+def _axis_values(axis) -> np.ndarray:
+    """Return numeric axis values, falling back to positional indices."""
+    try:
+        return np.asarray(axis, dtype=float).reshape(-1)
+    except (TypeError, ValueError):
+        return np.arange(np.size(axis), dtype=float)
+
+
+def _centre_and_step(values: np.ndarray) -> tuple[float, float]:
+    """Return an axis's midpoint value and average step."""
+    n = values.size
+    if n == 0:
+        return 0.0, 1.0
+    centre = float(np.interp((n - 1) / 2, np.arange(n), values))
+    step = float(values[-1] - values[0]) / (n - 1) if n > 1 else 0.0
+    return centre, step if np.isfinite(step) and step != 0 else 1.0
+
+
 class RotateHeatMap(Filter):
     def __init__(self, figure: dict, num_axes: int, options: dict = None) -> None:
         """
@@ -1455,13 +1491,57 @@ class RotateHeatMap(Filter):
             cval=np.nan,  # Empty space with np.nan (white)
             prefilter=False,
         )
-        # Update the axis labels
+        # Preserve the original axis spacing and center the output on the input.
+        # Relative to that center, columns are c*x + s*(dx/dy)*y and rows are
+        # -s*(dy/dx)*x + c*y.
+        x_values = _axis_values(self.x_axis)
+        y_values = _axis_values(self.y_axis)
+        x_centre, dx = _centre_and_step(x_values)
+        y_centre, dy = _centre_and_step(y_values)
+        n_rows, n_cols = (int(n) for n in out_plane_shape)
+        columns = x_centre + dx * (np.arange(n_cols) - (n_cols - 1) / 2)
+        rows = y_centre + dy * (np.arange(n_rows) - (n_rows - 1) / 2)
+        self.new_fig.data[0].x = columns
+        self.new_fig.data[0].y = rows
+
+        # Build replacement titles from plain labels rather than existing TeX.
+        x_name = _tex_name(self.x_definition["label"])
+        y_name = _tex_name(self.y_definition["label"])
+        unit = ""
+        if self.x_definition["unit"] == self.y_definition["unit"]:
+            latex_unit = render_unit(self.x_definition["unit"], latex=True)
+            unit = rf"\;\left({latex_unit}\right)" if latex_unit else ""
+        angle = rf"\;({self.angle}^{{\circ}})"
         self.new_fig["layout"]["xaxis"]["title"]["text"] = (
-            rf"${c:.3f}\text{{{self.x_label}}} + {-s:.3f}\text{{{self.y_label}}}\:({self.angle}^{{\circ}})$"
+            rf"${c:.3g}\,{x_name} {_signed(s * dx / dy)}\,{y_name}{unit}{angle}$"
         )
         self.new_fig["layout"]["yaxis"]["title"]["text"] = (
-            rf"${s:.3f}\text{{{self.x_label}}} + {c:.3f}\text{{{self.y_label}}}\:({self.angle}^{{\circ}})$"
+            rf"${-s * dy / dx:.3g}\,{x_name} {_signed(c)}\,{y_name}{unit}{angle}$"
         )
+
+        # Persist the titles so the page does not restore the unswapped values.
+        meta = dict(self.new_fig.layout.meta or {})
+        definitions = dict(meta.get(UNIT_META_KEY, {}))
+        for axis in ("x", "y"):
+            if isinstance(definitions.get(axis), dict):
+                definitions[axis] = {
+                    key: value
+                    for key, value in definitions[axis].items()
+                    if key not in ("engineering_titles", TITLE_TEMPLATE_KEY)
+                }
+        if definitions:
+            meta[UNIT_META_KEY] = definitions
+        # Store the inverse coordinate transform used by LineCut:
+        # source index = matrix @ rotated index + offset.
+        meta[ROTATION_META_KEY] = {
+            "matrix": rota_mat.tolist(),
+            "offset": [float(v) for v in final_offset],
+            "columns": {"start": float(columns[0]), "step": dx},
+            "rows": {"start": float(rows[0]), "step": dy},
+            "x": x_values.tolist(),
+            "y": y_values.tolist(),
+        }
+        self.new_fig.update_layout(meta=meta)
 
         # Update the figure
         self._hmap_update(z_rotated, fil=f"Rot({self.angle}°)")
@@ -1669,6 +1749,7 @@ def _generate_plot_json_for_transform(
     filters_order: list[str],
     filters_opts: dict,
     swap_xy: bool,
+    cut: dict | None = None,
 ) -> tuple[dict, list[str]]:
     """Generate a plot JSON from canonical plot context + transform settings."""
     from .data_loader import load_dataset_sync
@@ -1689,6 +1770,7 @@ def _generate_plot_json_for_transform(
             indeps=effective_indeps,
             deps=deps,
             slider=slider,
+            cut=cut,
         )
     elif plot_type == "HeatMap":
         plots_data = create_heat_maps(
@@ -1743,6 +1825,7 @@ async def transform_plot_endpoint(
             filters_order=request.filters_order or [],
             filters_opts=request.filters_opts or {},
             swap_xy=bool(request.swap_xy),
+            cut=ctx.get("cut"),
         )
 
         plot_json = sanitize_for_json(plot_json)

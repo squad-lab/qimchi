@@ -27,6 +27,7 @@ export interface DatasetLike {
 export interface ComposerSelectionLike {
   indeps: string[];
   deps: string[];
+  plotType?: "LinePlot" | "HeatMap";
 }
 
 export interface SharedFieldResult {
@@ -70,15 +71,22 @@ export const getFieldIndependents = (
   return Array.isArray(dims) ? dims : null;
 };
 
-/** Resolve an axis field to its single sweep variable. */
+/**
+ * Resolve an axis field to its sweep. For measured fields spanning multiple
+ * sweeps, use the last sweep and expose the others as sliders, matching the
+ * backend's `sweep_dimension`. Heat-map axes must map to exactly one sweep.
+ */
 export const axisIndependents = (
   field: string,
   attributes?: DatasetAttributesLike,
+  plotType?: "LinePlot" | "HeatMap",
 ): string[] | null => {
   if ((attributes?.independents ?? []).includes(field)) return [field];
   const dims = getFieldIndependents(field, attributes);
   if (dims === null) return null; // unknown: callers stay permissive
-  return dims.length === 1 ? dims : [];
+  if (dims.length === 1) return dims;
+  if (dims.length === 0 || plotType === "HeatMap") return [];
+  return [dims[dims.length - 1]];
 };
 
 /** Resolve all selected axes to their sweep variables. */
@@ -175,16 +183,21 @@ export const isComposerCompatibleWithDataset = (
   const indeps = toSet(datasetAttributes.independents);
   const deps = toSet(datasetAttributes.dependents);
 
-  // A measured value can be an axis when it belongs to one sweep.
+  // A measured value can be an axis when it runs along one sweep.
   const axesMatch = composerSelection.indeps.every((name) => {
     if (indeps.has(name)) return true;
     if (!deps.has(name)) return false;
-    const resolved = axisIndependents(name, datasetAttributes);
+    const resolved = axisIndependents(name, datasetAttributes, composerSelection.plotType);
     return resolved === null || resolved.length === 1;
   });
   const depsMatch = hasAllNames(deps, composerSelection.deps);
+  if (!axesMatch || !depsMatch) return false;
 
-  return axesMatch && depsMatch;
+  // Each dependent must vary along the sweeps its axes run along.
+  const axisDims = composerSelection.indeps.flatMap(
+    (name) => axisIndependents(name, datasetAttributes, composerSelection.plotType) ?? [],
+  );
+  return composerSelection.deps.every((dep) => dependsOnAll(dep, axisDims, datasetAttributes));
 };
 
 export const getEligibleDatasetsForComposer = <T extends DatasetLike>(
