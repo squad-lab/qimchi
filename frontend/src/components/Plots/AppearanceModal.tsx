@@ -7,6 +7,7 @@ import {
   Download,
   Upload,
 } from "lucide-react";
+import { createPortal } from "react-dom";
 import { Rnd } from "react-rnd";
 
 // Local imports
@@ -27,6 +28,8 @@ interface AppearanceModalProps {
   plotType?: string;
   plotTitle?: string;
   plotJson?: any;
+  /** Preview a color scale; null clears the preview. */
+  onPreviewColorscale?: (colorscale: string | null) => void;
 }
 
 // Simple global z-index manager so modals can stack above each other.
@@ -48,6 +51,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
   plotType = "line", // Fallback if detecting fails
   plotTitle,
   plotJson,
+  onPreviewColorscale,
 }) => {
   const [localSettings, setLocalSettings] = useState<PlotAppearanceSettings>(settings);
   const [activeTab, setActiveTab] = useState<"style" | "x-axis" | "y-axis" | "heatmap">(
@@ -365,7 +369,8 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
 
   if (!isOpen) return null;
 
-  return (
+  // Render in <body> to avoid clipping or transforms inherited from the plot tile.
+  return createPortal(
     <div ref={wrapperRef} className="fixed inset-0 pointer-events-none">
       <Rnd
         default={{
@@ -384,6 +389,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
         onPointerDown={() => bringToFront()}
       >
         <div
+          data-tour="appearance-panel"
           className={`bg-gray-100 rounded-lg shadow-2xl border-2 w-full h-full overflow-hidden flex flex-col transition-colors ${
             isDragging ? "border-blue-500 bg-blue-50" : "border-gray-300"
           }`}
@@ -525,6 +531,7 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
                 settings={localSettings}
                 updateSetting={updateSetting}
                 plotJson={plotJson}
+                onPreviewColorscale={onPreviewColorscale}
               />
             )}
 
@@ -559,7 +566,8 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
           )}
         </div>
       </Rnd>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

@@ -26,6 +26,7 @@ import plotlyColorscales from "./plotly_colorscales_plotlyjs.json";
 import type { PlotAppearanceSettings } from "../../components/types";
 import { IconDropdown, LogChartIcon } from "./UtilComponents";
 import DualThumbSlider from "./DualThumbSlider";
+import ColorscalePicker, { type ColorscaleCategory } from "./ColorscalePicker";
 import Tooltip from "../Tooltip";
 import { engineeringFormatter } from "../../utils/engineeringFormat";
 
@@ -179,16 +180,6 @@ const availableColorscales = Object.keys(plotlyColorscales);
 const CYCLICAL_COLORSCALES = ["edge", "phase", "twilight", "mrybm", "mygbm"];
 
 // Organize colorscales by category
-interface ColorscaleOption {
-  label: string;
-  value: string;
-  warning?: boolean;
-}
-
-interface ColorscaleCategory {
-  label: string;
-  options: ColorscaleOption[];
-}
 
 const COLORSCALE_CATEGORIES: ColorscaleCategory[] = [
   {
@@ -529,6 +520,8 @@ interface ColormapSectionProps extends SectionProps {
   /** The plot the colour range is relative to; omitted for defaults. */
   plotJson?: any;
   showColorRange?: boolean;
+  /** Preview a color scale; null clears the preview. */
+  onPreviewColorscale?: (colorscale: string | null) => void;
 }
 
 export const ColormapSection: React.FC<ColormapSectionProps> = ({
@@ -536,8 +529,10 @@ export const ColormapSection: React.FC<ColormapSectionProps> = ({
   updateSetting,
   plotJson,
   showColorRange = true,
+  onPreviewColorscale,
 }) => {
   const colorscale = splitColorscale(settings.hmap?.colorscale || "viridis");
+  const withDirection = (base: string) => `${base}${colorscale.reversed ? "_r" : ""}`;
   return (
     <div className="w-full [&>*:not(:last-child)]:mb-4">
       <div>
@@ -563,30 +558,16 @@ export const ColormapSection: React.FC<ColormapSectionProps> = ({
             </span>
           </label>
         </div>
-        <select
+        <ColorscalePicker
           value={colorscale.base}
-          onChange={(e) =>
-            updateSetting(
-              ["hmap", "colorscale"],
-              `${e.target.value}${colorscale.reversed ? "_r" : ""}`,
-            )
+          reversed={colorscale.reversed}
+          categories={COLORSCALE_CATEGORIES}
+          onSelect={(base) => updateSetting(["hmap", "colorscale"], withDirection(base))}
+          onPreview={
+            onPreviewColorscale &&
+            ((base) => onPreviewColorscale(base === null ? null : withDirection(base)))
           }
-          className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          title="Heatmap colorscale"
-          aria-label="Heatmap colorscale"
-        >
-          {COLORSCALE_CATEGORIES.map((category) => (
-            <optgroup key={category.label} label={category.label}>
-              {category.options.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.warning ? "⚠ " : ""}
-                  {option.label}
-                  {option.warning ? " (Cyclical)" : ""}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+        />
         {CYCLICAL_COLORSCALES.includes(colorscale.base) && (
           <div className="mt-2 flex items-start gap-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
             <AlertTriangle size={14} className="shrink-0 mt-0.5" />
