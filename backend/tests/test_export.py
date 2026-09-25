@@ -724,3 +724,109 @@ async def test_send_to_notes_and_listing_error_responses(tmp_path, monkeypatch):
         lambda _path: (_ for _ in ()).throw(RuntimeError("bad path")),
     )
     assert (await export.export_send_to_notes_get("bad")).status_code == 500
+
+
+def test_batch_export_zips_each_plot_with_its_own_view_and_filters(
+    tmp_path, monkeypatch
+):
+    datasets = [tmp_path / "a.zarr", tmp_path / "b.zarr"]
+    for dataset in datasets:
+        dataset.mkdir()
+    ranges = []
+
+    def fake_write(figure, path, **kwargs):
+        ranges.append(tuple(figure.layout.xaxis.range or ()))
+        Image.new("RGB", (2, 2), "white").save(path)
+
+    monkeypatch.setattr(export, "_write_plotly_image", fake_write)
+    monkeypatch.setattr(export, "_library_metadata", lambda path, uuid: {"tags": []})
+    monkeypatch.setattr(export, "_resolve_fpath_to_disk", lambda fpath: fpath)
+    plot = {"data": [{"type": "scatter", "x": [0, 1], "y": [0, 1]}], "layout": {}}
+    plots = [
+        {
+            "plot_json": plot,
+            "fpath": str(datasets[0]),
+            "relayout_data": {"xaxis.range[0]": 0.2, "xaxis.range[1]": 0.4},
+            "applied_filters": [{"name": "flip"}],
+        },
+        # Two plots of one dataset must not overwrite each other's files.
+        {"plot_json": plot, "fpath": str(datasets[1])},
+        {"plot_json": plot, "fpath": str(datasets[1])},
+    ]
+    options = export.ExportSettings(formats=["png"], variants=["light"], scale=3)
+
+    result = export._export_many_plot_images_sync(plots, options=options)
+
+    assert result["exported"] == 3 and result["failures"] == []
+    assert (0.2, 0.4) in ranges
+    with zipfile.ZipFile(result["zip_path"]) as outer:
+        names = sorted(outer.namelist())
+        assert [name[:3] for name in names] == ["01_", "02_", "03_"]
+        with zipfile.ZipFile(outer.open(names[0])) as first:
+            meta = json.loads(first.read("metadata.json"))
+            assert meta["applied_filters"] == [{"name": "flip"}]
+            assert any(name.endswith(".png") for name in first.namelist())
+    Path(result["zip_path"]).unlink()
+
+
+def test_batch_export_lists_a_failed_plot_and_keeps_the_rest(tmp_path, monkeypatch):
+    dataset = tmp_path / "a.zarr"
+    dataset.mkdir()
+
+    def fake_write(figure, path, **kwargs):
+        Image.new("RGB", (2, 2), "white").save(path)
+
+    def resolve(fpath):
+        if fpath == "memory://gone":
+            raise ValueError("measurement is gone")
+        return fpath
+
+    monkeypatch.setattr(export, "_write_plotly_image", fake_write)
+    monkeypatch.setattr(export, "_library_metadata", lambda path, uuid: {"tags": []})
+    monkeypatch.setattr(export, "_resolve_fpath_to_disk", resolve)
+    plot = {"data": [{"type": "scatter", "x": [0], "y": [0]}], "layout": {}}
+    options = export.ExportSettings(formats=["png"], variants=["light"])
+
+    result = export._export_many_plot_images_sync(
+        [
+            {"plot_json": plot, "fpath": str(dataset)},
+            {"plot_json": plot, "fpath": "memory://gone", "title": "live"},
+        ],
+        options=options,
+    )
+
+    assert result["exported"] == 1
+    assert result["failures"] == ["plot 2 (live): measurement is gone"]
+    with zipfile.ZipFile(result["zip_path"]) as outer:
+        assert "failed.txt" in outer.namelist()
+    Path(result["zip_path"]).unlink()
+
+
+@pytest.mark.asyncio
+async def test_batch_export_endpoint_rejects_an_empty_request():
+    response = await export.export_many_plot_images(FakeRequest({"plots": []}))
+    assert response.status_code == 400
+
+
+def test_a_long_filter_chain_wraps_inside_the_image():
+    figure = export.go.Figure({"data": [{"x": [0, 1], "y": [1, 2]}], "layout": {}})
+    filters = ["gamma_corr", "normalize", "log_scale", "diff_x", "savgol", "sma"]
+
+    export._add_export_info_footer(figure, [{"name": name} for name in filters])
+
+    lines = figure.layout.annotations[-1].text.split("<br>")
+    filter_lines = lines[
+        lines.index(next(l for l in lines if "Applied Filters" in l)) :
+    ]
+    assert len(filter_lines) > 1
+    left = figure.layout.margin.l or 80
+    max_chars = (figure.layout.width - left) / export._EXPORT_INFO_CHAR_PX
+    for line in filter_lines:
+        plain = line.replace("<b>", "").replace("</b>", "").replace("&nbsp;", " ")
+        assert len(plain) <= max_chars
+    # Verify that names remain intact and ordered after wrapping.
+    joined = " ".join(filter_lines)
+    names = ["Gamma Correction", "Normalize", "Log Scale", "Diff along Y"]
+    assert [joined.index(name) for name in names] == sorted(
+        joined.index(name) for name in names
+    )

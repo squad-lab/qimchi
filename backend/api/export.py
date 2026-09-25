@@ -269,6 +269,40 @@ def _write_plotly_image(
     _embed_fira_sans_in_svg(target)
 
 
+# Monospace glyphs are about 0.6 em wide; the footer is set at 15 px.
+_EXPORT_INFO_FONT_SIZE = 15
+_EXPORT_INFO_CHAR_PX = 0.6 * _EXPORT_INFO_FONT_SIZE
+
+
+def _footer_entry_lines(
+    label: str, parts: list[str], joiner: str, max_chars: int
+) -> list[str]:
+    """
+    Wrap a labeled footer entry without splitting individual values.
+
+    """
+    prefix = f"{label}: "
+    indent = len(prefix)
+    lines: list[list[str]] = [[]]
+    used = indent
+    for part in parts:
+        if not lines[-1]:
+            lines[-1].append(part)
+            used += len(part)
+        elif used + len(joiner) + len(part) <= max_chars:
+            lines[-1].append(part)
+            used += len(joiner) + len(part)
+        else:
+            lines.append([part])
+            used = indent + len(part)
+    # Keep the separator on the preceding line when wrapping an entry.
+    rendered = [joiner.join(escape(part) for part in line) for line in lines]
+    rendered = [text + joiner.rstrip() for text in rendered[:-1]] + rendered[-1:]
+    return [f"<b>{escape(label)}:</b> {rendered[0]}"] + [
+        "&nbsp;" * indent + text for text in rendered[1:]
+    ]
+
+
 def _add_export_info_footer(
     fig: go.Figure,
     applied_filters: list[Dict] | None,
@@ -294,7 +328,7 @@ def _add_export_info_footer(
                 None,
             )
             if value is not None:
-                info_lines.append(f"<b>{label}:</b> {escape(str(value))}")
+                info_lines.append((label, str(value).split(" "), " "))
 
         for key, value in measurement_info.items():
             if key in consumed_keys or key in (
@@ -308,7 +342,7 @@ def _add_export_info_footer(
             if value in (None, "", "N/A"):
                 continue
             label = str(key).replace("_", " ").title()
-            info_lines.append(f"<b>{escape(label)}:</b> {escape(str(value))}")
+            info_lines.append((label, str(value).split(" "), " "))
 
     tag_names = sorted(
         {
@@ -329,7 +363,7 @@ def _add_export_info_footer(
         display_name = _FILTER_DISPLAY_NAMES.get(
             filter_name, filter_name.replace("_", " ").title()
         )
-        entries.append(escape(display_name))
+        entries.append(display_name)
 
     if not info_lines and not entries and not tag_names:
         return
@@ -337,14 +371,24 @@ def _add_export_info_footer(
     current_bottom = (
         fig.layout.margin.b if fig.layout.margin and fig.layout.margin.b else 80
     )
-    footer_lines = [
-        *info_lines,
-        f"<b>Custom Tags:</b> {', '.join(escape(tag) for tag in tag_names) if tag_names else 'None'}",
-        f"<b>Applied Filters:</b> {' -> '.join(entries) if entries else 'None'}",
-    ]
-    footer_height = 42 + 19 * len(footer_lines)
     current_width = fig.layout.width or base_width
     current_height = fig.layout.height or base_height
+    # Constrain the footer from the plot's left edge to the page margin.
+    left_margin = (
+        fig.layout.margin.l if fig.layout.margin and fig.layout.margin.l else 80
+    )
+    max_chars = max(20, int((current_width - left_margin - 16) / _EXPORT_INFO_CHAR_PX))
+    entries_to_show = [
+        *info_lines,
+        ("Custom Tags", tag_names or ["None"], ", "),
+        ("Applied Filters", entries or ["None"], " -> "),
+    ]
+    footer_lines = [
+        line
+        for label, parts, joiner in entries_to_show
+        for line in _footer_entry_lines(label, parts, joiner, max_chars)
+    ]
+    footer_height = 42 + 19 * len(footer_lines)
     fig.update_layout(
         width=current_width,
         height=current_height + footer_height,
@@ -364,7 +408,7 @@ def _add_export_info_footer(
         showarrow=False,
         font=dict(
             family=_EXPORT_INFO_FONT_FAMILY,
-            size=15,
+            size=_EXPORT_INFO_FONT_SIZE,
             color="#e5e7eb" if dark else "#374151",
         ),
     )
@@ -380,6 +424,8 @@ def _cleanup_old_tasks() -> None:
         task_id
         for task_id, task in _export_tasks.items()
         if task.get("created_at", datetime.now()) < cutoff
+        # Batch exports may exceed the default task timeout.
+        and task.get("status") != "pending"
     ]
     for task_id in to_remove:
         task = _export_tasks.pop(task_id, None)
@@ -401,6 +447,7 @@ def _export_plot_images_sync(
     applied_filters: list[Dict] | None = None,
     measurement_info: Dict | None = None,
     options: ExportSettings | None = None,
+    name_suffix: str = "",
 ) -> Dict:
     """
     Synchronous function to export plot images (runs in executor).
@@ -413,6 +460,8 @@ def _export_plot_images_sync(
         applied_filters (list[Dict] | None): ordered filters to print below the plot
         measurement_info (Dict | None): Basket hover-card fields to print below the plot
         options (ExportSettings | None): formats, variants and scale to write
+        name_suffix (str): keeps file names apart when several plots of one
+            dataset are exported in the same second
 
     Returns:
         Returns dict with:
@@ -429,7 +478,7 @@ def _export_plot_images_sync(
 
     # Base filename with timestamp
     ts = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    base_filename = extras_dir / f"{dataset_uuid}__{ts}__plot"
+    base_filename = extras_dir / f"{dataset_uuid}__{ts}__plot{name_suffix}"
 
     # Convert incoming JSON to a Figure
     try:
@@ -653,7 +702,7 @@ def _export_plot_images_sync(
 
     return {
         "zip_path": tmp_zip.name,
-        "zip_filename": f"{dataset_uuid}__{ts}__plot_images.zip",
+        "zip_filename": f"{dataset_uuid}__{ts}__plot{name_suffix}_images.zip",
         "saved_paths": saved_paths,
         "timings": timings,
     }
@@ -722,21 +771,132 @@ async def _run_export_task(
         _export_tasks[task_id]["zip_filename"] = result["zip_filename"]
         logger.info(f"Export task {task_id} completed successfully")
 
-        # Desktop mode
-        save_dir = _desktop_export_dir(options.folder if options else None)
-        if save_dir:
-            try:
-                dest = save_dir / result["zip_filename"]
-                if dest.exists():
-                    dest = save_dir / f"{dest.stem}__{task_id[:8]}{dest.suffix}"
-                shutil.copy2(result["zip_path"], dest)
-                _export_tasks[task_id]["saved_to"] = str(dest)
-                logger.info(f"Export task {task_id} saved to {dest}")
-            except Exception:
-                logger.exception(f"Failed to save export zip into {save_dir}")
+        _save_to_desktop(task_id, result, options)
 
     except Exception as e:
         logger.error(f"Export task {task_id} failed: {e}", exc_info=True)
+        _export_tasks[task_id]["status"] = "failed"
+        _export_tasks[task_id]["error"] = str(e)
+
+
+def _save_to_desktop(
+    task_id: str, result: Dict, options: ExportSettings | None
+) -> None:
+    save_dir = _desktop_export_dir(options.folder if options else None)
+    if not save_dir:
+        return
+    try:
+        dest = save_dir / result["zip_filename"]
+        if dest.exists():
+            dest = save_dir / f"{dest.stem}__{task_id[:8]}{dest.suffix}"
+        shutil.copy2(result["zip_path"], dest)
+        _export_tasks[task_id]["saved_to"] = str(dest)
+        logger.info(f"Export task {task_id} saved to {dest}")
+    except Exception:
+        logger.exception(f"Failed to save export zip into {save_dir}")
+
+
+_MAX_BATCH_PLOTS = 100
+
+
+def _plot_label(plot: Dict, index: int) -> str:
+    title = plot.get("title") or Path(str(plot.get("fpath") or "")).name
+    return f"plot {index} ({title})" if title else f"plot {index}"
+
+
+def _export_many_plot_images_sync(
+    plots: list[Dict],
+    export_pool=None,
+    options: ExportSettings | None = None,
+) -> Dict:
+    """
+    Export plots concurrently into individual archives within one batch archive.
+
+    The export pool limits concurrent image writes. Failed plots are omitted and
+    reported; the batch fails only if no plot succeeds.
+
+    """
+    results: dict[int, Dict] = {}
+    failures: list[str] = []
+
+    def export_one(index: int, plot: Dict) -> Dict:
+        return _export_plot_images_sync(
+            plot["plot_json"],
+            _resolve_fpath_to_disk(plot["fpath"]),
+            plot.get("relayout_data"),
+            export_pool,
+            plot.get("applied_filters") or [],
+            plot.get("measurement_info") or {},
+            options,
+            name_suffix=f"_{index:02d}",
+        )
+
+    workers = max(1, min(len(plots), os.cpu_count() or 1, 8))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(export_one, index, plot): index
+            for index, plot in enumerate(plots, start=1)
+        }
+        for future in as_completed(futures):
+            index = futures[future]
+            try:
+                results[index] = future.result()
+            except Exception as e:
+                logger.error(
+                    f"Batch export of {_plot_label(plots[index - 1], index)} failed: {e}"
+                )
+                failures.append(f"{_plot_label(plots[index - 1], index)}: {e}")
+
+    if not results:
+        raise RuntimeError("No plot could be exported: " + "; ".join(sorted(failures)))
+
+    ts = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    outer = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    outer.close()
+    with zipfile.ZipFile(outer.name, "w", zipfile.ZIP_STORED) as zf:
+        for index in sorted(results):
+            result = results[index]
+            zf.write(
+                result["zip_path"], arcname=f"{index:02d}_{result['zip_filename']}"
+            )
+        if failures:
+            zf.writestr("failed.txt", "\n".join(sorted(failures)) + "\n")
+    for result in results.values():
+        try:
+            os.unlink(result["zip_path"])
+        except OSError:
+            pass
+
+    return {
+        "zip_path": outer.name,
+        "zip_filename": f"qimchi_plots__{ts}.zip",
+        "exported": len(results),
+        "failures": sorted(failures),
+    }
+
+
+async def _run_batch_export_task(
+    task_id: str,
+    plots: list[Dict],
+    export_pool=None,
+    options: ExportSettings | None = None,
+) -> None:
+    try:
+        logger.info(f"Starting batch export task {task_id} for {len(plots)} plots")
+        result = await asyncio.to_thread(
+            _export_many_plot_images_sync, plots, export_pool, options
+        )
+        task = _export_tasks[task_id]
+        task.update(
+            status="completed",
+            result=result,
+            zip_path=result["zip_path"],
+            zip_filename=result["zip_filename"],
+        )
+        logger.info(f"Batch export task {task_id} completed")
+        _save_to_desktop(task_id, result, options)
+    except Exception as e:
+        logger.error(f"Batch export task {task_id} failed: {e}", exc_info=True)
         _export_tasks[task_id]["status"] = "failed"
         _export_tasks[task_id]["error"] = str(e)
 
@@ -1177,6 +1337,62 @@ async def export_plot_images(request: Request) -> JSONResponse:
         )
 
 
+@router.post("/export-plot-images/batch")
+async def export_many_plot_images(request: Request) -> JSONResponse:
+    """
+    Export several plots as one zip of per-plot zips (non-blocking).
+
+    Expects JSON ``{"plots": [...]}``, each entry shaped like the body of
+    ``POST /export-plot-images``. Poll the same status endpoint for the result.
+
+    """
+    _cleanup_old_tasks()
+
+    data = await request.json()
+    plots = data.get("plots") if isinstance(data, dict) else None
+    if not isinstance(plots, list) or not plots:
+        return JSONResponse(
+            status_code=400, content={"success": False, "message": "No plots to export"}
+        )
+    if len(plots) > _MAX_BATCH_PLOTS:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "message": f"At most {_MAX_BATCH_PLOTS} plots can be exported at once",
+            },
+        )
+    if not all(
+        isinstance(plot, dict) and plot.get("plot_json") and plot.get("fpath")
+        for plot in plots
+    ):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "message": "Every plot needs plot_json and fpath",
+            },
+        )
+
+    task_id = str(uuid.uuid4())
+    _export_tasks[task_id] = {
+        "status": "pending",
+        "created_at": datetime.now(),
+        "result": None,
+        "error": None,
+        "zip_path": None,
+    }
+    options = await asyncio.to_thread(export_settings)
+    export_pool = getattr(request.app.state, "export_pool", None)
+    asyncio.create_task(_run_batch_export_task(task_id, plots, export_pool, options))
+    logger.info(f"Created batch export task {task_id} for {len(plots)} plots")
+
+    return JSONResponse(
+        status_code=202,
+        content={"success": True, "task_id": task_id, "status": "pending"},
+    )
+
+
 @router.get("/export-plot-images/status/{task_id}")
 async def get_export_status(task_id: str) -> JSONResponse:
     """
@@ -1207,6 +1423,10 @@ async def get_export_status(task_id: str) -> JSONResponse:
         # Present only in desktop mode: the backend already wrote the zip here.
         if task.get("saved_to"):
             response["saved_to"] = task["saved_to"]
+        result = task.get("result") or {}
+        if "exported" in result:
+            response["exported"] = result["exported"]
+            response["failures"] = result.get("failures", [])
     elif task["status"] == "failed":
         response["error"] = task.get("error", "Unknown error")
 
