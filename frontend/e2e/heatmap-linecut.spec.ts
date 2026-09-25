@@ -264,7 +264,9 @@ test("a right-click locks the cut in place until it is unlocked", async ({ page 
   await page.getByRole("button", { name: "LineCut Tool" }).first().click();
   await expect.poll(() => heatmapState(page)).not.toBeNull();
   const guide = async () =>
-    JSON.parse((await page.locator("[data-linecut-guide]").first().getAttribute("data-linecut-guide"))!);
+    JSON.parse(
+      (await page.locator("[data-linecut-guide]").first().getAttribute("data-linecut-guide"))!,
+    );
 
   await expect(async () => {
     await page.mouse.move(0, 0);

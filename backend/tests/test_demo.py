@@ -3,6 +3,7 @@ import time
 import numpy as np
 import pytest
 import xarray as xr
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api import data_loader, demo, plots
@@ -41,7 +42,9 @@ def test_prepare_leaves_current_files_alone_and_rewrites_old_ones(home, monkeypa
 
 
 def test_the_endpoint_reports_where_the_files_are(home):
-    from main import app
+    # The router alone: the full app's startup launches Kaleido and export workers.
+    app = FastAPI()
+    app.include_router(demo.router)
 
     with TestClient(app) as client:
         response = client.post("/demo/prepare")

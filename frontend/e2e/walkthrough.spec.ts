@@ -337,7 +337,11 @@ test("starting clears the Composer, so its steps can be done", async ({ page }) 
   await cardButton(page, "Keep everything").click();
 
   const composer = page.locator('[data-tour="composer"]');
-  await page.locator('[data-tour="basket"]').getByText("signal", { exact: true }).first().dblclick();
+  await page
+    .locator('[data-tour="basket"]')
+    .getByText("signal", { exact: true })
+    .first()
+    .dblclick();
   const signalAxis = composer.getByRole("button", { name: /^Remove signal from/ });
   await expect(signalAxis).toBeVisible();
 
