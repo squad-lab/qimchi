@@ -21,7 +21,10 @@ export async function mockLiveHeatmapApi(page: Page) {
     holdTransform: null as Promise<void> | null,
     filteredFrame: "later" as Frame,
     plotDelayMs: 0,
-    transformRequests: [] as { filters_order: string[] }[],
+    transformRequests: [] as {
+      filters_order: string[];
+      filters_opts: Record<string, Record<string, unknown>>;
+    }[],
   };
 
   await page.route("**/*", async (route) => {
@@ -99,10 +102,7 @@ export async function mockLiveHeatmapApi(page: Page) {
 export async function openLiveHeatmap(page: Page) {
   await page.goto("/");
   await page.getByRole("button", { name: "Live Measurements" }).click();
-  const row = page
-    .getByText("live-heat", { exact: true })
-    .locator("xpath=ancestor::div[@data-level][1]");
-  await row.getByRole("button", { name: "Add to basket" }).click();
+  await page.getByText("live-heat", { exact: true }).dblclick();
   await expect.poll(() => heatmapState(page)).not.toBeNull();
 }
 

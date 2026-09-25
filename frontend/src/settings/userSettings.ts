@@ -13,6 +13,14 @@ export type ExportVariant = "light" | "dark";
 export type PlottingBehaviour = "heatmapOrLine" | "both" | "none";
 
 export const PLOT_WIDTHS: PlotWidthPercent[] = [33, 50, 66, 100];
+/** Live refresh interval in milliseconds, from 100 to 1000 in steps of 50. */
+export const LIVE_REFRESH_MIN_MS = 100;
+export const LIVE_REFRESH_MAX_MS = 1000;
+export const LIVE_REFRESH_STEP_MS = 50;
+export const LIVE_REFRESH_STEPS = Array.from(
+  { length: (LIVE_REFRESH_MAX_MS - LIVE_REFRESH_MIN_MS) / LIVE_REFRESH_STEP_MS + 1 },
+  (_, i) => LIVE_REFRESH_MIN_MS + i * LIVE_REFRESH_STEP_MS,
+);
 export const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2] as const;
 
 export interface UserSettings {
@@ -20,6 +28,8 @@ export interface UserSettings {
     theme: ThemePreference;
     zoom: number;
     plotWidth: PlotWidthPercent;
+  /** Whether the first-launch walkthrough has been offered. */
+    walkthroughSeen: boolean;
   };
   plots: {
     plottingBehaviour: PlottingBehaviour;
@@ -32,6 +42,8 @@ export interface UserSettings {
   };
   live: {
     autoAddToBasket: boolean;
+    /** Minimum supported live refresh interval in milliseconds. */
+    minRefreshMs: number;
   };
   export: {
     formats: ExportFormat[];
@@ -52,10 +64,10 @@ export interface UserSettings {
 }
 
 export const FACTORY_SETTINGS: UserSettings = {
-  general: { theme: "system", zoom: 1, plotWidth: 50 },
+  general: { theme: "system", zoom: 1, plotWidth: 50, walkthroughSeen: false },
   plots: { plottingBehaviour: "heatmapOrLine", squarify: false, recreateCustomPlots: true },
   explorer: { sortBy: "timestamp" },
-  live: { autoAddToBasket: true },
+  live: { autoAddToBasket: true, minRefreshMs: 300 },
   export: { formats: ["png", "svg"], variants: ["light", "dark"], scale: null, folder: null },
   desktop: { checkForUpdates: true, previewReleases: false },
   appearance: { heatmap: FACTORY_APPEARANCE_SETTINGS, line: FACTORY_APPEARANCE_SETTINGS },
@@ -77,6 +89,7 @@ const ENUM_LEAVES: Record<string, readonly unknown[]> = {
   "general.plotWidth": PLOT_WIDTHS,
   "explorer.sortBy": ["name", "timestamp", "size", "chrono"],
   "plots.plottingBehaviour": ["heatmapOrLine", "both", "none"],
+  "live.minRefreshMs": LIVE_REFRESH_STEPS,
 };
 
 /** The effective settings: stored values over the defaults, ignoring anything malformed. */

@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 
 import { expect, test } from "./coverage";
+import { chooseColorscale } from "./colorscale";
 import { mockLiveHeatmapApi, openLiveHeatmap } from "./liveHeatmap";
 import { mockSettingsApi } from "./settingsMock";
 
@@ -23,6 +24,9 @@ const heatmapLook = (page: Page) =>
   });
 
 const settingsDialog = (page: Page) => page.getByRole("dialog", { name: "Settings" });
+// The Viewer's own width menu, not a plot's.
+const viewerWidthButton = (page: Page) =>
+  page.getByRole("button", { name: "Plot width", exact: true }).last();
 
 async function openSettings(page: Page, section?: string) {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -44,7 +48,7 @@ test("a heatmap default applies to existing plots, except where a plot overrides
   await expect.poll(async () => (await heatmapLook(page))?.colorscale).toBe(VIRIDIS);
 
   await openSettings(page, "HeatMap");
-  await settingsDialog(page).getByLabel("Heatmap colorscale").selectOption("plasma");
+  await chooseColorscale(page, settingsDialog(page), "Plasma");
   await expect.poll(async () => (await heatmapLook(page))?.colorscale).toBe(PLASMA);
   await expect
     .poll(() => settings.document)
@@ -53,10 +57,10 @@ test("a heatmap default applies to existing plots, except where a plot overrides
 
   // The plot's own choice wins over later defaults...
   await page.getByTitle("Edit Appearance").first().click();
-  await page.getByLabel("Heatmap colorscale").selectOption("inferno");
+  await chooseColorscale(page, page, "Inferno");
   await expect.poll(async () => (await heatmapLook(page))?.colorscale).toBe(INFERNO);
   await openSettings(page, "HeatMap");
-  await settingsDialog(page).getByLabel("Heatmap colorscale").selectOption("cividis");
+  await chooseColorscale(page, settingsDialog(page), "Cividis");
   await page.waitForTimeout(500);
   expect((await heatmapLook(page))?.colorscale).toBe(INFERNO);
   await settingsDialog(page).getByRole("button", { name: "Close modal" }).click();
@@ -114,7 +118,8 @@ test("rail buttons and Settings edit the same saved values", async ({ page }) =>
   await page.goto("/");
 
   await page.getByRole("button", { name: "Switch to dark theme" }).click();
-  await page.getByRole("button", { name: "66% width" }).click();
+  await viewerWidthButton(page).click();
+  await page.getByRole("menuitemradio", { name: "66% width (all plots)" }).click();
   await expect.poll(() => settings.document).toEqual({ general: { theme: "dark", plotWidth: 66 } });
 
   await openSettings(page);
@@ -131,7 +136,11 @@ test("rail buttons and Settings edit the same saved values", async ({ page }) =>
   await page.evaluate(() => localStorage.clear());
   await page.reload();
   await expect(page.locator("html")).toHaveClass(/dark/);
-  await expect(page.getByRole("button", { name: "66% width" })).toHaveClass(/bg-gray-200/);
+  await viewerWidthButton(page).click();
+  await expect(page.getByRole("menuitemradio", { name: "66% width (all plots)" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
 });
 
 for (const [behaviour, expected] of [
@@ -150,8 +159,8 @@ for (const [behaviour, expected] of [
     const row = page
       .getByText("live-heat", { exact: true })
       .locator("xpath=ancestor::div[@data-level][1]");
-    await row.getByRole("button", { name: "Add to basket" }).click();
-    await expect(row.getByRole("button", { name: "Remove from basket" })).toBeVisible();
+    await page.getByText("live-heat", { exact: true }).dblclick();
+    await expect(row).toHaveClass(/border-l-green-500/);
 
     const plotTypes = () =>
       page.evaluate(() =>
@@ -214,9 +223,8 @@ for (const autoAdd of [true, false]) {
     await expect(row).toBeVisible({ timeout: 5_000 });
     await page.waitForTimeout(1_500);
 
-    await expect(row.getByRole("button", { name: "Remove from basket" })).toHaveCount(
-      autoAdd ? 1 : 0,
-    );
+    if (autoAdd) await expect(row).toHaveClass(/border-l-green-500/);
+    else await expect(row).not.toHaveClass(/border-l-green-500/);
   });
 }
 
@@ -226,7 +234,8 @@ test("the Explorer's sort buttons and Settings share one saved order", async ({ 
   await page.goto("/");
   await page.getByRole("button", { name: "Live Measurements" }).click();
 
-  await page.getByTitle("Sort by size").click();
+  await page.getByRole("button", { name: "Choose sort" }).click();
+  await page.getByRole("menuitemradio", { name: "size" }).click();
   await expect.poll(() => settings.document).toEqual({ explorer: { sortBy: "size" } });
 
   await openSettings(page, "Explorer");

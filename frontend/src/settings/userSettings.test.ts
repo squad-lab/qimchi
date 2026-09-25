@@ -37,6 +37,27 @@ describe("resolveSettings", () => {
   });
 });
 
+describe("live refresh", () => {
+  it("defaults to refreshing at most every 300 ms", () => {
+    expect(resolveSettings({}).live.minRefreshMs).toBe(300);
+  });
+
+  it("accepts only the offered choices", () => {
+    expect(resolveSettings({ live: { minRefreshMs: 100 } }).live.minRefreshMs).toBe(100);
+    expect(resolveSettings({ live: { minRefreshMs: 1000 } }).live.minRefreshMs).toBe(1000);
+    // Off the 50 ms grid, or out of range.
+    expect(resolveSettings({ live: { minRefreshMs: 125 } }).live.minRefreshMs).toBe(300);
+    expect(resolveSettings({ live: { minRefreshMs: 2000 } }).live.minRefreshMs).toBe(300);
+    // Clamp imported or manually edited values below the safe minimum.
+    expect(resolveSettings({ live: { minRefreshMs: 5 } }).live.minRefreshMs).toBe(300);
+    expect(resolveSettings({ live: { minRefreshMs: "fast" } }).live.minRefreshMs).toBe(300);
+  });
+
+  it("is not stored while it is at its default", () => {
+    expect(patchFor(["live", "minRefreshMs"], 300)).toEqual({ live: { minRefreshMs: null } });
+  });
+});
+
 describe("patchFor", () => {
   it("stores a changed value and removes one set back to its default", () => {
     expect(patchFor(["general", "zoom"], 1.5)).toEqual({ general: { zoom: 1.5 } });

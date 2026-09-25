@@ -30,6 +30,9 @@ import UpdatesPanel from "./UpdatesPanel";
 import { useUpdateStore } from "../stores/updateStore";
 import {
   FACTORY_SETTINGS,
+  LIVE_REFRESH_MAX_MS,
+  LIVE_REFRESH_MIN_MS,
+  LIVE_REFRESH_STEP_MS,
   PLOT_WIDTHS,
   ZOOM_STEPS,
   type ExplorerSort,
@@ -84,20 +87,85 @@ const SORT_LABELS: Record<ExplorerSort, string> = {
 const Field = ({
   label,
   description,
+  inline = false,
   children,
 }: {
   label: string;
   description?: string;
+  inline?: boolean;
   children: React.ReactNode;
 }) => (
-  <div className="py-3 border-b border-gray-100 last:border-b-0">
+  <div
+    className={`border-b border-gray-100 py-3 last:border-b-0 ${
+      inline ? "flex items-center justify-between gap-6" : ""
+    }`}
+  >
     <div className="min-w-0">
       <div className="text-sm font-medium text-gray-700">{label}</div>
       {description && <div className="mt-0.5 text-xs text-gray-500">{description}</div>}
     </div>
-    <div className="mt-2 w-full min-w-0 [&>select]:w-full">{children}</div>
+    <div className={inline ? "shrink-0" : "mt-2 w-full min-w-0 [&>select]:w-full"}>{children}</div>
   </div>
 );
+
+// Align marks with the center of the range thumb across its usable track.
+const THUMB_PX = 16;
+const markLeft = (fraction: number) =>
+  `calc(${fraction * 100}% + ${(0.5 - fraction) * THUMB_PX}px)`;
+
+const RefreshSlider = ({ value, onChange }: { value: number; onChange: (ms: number) => void }) => {
+  const fallback = FACTORY_SETTINGS.live.minRefreshMs;
+  const span = LIVE_REFRESH_MAX_MS - LIVE_REFRESH_MIN_MS;
+  const defaultAt = (fallback - LIVE_REFRESH_MIN_MS) / span;
+  return (
+    <div className="w-full">
+      <div className="mb-1 flex h-6 items-center justify-between text-sm">
+        <span className="font-mono font-semibold text-gray-800">{value} ms</span>
+        {value !== fallback && (
+          <button
+            type="button"
+            onClick={() => onChange(fallback)}
+            className="qimchi-dark-hover-plain flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:bg-gray-100"
+          >
+            <RotateCcw size={12} />
+            Reset to {fallback} ms
+          </button>
+        )}
+      </div>
+      <div className="relative pt-2.5">
+        {/* The default */}
+        <div
+          className="pointer-events-none absolute top-0 h-0 w-0 -translate-x-1/2 border-x-[6px] border-t-[9px] border-x-transparent border-t-amber-500"
+          style={{ left: markLeft(defaultAt) }}
+          aria-hidden
+        />
+        <input
+          type="range"
+          aria-label="Fastest live refresh"
+          min={LIVE_REFRESH_MIN_MS}
+          max={LIVE_REFRESH_MAX_MS}
+          step={LIVE_REFRESH_STEP_MS}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="w-full cursor-pointer accent-blue-600"
+        />
+      </div>
+      <div className="relative mt-1 h-4 text-xs text-gray-500">
+        <span className="absolute left-0">{LIVE_REFRESH_MIN_MS} ms</span>
+        <button
+          type="button"
+          onClick={() => onChange(fallback)}
+          className="absolute -translate-x-1/2 font-semibold text-amber-600 hover:underline"
+          style={{ left: markLeft(defaultAt) }}
+          title="Set it back to the default"
+        >
+          {fallback} ms
+        </button>
+        <span className="absolute right-0">{LIVE_REFRESH_MAX_MS / 1000} s</span>
+      </div>
+    </div>
+  );
+};
 
 const Toggle = ({
   checked,
@@ -403,6 +471,7 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
             <Field
               label="Recreate custom plots"
               description="Adding a measurement recreates the plots already in the Viewer. Turn this off to recreate only its default plots, not Composer plots or LineCuts."
+              inline
             >
               <Toggle
                 label="Recreate custom plots for new measurements"
@@ -410,7 +479,7 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
                 onChange={(on) => update(["plots", "recreateCustomPlots"], on)}
               />
             </Field>
-            <Field label="Square plots" description="Keep every plot at a 1:1 aspect ratio.">
+            <Field label="Square plots" description="Keep every plot at a 1:1 aspect ratio." inline>
               <Toggle
                 label="Square plots"
                 checked={settings.plots.squarify}
@@ -446,6 +515,7 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
             <Field
               label="Add new measurements to the basket"
               description="Put a measurement in the basket as soon as it starts running."
+              inline
             >
               <Toggle
                 label="Add new live measurements to the basket"
@@ -453,13 +523,30 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
                 onChange={(on) => update(["live", "autoAddToBasket"], on)}
               />
             </Field>
+            <Field
+              label="Fastest live refresh"
+              description="The shortest time a live plot waits between updates. Qimchi waits longer by itself when a refresh takes longer than this."
+            >
+              <RefreshSlider
+                value={settings.live.minRefreshMs}
+                onChange={(ms) => update(["live", "minRefreshMs"], ms)}
+              />
+            </Field>
+            <div className="mt-1 flex items-start gap-2 rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <span>
+                Each refresh queries your measurement code for its latest data. Refreshing faster
+                than the default can make live plotting in Qimchi unstable, and can slow down or
+                disturb a measurement that is running. If that happens, set this back to 300 ms.
+              </span>
+            </div>
           </>
         );
       case "export":
         return (
           <>
             <SectionHeader title="Image export" onReset={() => resetSection(["export"])} />
-            <Field label="Formats">
+            <Field label="Formats" inline>
               <Checkboxes
                 label="Export formats"
                 values={settings.export.formats}
@@ -470,7 +557,7 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
                 onChange={(formats) => update(["export", "formats"], formats)}
               />
             </Field>
-            <Field label="Variants" description="Images for light and dark backgrounds.">
+            <Field label="Variants" description="Images for light and dark backgrounds." inline>
               <Checkboxes
                 label="Export variants"
                 values={settings.export.variants}
