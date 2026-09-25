@@ -2,115 +2,162 @@
 
 ### v0.7.0 - 2026-09-12
 
-- [Feature] The footer now shows the exact build version, including release-candidate tags, links to this changelog, and uses its pulsing dot to report whether the backend is reachable. Docker and all three desktop packages carry the release tag into the bundled frontend.
-- [Fix] Instrument snapshots containing Python's non-standard `Infinity`, `-Infinity`, or `NaN` JSON constants now render as their corresponding JavaScript numeric values instead of appearing as a character-counted string.
-- [Fix] Light/dark theme changes now apply atomically instead of briefly showing mixed-theme colours, and plot status, background-correction, and LineCut overlays have proper dark backgrounds.
-- [Misc] Plot-clearing controls are more compact: Clear All uses a labelled trash icon, and the maximized LineCut preview no longer duplicates the main close action.
-- [Misc] Preview CI reserves fast hosted runners for tests and builds, starts the bottleneck Windows build immediately, and makes untagged desktop builds explicit choices in manually started pipelines.
-- [Feature] Dark mode: an app-wide dark theme (Atom One Dark palette) with a light/dark toggle in the branding footer. The choice is remembered across restarts and defaults to your system preference. Plots, the metadata JSON view, filters, and sliders all follow the theme; the Qimchi brand green is preserved in both modes.
-- [Feature] Library: heart, trash and tag your measurements. Marks are saved to a local database and shown in the Explorer, with filters for hearted-only, hiding trash, and tags. Select several measurements and apply any of them at once.
-- [Feature] Tags work like labels -- a measurement can carry several. Filter by them from the searchable Tags dropdown, or type `#tag` (or `#"two words"`) in the Explorer search box alongside an ordinary name search.
-- [Feature] Marks follow a measurement even if you rename or move its file. Qimchi identifies a measurement by its qanary (formerly, qcutils) ID, a QCoDeS run GUID, or -- for datasets with neither -- a signature derived from the data itself. Nothing is written next to your files.
-- [Feature] Notes are stored in the database instead of `.md` sidecars, so QCoDeS runs and artefacts can have notes too. Existing sidecar notes are imported on first open, and the `.md` mirror is still written unless `QIMCHI_NOTES_MD_EXPORT` is off.
-- [Fix] Opening the same measurement in overlapping requests no longer causes a database error while its legacy note is imported.
-- [Feature] Plots: new plots now appear on the left, matching the Basket. Pin a plot to hold it on its measurement while Next/Prev moves the others, so you can compare two datasets side by side.
-- [Feature] Adding a measurement while the Viewer has plots recreates those plots for it -- default and custom alike, with the same variables and filters -- instead of adding the default plots again. A default plot you removed therefore stays removed, including for new live measurements. Plots whose variables are missing from the new measurement are skipped and named, and a measurement that fits none of them gets its default plots.
-- [Feature] Tags can be renamed and deleted from the tag popover. Renaming keeps every measurement that carries the tag; deleting asks first and says how many datasets are affected. A name that is already taken is refused rather than quietly merging two tags into one.
-- [Feature] Keyboard shortcuts for the Explorer selection: `Alt+Shift+H` hearts it and `Alt+Shift+T` trashes it, both across the whole multi-selection. They are listed with the rest in Help.
-- [Feature] Exported images carry their measurement with them. Each PNG holds its tags, heart/trash state and IDs in the image metadata, and the same details are written to `metadata.json` inside the export zip.
-- [Fix] The SQUAD Lab logo no longer fails to load in dark mode, and matches the light-mode size.
-- [Fix] Updating no longer risks leaving the app showing the previous version's interface, or a blank window.
-- [Fix] The app no longer writes its log into its own installation folder, which could make a silent update skip files.
-- [Fix] Logs are kept across restarts and updates instead of the debug log being wiped on every launch, and are consolidated in `~/.qimchi/logs`.
-- [Fix] Live qanary plots no longer flicker between live and disk state when a measurement finishes during a refresh, and the release test now exercises the published qanary package reproducibly.
-- [Feature] Unwanted ongoing measurements can be hidden from the Live Measurements view without marking them finished or stopping their producer. Hidden runs stay ignored across restarts, can be restored or immediately undone, and are forgotten after they actually end.
-- [Fix] The Docker image now includes database migrations and dataset readers, and nginx forwards the library and plot-transform APIs used by the frontend.
-- [Fix] The first image export is no longer slow. The export workers and the browser they drive now start with the app, in the background, instead of on your first export -- a wait of several seconds that only ever hit the first plot you exported.
-- [Fix] Plot titles are no longer dark on a dark background in dark mode.
-- [Fix] The Live/Completed badge no longer stretches into a large square when plots are squarified.
-- [Fix] The fade at the right edge of a full Basket slot no longer shows as a pale band in dark mode.
-- [Fix] Qimchi no longer keeps contacting a measurement that has already finished, nor mistakes a later run that reused the same port for it. A finished measurement is read from disk straight away.
-- [Misc] Live measurements are now discovered through `~/.qimchi/live_measurements.db` instead of `~/.qcutils/`. Upgrade Qimchi and your measurement packages together; once running measurements show up again, the old `~/.qcutils` folder can be deleted.
-- [Misc] The companion measurement package qcutils is now called qanary. Measurements it identified are relabelled in the library database on first launch; your hearts, tags, trash and notes are unaffected.
-- [Misc] Measurement metadata is read once and cached, so reopening a dataset no longer re-reads the file.
-- [Misc] Windows uninstaller now offers to also remove the app's runtime data and cache (`~/.qimchi`: saved settings/window state, logs, and the ~150 MB downloaded Chrome used for image export). Your library, exported plots, notes, and datasets are left untouched.
-- [Misc] CI now verifies the locked backend environment and runs frontend ESLint, Prettier, and production-build checks; frontend formatting and linting are available as npm scripts.
-- [Misc] Backend regression coverage now spans every module, including downloads, exports, filters, notes, live data, library state, plotting, and application lifecycle, with a 75% coverage floor enforced in CI.
-- [Misc] Hovering the filter button now lists the filters applied to that plot, by name and in the order they are applied.
-- [Misc] Trashed measurements are quieter: greyed out, no red on the icon, and only Restore responds -- so a trashed dataset cannot be opened or plotted by accident.
-- [Misc] Following a live measurement now transfers only the rows measured since the last refresh instead of the whole grid every time, which keeps a long sweep as cheap to watch at the end as at the start. Takes effect once your producers run qimchi-connect 0.3.0 or newer.
-- [Misc] Dark mode colours -- panel titles, the Explorer tree, dataset icons -- come from theme tokens instead of values written into components, so the two themes stay in step. Dataset icons keep one colour in both themes, so a kind is recognisable either way.
-- [Misc] Qimchi now runs against QCoDeS 0.59.
-- [Feature] Axis and colorbar labels now carry the units of the data and are typeset as mathematics. Units are read from the dataset, kept correct through filters -- differentiating a current against a gate voltage gives a conductance, in siemens -- and shown with the engineering prefix that suits the values on screen, so ticks read `1.2` and `(mV)` rather than `0.0012`. Where a filter cancels the units out, the prefix moves onto the tick labels themselves.
-- [Feature] New Scale filter for Y or Z data: multiply by a number (optionally with its own unit), invert, or express the data in units of the conductance and resistance quanta, G0, 2G0 and R0. Units of the result are inferred, and can be overridden along with the label.
-- [Feature] Axis and colorbar labels can be renamed in place: click one, type, and press Enter. An edited label is kept as the plot rescales.
-- [Feature] Plots are set in Fira Sans, matching the rest of the app, and exported images embed both it and the mathematics fonts, so a PNG or SVG looks the same on any machine.
-- [Fix] Long colorbar labels are no longer cut off at the edge of the plot, on screen or in exports. The space reserved for the label now follows its length, and a very long one is set slightly smaller instead of taking the plot with it.
-- [Fix] Hovering a point shows plain axis labels instead of the raw LaTeX behind them.
-- [Fix] The colorbar of a running measurement no longer shifts the plot sideways as values grow, and Plotly's "Click to enter Colorscale title" placeholder no longer sits behind the real label.
-- [Misc] Release-candidate builds are no longer a dead end. A preview install is now offered the next preview and, as soon as it ships, the stable release of that version. Stable installs are still never offered previews.
-- [Misc] Installation instructions now cover the desktop app on all three platforms, including the one-time Windows SmartScreen and macOS "Open Anyway" prompts that appear because Qimchi is not code-signed or notarized yet. The old Windows clone-and-build scripts have been removed in favour of the installer; the Linux/macOS install script is unchanged.
-- [Feature] The sidebar is now an accordion. Explorer, Metadata, Notes and Live Measurements each get an icon tab on a slim rail and open one at a time, using the full height of the pane; `Alt+1` to `Alt+4` open them directly. Help, the theme toggle, the notifications log, app zoom and the collapse button sit together at the bottom of the rail.
-- [Feature] The Explorer can expand to fill the window with `Shift+F` (`Esc` to leave), where a wider layout shows each measurement's modified date.
-- [Feature] Live Measurements is now one of the sidebar panes rather than a separate mode of the Explorer.
-- [Feature] Basket, Composer and Viewer carry a control ribbon like the plot cards -- the section icon with its count, then the controls. `Alt+B` and `Alt+C` collapse the Basket and the Composer, and whether they are collapsed is remembered across restarts.
-- [Feature] Help is searchable. Type to fuzzy-match every section, move through the hits with the arrow keys and open one with Enter. The window also opens 30% wider.
-- [Feature] Zoom the whole app from the sidebar rail, in the same steps a browser uses, with a percentage button that resets it to 100%. The level is remembered.
-- [Feature] QCoDeS and Quantify measurements now show the metadata they actually carry. Qimchi looked only for qanary's four sections and showed "N/A" for each; a QCoDeS run now lists its run id, GUID, sample and experiment names and its station snapshot, and is named by its run name in the Explorer.
-- [Feature] Notes for QCoDeS runs are keyed to the database rather than to each run's own GUID, so they are no longer at risk of being orphaned. Selecting the database itself shows an overall view pooling the notes of every run in it.
-- [Feature] Measurement downloads now include each dataset's library record -- its tags, heart and trash state, and IDs -- as a JSON file inside the archive.
-- [Feature] The Explorer lists the newest measurements first by default.
-- [Fix] The Explorer keeps the tree, and your place in it, while it refreshes instead of replacing the whole pane with a spinner.
-- [Fix] The Explorer reopens the folders you had open rather than expanding everything, and Expand/Collapse all now follows the folder you are actually looking at, including after Back and Forward.
-- [Fix] The full-window Explorer now covers a plot's Plotly toolbar, which used to paint straight through it.
-- [Fix] An image export that produced no images now reports the failure, instead of handing you an archive containing only its own logs.
-- [Fix] The maximized plot view no longer repeats the measurement name in the plot title, where the header already carries it.
-- [Fix] Dark mode: dropdown lists, the notes editor and its header, the sidebar rail's active tab and hover colours, and several chip borders.
-- [Fix] The Explorer search box's focus ring is no longer clipped, and the icon rail no longer scrolls sideways.
-- [Fix] Clicking an axis title to edit it now works reliably on a freshly drawn plot.
-- [Fix] Metadata loads for datasets stored as an xarray DataTree instead of failing.
-- [Fix] The Metadata pane shows a qanary measurement's four sections again, rather than following them with every other attribute the file carries. Those belong to the Basket's attribute strip, and listing them here buried the sections.
-- [Fix] Applying or changing a filter on a LineCut no longer rebuilds the plot at the wrong slice. The cut position was dropped, so the plot silently fell back to the lowest slider value -- PolyFit, in particular, then fitted a line you were not looking at.
-- [Misc] The Explorer is much faster: scanning a folder of 210 measurements went from 1.06s to 0.19s. The scan no longer re-reads every chunk of a zarr store to date it, runs off the request loop so it cannot hold up plots and notes, and remembers each dataset's size and timestamp until the file changes.
-- [Misc] A large basket no longer slows the rest of the app down. With around 90 measurements loaded, opening Metadata used to wait behind the whole basket redrawing. The Explorer tree also loads collapsed now and draws only the rows on screen.
-- [Misc] The frontend has a test suite: Vitest over the stores and utilities, and Playwright over the library features, the sidebar rail and the control ribbons. CI runs both with coverage floors, alongside the backend's.
-- [Misc] CI fixes lint and formatting on the branch and pushes the result, so a merge request is never held up by a missed formatting run.
-- [Misc] The repository root is tidier: the Docker files live in `docker/`, and the Windows build script alongside the Linux and macOS ones in `scripts/`. The superseded Windows clone-and-build scripts are gone.
-- [Misc] Downloads from the Releases page now carry their version in the filename -- `qimchi-setup-v0.7.0.exe` rather than `qimchi-setup.exe` -- so a file in your Downloads folder says which build it is.
-- [Feature] Updates download in the background: Qimchi stays usable while the new version downloads, shows its progress on the sidebar rail, and asks to install it once it is ready. "Remind me at next launch" keeps the download and asks again when Qimchi next starts. Settings > Updates shows the running version and checks for, downloads and installs updates on demand.
-- [Feature] Settings: a gear on the sidebar rail (Shift+S) opens one place for your preferences, saved to the Qimchi database so they survive restarts and updates. It covers the theme (now including System), zoom, plot width, square plots, the plotting behaviour, the Explorer's sort order, whether new live measurements join the basket, image export (formats, light/dark variants, resolution and, in the desktop app, the folder), and, in the desktop app, update checks and preview releases.
-- [Feature] Adding a measurement now creates a HeatMap when its variables allow one, and a LinePlot only when they don't, instead of always both. Change this under Settings > Plots > Plotting behaviour: HeatMap or LinePlot (the default), both, or none. The checks on whether a plot can be made are unchanged.
-- [Feature] Each plot has a width button that opens the same 33/50/66/100% choices as the Viewer, for that plot alone. The Viewer's buttons still set every plot. Its two export buttons are now one Export button that opens Disk and Notes.
-- [Feature] Plots can be rearranged: drag a plot by the grip handle on its side ribbon and drop it before or after another plot, or focus the handle and use the arrow keys. Each plot keeps its own width, and the Viewer scrolls when you hold a plot near its top or bottom edge.
-- [Feature] Settings can be exported to a JSON file and imported again from the Settings title bar, to copy them to another machine or keep a backup. Importing replaces every setting, and values the file does not hold, or that are invalid, return to their defaults.
-- [Feature] Default plot appearance: Settings sets the colormap, axes, grid, ticks, lines and markers for every HeatMap and LinePlot. A change applies to open plots straight away, except where a plot has its own value from its Appearance panel, and a plot's Reset now returns it to your defaults instead of the built-in look.
-- [Feature] The theme, zoom, plot-width, square-plot and Explorer sort buttons change the same saved settings, so the plot width is now kept across sessions too.
-- [Fix] Turning on a plot's major or minor grid in Appearance now draws the grid. The setting was saved but never shown.
-- [Feature] A Reverse toggle next to the heatmap colorscale in Appearance flips any colormap. The choice stays when you pick another map, and carries through to exported images.
-- [Feature] The colour range in Appearance shows its values in the data's units with a suitable SI prefix, e.g. "250 pA" rather than "0.00000000025".
-- [Feature] The LineCut preview now follows a live measurement as new data arrives, and refreshes at once when you switch between X and Y cuts. Unmeasured points no longer shift the rest of the slice.
-- [Fix] A heatmap's colour range no longer inherits the range of heatmaps opened before it. "Data min" could read higher than "Data max", and the range stopped following new data on a live plot.
-- [Fix] A running measurement's colorbar keeps its SI prefix while some points are still unmeasured, instead of showing long raw decimals until the sweep finishes.
-- [Fix] Swapping axes while LineCut is active no longer squeezes the heatmap into a sliver at the edge of the plot.
-- [Fix] Zoom and pan are kept when a filter result, a live refresh or a background-correction overlay arrives after you moved the view. On a live plot a slow filter used to snap the view back to full range.
-- [Fix] Resetting a live plot, or changing its filters, no longer makes it flick back to the previous state for a moment, and Reset no longer blanks the plot while it reloads.
-- [Fix] Changing a filter while an earlier change is still being applied is no longer ignored. The latest change is applied once the earlier one finishes, so the plot matches what the Filters panel shows.
-- [Fix] On the Windows desktop app, a crashed page now reloads by itself instead of leaving WebView2's "This page is having a problem" screen, and the crash is recorded in the debug log. If it crashes three times within five minutes, the page is left as it is.
-- [Fix] Live plots on the Windows desktop app keep refreshing at full speed while the window is minimized or behind other windows.
-- [Feature] The basket holds up to 50 measurements. Adding more shows a warning asking you to remove some first, instead of slowing the app down, and a caution icon under the basket icon says so while it is full.
-- [Fix] Tooltips near the right edge of the window no longer wrap after every word.
-- [Fix] Closing a plot now frees its memory. Plots were never completely released, so a long session -- especially with large heatmaps -- could exhaust the browser's memory and show "This page is having a problem: Out of Memory".
-- [Fix] A live measurement no longer grows the app's memory as it refreshes. Every refresh left the previous figure behind, so a long live session could exhaust the browser's memory and lose the window to an "Out of Memory" page.
-- [Misc] Long sessions hold on to less: closing a plot also drops its saved filters, sliders and appearance, the notifications log keeps its most recent 500 entries, and the Explorer remembers only the folders you visited most recently.
-- [Fix] Axes and colour bars always show at least two labelled values. Some heatmaps had a colour bar with a single label, which gave no sense of scale.
-- [Fix] Closing the desktop app now always ends it, on Windows and macOS.
-- [Fix] Updating on Windows works again. Setup could not replace a running Qimchi and gave up part-way, leaving an install that would not open; the update now waits for Qimchi to close before installing, shows its progress, and opens Qimchi again when it is done. Opening Qimchi while an update installs now says an update is in progress instead of breaking it.
-- [Fix] On macOS, installing an update now quits Qimchi once the new version's disk image opens, so it can be installed straight away.
-- [Fix] After updating from one release candidate to the next, the app no longer risks showing the previous candidate's interface.
-- [Fix] Warning and error boxes, such as "Library unavailable", are readable in dark mode, and the Notifications Log buttons no longer flash a pale background on hover.
-- [Misc] The debug log now records each step of the update check.
-- [Misc] The desktop app's "Open debug log" terminal no longer prints the whole log first. On Windows it shows the last 200 lines and keeps following; on macOS and Linux it opens in `less` following new lines (Ctrl+C to scroll and search, `F` to follow again, `q` to quit), or the last 200 lines with `tail` if `less` is missing.
-- [Misc] The filter summary on the filter button uses the names shown in the Filters panel, such as "Diff along Y", instead of internal identifiers.
+- [Feature] Complex variables, including HDF5 `r`/`i` pairs, are available as amplitude, phase in radians, real, and imaginary values. Library metadata is preserved for these measurements.
+- [Feature] Text-labelled and coordinate-free dimensions have indexed sliders, allowing datasets such as fit results with a `param` axis to be plotted as heat maps.
+- [Feature] Added a first-run walkthrough covering measurements, filters, appearance, line plots, and live data. It uses two bundled demos, can be reopened from Help, and offers to remove the demos and restore the previous Explorer location on exit.
+- [Feature] The heat-map colour-scale picker shows swatches and previews the highlighted scale. Selection applies the scale; Escape cancels the preview.
+- [Feature] The default live refresh interval is 300 ms, down from 750 ms. Settings > Live supports intervals from 100 ms to 1 s in 50 ms steps; short intervals may affect measurement stability.
+- [Feature] Added plotting support for MATLAB `.mat` files, including v7.3 files. Ordered 1-D arrays are used as axes; scalars, text, and struct fields are shown as metadata.
+- [Feature] Added bulk export for all Viewer plots. The output contains one archive per plot, preserves the current plot state and export settings, and records individual export failures without aborting the batch.
+- [Feature] Added Export > Copy for copying a plot to the clipboard as a transparent PNG.
+- [Feature] Selecting multiple Composer fields on one axis creates one plot per field.
+- [Feature] Two measured quantities from the same sweep can be plotted against each other. Additional sweep dimensions are controlled by sliders.
+- [Feature] Added oblique LineCuts. Press `O` or select Oblique, then choose the start and end points. A caution note beside Oblique and in Help describes the interpolation.
+- [Feature] LineCut opens in a pop-up beside its plot instead of maximizing it. A right-click on the heat map locks the cut in place; clicking then keeps the locked cut.
+- [Feature] Applied filters can be reordered in the Filters panel's Applied section, by dragging or with the arrows; the plot redraws in the new order. Filter tabs show each filter's position.
+- [Feature] `Esc` exits the walkthrough after closing any active panel, menu, or maximized plot. If demos were added, the first press offers cleanup and the second keeps them.
+- [Feature] Added an Atom One Dark app theme with a footer toggle. The saved choice defaults to the system theme and applies to plots, metadata, filters, and sliders.
+- [Feature] Measurements can be hearted, trashed, and tagged. Marks are stored in the local library database, support multi-selection, and can be filtered in the Explorer.
+- [Feature] Measurements can have multiple tags. Tags can be filtered from the Tags menu or with `#tag` and `#"two words"` Explorer searches.
+- [Feature] Measurement marks survive file moves and renames when a qanary ID, QCoDeS GUID, or data-derived signature is available.
+- [Feature] Notes are stored in the library database, adding support for QCoDeS runs and other artefacts. Existing sidecars are imported; `.md` mirroring remains enabled unless `QIMCHI_NOTES_MD_EXPORT` is disabled.
+- [Feature] New plots appear on the left. Pinned plots keep their measurement while Next/Prev updates unpinned plots.
+- [Feature] Adding a measurement recreates the current default and custom plots with their variables and filters. Incompatible plots are skipped; default plots are used when none match.
+- [Feature] Tags can be renamed and deleted from the tag popover. Rename conflicts are rejected, and deletion reports the number of affected datasets before confirmation.
+- [Feature] Added `Alt+Shift+H` and `Alt+Shift+T` to heart or trash the current Explorer selection.
+- [Feature] Folders can be hearted, trashed, and tagged. Folder marks apply recursively to descendants; folder identity remains path-based.
+- [Feature] PNG exports embed library state and measurement IDs. Export archives include the same data in `metadata.json`.
+- [Feature] Running measurements can be hidden from Live Measurements without stopping or completing them. Hidden runs persist across restarts and are removed from the hidden list when they finish.
+- [Feature] Axis and colour-bar labels include dataset units and mathematical typesetting. Filters update units, and displayed values use an appropriate engineering prefix.
+- [Feature] Added a Scale filter for Y and Z data with multiplication, inversion, conductance/resistance quantum units, inferred units, and label overrides.
+- [Feature] Axis and colour-bar labels can be edited in place and remain unchanged when the plot rescales.
+- [Feature] Plots use Fira Sans. Exported images embed the application and mathematics fonts.
+- [Feature] Replaced the sidebar with an accordion rail for Explorer, Metadata, Notes, and Live Measurements. `Alt+1` through `Alt+4` open the panes directly.
+- [Feature] `Shift+F` opens a full-window Explorer with measurement modification dates; `Esc` closes it.
+- [Feature] Moved Live Measurements from an Explorer mode to its own sidebar pane.
+- [Feature] Added control ribbons to Basket, Composer, and Viewer. `Alt+B` and `Alt+C` toggle Basket and Composer, with state preserved across restarts.
+- [Feature] Help supports fuzzy search and keyboard navigation and opens in a wider window.
+- [Feature] Added persistent app zoom controls to the sidebar rail, including a 100% reset.
+- [Feature] QCoDeS and Quantify measurements show source-specific metadata. QCoDeS entries include run ID, GUID, sample, experiment, station snapshot, and run name.
+- [Feature] QCoDeS notes are associated with the database. Selecting a database shows notes from all its runs.
+- [Feature] Measurement downloads include the dataset's library record as JSON.
+- [Feature] The Explorer sorts newest measurements first by default.
+- [Feature] Updates download in the background with progress shown on the sidebar rail. Settings > Updates supports manual checks, downloads, installation, preview releases, and deferred reminders.
+- [Feature] Added persistent Settings for theme, zoom, plot layout and behavior, Explorer sorting, live-basket behavior, image export, and desktop updates. Open with `Shift+S` or the sidebar gear.
+- [Feature] Automatic plotting now creates a HeatMap when possible and otherwise a LinePlot. Settings > Plots can select HeatMap or LinePlot, both, or neither.
+- [Feature] Each plot has an independent 33/50/66/100% width control. Viewer-wide width controls remain available, and Disk and Notes exports share one menu.
+- [Feature] Plots can be reordered by dragging the ribbon handle or using its keyboard controls. Plot widths are preserved, with edge-triggered Viewer scrolling during drag.
+- [Feature] Settings can be exported to and imported from JSON. Import replaces all settings and restores defaults for missing or invalid values.
+- [Feature] Settings can define default colormap, axes, grid, ticks, lines, and markers. Changes update open plots unless locally overridden; Reset returns to these defaults.
+- [Feature] Theme, zoom, plot width, square-plot, and Explorer sort controls update the same persistent settings.
+- [Feature] Added a persistent Reverse option for heat-map colour scales, including exports.
+- [Feature] Appearance shows colour-range values with data units and SI prefixes.
+- [Feature] LineCut previews update with live data and immediately when switching between X and Y. Unmeasured points no longer offset the slice.
+- [Feature] The Basket is limited to 50 measurements and shows a warning and status icon when full.
+- [Feature] The footer shows the full build version, including release-candidate tags, links to the changelog, and indicates backend connectivity. Docker and desktop packages pass the release tag to the frontend.
+- [Fix] LineCut uses the selected direction immediately, without requiring the heat map to redraw first.
+- [Fix] Rotated heat-map axes and titles now account for axis step sizes. LineCut previews and results follow the rotated image correctly.
+- [Fix] Long Help entries wrap below their titles with consistent spacing.
+- [Fix] The live-refresh slider no longer changes value when its reset button appears.
+- [Fix] Metadata and Explorer search inputs use the same font size.
+- [Fix] Wide tooltips are repositioned to remain inside the window.
+- [Fix] Swapping heat-map axes no longer hides the plot ribbon while it is hovered.
+- [Fix] LineCut preserves zoom when switching direction or starting an oblique cut.
+- [Fix] Deep zoom no longer triggers repeated redraws when the axis unit prefix changes.
+- [Fix] LineCut guides and heat-map hover labels now track the pointer without redrawing the heat map.
+- [Fix] Data-slider updates are debounced by 50 ms instead of 80 ms.
+- [Fix] Data sliders can reach their maximum when the step does not divide the range exactly.
+- [Fix] Applying or removing a filter no longer resets data-slider positions, and removing the last filter keeps the plot on the slider's slice.
+- [Fix] The Filters panel's Sliders and Applied tabs follow the dark theme.
+- [Fix] Starting the walkthrough clears the Composer, so leftover axes no longer block its steps.
+- [Fix] The plot selected with `1`-`9` has a clearly visible blue outline.
+- [Fix] Long notifications and notification-log entries wrap within their containers.
+- [Fix] Help and Settings no longer overlap the walkthrough. Closing them resumes the current step; starting the walkthrough closes either modal.
+- [Fix] The second walkthrough demo cannot be opened before its step.
+- [Fix] `Ctrl/Cmd` with `+` or `−` now controls app zoom on macOS. Help also lists the LineCut `X`, `Y`, and `O` shortcuts.
+- [Fix] Plots only show sliders for dimensions used by their variables.
+- [Fix] Long plot errors and Windows paths remain inside the error card.
+- [Fix] Removed Plotly's external "Share chart" action from the toolbar.
+- [Fix] Open Appearance and Filters panels remain attached and unclipped while their plot is dragged.
+- [Fix] The Composer reports a missing Z field instead of requesting an invalid heat map.
+- [Fix] Invalid plot requests show one error and do not add an empty plot card.
+- [Fix] Variable-compatibility errors identify the affected variables and sweep dimensions.
+- [Fix] Rotated heat-map labels no longer produce LaTeX brace errors and include units when both axes share them.
+- [Fix] Filters, tags, and measurement details wrap in exported images without splitting filter names.
+- [Fix] Instrument snapshot values containing Python `Infinity`, `-Infinity`, or `NaN` constants are parsed as numbers instead of strings.
+- [Fix] Theme changes no longer show mixed light and dark colours during the transition. Plot status, background-correction, and LineCut overlays now have dark-theme backgrounds.
+- [Fix] Concurrent requests no longer cause a database error during legacy-note import.
+- [Fix] The SQUAD Lab logo loads at the correct size in dark mode.
+- [Fix] Updates no longer leave a stale or blank frontend.
+- [Fix] Logs are no longer written to the installation directory, preventing skipped files during silent updates.
+- [Fix] Logs persist across launches and updates under `~/.qimchi/logs`.
+- [Fix] Live qanary plots no longer alternate between live and disk data when a measurement finishes during refresh. Release tests use the published qanary package.
+- [Fix] The Docker image includes migrations and dataset readers; nginx forwards the library and plot-transform APIs.
+- [Fix] Image-export workers and their browser start in the background with the app, removing the delay from the first export.
+- [Fix] Plot titles use a visible colour in dark mode.
+- [Fix] Live/Completed badges keep their intended size in square plot layouts.
+- [Fix] Full Basket slots no longer show a light fade in dark mode.
+- [Fix] Finished measurements are read from disk and no longer polled or confused with later runs that reuse the same port.
+- [Fix] Colour-bar margins and font size adapt to long labels on screen and in exports.
+- [Fix] Hover labels show plain axis text instead of raw LaTeX.
+- [Fix] Live colour bars no longer shift the plot as values grow, and Plotly's title placeholder is hidden.
+- [Fix] Explorer refreshes preserve the tree and current position instead of replacing the pane with a spinner.
+- [Fix] Explorer refreshes restore expanded folders, and Expand/Collapse All follows the current folder after navigation.
+- [Fix] Full-window Explorer covers Plotly toolbars.
+- [Fix] Image exports that produce no images now report an error instead of returning a logs-only archive.
+- [Fix] Maximized plots no longer repeat the measurement name in the plot title.
+- [Fix] Corrected dark-mode styles for dropdowns, the notes editor, sidebar tabs, hover states, and chip borders.
+- [Fix] The Explorer search focus ring is no longer clipped, and the icon rail no longer scrolls horizontally.
+- [Fix] Axis-title editing works on newly rendered plots.
+- [Fix] Metadata loads from xarray DataTree datasets.
+- [Fix] The Metadata pane shows only qanary's four metadata sections; other attributes remain in the Basket.
+- [Fix] LineCut filters preserve the selected slice, including for PolyFit.
+- [Fix] Major and minor grid settings are now rendered on plots.
+- [Fix] Heat maps no longer inherit colour ranges from previously opened plots; live ranges continue to update.
+- [Fix] Live colour bars retain their SI prefix while data points are unmeasured.
+- [Fix] Swapping axes during LineCut no longer collapses the heat map.
+- [Fix] Zoom and pan persist through filter results, live refreshes, and background-correction updates.
+- [Fix] Live-plot reset and filter changes no longer restore stale state or blank the plot while loading.
+- [Fix] Filter changes made during an active update are queued and applied afterward.
+- [Fix] The Windows app reloads after a WebView2 page crash and logs the event. Automatic reload stops after three crashes in five minutes.
+- [Fix] Live plots continue refreshing at full speed when the Windows app is minimized or in the background.
+- [Fix] Tooltips near the right edge no longer wrap after every word.
+- [Fix] Closing a plot releases its data and browser resources.
+- [Fix] Live refreshes release previous figures instead of accumulating memory.
+- [Fix] Axes and colour bars show at least two labelled values.
+- [Fix] Closing the desktop window terminates the app on Windows and macOS.
+- [Fix] Windows updates wait for Qimchi to exit before replacing files, show installation progress, and relaunch the app. Launch attempts during an update show an update-in-progress message.
+- [Fix] macOS updates quit Qimchi after opening the new disk image.
+- [Fix] Updating between release candidates no longer loads the previous frontend.
+- [Fix] Warning and error boxes are readable in dark mode, and Notification Log buttons no longer flash on hover.
+- [Misc] The notification log opens beside its rail button on the left.
+- [Misc] Renamed the Viewer toggle to "Show only live and pinned plots".
+- [Misc] Clear All now uses a labelled trash icon, and the maximized LineCut preview no longer duplicates the close action.
+- [Misc] Preview CI starts the Windows build immediately, reserves fast runners for tests and builds, and makes untagged desktop builds opt-in.
+- [Misc] Live measurement discovery now uses `~/.qimchi/live_measurements.db`. Update Qimchi and its measurement packages together before removing `~/.qcutils/`.
+- [Misc] Renamed qcutils to qanary. Existing measurement records are migrated without changing hearts, tags, trash, or notes.
+- [Misc] Measurement metadata is cached after the first read.
+- [Misc] The Windows uninstaller can remove runtime data and cache while preserving the library, exports, notes, and datasets.
+- [Misc] CI verifies the locked backend environment and runs frontend lint, formatting, and production-build checks. Matching npm scripts are available locally.
+- [Misc] Backend tests cover all modules and enforce a 75% coverage floor.
+- [Misc] Hovering the filter button shows the plot's applied filters in order.
+- [Misc] Trashed measurements are greyed out and only allow Restore; they cannot be opened or plotted.
+- [Misc] Live refreshes transfer only rows added since the previous refresh when producers use qimchi-connect 0.3.0 or newer.
+- [Misc] Dark-mode component colours use shared theme tokens. Dataset types retain the same icon colour in both themes.
+- [Misc] Updated QCoDeS support to 0.59.
+- [Misc] Release-candidate installations receive later previews and the corresponding stable release. Stable installations do not receive previews.
+- [Misc] Added desktop installation instructions for Windows, Linux, and macOS, including unsigned-app prompts. Removed the obsolete Windows clone-and-build scripts.
+- [Misc] Reduced a 210-measurement Explorer scan from 1.06 s to 0.19 s by avoiding zarr chunk reads, moving scans off the request loop, and caching dataset size and timestamp.
+- [Misc] Large baskets no longer block other panels while redrawing. Explorer starts collapsed and renders only visible rows.
+- [Misc] Added Vitest and Playwright frontend test suites with CI coverage thresholds.
+- [Misc] CI applies and pushes lint and formatting fixes to the branch.
+- [Misc] Moved Docker files to `docker/` and platform build scripts to `scripts/`; removed obsolete Windows build scripts.
+- [Misc] Release downloads include the version in their filenames, for example `qimchi-setup-v0.7.0.exe`.
+- [Misc] Redrawn plots release their previous chart, and stored state for plots from earlier sessions is dropped at startup.
+- [Misc] Closing a plot removes its stored filters, sliders, and appearance. Notifications are limited to 500 entries, and Explorer history is bounded.
+- [Misc] Update checks are recorded step-by-step in the debug log.
+- [Misc] Open debug log starts at the latest 200 lines and follows new output. Windows uses its terminal; macOS and Linux use `less` or fall back to `tail`.
+- [Misc] Filter summaries use the display names from the Filters panel, such as "Diff along Y".
 
 ### v0.6.2 - 2026-06-23
 
