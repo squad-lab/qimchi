@@ -216,7 +216,9 @@ auto_tag_version:
       git push origin "v$CURRENT_VERSION"
       echo "Successfully created and pushed tag v$CURRENT_VERSION"
   rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    # A preview branch may temporarily be the project default. Stable releases
+    # are cut from main only; preview tags are handled by tag_preview below.
+    - if: $CI_COMMIT_BRANCH == "main"
       when: on_success
   #     changes:
   #       - backend/pyproject.toml
