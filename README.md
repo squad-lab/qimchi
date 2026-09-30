@@ -4,7 +4,7 @@ Plotly based data visualization tool for `xarray` data. Optimized to work with t
 
 This repository contains a unified FastAPI application that serves a React-based frontend for the Qimchi plotter.
 
-## What's new in 0.7.0 ([Preview](https://gitlab.com/squad-lab/qimchi/-/blob/preview/CHANGELOG.md))
+## What's new in 0.7.0
 
 > [!TIP]
 > 🖥️ **Desktop app:** a self-contained build of Qimchi that runs in its own window, with no separate Git, Python or Node installation required. Installers for Windows (`.exe`), Linux (`.AppImage`) and macOS (`.dmg`) are available on the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases). The app checks for updates on startup and can install them with one click.
@@ -34,7 +34,7 @@ Everything in this release is listed in the [changelog on `preview`](https://git
 ## Table of Contents
 
 - [ Qimchi v0.7.0](#-qimchi-v070)
-  - [What's new in 0.7.0 (Preview)](#whats-new-in-070-preview)
+  - [What's new in 0.7.0](#whats-new-in-070)
   - [Table of Contents](#table-of-contents)
   - [Installation](#installation)
     - [Windows](#windows)
