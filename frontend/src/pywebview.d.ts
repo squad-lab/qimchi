@@ -8,6 +8,8 @@ declare global {
       api: {
         /** Open the OS folder picker; resolves to the chosen path (or ""). */
         open_folder_dialog: () => Promise<string>;
+        /** Show a file the backend saved (a log bundle) in the file manager. */
+        reveal_file?: (path: string) => Promise<boolean>;
         /** Open ~/.qimchi/qimchi_debug.log in a terminal that follows it live. */
         open_log_terminal: () => Promise<boolean>;
         /** Ask where to save a text file and write it; resolves to the path (or ""). */

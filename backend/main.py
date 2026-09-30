@@ -9,13 +9,14 @@ from concurrent.futures import ProcessPoolExecutor
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 # Local imports
 from api import (
     demo,
+    diagnostics,
     dirtree,
     download,
     export,
@@ -37,10 +38,7 @@ _export_timing_log = os.environ.get("EXPORT_TIMING_LOG", "false").lower() in (
     "yes",
 )
 
-# Warm the export workers on startup so the first exported image does not pay
-# for a worker process spawning and its Chrome booting. It runs off the event
-# loop and its failures are logged, so set ENABLE_KALEIDO_WARMUP=0 only to opt
-# out (a container with no usable Chrome, say).
+# Warm export workers off the event loop. Set ENABLE_KALEIDO_WARMUP=0 to disable.
 _enable_kaleido_warmup = os.environ.get("ENABLE_KALEIDO_WARMUP", "true").lower() in (
     "1",
     "true",
@@ -86,28 +84,18 @@ def _stop_kaleido_sync_server(context: str) -> None:
 
 
 def _warm_export_pool(pool: ProcessPoolExecutor, workers: int) -> None:
-    """
-    Warm every export worker, off the event loop.
-
-    One task per worker, submitted together: the first render in a process
-    takes long enough that the pool keeps spawning rather than reusing the one
-    that is busy, so the tasks spread across the workers. Each renders an
-    empty plot into a temp directory through the real export path
-    (:func:`api.export.warm_export_worker`).
-
-    Args:
-        pool (ProcessPoolExecutor): The export pool to warm.
-        workers (int): How many workers it was created with.
-
-    """
+    """Warm each export worker off the event loop with one real render."""
     try:
         started = time.perf_counter()
         futures = [pool.submit(export.warm_export_worker) for _ in range(workers)]
         warmed = 0
         slowest = 0.0
+        # Use one deadline for the whole pool, not one timeout per worker.
+        deadline = started + 120
         for future in futures:
             try:
-                slowest = max(slowest, float(future.result(timeout=120) or 0.0))
+                remaining = max(0.0, deadline - time.perf_counter())
+                slowest = max(slowest, float(future.result(timeout=remaining) or 0.0))
                 warmed += 1
             except Exception:
                 # Kaleido usually times out here when Chrome cannot start.
@@ -142,13 +130,7 @@ router = APIRouter()
 
 @router.get("/health")
 async def export_health() -> dict:
-    """
-    Health check endpoint for the export_plot_images service.
-
-    Also reports whether the library database came up, so the SPA can disable
-    hearts/tags/notes with a reason instead of letting them fail on click.
-
-    """
+    """Report service and library-database health."""
     db_ready, db_error = db_status()
     return {"ok": True, "id": "qimchi", "dbReady": db_ready, "dbError": db_error}
 
@@ -159,14 +141,23 @@ async def lifespan(app: FastAPI):
     """Create a ProcessPoolExecutor for export workers and warm kaleido on startup,
     then shut down the pool on application shutdown.
     """
+    diagnostics.install_exception_hooks()
+    diagnostics.quiet_polling_access_log()
+    asyncio.get_running_loop().set_exception_handler(
+        diagnostics.asyncio_exception_handler
+    )
+    background: list[asyncio.Task] = [
+        asyncio.create_task(diagnostics.watch_event_loop(), name="loop-watch")
+    ]
+    interval = diagnostics.resource_log_interval()
+    if interval > 0:
+        background.append(
+            asyncio.create_task(diagnostics.sampler.run(interval), name="resources")
+        )
+
     try:
-        # Bring the Qimchi database up to head and seed the implicit local user.
-        # Runs off the event loop. A DB failure must not stop the app from
-        # serving plots -- that is Qimchi's core job and it needs no database --
-        # but it must not be silent either: notes are DB-backed, so a quiet
-        # failure would let the user type notes that are never persisted.
-        # Record the reason so the routers can return 503 and the UI can
-        # disable the library affordances instead of failing on click.
+        # Migrate the database off the event loop. Keep plotting available on
+        # failure, but expose the reason so database-backed UI can be disabled.
         try:
             await asyncio.to_thread(run_migrations)
             await asyncio.to_thread(seed_local_user)
@@ -188,9 +179,7 @@ async def lifespan(app: FastAPI):
             initializer=_init_export_worker,
         )
 
-        # Warm the pool in the background. Warming this process instead would
-        # do nothing for exports: they run in the workers, which ProcessPool
-        # only spawns once work arrives.
+        # Warm the worker processes in the background.
         if _enable_kaleido_warmup:
             threading.Thread(
                 target=_warm_export_pool,
@@ -207,6 +196,9 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        for task in background:
+            task.cancel()
+        await asyncio.to_thread(diagnostics.sampler.snapshot, "shutdown")
         demo.shutdown()
         try:
             pool = getattr(app.state, "export_pool", None)
@@ -221,6 +213,26 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# Requests slower than this are logged with their duration.
+_SLOW_REQUEST_SECONDS = 1.0
+
+
+@app.middleware("http")
+async def log_slow_requests(request: Request, call_next):
+    started = time.perf_counter()
+    response = await call_next(request)
+    elapsed = time.perf_counter() - started
+    if elapsed > _SLOW_REQUEST_SECONDS:
+        logging.getLogger("qimchi.requests").info(
+            "Slow request: %s %s took %.1f s (status %d)",
+            request.method,
+            request.url.path,
+            elapsed,
+            response.status_code,
+        )
+    return response
+
 
 # Static file serving (optional - nginx handles this in production)
 serve_static = os.environ.get("SERVE_STATIC_FILES", "true").lower() in (
@@ -278,6 +290,7 @@ app.include_router(live_measurements.router)
 app.include_router(library.router)
 app.include_router(settings.router)
 app.include_router(demo.router)
+app.include_router(diagnostics.router)
 
 
 # Root route to serve the SPA (only when FastAPI serves static files)
@@ -309,15 +322,7 @@ if serve_static:
 
     @app.get("/")
     async def read_root():
-        """Serve the React SPA at the root route.
-
-        index.html must never be cached. Vite content-hashes the JS/CSS under
-        /assets (safe to cache forever), but the hashes only take effect if the
-        shell that references them is re-fetched. A cached index.html keeps
-        pointing at the previous build's filenames -- which is how an updated
-        app can still render the old UI, and after an auto-update those files
-        are gone entirely.
-        """
+        """Serve the uncached SPA shell so it always references current assets."""
         index_path = os.path.join(frontend_dist_path, "index.html")
         if os.path.exists(index_path):
             return FileResponse(

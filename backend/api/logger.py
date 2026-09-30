@@ -18,24 +18,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 
 
 def _resolve_log_path() -> Path:
-    """
-    Decide where ``qimchi.log`` lives.
-
-    In a frozen build ``BASE_DIR`` is inside the *installation* directory
-    (``_internal/backend`` under %LOCALAPPDATA%\\Programs or Program Files).
-    Logging there is actively harmful:
-
-    * ``ConcurrentRotatingFileHandler`` keeps ``qimchi.log`` and a
-      ``.__qimchi.lock`` sidecar open, so the auto-update installer cannot
-      replace files in that directory -- with ``/VERYSILENT /SUPPRESSMSGBOXES``
-      the in-use prompt is suppressed and the upgrade can silently skip files.
-    * A machine-wide install puts it under Program Files, which is read-only
-      for a normal user, so opening the log fails outright.
-
-    So a frozen/desktop run logs to the app home (``~/.qimchi``), alongside the
-    launcher's ``qimchi_debug.log``. Dev runs keep ``backend/qimchi.log``.
-
-    """
+    """Use the app data directory for desktop logs and the backend for dev logs."""
     override = os.getenv("QIMCHI_LOG_PATH")
     if override:
         path = Path(override).expanduser()
@@ -50,9 +33,7 @@ def _resolve_log_path() -> Path:
             else Path.home() / ".qimchi"
         )
         try:
-            # All logs live together in <home>/logs: this file, its rotation
-            # backups, and the launcher's qimchi_debug.log. ~/.qimchi survives
-            # updates (they replace program files only), so history is kept.
+            # Keep backend and launcher logs in the update-safe app home.
             logs_dir = home / "logs"
             logs_dir.mkdir(parents=True, exist_ok=True)
             _migrate_legacy_log(home / "qimchi.log", logs_dir / "qimchi.log")
@@ -73,6 +54,18 @@ def _migrate_legacy_log(old: Path, new: Path) -> None:
 
 
 LOG_PATH = _resolve_log_path()
+
+# Millisecond timestamps, matching the desktop launcher's debug log.
+FILE_FORMAT = "%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s: %(message)s"
+DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+# The desktop launcher timestamps every line it writes to its debug log.
+CONSOLE_FORMAT = "[%(levelname)s] %(name)s: %(message)s"
+
+
+def _desktop() -> bool:
+    return bool(getattr(sys, "frozen", False)) or os.getenv("QIMCHI_DESKTOP") == "1"
+
+
 LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
@@ -98,9 +91,15 @@ class _QueueHandler(logging.handlers.QueueHandler):
             handler.flush()
 
     def close(self) -> None:
+        # uvicorn closes handlers during startup; keep the listener alive.
+        self.flush()
+        super().close()
+
+    def stop_writing(self) -> None:
+        """Stop writing and let go of the log file and its lock sidecar."""
         self.listener.stop()
         for handler in self.listener.handlers:
-            handler.close()  # releases the log file and its lock sidecar
+            handler.close()
         super().close()
 
 
@@ -120,14 +119,7 @@ def _attach_through_queue(
 
 
 def get_logger(name: str = "qimchi") -> logging.Logger:
-    """
-    Return a configured logger with RotatingFileHandler and RichHandler + console.
-
-    The file is written to ``LOG_PATH`` (see ``_resolve_log_path``):
-    ``~/.qimchi/qimchi.log`` when frozen, ``backend/qimchi.log`` in dev.
-    Rotation: 20 MB, 5 backups.
-
-    """
+    """Return the configured console and rotating-file logger."""
     logger = logging.getLogger(name)
     if getattr(logger, "__configured", False):
         return logger
@@ -143,13 +135,14 @@ def get_logger(name: str = "qimchi") -> logging.Logger:
     )
     fh.setLevel(logging.DEBUG)
     fh_formatter = logging.Formatter(
-        fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+        fmt=FILE_FORMAT,
+        datefmt=DATE_FORMAT,
     )
     fh.setFormatter(fh_formatter)
 
-    # Console handler: use RichHandler if available, fallback to StreamHandler
-    if RichHandler is not None:
+    # Console handler. In the desktop app the console is the debug log, where
+    # Rich's column layout wraps long lines and breaks searching.
+    if RichHandler is not None and not _desktop():
         ch = RichHandler(rich_tracebacks=True)
         # RichHandler uses its own formatting; set level only
         ch.setLevel(logging.INFO)
@@ -157,7 +150,9 @@ def get_logger(name: str = "qimchi") -> logging.Logger:
         ch = logging.StreamHandler()
         ch.setLevel(logging.INFO)
         ch.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+            logging.Formatter(CONSOLE_FORMAT)
+            if _desktop()
+            else logging.Formatter(FILE_FORMAT, DATE_FORMAT)
         )
 
     _attach_through_queue(logger, fh, ch)
@@ -172,26 +167,15 @@ def consolidate_root_logging() -> None:
     """
     Send every other logger's file output to the same ``qimchi.log``.
 
-    Several modules use ``logging.getLogger(__name__)`` (``api.updater``,
-    ``api.live_measurements``), and uvicorn has its own loggers. Without this
-    they only reach stderr -- which in the desktop app means the launcher's
-    debug log, i.e. not the rotating, preserved file. Attaching one shared
-    handler to the root logger consolidates them.
-
-    The ``qimchi`` logger sets ``propagate = False`` and keeps its own handler,
-    so nothing is written twice.
 
     """
     root = logging.getLogger()
 
-    # Drop a handler we attached earlier rather than bailing out. The root
-    # logger survives a module reload, so a "already done" flag would leave an
-    # old handler pointing at the previous log path after LOG_PATH changes.
     for handler in list(root.handlers):
         if getattr(handler, "_qimchi_root_handler", False):
             root.removeHandler(handler)
             try:
-                handler.close()
+                handler.stop_writing()
             except Exception:
                 pass
 
@@ -204,8 +188,8 @@ def consolidate_root_logging() -> None:
     fh.setLevel(logging.INFO)
     fh.setFormatter(
         logging.Formatter(
-            fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
+            fmt=FILE_FORMAT,
+            datefmt=DATE_FORMAT,
         )
     )
     _attach_through_queue(root, fh)

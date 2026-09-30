@@ -43,12 +43,14 @@ dependencies = [
     # "qanary",  # the measurement side; installed separately, never a backend dep
     "sqlmodel>=0.0.24",
     "alembic>=1.14",
+    # Provide a CA bundle for HTTPS in frozen macOS builds.
+    "certifi>=2024.2",
+    # Resource sampling in the logs (api/diagnostics.py).
+    "psutil>=5.9",
 ]
 
 [project.optional-dependencies]
-# Everything needed to work on the backend: `uv sync --extra dev`, then
-# `uv run pre-commit install` once per clone. The hook config lives at the
-# repository root, one level up from here.
+# Backend development dependencies. Install with `uv sync --extra dev`.
 dev = [
     "wheel~=0.46.0",
     "ruff==0.16.6",
@@ -102,10 +104,7 @@ package = true
 requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
-# Explicit package discovery. `migrations/` (Alembic) is a top-level directory
-# but NOT an importable package -- it is loaded from the filesystem by path and
-# bundled as data by packaging/qimchi.spec. Without this, setuptools' flat-layout
-# auto-discovery sees both `api` and `migrations` and refuses to build.
+# Exclude the non-package Alembic migrations directory from package discovery.
 [tool.setuptools.packages.find]
 include = ["api*"]
 namespaces = false
@@ -118,10 +117,7 @@ repository = "https://gitlab.com/squad-lab/qimchi"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# A hung test should fail with a traceback, not consume the job's whole hour
-# in silence. Generous, because the live end-to-end tests provision an
-# isolated environment from PyPI; a single slow case can raise its own bar
-# with @pytest.mark.timeout.
+# Individual slow tests can override this default with @pytest.mark.timeout.
 timeout = 300
 
 [tool.coverage.run]
@@ -141,10 +137,7 @@ exclude_also = [
 
 [tool.ruff]
 target-version = "py313"
-# Ruff 0.16 formats Python code blocks inside Markdown, but the ruff-format
-# pre-commit hook only passes it Python files. Excluding Markdown keeps a local
-# `ruff format .`, the hooks and CI in agreement, rather than having CI fail on a
-# README the hooks never touched.
+# Keep `ruff format .` consistent with the Python-only pre-commit hook.
 extend-exclude = ["*.md"]
 
 [tool.ruff.lint]

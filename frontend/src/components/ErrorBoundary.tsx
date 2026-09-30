@@ -5,6 +5,8 @@
 
 import React from "react";
 
+import { reportClientError } from "../utils/clientLog";
+
 interface ErrorBoundaryState {
   hasError: boolean;
   error?: Error;
@@ -27,6 +29,11 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error("Error caught by boundary:", error, errorInfo);
+    reportClientError(
+      `${error.name}: ${error.message}`,
+      `${error.stack ?? ""}${errorInfo.componentStack ?? ""}`,
+      "ErrorBoundary",
+    );
   }
 
   render() {

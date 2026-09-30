@@ -159,6 +159,22 @@
         },
         options: {
           skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"],
+          // NathJax: No context menu, expression explorer or speech
+          enableMenu: false,
+          enableExplorer: false,
+          enableEnrichment: false,
+          enableSpeech: false,
+          enableBraille: false,
+          enableComplexity: false,
+          menuOptions: {
+            settings: {
+              enrich: false,
+              speech: false,
+              braille: false,
+              inTabOrder: false,
+              help: false,
+            },
+          },
         },
       };
     </script>

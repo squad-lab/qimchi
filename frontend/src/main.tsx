@@ -10,6 +10,9 @@ import "@fontsource/fira-sans/latin-700.css";
 // Local imports
 import "./index.css";
 import App from "./App.tsx";
+import { installClientLog } from "./utils/clientLog";
+
+installClientLog();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
