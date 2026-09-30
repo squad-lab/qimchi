@@ -112,6 +112,34 @@ test("wide Settings sections stay in one column", async ({ page }) => {
   expect(Math.abs(minor!.x - major!.x)).toBeLessThan(4);
 });
 
+test("Settings search opens and highlights a matching setting", async ({ page }) => {
+  await mockLiveHeatmapApi(page);
+  await mockSettingsApi(page);
+  await page.goto("/");
+  await openSettings(page);
+
+  const dialog = settingsDialog(page);
+  const search = dialog.getByRole("textbox", { name: "Search settings" });
+  await search.fill("fastest refresh");
+  await expect(dialog.getByRole("group", { name: "Settings search results" })).toContainText(
+    "Fastest live refresh",
+  );
+  await search.press("Enter");
+
+  await expect(dialog.getByRole("button", { name: "Live", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await expect(dialog.getByLabel("Fastest live refresh")).toBeVisible();
+  await expect(search).toHaveValue("");
+
+  await search.fill("no such setting");
+  await expect(dialog).toContainText("No settings found for “no such setting”");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeVisible();
+  await expect(search).toHaveValue("");
+});
+
 test("rail buttons and Settings edit the same saved values", async ({ page }) => {
   await mockLiveHeatmapApi(page);
   const settings = await mockSettingsApi(page, { general: { theme: "light" } });

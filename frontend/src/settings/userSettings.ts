@@ -11,6 +11,7 @@ export type ExportFormat = "png" | "svg";
 export type ExportVariant = "light" | "dark";
 /** Which plots adding a measurement creates. */
 export type PlottingBehaviour = "heatmapOrLine" | "both" | "none";
+export type LineCutDirection = "horizontal" | "vertical" | "oblique";
 
 export const PLOT_WIDTHS: PlotWidthPercent[] = [33, 50, 66, 100];
 /** Live refresh interval in milliseconds, from 100 to 1000 in steps of 50. */
@@ -28,7 +29,7 @@ export interface UserSettings {
     theme: ThemePreference;
     zoom: number;
     plotWidth: PlotWidthPercent;
-  /** Whether the first-launch walkthrough has been offered. */
+    /** Whether the first-launch walkthrough has been offered. */
     walkthroughSeen: boolean;
   };
   plots: {
@@ -36,6 +37,8 @@ export interface UserSettings {
     squarify: boolean;
     /** Whether new measurements also recreate custom plots. */
     recreateCustomPlots: boolean;
+    /** Initial LineCut direction. */
+    lineCutDirection: LineCutDirection;
   };
   explorer: {
     sortBy: ExplorerSort;
@@ -57,6 +60,10 @@ export interface UserSettings {
     checkForUpdates: boolean;
     previewReleases: boolean;
   };
+  developer: {
+    /** Include timings.json in export archives. */
+    exportTimings: boolean;
+  };
   appearance: {
     heatmap: PlotAppearanceSettings;
     line: PlotAppearanceSettings;
@@ -65,11 +72,17 @@ export interface UserSettings {
 
 export const FACTORY_SETTINGS: UserSettings = {
   general: { theme: "system", zoom: 1, plotWidth: 50, walkthroughSeen: false },
-  plots: { plottingBehaviour: "heatmapOrLine", squarify: false, recreateCustomPlots: true },
+  plots: {
+    plottingBehaviour: "heatmapOrLine",
+    squarify: false,
+    recreateCustomPlots: true,
+    lineCutDirection: "horizontal",
+  },
   explorer: { sortBy: "timestamp" },
   live: { autoAddToBasket: true, minRefreshMs: 300 },
   export: { formats: ["png", "svg"], variants: ["light", "dark"], scale: null, folder: null },
   desktop: { checkForUpdates: true, previewReleases: false },
+  developer: { exportTimings: false },
   appearance: { heatmap: FACTORY_APPEARANCE_SETTINGS, line: FACTORY_APPEARANCE_SETTINGS },
 };
 
@@ -89,6 +102,7 @@ const ENUM_LEAVES: Record<string, readonly unknown[]> = {
   "general.plotWidth": PLOT_WIDTHS,
   "explorer.sortBy": ["name", "timestamp", "size", "chrono"],
   "plots.plottingBehaviour": ["heatmapOrLine", "both", "none"],
+  "plots.lineCutDirection": ["horizontal", "vertical", "oblique"],
   "live.minRefreshMs": LIVE_REFRESH_STEPS,
 };
 
@@ -124,10 +138,7 @@ const sameValue = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringi
 const factoryValueAt = (path: string[]): unknown =>
   path.reduce<unknown>((node, key) => (isObject(node) ? node[key] : undefined), FACTORY_SETTINGS);
 
-/**
- * A patch that sets `value` at `path`. Leaves equal to the default become
- * null, which removes them from the stored document instead of pinning them.
- */
+/** Set a path, using null to remove values that match the factory default. */
 export const patchFor = (path: string[], value: unknown): Json => {
   const leaves = (node: unknown, def: unknown): unknown => {
     if (isObject(node) && isObject(def)) {
@@ -142,11 +153,7 @@ export const patchFor = (path: string[], value: unknown): Json => {
   return patch as Json;
 };
 
-/**
- * The stored form of any settings-like object: only valid values that differ
- * from the defaults. Used for imported files, which may be old, hand-edited or
- * from another version.
- */
+/** Validate settings and retain only values that differ from defaults. */
 export const normalizeStored = (document: unknown): Json =>
   applyPatch({}, patchFor([], resolveSettings(document)));
 

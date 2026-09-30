@@ -151,7 +151,7 @@ const TagPopover = ({
                 <button
                   type="button"
                   onClick={() => void commitRename(tag.id)}
-                  className="p-1 text-indigo-600 hover:bg-indigo-50 rounded shrink-0"
+                  className="qimchi-dark-hover-plain shrink-0 rounded bg-transparent p-1 text-indigo-600 hover:bg-indigo-50"
                   aria-label="Save tag name"
                 >
                   <Check size={14} />
@@ -274,7 +274,7 @@ const TagPopover = ({
         <button
           type="button"
           onClick={handleCreate}
-          className="p-1 text-indigo-600 hover:bg-indigo-50 rounded shrink-0"
+          className="qimchi-dark-hover-plain shrink-0 rounded bg-transparent p-1 text-indigo-600 hover:bg-indigo-50"
           aria-label="Create and apply tag"
         >
           <Plus size={14} />

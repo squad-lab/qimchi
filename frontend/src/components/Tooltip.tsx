@@ -256,7 +256,7 @@ const Tooltip: React.FC<TooltipProps> = ({
               ref={tooltipRef}
               role="tooltip"
               className={
-                `tooltip-positioned ${positionClass} px-3 py-2 text-sm text-white bg-gray-900 rounded-lg shadow-lg transition-opacity duration-150 ` +
+                `tooltip-positioned pointer-events-none ${positionClass} px-3 py-2 text-sm text-white bg-gray-900 rounded-lg shadow-lg transition-opacity duration-150 ` +
                 (isVisible ? "opacity-100" : "opacity-0")
               }
             >

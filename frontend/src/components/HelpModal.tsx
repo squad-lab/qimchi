@@ -522,6 +522,18 @@ const MetadataHelp = memo(() => (
           </p>
         </div>
 
+        <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
+          <h4 className="font-semibold text-gray-800 mb-1 flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+            Pinned Parameters
+          </h4>
+          <p className="text-xs leading-relaxed">
+            In a qanary Parameters Snapshot, hover over a parameter and click its pin. Pinned values
+            appear in a movable window and update when you use Next or Prev. Unpin them there or in
+            Metadata.
+          </p>
+        </div>
+
         <div className="p-3 rounded-lg border shadow-sm text-amber-800 bg-amber-50/50 border-amber-100">
           <h4 className="font-semibold mb-1 flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
@@ -690,6 +702,13 @@ const ViewerHelp = memo(() => (
             prefixes may differ from the axis prefixes
           </span>
         </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            When a filter changes a heat map&apos;s values, such as a derivative, its hover label
+            shows the new quantity and unit, matching the colour bar
+          </span>
+        </li>
       </ul>
     </div>
 
@@ -719,6 +738,26 @@ const ViewerHelp = memo(() => (
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
+            <strong>Saved Presets:</strong> Save a filter sequence and apply it to any plot. The
+            Applied section shows changes to a linked preset and lets you update, revert, unlink, or
+            save a copy. Saved Presets also supports rename, replace, and remove
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>
+              R<sub>in</sub> Correction:
+            </strong>{" "}
+            On a heat map of measured current, replace the applied bias with the voltage across the
+            sample, V<sub>S</sub> = V<sub>b</sub> − I × R<sub>in</sub>, by entering the resistance
+            in line with the sample and choosing which axis holds the bias. Each line is redrawn
+            against V<sub>S</sub>, so parts of the map where a line has no data are left empty
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
             <strong>Sliders:</strong> When a plotted variable varies over more dimensions than the
             plot shows, Filters has a slider for each of the others. Dimensions labelled with text
             step through their labels
@@ -727,8 +766,8 @@ const ViewerHelp = memo(() => (
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            Complex-valued variables appear as four: their amplitude, phase (in radians), real and
-            imaginary parts
+            Complex variables provide amplitude, unwrapped phase in radians, real, and imaginary
+            values
           </span>
         </li>
         <li className="flex gap-2 leading-relaxed">
@@ -764,6 +803,23 @@ const ViewerHelp = memo(() => (
             where it ends. Right-click the heat map to lock the cut in place, and right-click again
             to let it follow the pointer. The preview opens in a pop-up beside the plot; expand it
             to the full window from its header
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            The preview&apos;s title names the axis and where the slice is, such as &quot;Slice at
+            Voltage 1 = 421 mV&quot;, and its hover label uses the heat map&apos;s names and units.
+            Hover labels stay above the LineCut guide. Choose the starting direction under Settings
+            &gt; Plots
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            On a live heat map, Follow keeps the cut on the row or column currently being measured,
+            including its partial values. It moves when the next line starts and changes orientation
+            when the heat-map axes are swapped. Choosing a direction or right-clicking stops Follow
           </span>
         </li>
         <li className="flex gap-2 leading-relaxed">
@@ -970,7 +1026,8 @@ const SettingsHelp = memo(() => (
         </li>
         <li>
           <strong>Plots</strong>: choose which plots are created for a new measurement, whether
-          custom plots are recreated and whether plots use a square aspect ratio
+          custom plots are recreated, whether plots use a square aspect ratio and which direction
+          LineCut starts in
         </li>
         <li>
           <strong>Explorer</strong>, <strong>Live</strong> and <strong>Export</strong>: set the sort
@@ -984,6 +1041,10 @@ const SettingsHelp = memo(() => (
         <li>
           <strong>HeatMap</strong> and <strong>LinePlot</strong>: set the default appearance for
           each plot type. Per-plot Appearance settings override these defaults; Reset restores them
+        </li>
+        <li>
+          <strong>Developer</strong>: add render times to exports, and save Qimchi&apos;s logs as
+          one zip file to attach to a bug report, optionally with recent crash reports
         </li>
       </ul>
       <p className="mt-3 text-gray-600">
@@ -1055,9 +1116,9 @@ const DesktopHelp = memo(() => (
           <span>
             <span>
               Exporting plot images (<span className="font-mono bg-gray-100 px-1 rounded">E</span>)
-              saves a ZIP to your{" "}
-              <span className="font-mono bg-gray-100 px-1 rounded">Downloads</span>
-              folder. The notification shows the full path
+              saves a ZIP to the export folder chosen in Settings &gt; Export, or to your{" "}
+              <span className="font-mono bg-gray-100 px-1 rounded">Downloads</span> folder if none
+              is set. The notification shows the full path
             </span>
           </span>
         </li>
@@ -1077,6 +1138,80 @@ const DesktopHelp = memo(() => (
           <span>
             If no compatible Chrome or Chromium installation is available, Qimchi downloads a
             private copy for image rendering on the first export
+          </span>
+        </li>
+      </ul>
+    </div>
+
+    <div className="space-y-2">
+      <h4 className="font-medium text-gray-800">Updates</h4>
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Qimchi checks for a new version when it starts and offers to download it in the
+            background while you keep working. When the download finishes, it asks before
+            installing; choose 'Remind me at next launch' to install later
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>Windows:</strong> Qimchi closes and the usual installer opens. Follow its steps;
+            its last page can start Qimchi again
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>macOS:</strong> Qimchi closes, puts the new version in place of the old one in
+            Applications and opens it. If macOS asks, allow Qimchi under Privacy &amp; Security &gt;
+            App Management; otherwise the disk image opens so you can drag Qimchi into Applications
+            yourself
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <strong>Linux:</strong> Qimchi replaces its AppImage and restarts, or saves the new
+            AppImage to your Downloads folder if it cannot
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Check for updates, or include preview releases, under Settings &gt; Updates</span>
+        </li>
+      </ul>
+    </div>
+
+    <div className="space-y-2">
+      <h4 className="font-medium text-gray-800 flex items-center gap-1.5">
+        <FileArchive size={15} className="text-blue-500" />
+        Logs and Bug Reports
+      </h4>
+      <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Qimchi records what it does in two log files in{" "}
+            <span className="font-mono bg-gray-100 px-1 rounded">~/.qimchi/logs</span>. Every line
+            has the date and time, and once a minute Qimchi also notes how much memory it, its
+            export helpers, Chrome and the app window are using
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            To report a problem, open Settings &gt; Developer and choose Save logs for a bug report.
+            It saves both logs and a summary of your computer in one ZIP file to attach. Tick the
+            crash reports option to include recent crash reports from the app window as well
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            To watch the log as it is written, open the notification log from the sidebar rail and
+            use its terminal button
           </span>
         </li>
       </ul>
@@ -1138,6 +1273,13 @@ const DesktopHelp = memo(() => (
               <span className="font-mono bg-gray-100 px-1 rounded">chrome/</span> — the downloaded
               browser used for image export
             </span>
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            <span className="font-mono bg-gray-100 px-1 rounded">updates/</span> — a downloaded
+            update waiting to be installed, and the installer&apos;s log
           </span>
         </li>
       </ul>

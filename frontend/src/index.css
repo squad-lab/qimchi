@@ -99,6 +99,15 @@ select {
   user-select: none;
 }
 
+select:not([multiple]) {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: right 0.625rem center;
+  background-repeat: no-repeat;
+  background-size: 1rem;
+  padding-right: 2rem;
+}
+
 /* Ensure draggable items can still be dragged */
 [draggable="true"] {
   -webkit-user-drag: element;
@@ -118,17 +127,13 @@ select {
   top: 0;
 }
 
-/* Tooltip portal - escapes ancestor clipping by using fixed positioning
-   and reading the coordinates from CSS variables set on :root by the
-   component. High z-index prevents it from being painted under other
-   app elements. */
 .tooltip-portal > .tooltip-positioned {
   position: fixed !important;
   left: var(--tooltip-left, 0);
   top: var(--tooltip-top, 0);
   transform: var(--tooltip-transform, translate(-50%, -100%));
   z-index: 9999 !important;
-  pointer-events: auto;
+  pointer-events: none;
   /* A fixed element's automatic width stops at the viewport edge, so a
      left-hand tooltip near the right of the window wrapped word by word. */
   width: max-content;
@@ -152,16 +157,14 @@ select {
 }
 
 /* Modebar positioning - bottom middle horizontal */
-/* Layer stack, in paint order. These are the only values that matter across
-   component boundaries; anything local to a card stays well below them.
+/* Cross-component layer stack, in paint order.
      1000  Plotly modebar (below)
      1100  LineCut pop-up (LineCutPopup.tsx)
      1500  full-window Explorer (ExplorerLayer.tsx)
      1600  Explorer tag/filter popovers
      2001+ modals, incrementing per open (getNextGlobalModalZ)
      9999  tooltip portal
-   The Explorer needs a slot above the modebar: it covers the viewport, and a
-   modebar painting through a covered plot is the giveaway that it had none. */
+*/
 .modebar-container {
   position: absolute !important;
   top: 0% !important;
@@ -251,6 +254,36 @@ select {
   height: 15px;
 }
 
+.wmde-markdown.release-notes h1,
+.wmde-markdown.release-notes h2,
+.wmde-markdown.release-notes h3 {
+  margin: 0.6em 0 0.3em;
+  padding: 0;
+  border: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.wmde-markdown.release-notes > :first-child {
+  margin-top: 0;
+}
+
+.wmde-markdown.release-notes ul,
+.wmde-markdown.release-notes ol {
+  margin: 0.2em 0;
+  padding-left: 1.4em;
+  list-style: disc;
+}
+
+.wmde-markdown.release-notes ol {
+  list-style: decimal;
+}
+
+.dark .wmde-markdown.release-notes {
+  --color-fg-default: #d7dae0;
+  color: #d7dae0;
+}
+
 .dark .notes-markdown-editor {
   --color-fg-default: #fff;
   --color-prettylights-syntax-constant: #fff;
@@ -275,14 +308,7 @@ select {
   -webkit-text-fill-color: #fff !important;
 }
 
-/* ============================================================
-   Dark mode -- Atom One Dark palette.
-   Qimchi's brand green (see theme.ts) is intentionally left as-is;
-   only the pale accent tints below get dark-safe counterparts.
-   Everything else here remaps the neutral gray/slate/white scale
-   plus a curated set of semantic "light chip" colors so existing
-   components pick up dark mode without per-component rewrites.
-   ============================================================ */
+/* Dark mode: Atom One Dark neutrals and semantic colours. */
 
 :root {
   color-scheme: light;
@@ -295,9 +321,7 @@ select {
 }
 
 .dark {
-  /* Native widgets -- <select> popups above all -- are painted by the OS from
-     color-scheme, which no class remap can reach. Without this the option list
-     keeps its light palette and renders near-white text on white. */
+  /* Let the OS apply the dark palette to native controls. */
   color-scheme: dark;
 
   /* --qimchi-accent-header-bg: #2d3b1f; */
@@ -308,16 +332,7 @@ select {
   --qimchi-accent-border-light: #4a5c34;
 }
 
-/* ==============================================================
-   Formalized theme tokens
-   --------------------------------------------------------------
-   These exist so a value can differ per mode from ONE place. A
-   colour written into a component -- text-[#cddaf3], or an alpha
-   tuned by hand -- cannot: #cddaf3 reads well on a dark panel and
-   is nearly invisible on a light one. Anything that needs to flip
-   between themes belongs here, and components reference the
-   classes below.
-   ============================================================== */
+/* Theme-dependent values shared across components. */
 :root {
   /* Sidebar section headers (Explorer / Metadata / Notes). */
   --qimchi-panel-title-fg: #22330d;
@@ -366,10 +381,7 @@ select {
   --qimchi-modebar-bg: rgba(40, 44, 52, 0.85);
 }
 
-/* Dataset-type icons keep one identity in both themes, so a .zarr
-   always looks like a .zarr. Mid-tone hues, chosen to stay legible
-   on the light page (#f0f6fc) and the dark one (#010409) alike --
-   which is why they are not in the .dark block. */
+/* Dataset-type icon colours shared by both themes. */
 :root {
   --qimchi-icon-zarr: #cd9900;
   --qimchi-icon-netcdf: #3b9ae1;
@@ -420,10 +432,7 @@ select {
   opacity: 1;
 }
 
-/* Wide ("desktop") Explorer layout: the per-row date column only exists
-   once DirTree's own container is wide enough for them -- reached by dragging
-   the sidebar wider or by the full-window Explorer view. Kept in CSS so the
-   virtualized row component does not have to subscribe to the width. */
+/* Show Explorer dates when its container is wide enough. */
 .qimchi-row-meta {
   display: none;
 }
@@ -444,10 +453,7 @@ select {
   justify-content: flex-end;
 }
 
-/* <select> and its popup. color-scheme alone fixes the closed control, but
-   Chromium on Windows still paints the dropdown sheet white -- the options
-   then inherit the control's light text and vanish against it. Colouring the
-   control and the options explicitly is what actually lands. */
+/* Explicit Windows Chromium colours for select controls and their popups. */
 .qimchi-help-hit {
   animation: qimchi-help-hit 1.6s ease-out;
   border-radius: 0.25rem;
@@ -515,9 +521,7 @@ select {
   scrollbar-color: #4b5263 #21252b;
 }
 
-/* Neutral surface ramp. The numbering is conceptually inverted from
-   light mode: 50 (near-white bg) becomes the deepest dark surface,
-   900 (near-black text) becomes the brightest text. */
+/* Inverted neutral ramp for dark surfaces and text. */
 .dark .bg-gray-50,
 .dark .bg-slate-50 {
   background-color: #21252b;
@@ -619,10 +623,7 @@ select {
   color: #dcdfe4;
 }
 
-/* Compact action bars use Tailwind's light semantic hover fills. Scope their
-   dark counterparts to the controls opted into this class so blue, red,
-   green, amber and purple actions keep their identity without flashing a
-   pale background. Active/toggled controls intentionally omit the class. */
+/* Dark semantic hover fills for opted-in compact action bars. */
 .dark .qimchi-dark-hover-plain:hover {
   background-color: #323842;
 }
@@ -688,9 +689,7 @@ select {
   background-color: #2e2519;
 }
 
-/* Semantic "light chip" colors (badges, dropzones, error/warning boxes):
-   dark-tinted backgrounds + lightened text so contrast survives the
-   surface flip. Related hues share an Atom One Dark accent. */
+/* Dark variants for semantic chips, dropzones, and alerts. */
 
 /* blue / sky */
 .dark .bg-blue-50,
@@ -972,11 +971,7 @@ select {
   border-color: #4a3a26;
 }
 
-/* BrandingFooter (see BrandingFooter.tsx). These use gradient stops,
-   opacity-modified backgrounds and hover/active states that the utility
-   remaps above can't reach; the `.dark .qimchi-*` selectors carry enough
-   specificity (0,2,0) to beat the base Tailwind utilities regardless of
-   CSS source order (unlike the :where()-based `dark:` variant). */
+/* BrandingFooter overrides requiring higher specificity than Tailwind. */
 .dark .qimchi-footer {
   background-image: linear-gradient(to bottom, #282c34, #282c34, #21252b);
 }
@@ -1001,25 +996,6 @@ select {
 .dark .qimchi-icon-btn:active {
   background-color: #2b3f57;
 }
-
-/* Global media rules */
-/* @layer base {
-  @media (max-width: 1920px) {
-    body {
-      --zoom-ratio: 0.8;
-      transform-origin: 0 0;
-      transform: scale(var(--zoom-ratio));
-
-      width: calc(100% / var(--zoom-ratio));
-      height: calc(100% / var(--zoom-ratio));
-
-    }
-
-    html, #root {
-      height: 100%;
-    }
-  }
-} */
 
 /* Dark toggle colours need selectors stronger than the :where() variant. */
 .dark .qimchi-toggle {

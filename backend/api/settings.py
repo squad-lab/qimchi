@@ -1,12 +1,4 @@
-"""
-User settings: one JSON document per user, stored in the Qimchi DB.
-
-The frontend owns the document's shape and merges it over its own defaults, so
-only values the user changed are stored. The backend validates just the
-sections it reads itself (export and desktop) and falls back to their defaults
-when those are missing, invalid, or the database is unavailable.
-
-"""
+"""Store per-user settings, validating only sections used by the backend."""
 
 import asyncio
 import json
@@ -39,6 +31,8 @@ class ExportSettings(BaseModel):
     scale: float | None = Field(default=None, ge=1, le=4)
     # None saves desktop exports to QIMCHI_EXPORT_DIR, else ~/Downloads.
     folder: str | None = None
+    # Copied from developer.exportTimings by export_settings().
+    timings: bool = False
 
     @field_validator("formats", "variants")
     @classmethod
@@ -53,9 +47,14 @@ class DesktopSettings(BaseModel):
     previewReleases: bool = False
 
 
+class DeveloperSettings(BaseModel):
+    exportTimings: bool = False
+
+
 _VALIDATED_SECTIONS: dict[str, type[BaseModel]] = {
     "export": ExportSettings,
     "desktop": DesktopSettings,
+    "developer": DeveloperSettings,
 }
 
 
@@ -154,7 +153,13 @@ def _section(name: str, model: type[BaseModel]) -> BaseModel:
 
 
 def export_settings() -> ExportSettings:
-    return _section("export", ExportSettings)  # type: ignore[return-value]
+    options: ExportSettings = _section("export", ExportSettings)  # type: ignore[assignment]
+    options.timings = developer_settings().exportTimings
+    return options
+
+
+def developer_settings() -> DeveloperSettings:
+    return _section("developer", DeveloperSettings)  # type: ignore[return-value]
 
 
 def desktop_settings() -> DesktopSettings:

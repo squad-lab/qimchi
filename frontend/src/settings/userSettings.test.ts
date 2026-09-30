@@ -53,6 +53,16 @@ describe("live refresh", () => {
     expect(resolveSettings({ live: { minRefreshMs: "fast" } }).live.minRefreshMs).toBe(300);
   });
 
+  it("starts LineCut horizontally unless another direction is chosen", () => {
+    expect(resolveSettings({}).plots.lineCutDirection).toBe("horizontal");
+    expect(resolveSettings({ plots: { lineCutDirection: "oblique" } }).plots.lineCutDirection).toBe(
+      "oblique",
+    );
+    expect(resolveSettings({ plots: { lineCutDirection: "up" } }).plots.lineCutDirection).toBe(
+      "horizontal",
+    );
+  });
+
   it("is not stored while it is at its default", () => {
     expect(patchFor(["live", "minRefreshMs"], 300)).toEqual({ live: { minRefreshMs: null } });
   });

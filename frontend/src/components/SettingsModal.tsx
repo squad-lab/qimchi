@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
+  Code,
+  ChevronRight,
   Download,
   Upload,
   ChartLine,
@@ -15,9 +17,11 @@ import {
   Radio,
   RefreshCw,
   RotateCcw,
+  Search,
   Settings as SettingsIcon,
   SlidersHorizontal,
   Spline,
+  X,
 } from "lucide-react";
 
 import SectionedModal, { type ModalSection } from "./SectionedModal";
@@ -27,6 +31,7 @@ import { useToast } from "../hooks/useToast";
 import { saveTextFile } from "../utils/saveTextFile";
 import Tooltip from "./Tooltip";
 import UpdatesPanel from "./UpdatesPanel";
+import LogBundlePanel from "./LogBundlePanel";
 import { useUpdateStore } from "../stores/updateStore";
 import {
   FACTORY_SETTINGS,
@@ -50,11 +55,9 @@ const isDesktop = () => typeof window !== "undefined" && Boolean(window.pywebvie
 
 const buildSections = (updates: boolean): ModalSection[] => [
   { id: "general", label: "General", icon: <SlidersHorizontal size={16} /> },
-  { id: "plots", label: "Plots", icon: <ChartScatter size={16} /> },
   { id: "explorer", label: "Explorer", icon: <FolderTree size={16} /> },
   { id: "live", label: "Live", icon: <Radio size={16} /> },
-  { id: "export", label: "Export", icon: <Image size={16} /> },
-  ...(updates ? [{ id: "updates", label: "Updates", icon: <RefreshCw size={16} /> }] : []),
+  { id: "plots", label: "Plots", icon: <ChartScatter size={16} /> },
   {
     id: "heatmap",
     label: "HeatMap",
@@ -75,6 +78,9 @@ const buildSections = (updates: boolean): ModalSection[] => [
       { id: "line.y", label: "Y axis", icon: <MoveVertical size={14} /> },
     ],
   },
+  { id: "export", label: "Export", icon: <Image size={16} /> },
+  ...(updates ? [{ id: "updates", label: "Updates", icon: <RefreshCw size={16} /> }] : []),
+  { id: "developer", label: "Developer", icon: <Code size={16} /> },
 ];
 
 const SORT_LABELS: Record<ExplorerSort, string> = {
@@ -83,6 +89,148 @@ const SORT_LABELS: Record<ExplorerSort, string> = {
   size: "Size",
   chrono: "Chronological",
 };
+
+interface SettingsSearchEntry {
+  id: string;
+  sectionId: string;
+  sectionLabel: string;
+  label: string;
+  keywords?: string;
+}
+
+const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
+  { id: "theme", sectionId: "general", sectionLabel: "General", label: "Theme" },
+  { id: "zoom", sectionId: "general", sectionLabel: "General", label: "Zoom" },
+  { id: "plot-width", sectionId: "general", sectionLabel: "General", label: "Plot width" },
+  { id: "sort", sectionId: "explorer", sectionLabel: "Explorer", label: "Sort by" },
+  {
+    id: "auto-add",
+    sectionId: "live",
+    sectionLabel: "Live",
+    label: "Add new measurements to the basket",
+    keywords: "automatic live",
+  },
+  {
+    id: "refresh",
+    sectionId: "live",
+    sectionLabel: "Live",
+    label: "Fastest live refresh",
+    keywords: "rate interval milliseconds",
+  },
+  {
+    id: "plotting-behaviour",
+    sectionId: "plots",
+    sectionLabel: "Plots",
+    label: "Plotting behaviour",
+    keywords: "heatmap lineplot basket",
+  },
+  {
+    id: "recreate",
+    sectionId: "plots",
+    sectionLabel: "Plots",
+    label: "Recreate custom plots",
+  },
+  {
+    id: "linecut-direction",
+    sectionId: "plots",
+    sectionLabel: "Plots",
+    label: "Default LineCut direction",
+    keywords: "horizontal vertical oblique",
+  },
+  { id: "square", sectionId: "plots", sectionLabel: "Plots", label: "Square plots" },
+  {
+    id: "heatmap-colorscale",
+    sectionId: "heatmap.colormap",
+    sectionLabel: "HeatMap · Colormap",
+    label: "Colorscale",
+    keywords: "palette reverse color range",
+  },
+  ...(["heatmap.x", "heatmap.y", "line.x", "line.y"] as const).flatMap((sectionId) => {
+    const [plot, axis] = sectionId.split(".");
+    const sectionLabel = `${plot === "heatmap" ? "HeatMap" : "LinePlot"} · ${axis.toUpperCase()} axis`;
+    return [
+      {
+        id: `${sectionId}-axis-type`,
+        sectionId,
+        sectionLabel,
+        label: "Axis Type",
+        keywords: `${axis} linear log date category`,
+      },
+      {
+        id: `${sectionId}-major`,
+        sectionId,
+        sectionLabel,
+        label: "Major Grid & Ticks",
+        keywords: `${axis} grid color dash width number tick angle length`,
+      },
+      {
+        id: `${sectionId}-minor`,
+        sectionId,
+        sectionLabel,
+        label: "Minor Grid & Ticks",
+        keywords: `${axis} grid color dash width number tick length`,
+      },
+    ];
+  }),
+  {
+    id: "line-mode",
+    sectionId: "line.style",
+    sectionLabel: "LinePlot · Line & markers",
+    label: "Mode",
+    keywords: "lines markers",
+  },
+  {
+    id: "line-settings",
+    sectionId: "line.style",
+    sectionLabel: "LinePlot · Line & markers",
+    label: "Line Settings",
+    keywords: "color width opacity dash shape smoothing",
+  },
+  {
+    id: "marker-settings",
+    sectionId: "line.style",
+    sectionLabel: "LinePlot · Line & markers",
+    label: "Marker Settings",
+    keywords: "symbol color size opacity",
+  },
+  { id: "formats", sectionId: "export", sectionLabel: "Export", label: "Formats" },
+  { id: "variants", sectionId: "export", sectionLabel: "Export", label: "Variants" },
+  { id: "resolution", sectionId: "export", sectionLabel: "Export", label: "Resolution" },
+  {
+    id: "save-to",
+    sectionId: "export",
+    sectionLabel: "Export",
+    label: "Save to",
+    keywords: "folder downloads",
+  },
+  {
+    id: "update-startup",
+    sectionId: "updates",
+    sectionLabel: "Updates",
+    label: "Check for updates at startup",
+  },
+  {
+    id: "preview-releases",
+    sectionId: "updates",
+    sectionLabel: "Updates",
+    label: "Include preview releases",
+    keywords: "release candidate rc",
+  },
+  {
+    id: "timings",
+    sectionId: "developer",
+    sectionLabel: "Developer",
+    label: "Export timings",
+    keywords: "timings.json performance render",
+  },
+  {
+    id: "logs",
+    sectionId: "developer",
+    sectionLabel: "Developer",
+    label: "Logs for a bug report",
+    keywords: "diagnostics crash zip support",
+  },
+];
 
 const Field = ({
   label,
@@ -96,6 +244,7 @@ const Field = ({
   children: React.ReactNode;
 }) => (
   <div
+    data-setting-label={label}
     className={`border-b border-gray-100 py-3 last:border-b-0 ${
       inline ? "flex items-center justify-between gap-6" : ""
     }`}
@@ -283,8 +432,10 @@ const SectionHeader = ({ title, onReset }: { title: string; onReset: () => void 
 const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) => {
   const desktop = isDesktop();
   const updatesSupported = useUpdateStore((state) => state.supported);
-  const sections = buildSections(updatesSupported);
+  const sections = useMemo(() => buildSections(updatesSupported), [updatesSupported]);
   const [activeSection, setActiveSection] = useState("general");
+  const [query, setQuery] = useState("");
+  const [highlightIndex, setHighlightIndex] = useState(0);
 
   useEffect(() => {
     if (isOpen && initialSection) setActiveSection(initialSection);
@@ -298,6 +449,46 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
   const replaceAll = useSettingsStore((state) => state.replaceAll);
   const { showToast } = useToast();
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const pendingSearchTargetRef = useRef<string | null>(null);
+
+  const searchableSectionIds = useMemo(
+    () =>
+      new Set(
+        sections.flatMap((section) => [section.id, ...(section.children ?? []).map((c) => c.id)]),
+      ),
+    [sections],
+  );
+  const searchResults = useMemo(() => {
+    const terms = query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return [];
+    return SETTINGS_SEARCH_ENTRIES.filter((entry) => {
+      if (!searchableSectionIds.has(entry.sectionId)) return false;
+      if (entry.id === "save-to" && !desktop) return false;
+      const text =
+        `${entry.label} ${entry.sectionLabel} ${entry.keywords ?? ""}`.toLocaleLowerCase();
+      return terms.every((term) => text.includes(term));
+    });
+  }, [desktop, query, searchableSectionIds]);
+
+  useEffect(() => setHighlightIndex(0), [query]);
+
+  useEffect(() => {
+    const target = pendingSearchTargetRef.current;
+    if (!target || !contentRef.current || query) return;
+    pendingSearchTargetRef.current = null;
+    const nodes = contentRef.current.querySelectorAll("[data-setting-label], h3, h4, label");
+    for (const node of nodes) {
+      const label =
+        node.getAttribute("data-setting-label") ?? node.textContent?.replace(/\s+/g, " ").trim();
+      if (label !== target) continue;
+      node.scrollIntoView({ block: "center", behavior: "smooth" });
+      node.classList.add("qimchi-help-hit");
+      window.setTimeout(() => node.classList.remove("qimchi-help-hit"), 1600);
+      break;
+    }
+  }, [activeSection, query]);
 
   // Only the values that differ from the defaults, as stored.
   const exportSettings = async () => {
@@ -340,6 +531,30 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
     const section = sections.find((s) => s.id === id);
     setActiveSection(section?.children?.[0]?.id ?? id);
   };
+
+  const openSearchResult = (result: SettingsSearchEntry) => {
+    setConfirmingResetAll(false);
+    pendingSearchTargetRef.current = result.label;
+    setActiveSection(result.sectionId);
+    setQuery("");
+    searchInputRef.current?.blur();
+  };
+
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (searchResults.length === 0) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setHighlightIndex((index) => (index + 1) % searchResults.length);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setHighlightIndex((index) => (index - 1 + searchResults.length) % searchResults.length);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      openSearchResult(searchResults[highlightIndex]);
+    }
+  };
+
+  const handleEscape = () => (query ? setQuery("") : onClose());
 
   const resetSection = (path: (keyof UserSettings)[] | string[]) => {
     const factory = path.reduce<unknown>(
@@ -479,6 +694,21 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
                 onChange={(on) => update(["plots", "recreateCustomPlots"], on)}
               />
             </Field>
+            <Field
+              label="Default LineCut direction"
+              description="Initial direction. While active, press X, Y, or O to switch. Measured axes do not support Oblique."
+            >
+              <select
+                aria-label="LineCut direction"
+                value={settings.plots.lineCutDirection}
+                onChange={(e) => update(["plots", "lineCutDirection"], e.target.value)}
+                className="rounded border border-gray-300 p-1.5 text-sm"
+              >
+                <option value="horizontal">Horizontal (X)</option>
+                <option value="vertical">Vertical (Y)</option>
+                <option value="oblique">Oblique (O)</option>
+              </select>
+            </Field>
             <Field label="Square plots" description="Keep every plot at a 1:1 aspect ratio." inline>
               <Toggle
                 label="Square plots"
@@ -612,6 +842,29 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
             )}
           </>
         );
+      case "developer":
+        return (
+          <>
+            <SectionHeader title="Developer" onReset={() => resetSection(["developer"])} />
+            <Field
+              label="Export timings"
+              description="Add per-image render times to timings.json in each export archive."
+              inline
+            >
+              <Toggle
+                label="Add timings.json to exports"
+                checked={settings.developer.exportTimings}
+                onChange={(on) => update(["developer", "exportTimings"], on)}
+              />
+            </Field>
+            <Field
+              label="Logs for a bug report"
+              description="Qimchi records what it does, including how much memory it uses, in log files."
+            >
+              <LogBundlePanel />
+            </Field>
+          </>
+        );
       case "updates":
         return (
           <>
@@ -671,6 +924,7 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
     <SectionedModal
       isOpen={isOpen}
       onClose={onClose}
+      onEscape={handleEscape}
       title="Settings"
       icon={<SettingsIcon size={18} className="text-blue-600" />}
       shortcut="Shift+S"
@@ -679,6 +933,7 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
       activeSection={activeSection}
       onSelectSection={selectSection}
       navLabel="Settings sections"
+      contentRef={contentRef}
       headerActions={
         <>
           <Tooltip content="Import settings" position="bottom">
@@ -716,18 +971,81 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
         </>
       }
       toolbar={
-        available ? undefined : (
-          <div role="alert" className="flex items-center gap-2 text-sm text-amber-800">
-            <AlertTriangle size={15} className="shrink-0" />
-            <span>
-              Settings can&apos;t be saved right now ({unavailableReason}). Changes apply to this
-              window only.
-            </span>
+        <div className="space-y-2">
+          <div className="relative">
+            <Search
+              size={14}
+              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+            />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="Search settings..."
+              aria-label="Search settings"
+              className="w-full rounded-md border border-gray-300 bg-white py-1.5 pl-8 pr-8 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X size={14} />
+              </button>
+            )}
           </div>
-        )
+          {!available && (
+            <div role="alert" className="flex items-center gap-2 text-sm text-amber-800">
+              <AlertTriangle size={15} className="shrink-0" />
+              <span>
+                Settings can&apos;t be saved right now ({unavailableReason}). Changes apply to this
+                window only.
+              </span>
+            </div>
+          )}
+        </div>
       }
     >
-      <div className="w-full">{renderContent()}</div>
+      {query.trim() ? (
+        searchResults.length === 0 ? (
+          <div className="pt-8 text-center text-sm text-gray-500">
+            No settings found for &ldquo;{query}&rdquo;
+          </div>
+        ) : (
+          <div className="space-y-1" role="group" aria-label="Settings search results">
+            <p className="mb-2 text-xs text-gray-500">
+              {searchResults.length} result{searchResults.length === 1 ? "" : "s"} · Press Enter to
+              open; use the arrow keys to move
+            </p>
+            {searchResults.map((result, index) => (
+              <button
+                key={result.id}
+                type="button"
+                onClick={() => openSearchResult(result)}
+                onMouseEnter={() => setHighlightIndex(index)}
+                className={`w-full rounded-md border px-3 py-2 text-left transition-colors ${
+                  index === highlightIndex
+                    ? "border-blue-300 bg-blue-50"
+                    : "border-transparent hover:bg-gray-50"
+                }`}
+              >
+                <div className="mb-0.5 flex items-center gap-1 text-[11px] font-medium text-gray-500">
+                  <span>{result.sectionLabel}</span>
+                  <ChevronRight size={11} />
+                  <span>Setting</span>
+                </div>
+                <div className="text-sm font-semibold text-gray-800">{result.label}</div>
+              </button>
+            ))}
+          </div>
+        )
+      ) : (
+        <div className="w-full">{renderContent()}</div>
+      )}
     </SectionedModal>
   );
 };

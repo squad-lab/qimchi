@@ -107,12 +107,14 @@ def test_backend_sections_fall_back_to_defaults(client):
             "settings": {
                 "export": {"formats": ["png"], "variants": ["dark"], "scale": 2},
                 "desktop": {"previewReleases": True},
+                "developer": {"exportTimings": True},
             }
         },
     )
 
     export = settings.export_settings()
     assert (export.formats, export.variants, export.scale) == (["png"], ["dark"], 2)
+    assert export.timings is True
     assert settings.desktop_settings().previewReleases is True
 
 
