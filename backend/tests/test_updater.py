@@ -303,6 +303,32 @@ def test_a_preview_install_prefers_the_stable_over_a_newer_preview(monkeypatch):
     assert result is not None and result["tag"] == "v0.7.0"
 
 
+def test_preview_and_stable_update_routes(monkeypatch):
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+    routes = (
+        ("v0.7.0-rc.10", False, ["v0.7.0-rc.11", "v0.6.2"], "v0.7.0-rc.11"),
+        ("v0.7.0-rc.11", False, ["v0.7.0", "v0.7.0-rc.12"], "v0.7.0"),
+        ("v0.7.0", False, ["v0.8.0-rc.1", "v0.7.1"], "v0.7.1"),
+        ("v0.7.0", False, ["v0.8.0-rc.1"], None),
+        ("v0.7.0", True, ["v0.8.0-rc.1"], "v0.8.0-rc.1"),
+    )
+
+    for running, include_previews, tags, expected in routes:
+        releases = [_release(tag, _WIN_ASSET) for tag in tags]
+        monkeypatch.setattr(
+            updater,
+            "urlopen",
+            lambda *_args, _releases=releases, **_kwargs: _Response(_releases),
+        )
+        monkeypatch.setattr(
+            updater, "current_version", lambda _running=running: _running
+        )
+
+        result = updater.check_for_update(include_previews=include_previews)
+
+        assert (result["tag"] if result else None) == expected
+
+
 def test_a_stable_install_is_still_never_offered_a_preview(monkeypatch):
     payload = [_release("v0.8.0-rc.1", _WIN_ASSET), _release("v0.7.0", _WIN_ASSET)]
     _install_fake_release_fetch(monkeypatch, payload)
@@ -342,6 +368,25 @@ def test_an_empty_stamp_falls_back_to_package_metadata(monkeypatch):
     _stamp_build_version(monkeypatch, "")
 
     assert updater.current_version() == "0.7.0"
+
+
+def test_a_frozen_build_reads_the_bundled_stamp(monkeypatch, tmp_path):
+    import importlib.metadata as metadata
+
+    stamp = tmp_path / "backend" / "api" / "_build_version.py"
+    stamp.parent.mkdir(parents=True)
+    stamp.write_text('BUILD_VERSION = "v0.7.0-rc.10"\n', encoding="utf-8")
+    monkeypatch.delitem(__import__("sys").modules, "api._build_version", raising=False)
+    monkeypatch.setattr(updater.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(updater.sys, "_MEIPASS", str(tmp_path), raising=False)
+    monkeypatch.setattr(metadata, "version", lambda _name: "0.7.0")
+
+    assert updater.current_version() == "v0.7.0-rc.10"
+    assert updater.version_source() == "build stamp"
+
+    stamp.write_text('BUILD_VERSION = "v0.7.0"\n', encoding="utf-8")
+    assert updater.current_version() == "v0.7.0"
+    assert not updater.is_prerelease(updater.current_version())
 
 
 def test_a_stamped_preview_build_is_offered_the_stable_release(monkeypatch):

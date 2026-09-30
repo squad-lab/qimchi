@@ -284,24 +284,34 @@ def test_installing_on_windows_runs_the_installer_and_closes(
     updates.check(include_previews=False)
     updates.download()
     monkeypatch.setattr(launcher.os, "name", "nt")
-    monkeypatch.setattr(subprocess, "DETACHED_PROCESS", 8, raising=False)
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     monkeypatch.setattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+    flags = []
     monkeypatch.setattr(
         subprocess,
         "Popen",
-        lambda args, **_kwargs: started.append(args) or SimpleNamespace(pid=1),
+        lambda args, **kwargs: (
+            (started.append(args) or flags.append(kwargs["creationflags"]))
+            or SimpleNamespace(pid=1)
+        ),
     )
     monkeypatch.setattr(launcher, "_close_windows", lambda log: closed.append(True))
 
     assert updates.install()["status"] == "installing"
     # Setup cannot replace a running Qimchi, so a helper waits for it to exit.
     assert started[0][0] == "powershell"
+    # DETACHED_PROCESS would exit before running the script.
+    assert flags == [0x08000000 | 512]
     script = started[0][-1]
     assert f"Wait-Process -Id {os.getpid()}" in script
     assert "Get-Process qimchi | Stop-Process -Force" in script
     assert "qimchi-setup-v0.7.0-rc.9.exe" in script
-    for argument in ("/SILENT", "/FORCECLOSEAPPLICATIONS", "/QIMCHIUPDATE=1"):
-        assert f"'{argument}'" in script
+    # Keep the standard Setup wizard interactive.
+    assert "/SILENT" not in script and "/VERYSILENT" not in script
+    assert "'/NORESTART'" in script
+    # -Wait would include the relaunched Qimchi process.
+    assert "-Wait " not in script and "$setup.WaitForExit()" in script
+    assert "setup.log" in script
     assert closed == [True]
     assert launcher._update_being_installed(str(tmp_path), lambda pid: pid == 1) == (
         "v0.7.0-rc.9"
@@ -309,7 +319,7 @@ def test_installing_on_windows_runs_the_installer_and_closes(
     assert closed == [True]
 
 
-def test_macos_update_quits_so_the_dmg_can_replace_the_app(
+def test_macos_update_replaces_the_app_once_it_has_quit(
     launcher, monkeypatch, tmp_path
 ):
     import subprocess
@@ -321,6 +331,9 @@ def test_macos_update_quits_so_the_dmg_can_replace_the_app(
     updates.download()
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(launcher.os, "name", "posix")
+    monkeypatch.setattr(
+        sys, "executable", "/Applications/qimchi.app/Contents/MacOS/qimchi"
+    )
     updates._offer["platform"] = "macos"
     monkeypatch.setattr(
         subprocess, "Popen", lambda args, **_kwargs: opened.append(args)
@@ -329,8 +342,35 @@ def test_macos_update_quits_so_the_dmg_can_replace_the_app(
 
     updates.install()
 
-    assert opened[0][0] == "open"
+    helper = opened[0]
+    assert helper[:2] == ["/bin/sh", "-c"]
+    assert helper[5:7] == [updates._offer["path"], "/Applications/qimchi.app"]
+    assert "ditto" in helper[2] and 'open "$dmg"' in helper[2]
     assert closed == [True]
+
+
+def test_macos_update_opens_the_dmg_outside_an_app_bundle(
+    launcher, monkeypatch, tmp_path
+):
+    import subprocess
+    import sys
+
+    messages, opened = [], []
+    updates, _ = _updates_with_offer(launcher, monkeypatch, tmp_path, messages)
+    updates.check(include_previews=False)
+    updates.download()
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(launcher.os, "name", "posix")
+    monkeypatch.setattr(sys, "executable", "/usr/local/bin/python3")
+    updates._offer["platform"] = "macos"
+    monkeypatch.setattr(
+        subprocess, "Popen", lambda args, **_kwargs: opened.append(args)
+    )
+    monkeypatch.setattr(launcher, "_close_windows", lambda log: None)
+
+    updates.install()
+
+    assert opened[0][0] == "open"
 
 
 def test_update_events_never_wait_on_the_page(launcher, monkeypatch, tmp_path):
@@ -446,3 +486,121 @@ def test_an_existing_certificate_setting_is_left_alone(launcher, monkeypatch):
     monkeypatch.setenv("SSL_CERT_FILE", "/etc/ssl/chosen.pem")
     launcher._use_bundled_certificates(lambda _msg: None)
     assert launcher.os.environ["SSL_CERT_FILE"] == "/etc/ssl/chosen.pem"
+
+
+def test_the_frozen_app_recognises_choreographers_chrome_wrapper(launcher):
+    wrapper = "/app/_internal/choreographer/browsers/_unix_pipe_chromium_wrapper.py"
+    chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+    assert launcher._chromium_wrapper_command(
+        ["/app/qimchi", wrapper, chrome, "--headless", "--remote-debugging-pipe"]
+    ) == [chrome, "--headless", "--remote-debugging-pipe"]
+    assert launcher._chromium_wrapper_command(["/app/qimchi"]) is None
+    assert launcher._chromium_wrapper_command(["/app/qimchi", "--after-update"]) is None
+
+
+def test_a_slow_chrome_is_kept_rather_than_replaced(launcher, monkeypatch):
+    import subprocess
+
+    calls = []
+
+    def slow(args, **_kwargs):
+        calls.append(args)
+        raise subprocess.TimeoutExpired(args, 30)
+
+    monkeypatch.setattr(subprocess, "run", slow)
+
+    assert launcher._chrome_starts("/chrome", lambda _message: None)
+    # The keychain flags keep macOS from holding Chrome on a prompt.
+    assert "--use-mock-keychain" in calls[0]
+    assert "--password-store=basic" in calls[0]
+
+
+def test_a_broken_downloaded_chrome_is_not_downloaded_again(
+    launcher, monkeypatch, tmp_path
+):
+    downloaded = str(tmp_path / "chrome-mac-arm64" / "chrome")
+    downloads = []
+    monkeypatch.delenv("BROWSER_PATH", raising=False)
+    monkeypatch.setattr(launcher, "_persistent_chrome_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(launcher, "_find_installed_chrome", lambda: downloaded)
+    monkeypatch.setattr(launcher, "_chrome_starts", lambda _exe, _log: False)
+
+    import threading
+
+    class Immediate:
+        def __init__(self, target, daemon):
+            self._target = target
+
+        def start(self):
+            self._target()
+
+    monkeypatch.setattr(threading, "Thread", Immediate)
+    import kaleido
+
+    monkeypatch.setattr(kaleido, "get_chrome_sync", lambda **_kw: downloads.append(1))
+
+    launcher._ensure_chrome_for_kaleido(lambda _message: None)
+
+    assert downloads == []
+
+
+def test_the_splash_shows_one_v_before_the_version(launcher, monkeypatch):
+    for version in ("v0.7.0-rc.9", "0.7.0"):
+        monkeypatch.setattr(launcher, "_app_version", lambda v=version: v)
+        html = launcher._splash_html()
+        assert ">v0.7.0" in html
+        assert "vv0.7.0" not in html
+
+
+def test_every_debug_log_line_gets_a_timestamp_even_when_written_in_pieces(launcher):
+    import io
+    import re
+    import threading
+
+    buffer = io.StringIO()
+    writer = launcher._TimestampedWriter(buffer)
+    writer.write("[updater] checking ")
+    writer.write("for updates\nTraceback (most recent call last):\n  File x")
+    writer.write("\n")
+
+    def burst(tag: str) -> None:
+        for i in range(50):
+            writer.write(f"{tag} {i}\n")
+
+    threads = [threading.Thread(target=burst, args=(t,)) for t in "ab"]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    stamp = r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} "
+    lines = buffer.getvalue().splitlines()
+    assert len(lines) == 103
+    assert all(re.match(stamp, line) for line in lines)
+    assert re.fullmatch(stamp + r"\[updater\] checking for updates", lines[0])
+    assert re.fullmatch(stamp + "  File x", lines[2])
+
+
+def test_the_debug_log_keeps_three_rolls(launcher, tmp_path, monkeypatch):
+    log = tmp_path / "qimchi_debug.log"
+    monkeypatch.setattr(launcher, "_DEBUG_LOG_MAX_BYTES", 10)
+    for generation in range(5):
+        log.write_text(f"generation {generation} " * 3, encoding="utf-8")
+        launcher._open_log_file(str(log)).close()
+
+    rolls = sorted(p.name for p in tmp_path.iterdir())
+    assert rolls == [
+        "qimchi_debug.log",
+        "qimchi_debug.log.1",
+        "qimchi_debug.log.2",
+        "qimchi_debug.log.3",
+    ]
+    assert "generation 4" in (tmp_path / "qimchi_debug.log.1").read_text("utf-8")
+
+
+def test_uvicorn_logs_without_its_own_time_or_colours(launcher):
+    config = launcher._uvicorn_log_config()
+    for formatter in config["formatters"].values():
+        assert "asctime" not in formatter["fmt"]
+        assert formatter["use_colors"] is False

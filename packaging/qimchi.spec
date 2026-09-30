@@ -111,6 +111,8 @@ hiddenimports = [
     "uvicorn.lifespan.on",
 ]
 hiddenimports += collect_submodules("api")
+if os.path.isfile(os.path.join(_backend_stage, "api", "_build_version.py")):
+    hiddenimports += ["api._build_version"]
 hiddenimports += collect_submodules("qcodes")
 # DB stack: alembic + sqlalchemy pull dialects/migration modules dynamically;
 # greenlet + mako are imported indirectly. Collect them so the frozen app can
@@ -134,7 +136,8 @@ if _fd_src and os.path.isfile(_fd_src):
 
 a = Analysis(
     [_launcher_path],
-    pathex=[os.path.join(_repo_root, "backend")],
+    # Prefer the staged backend because it contains the generated release tag.
+    pathex=[_backend_stage, os.path.join(_repo_root, "backend")],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,

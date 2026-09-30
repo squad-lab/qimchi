@@ -33,14 +33,7 @@ def _bundle_dir() -> str:
 
 
 def _qimchi_home() -> str:
-    """
-    The desktop app's home dir: persistent WebView storage, logs, the version
-    marker and the downloaded Chrome all live here.
-
-    Honours QIMCHI_HOME so this stays in step with the backend's resolver
-    (backend/api/shared/paths.py::qimchi_home). They must agree.
-
-    """
+    """Return the shared desktop data directory, honoring ``QIMCHI_HOME``."""
     override = os.environ.get("QIMCHI_HOME")
     home = (
         os.path.expanduser(override)
@@ -55,15 +48,7 @@ def _qimchi_home() -> str:
 
 
 def _log_path() -> str:
-    """
-    Path of the launcher's raw stdout/stderr log.
-
-    Lives in <home>/logs alongside the backend's qimchi.log so all logs are in
-    one place. ~/.qimchi survives updates (they replace program files only), so
-    this history is preserved -- see _open_log_file for why it is appended to
-    rather than truncated.
-
-    """
+    """Return the persistent launcher log path, falling back to the temp directory."""
     try:
         logs_dir = os.path.join(_qimchi_home(), "logs")
         os.makedirs(logs_dir, exist_ok=True)
@@ -87,16 +72,18 @@ def _log_path() -> str:
 
 # Roll the debug log at this size so appending forever can't fill the disk.
 _DEBUG_LOG_MAX_BYTES = 10 * 1024 * 1024
+_DEBUG_LOG_ROLLS = 3
 
 
 def _open_log_file(path: str):
-    """
-    Open the debug log for APPEND, rolling it once when it gets large.
-
-    """
+    """Open the debug log for append, rolling it when needed."""
     try:
         if os.path.isfile(path) and os.path.getsize(path) > _DEBUG_LOG_MAX_BYTES:
-            os.replace(path, path + ".1")  # keep exactly one previous roll
+            for index in range(_DEBUG_LOG_ROLLS - 1, 0, -1):
+                older = f"{path}.{index}"
+                if os.path.isfile(older):
+                    os.replace(older, f"{path}.{index + 1}")
+            os.replace(path, path + ".1")
     except OSError:
         pass
 
@@ -109,6 +96,142 @@ def _open_log_file(path: str):
     except Exception:
         pass
     return handle
+
+
+class _TimestampedWriter:
+    """Prefix each output line with one timestamp, including partial writes."""
+
+    def __init__(self, stream) -> None:
+        import threading
+
+        self._stream = stream
+        self._lock = threading.Lock()
+        self._line_start = True
+
+    @staticmethod
+    def _stamp() -> str:
+        import datetime
+
+        now = datetime.datetime.now()
+        return now.strftime("%Y-%m-%d %H:%M:%S.") + f"{now.microsecond // 1000:03d} "
+
+    def write(self, text: str) -> int:
+        if not text:
+            return 0
+        with self._lock:
+            out = []
+            for piece in text.splitlines(keepends=True):
+                if self._line_start:
+                    out.append(self._stamp())
+                out.append(piece)
+                self._line_start = piece.endswith("\n")
+            self._stream.write("".join(out))
+        return len(text)
+
+    def flush(self) -> None:
+        with self._lock:
+            self._stream.flush()
+
+    def fileno(self) -> int:
+        return self._stream.fileno()
+
+    def isatty(self) -> bool:
+        return False
+
+    @property
+    def encoding(self) -> str:
+        return getattr(self._stream, "encoding", "utf-8")
+
+    def writable(self) -> bool:
+        return True
+
+
+def _uvicorn_log_config() -> dict:
+    """uvicorn's logging, without its own times: the debug log adds them."""
+    import copy
+
+    from uvicorn.config import LOGGING_CONFIG
+
+    config = copy.deepcopy(LOGGING_CONFIG)
+    config["formatters"]["default"]["fmt"] = "[%(levelname)s] %(name)s: %(message)s"
+    config["formatters"]["access"]["fmt"] = (
+        '[%(levelname)s] uvicorn.access: %(client_addr)s - "%(request_line)s" '
+        "%(status_code)s"
+    )
+    for formatter in config["formatters"].values():
+        formatter["use_colors"] = False
+    return config
+
+
+def _webview2_runtime_version() -> str | None:
+    """The installed WebView2 runtime's version (Windows), from the registry."""
+    if sys.platform != "win32":
+        return None
+    import winreg
+
+    client = r"Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+    for root, key in (
+        (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\WOW6432Node\{client}"),
+        (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\{client}"),
+        (winreg.HKEY_CURRENT_USER, rf"Software\{client}"),
+    ):
+        try:
+            with winreg.OpenKey(root, key) as handle:
+                version = winreg.QueryValueEx(handle, "pv")[0]
+                if version and version != "0.0.0.0":
+                    return str(version)
+        except OSError:
+            continue
+    return None
+
+
+def _log_session_details(log) -> None:
+    """What a bug report needs to know about this machine and this run."""
+    import platform
+
+    details = [
+        f"version {_app_version()}",
+        f"{platform.platform()} ({platform.machine()})",
+        f"Python {sys.version.split()[0]}",
+        "frozen" if getattr(sys, "frozen", False) else "from source",
+        f"home {_qimchi_home()}",
+        f"args {sys.argv[1:]}",
+    ]
+    try:
+        import psutil
+
+        memory = psutil.virtual_memory().total / (1024**3)
+        details.append(f"{psutil.cpu_count()} CPUs, {memory:.1f} GB RAM")
+    except Exception:
+        pass
+    try:
+        from importlib.metadata import version
+
+        details.append(f"pywebview {version('pywebview')}")
+    except Exception:
+        pass
+    try:
+        runtime = _webview2_runtime_version()
+        if runtime:
+            details.append(f"WebView2 {runtime}")
+    except Exception:
+        pass
+    log("[session] " + "; ".join(details))
+
+
+def _resource_snapshot(reason: str) -> None:
+    """Ask the backend to log a resource line now, off the calling thread."""
+    import threading
+
+    def run() -> None:
+        try:
+            from api.diagnostics import sampler
+
+            sampler.snapshot(reason)
+        except Exception:
+            pass
+
+    threading.Thread(target=run, name="resource-snapshot", daemon=True).start()
 
 
 def _app_version() -> str:
@@ -171,7 +294,7 @@ def _splash_html() -> str:
     </style></head><body>
       {logo}
       <div class="name">Qimchi</div>
-      <div class="version">v{_app_version()}</div>
+      <div class="version">v{_app_version().removeprefix("v")}</div>
       <div class="bar"><span></span></div>
       <div class="lab">SQUAD Lab &middot; FZ J&uuml;lich</div>
     </body></html>"""
@@ -224,13 +347,7 @@ def _with_webview2_argument(existing: str | None, argument: str) -> str:
 
 
 class _ReloadBudget:
-    """
-    Allow a few automatic reloads in a time window.
-
-    A page that crashes again as soon as it loads would otherwise reload
-    forever; past the budget, the crash page stays so the user can see it.
-
-    """
+    """Limit automatic crash recovery to a few reloads per time window."""
 
     def __init__(self, limit: int = 3, window_seconds: float = 300.0, clock=None):
         import time
@@ -257,6 +374,7 @@ def _handle_webview2_process_failed(sender, args, budget: _ReloadBudget, log) ->
         for name in ("Reason", "ExitCode", "ProcessDescription")
     )
     log(f"[webview2] process failed: kind={kind}, {details}")
+    _resource_snapshot(f"after WebView2 {kind}")
     # A dead main-frame renderer leaves only the crash page. The browser process
     # dying takes the whole control with it, and GPU crashes recover by themselves.
     if kind != "RenderProcessExited":
@@ -328,10 +446,7 @@ def _use_bundled_certificates(log) -> None:
 
 
 def _persistent_chrome_dir() -> str:
-    """
-    Persistent, writable dir for a downloaded Chrome (survives across runs).
-
-    """
+    """Return the persistent directory for downloaded Chrome builds."""
     return os.path.join(_qimchi_home(), "chrome")
 
 
@@ -399,8 +514,59 @@ def _find_installed_chrome() -> str | None:
     return None
 
 
+# Choreographer's Chrome wrapper on macOS and Linux.
+_CHROMIUM_WRAPPER = "_unix_pipe_chromium_wrapper.py"
+
+
+def _chromium_wrapper_command(argv: list[str]) -> list[str] | None:
+    """Return the wrapped Chrome command, if present."""
+    if len(argv) > 2 and argv[1].endswith(_CHROMIUM_WRAPPER):
+        return argv[2:]
+    return None
+
+
+def _run_chromium_wrapper(command: list[str]) -> int:
+    """Run Chrome with Choreographer's input and output on file descriptors 3 and 4."""
+    import signal
+    import subprocess
+
+    os.dup2(0, 3)
+    os.dup2(1, 4)
+    os.set_inheritable(3, True)
+    os.set_inheritable(4, True)
+    process = subprocess.Popen(command, pass_fds=(3, 4))
+
+    def stop(_signum, _frame) -> None:
+        process.terminate()
+        try:
+            process.wait(5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    return process.wait()
+
+
+# Choreographer defaults plus flags that suppress macOS keychain prompts.
+_CHROME_CHECK_FLAGS = (
+    "--headless=new",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--password-store=basic",
+    "--use-mock-keychain",
+    "--disable-breakpad",
+    "--disable-component-update",
+    "--disable-sync",
+)
+
+
 def _chrome_starts(executable: str, log) -> bool:
-    """Check that Chrome can start in Kaleido's headless mode."""
+    """
+    Check whether Chrome starts in Kaleido's headless mode.
+
+    Treat a timeout as usable because macOS may be waiting for permission.
+    """
     import subprocess
     import tempfile
 
@@ -409,9 +575,7 @@ def _chrome_starts(executable: str, log) -> bool:
             result = subprocess.run(
                 [
                     executable,
-                    "--headless=new",
-                    "--no-first-run",
-                    "--no-default-browser-check",
+                    *_CHROME_CHECK_FLAGS,
                     f"--user-data-dir={profile}",
                     "--dump-dom",
                     "about:blank",
@@ -420,6 +584,9 @@ def _chrome_starts(executable: str, log) -> bool:
                 timeout=30,
                 check=False,
             )
+        except subprocess.TimeoutExpired:
+            log(f"[chrome] {executable} did not answer within 30s; using it anyway")
+            return True
         except Exception as exc:
             log(f"[chrome] {executable} did not run: {exc!r}")
             return False
@@ -434,14 +601,7 @@ def _chrome_starts(executable: str, log) -> bool:
 
 
 def _ensure_chrome_for_kaleido(log) -> None:
-    """
-    Make sure Kaleido v1 has a working Chrome for PNG/SVG export.
-
-    Kaleido >=1.0 no longer bundles Chrome; it finds one at runtime. We point it
-    at a real Chrome via the BROWSER_PATH env var that choreographer honours,
-    and if none exists we download 'Chrome for Testing' once.
-
-    """
+    """Find or download Chrome for Kaleido and set ``BROWSER_PATH``."""
     import threading
     import traceback
 
@@ -455,7 +615,9 @@ def _ensure_chrome_for_kaleido(log) -> None:
             log(f"[chrome] {reason}; downloading Chrome for Testing (one-time)...")
             import kaleido
 
-            exe = kaleido.get_chrome_sync(path=_persistent_chrome_dir())
+            target = _persistent_chrome_dir()
+            os.makedirs(target, exist_ok=True)
+            exe = kaleido.get_chrome_sync(path=target)
             os.environ["BROWSER_PATH"] = str(exe)
             log(f"[chrome] downloaded Chrome to: {exe}")
             return str(exe)
@@ -469,6 +631,9 @@ def _ensure_chrome_for_kaleido(log) -> None:
     def _prepare() -> None:
         # Fall back to a managed Chrome if the installed one cannot run headless.
         if found and _chrome_starts(found, log):
+            return
+        if found and found.startswith(_persistent_chrome_dir()):
+            log("[chrome] the downloaded Chrome does not run; not downloading it again")
             return
         _download("no usable Chrome found" if found else "no Chrome found")
 
@@ -506,14 +671,7 @@ class _Api:
         return result[0] if isinstance(result, (list, tuple)) else str(result)
 
     def save_text_file(self, filename: str, content: str) -> str:
-        """
-        Ask where to save ``content`` and write it there; return the path, or ""
-        if the user cancelled.
-
-        WebView2 silently drops downloads the page starts itself, so a file the
-        SPA generates (an exported settings file) is saved through this instead.
-
-        """
+        """Save SPA-generated text through a native dialog and return its path."""
         import webview
 
         file_dialog = getattr(webview, "FileDialog", None)
@@ -555,15 +713,18 @@ class _Api:
         """Close the update dialog for this session."""
         return self._updates.dismiss()
 
+    def reveal_file(self, path: str) -> bool:
+        """Show a file the backend saved (a log bundle) in the file manager."""
+        if not path or not os.path.isfile(path):
+            return False
+        try:
+            _open_containing_folder(path, self._log)
+            return True
+        except Exception:
+            return False
+
     def open_log_terminal(self) -> bool:
-        """
-        Open the debug log in a terminal that follows it live (best-effort).
-
-        Spawns a SYSTEM terminal (powershell / less / Terminal.app), never the
-        frozen exe, so there is no re-launch/fork-bomb risk. Returns False if no
-        terminal could be launched.
-
-        """
+        """Follow the debug log in a system terminal when available."""
         import shutil
         import subprocess
 
@@ -624,13 +785,7 @@ def _windows_log_follow_command(log: str) -> str:
 
 
 def _unix_log_follow_command(log: str) -> str:
-    """
-    Shell that follows the log in less, falling back to tail.
-
-    less +F opens at the end and follows new lines like tail -f; Ctrl+C stops
-    following so the whole log can be scrolled and searched, F resumes, q quits.
-
-    """
+    """Build a ``less +F`` command with a ``tail -f`` fallback."""
     import shlex
 
     quoted = shlex.quote(log)
@@ -651,12 +806,7 @@ def _close_windows(log) -> None:
 
 
 def _download_update_asset(asset_url: str, destination: str, log, progress=None) -> str:
-    """
-    Download an update to ``destination``, using only modules the frozen bundle has.
-
-    The file appears under its final name only once complete, so a download cut
-    short is never mistaken for an installer.
-    """
+    """Download atomically with modules available in the frozen bundle."""
     partial = destination + ".part"
     request = Request(asset_url, headers={"User-Agent": "Qimchi-Updater"})
     try:
@@ -777,27 +927,19 @@ def _asset_file_name(asset_url: str, platform: str) -> str:
 
 
 def _windows_install_after_exit_command(installer: str) -> list[str]:
-    """
-    A detached helper that installs once this Qimchi is really gone.
-
-    Setup cannot replace qimchi.exe while it runs, and it cannot reliably close
-    it either: Restart Manager refuses on some machines ("Permission Denied +
-    Session Mismatch"), and the export workers are windowless processes it
-    cannot ask to quit. Setup then answers its own "file in use" error with
-    Abort, which leaves the installation part-done. So the helper waits for
-    this process and its workers to exit, ends any straggler, and only then
-    runs Setup -- which starts Qimchi again (/QIMCHIUPDATE=1).
-    """
+    """Build a detached command that waits for Qimchi before running Setup."""
     quoted = installer.replace("'", "''")
+    setup_log = os.path.join(os.path.dirname(installer), "setup.log").replace("'", "''")
+    # -Wait also waits for Qimchi if Setup relaunches it.
     script = (
         "$ErrorActionPreference='SilentlyContinue';"
         f"Wait-Process -Id {os.getpid()} -Timeout 120;"
         "Get-Process qimchi | Wait-Process -Timeout 60;"
         "Get-Process qimchi | Stop-Process -Force;"
         "Start-Sleep -Seconds 1;"
-        f"Start-Process -FilePath '{quoted}' -Wait -ArgumentList "
-        "'/SILENT','/SUPPRESSMSGBOXES','/CLOSEAPPLICATIONS',"
-        "'/FORCECLOSEAPPLICATIONS','/NORESTART','/QIMCHIUPDATE=1'"
+        f"$setup=Start-Process -FilePath '{quoted}' -PassThru -ArgumentList "
+        f"'/NORESTART','/LOG=\"{setup_log}\"';"
+        "$setup.WaitForExit()"
     )
     return [
         "powershell",
@@ -807,6 +949,65 @@ def _windows_install_after_exit_command(installer: str) -> list[str]:
         "Hidden",
         "-Command",
         script,
+    ]
+
+
+# Replace the app after exit. Restore it on failure, then offer manual install.
+_MACOS_INSTALL_SCRIPT = r"""
+pid="$1"; dmg="$2"; target="$3"; log="$4"
+exec >>"$log" 2>&1
+echo "$(date) installing $dmg over $target"
+while kill -0 "$pid" 2>/dev/null; do sleep 0.5; done
+mount="$(mktemp -d /tmp/qimchi-update.XXXXXX)"
+staged="$(dirname "$target")/.qimchi-update.app"
+old="$(dirname "$target")/.qimchi-previous.app"
+installed=0
+if hdiutil attach -nobrowse -noautoopen -quiet -mountpoint "$mount" "$dmg"; then
+  source_app="$(ls -d "$mount"/[Qq]imchi.app 2>/dev/null | head -n 1)"
+  rm -rf "$staged" "$old"
+  if [ -n "$source_app" ] && ditto "$source_app" "$staged"; then
+    if mv "$target" "$old"; then
+      if mv "$staged" "$target"; then
+        installed=1
+        rm -rf "$old"
+      else
+        mv "$old" "$target"
+      fi
+    fi
+  fi
+  rm -rf "$staged"
+  hdiutil detach -quiet "$mount" || hdiutil detach -force -quiet "$mount"
+fi
+rmdir "$mount" 2>/dev/null
+if [ "$installed" = 1 ]; then
+  echo "$(date) installed; opening $target"
+  xattr -dr com.apple.quarantine "$target" 2>/dev/null
+  open "$target"
+else
+  echo "$(date) could not replace $target; opening the disk image"
+  open "$dmg"
+  open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AppBundles"
+fi
+"""
+
+
+def _running_app_bundle() -> str | None:
+    """Return the current macOS app bundle, if any."""
+    bundle = os.path.dirname(os.path.dirname(os.path.dirname(sys.executable)))
+    return bundle if bundle.endswith(".app") else None
+
+
+def _macos_install_after_exit_command(dmg: str, app_bundle: str, log: str) -> list[str]:
+    """Build the detached macOS update command."""
+    return [
+        "/bin/sh",
+        "-c",
+        _MACOS_INSTALL_SCRIPT,
+        "qimchi-update",
+        str(os.getpid()),
+        dmg,
+        app_bundle,
+        log,
     ]
 
 
@@ -851,14 +1052,7 @@ def _process_is_running(pid: int) -> bool:
 
 
 def _update_being_installed(home: str | None = None, is_running=None) -> str | None:
-    """
-    The tag an installer is putting in place right now, if any.
-
-    Opening Qimchi while its installer replaces files locks some of them, and
-    the installer then aborts part-way, leaving a mix of two versions that no
-    longer starts. A stale marker (installer gone, or over 30 minutes old) is
-    removed.
-    """
+    """Return the active install tag and remove stale install markers."""
     import json
     import time
 
@@ -881,7 +1075,7 @@ def _update_being_installed(home: str | None = None, is_running=None) -> str | N
 def _tell_user_update_in_progress(tag: str) -> None:
     message = (
         f"Qimchi is being updated to {tag}.\n\n"
-        "It will open by itself when the update has finished."
+        "Finish the installer, then open Qimchi again."
     )
     if os.name == "nt":
         import ctypes
@@ -890,14 +1084,7 @@ def _tell_user_update_in_progress(tag: str) -> None:
 
 
 def _evaluate_js_detached(window, script: str, log) -> None:
-    """
-    Run page script without waiting on it from the calling thread.
-
-    pywebview's evaluate_js blocks until the page answers, with no timeout. If
-    the window is closing, that answer never comes, and a non-daemon thread
-    stuck there -- the thread webview.start(func=...) runs in, or one serving a
-    js_api call -- keeps the whole process alive after the window is gone.
-    """
+    """Run page script on a daemon thread so shutdown cannot wait on it."""
     import threading
 
     def run() -> None:
@@ -910,14 +1097,7 @@ def _evaluate_js_detached(window, script: str, log) -> None:
 
 
 def _exit_soon_after_close(window, log, grace_seconds: float = 10.0) -> None:
-    """
-    End the process shortly after the window closes, even if shutdown hangs.
-
-    main() normally exits right after webview.start returns; this covers the
-    cases where it never returns, or the backend and export workers hang while
-    stopping. A lingering process blocks an installer from replacing the app,
-    and on macOS makes the next launch only re-activate the windowless process.
-    """
+    """Force process exit after a grace period when the window closes."""
     import threading
 
     def on_closed() -> None:
@@ -930,17 +1110,7 @@ def _exit_soon_after_close(window, log, grace_seconds: float = 10.0) -> None:
 
 
 class _Updates:
-    """
-    The desktop update flow, shared by the startup check and the SPA.
-
-    Checking, downloading and installing are separate steps, so the app stays
-    usable while an update downloads. A downloaded update is remembered in
-    <home>/updates/pending.json, so "remind me at next launch" survives a
-    restart without downloading again.
-
-    Every change is pushed to the page as a ``qimchi-update`` event; the page
-    can also ask for :meth:`status` at any time.
-    """
+    """Manage desktop updates and publish state through ``qimchi-update`` events."""
 
     def __init__(self, log, home: str | None = None) -> None:
         import threading
@@ -963,7 +1133,7 @@ class _Updates:
         }
         self._last_emitted_progress = -1.0
 
-    # -- plumbing ---------------------------------------------------------------
+    # Plumbing
     def attach(self, window) -> None:
         self._window = window
 
@@ -1009,7 +1179,7 @@ class _Updates:
             self._log,
         )
 
-    # -- steps ------------------------------------------------------------------
+    # Steps
     def restore_pending(self) -> None:
         """Offer an update downloaded in an earlier session, or clear a stale one."""
         import json
@@ -1214,15 +1384,17 @@ class _Updates:
         self._set(status="installing", prompt=None)
         try:
             if platform == "windows" or os.name == "nt":
-                # DETACHED_PROCESS + CREATE_NEW_PROCESS_GROUP so the installer
-                # keeps running after this process exits.
+                # DETACHED_PROCESS makes PowerShell exit before running this script.
                 flags = (
-                    subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                    subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
                 )
                 process = subprocess.Popen(
                     _windows_install_after_exit_command(installer),
                     creationflags=flags,
                     close_fds=True,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                 )
                 _mark_install_started(process.pid, pending["tag"], self._home)
                 self._log(
@@ -1231,11 +1403,26 @@ class _Updates:
                 )
                 _close_windows(self._log)
             elif platform == "macos" or sys.platform == "darwin":
-                subprocess.Popen(["open", installer], close_fds=True)
-                # A running app cannot be replaced from the DMG, so quit.
-                self._log(
-                    "[updater] opened the disk image; closing app so it can be replaced"
-                )
+                bundle = _running_app_bundle()
+                if bundle:
+                    log = os.path.join(os.path.dirname(installer), "install.log")
+                    subprocess.Popen(
+                        _macos_install_after_exit_command(installer, bundle, log),
+                        close_fds=True,
+                        start_new_session=True,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    self._log(
+                        f"[updater] {bundle} will be replaced once this app has "
+                        f"closed (log: {log})"
+                    )
+                else:
+                    subprocess.Popen(["open", installer], close_fds=True)
+                    self._log(
+                        "[updater] not running from an .app; opened the disk image"
+                    )
                 _close_windows(self._log)
             elif _try_replace_running_appimage(installer, self._log):
                 _close_windows(self._log)
@@ -1418,11 +1605,7 @@ def _run_native_smoke(window, dataset_path: str, download_dir: str, log) -> bool
         archive_path = None
         deadline = time.time() + 30
         while time.time() < deadline:
-            # The basket posts to /download-multiple/, which names its archive
-            # after the item count ("items_1_files.zip"), not after the
-            # dataset. The download directory is a fresh temp dir per run, so
-            # any archive in it is this run's; _validate_smoke_archive checks
-            # that it really holds the fixture.
+            # The fresh download directory contains only this smoke run's archive.
             matches = glob.glob(os.path.join(download_dir, "*.zip"))
             if matches:
                 archive_path = matches[0]
@@ -1445,11 +1628,7 @@ def _run_native_smoke(window, dataset_path: str, download_dir: str, log) -> bool
 
 
 def main() -> int:
-    # Re-entry guard (against fork bombs). If a dependency or a
-    # stray call ever re-launches the frozen exe, the child inherits this env
-    # var and exits immediately instead of starting a second server + window.
-    # Note: multiprocessing export workers never reach here -- freeze_support()
-    # intercepts them earlier -- so this does not affect the export pool.
+    # Stop a re-launched frozen child before it creates another server/window.
     if os.environ.get("QIMCHI_LAUNCHER_ACTIVE") == "1":
         return 0
     os.environ["QIMCHI_LAUNCHER_ACTIVE"] = "1"
@@ -1470,14 +1649,23 @@ def main() -> int:
     if not headless_smoke:
         import webview
 
-    log_file = _open_log_file(_log_path())
+    raw_log = _open_log_file(_log_path())
+    log_file = _TimestampedWriter(raw_log)
 
     def log(msg: str) -> None:
         print(msg, file=log_file)
 
     sys.stdout = log_file
     sys.stderr = log_file
+    try:
+        import faulthandler
+
+        # Native crashes (WebView2, pythonnet, Chrome pipes) leave a stack here.
+        faulthandler.enable(file=raw_log, all_threads=True)
+    except Exception:
+        pass
     log("Starting Qimchi launcher...")
+    _log_session_details(log)
 
     # The installer starts Qimchi with --after-update just before it exits.
     after_update = "--after-update" in sys.argv
@@ -1527,7 +1715,13 @@ def main() -> int:
             from main import app
 
             log(f"Running uvicorn on 127.0.0.1:{port}...")
-            config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="info")
+            config = uvicorn.Config(
+                app,
+                host="127.0.0.1",
+                port=port,
+                log_level="info",
+                log_config=_uvicorn_log_config(),
+            )
             server = uvicorn.Server(config)
             server_ref["server"] = server
             server.run()
@@ -1621,9 +1815,7 @@ def main() -> int:
         os.environ.get(WEBVIEW2_ARGUMENTS_ENV), "--disable-background-timer-throttling"
     )
 
-    # private_mode=False + a persistent storage_path so the SPA's localStorage
-    # (zustand-persisted basket/plot/sidebar state) survives across launches.
-    # pywebview defaults to private_mode=True, which wipes it every time.
+    # Persist the SPA's localStorage across launches.
     storage_path = os.path.join(_qimchi_home(), "webview")
     os.makedirs(storage_path, exist_ok=True)
     _purge_webview_cache_on_upgrade(storage_path, log)
@@ -1678,14 +1870,7 @@ def main() -> int:
 
 
 def _shut_down(code: int) -> None:
-    """
-    End the process once the window has closed.
-
-    A normal interpreter exit waits for the export pool's workers and their
-    Chrome, and one that hangs leaves a windowless process behind. On macOS
-    that process keeps the app "running", so the next launch only re-activates
-    it: a window flashes and nothing opens, and an update cannot replace it.
-    """
+    """Terminate child workers, then exit without waiting for interpreter cleanup."""
     for handle in (sys.stdout, sys.stderr):
         try:
             print(f"Qimchi process exiting (code {code}).", file=handle)
@@ -1701,9 +1886,10 @@ def _shut_down(code: int) -> None:
 
 
 if __name__ == "__main__":
-    # MUST be first: on Windows, ProcessPoolExecutor export workers re-execute
-    # this frozen exe. freeze_support() makes those children run the worker and
-    # exit instead of re-launching uvicorn + a new window.
+    chromium_command = _chromium_wrapper_command(sys.argv)
+    if chromium_command is not None:
+        os._exit(_run_chromium_wrapper(chromium_command))
+    # Handle Windows export workers before launcher startup.
     multiprocessing.freeze_support()
     exit_code = main()
     if getattr(sys, "frozen", False):

@@ -53,6 +53,8 @@ def test_pywebview_builds_embed_the_release_version_in_the_frontend():
         assert "git tag --points-at HEAD --list 'v*'" in script
         assert 'QIMCHI_VERSION="$FRONTEND_VERSION" npm run build' in script
     assert '(_frontend_dist, "frontend/dist")' in spec
+    assert 'hiddenimports += ["api._build_version"]' in spec
+    assert "pathex=[_backend_stage," in spec
 
 
 def test_container_starts_the_prebuilt_environment_without_resolving_again():
@@ -114,15 +116,18 @@ def test_release_asset_names_carry_the_tag_and_stay_matchable(monkeypatch):
     ]
 
     assert len(names) == 3, names
-    expanded = [name.replace("${CI_COMMIT_TAG}", "v0.7.0-rc.5") for name in names]
-    assert all("v0.7.0-rc.5" in name for name in expanded), expanded
+    for tag in ("v0.7.0-rc.5", "v0.7.0"):
+        expanded = [name.replace("${CI_COMMIT_TAG}", tag) for name in names]
+        assert all(tag in name for name in expanded), expanded
 
-    for platform, expected in (
-        ("win32", "windows"),
-        ("darwin", "macos"),
-        ("linux", "linux"),
-    ):
-        monkeypatch.setattr(updater.sys, "platform", platform)
-        hits = [name for name in expanded if updater._platform_asset_match(name, "")]
-        assert len(hits) == 1, (platform, hits)
-        assert updater._platform_asset_match(hits[0], "")[0] == expected
+        for platform, expected in (
+            ("win32", "windows"),
+            ("darwin", "macos"),
+            ("linux", "linux"),
+        ):
+            monkeypatch.setattr(updater.sys, "platform", platform)
+            hits = [
+                name for name in expanded if updater._platform_asset_match(name, "")
+            ]
+            assert len(hits) == 1, (platform, hits)
+            assert updater._platform_asset_match(hits[0], "")[0] == expected

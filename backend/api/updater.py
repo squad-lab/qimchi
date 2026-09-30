@@ -30,6 +30,7 @@ import re
 import ssl
 import sys
 from collections.abc import Callable
+from pathlib import Path
 from urllib.request import Request, urlopen
 
 _log = logging.getLogger(__name__)
@@ -88,6 +89,34 @@ def _platform_asset_match(name: str, url: str) -> tuple[str, str] | None:
     return None
 
 
+def _build_version() -> str:
+    """Read the release tag compiled into or bundled beside the backend."""
+    try:
+        from ._build_version import BUILD_VERSION
+
+        if BUILD_VERSION:
+            return str(BUILD_VERSION)
+    except Exception:
+        pass
+
+    # PyInstaller may bundle the generated module as data rather than placing it
+    # in its Python archive. Read that copy before falling back to base metadata.
+    if getattr(sys, "frozen", False):
+        root = getattr(sys, "_MEIPASS", "")
+        stamp = Path(root) / "backend" / "api" / "_build_version.py"
+        try:
+            match = re.search(
+                r'^\s*BUILD_VERSION\s*=\s*["\']([^"\']+)["\']',
+                stamp.read_text(encoding="utf-8"),
+                re.MULTILINE,
+            )
+            if match:
+                return match.group(1)
+        except OSError:
+            pass
+    return ""
+
+
 def current_version() -> str:
     """
     Return the running version, preferring the tag this build was cut from.
@@ -99,13 +128,9 @@ def current_version() -> str:
     tag into ``api/_build_version.py``; it is absent in a dev checkout.
 
     """
-    try:
-        from ._build_version import BUILD_VERSION
-
-        if BUILD_VERSION:
-            return BUILD_VERSION
-    except Exception:
-        pass
+    stamped = _build_version()
+    if stamped:
+        return stamped
 
     try:
         from importlib.metadata import version
@@ -117,13 +142,8 @@ def current_version() -> str:
 
 def version_source() -> str:
     """Where :func:`current_version` finds the version: the build stamp or metadata."""
-    try:
-        from ._build_version import BUILD_VERSION
-
-        if BUILD_VERSION:
-            return "build stamp"
-    except Exception:
-        pass
+    if _build_version():
+        return "build stamp"
     try:
         from importlib.metadata import version
 

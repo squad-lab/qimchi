@@ -69,6 +69,25 @@ test.beforeEach(async ({ page }) => {
   await mockSettingsApi(page);
 });
 
+test("Settings sections follow the intended order", async ({ page }) => {
+  await fakeDesktopUpdater(page, {});
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+
+  const nav = page.getByRole("navigation", { name: "Settings sections" });
+  await expect(nav.locator(":scope > div > button")).toHaveText([
+    "General",
+    "Explorer",
+    "Live",
+    "Plots",
+    "HeatMap",
+    "LinePlot",
+    "Export",
+    "Updates",
+    "Developer",
+  ]);
+});
+
 test("an update downloads in the background and asks to install when ready", async ({ page }) => {
   await fakeDesktopUpdater(page, {
     status: "available",
@@ -79,7 +98,8 @@ test("an update downloads in the background and asks to install when ready", asy
   await page.goto("/");
 
   const dialog = page.getByRole("dialog", { name: "Qimchi v0.7.0-rc.9 is available" });
-  await expect(dialog).toContainText("You are running v0.7.0-rc.8");
+  await expect(dialog).toContainText("v0.7.0-rc.8");
+  await expect(dialog.getByText("Qimchi v0.7.0-rc.9", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "Download in background" }).click();
   await expect(dialog).toHaveCount(0);
 
