@@ -1,6 +1,6 @@
 ## Qimchi Changelog
 
-### v0.7.0 - 2026-09-12
+### v0.7.0 - 2026-10-01
 
 - [Feature] Complex variables, including HDF5 `r`/`i` pairs, are available as amplitude, phase in radians, real, and imaginary values. Library metadata is preserved for these measurements.
 - [Feature] Text-labelled and coordinate-free dimensions have indexed sliders, allowing datasets such as fit results with a `param` axis to be plotted as heat maps.
