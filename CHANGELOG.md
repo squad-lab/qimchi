@@ -43,6 +43,15 @@
 - [Feature] Measurement downloads include the dataset's library record as JSON.
 - [Feature] The Explorer sorts newest measurements first by default.
 - [Feature] Updates download in the background with progress shown on the sidebar rail. Settings > Updates supports manual checks, downloads, installation, preview releases, and deferred reminders.
+- [Feature] Added an R_in Correction heat-map filter using V_S = V_b − I × R_in.
+- [Feature] Filter presets can be saved, applied, updated, reverted, renamed, and removed from the Filters panel.
+- [Feature] Configured filters can be switched off and back on from the Applied list without losing their settings or position.
+- [Feature] Settings > Plots sets the initial LineCut direction.
+- [Feature] Settings can be searched by section, control, or related term. Results support keyboard navigation and open the matching setting directly.
+- [Feature] On a live heat map, LineCut can follow the row or column currently being measured. It advances with the frontier, follows swapped axes, and is unavailable after the measurement completes.
+- [Feature] Settings > Developer can save Qimchi's logs and recent crash reports as one zip file for a bug report. Crash reports from the last two weeks are included by default and can be excluded.
+- [Feature] qanary parameters can be pinned from Metadata and tracked across measurements.
+- [Feature] The update prompt now shows both versions and formatted release notes.
 - [Feature] Added persistent Settings for theme, zoom, plot layout and behavior, Explorer sorting, live-basket behavior, image export, and desktop updates. Open with `Shift+S` or the sidebar gear.
 - [Feature] Automatic plotting now creates a HeatMap when possible and otherwise a LinePlot. Settings > Plots can select HeatMap or LinePlot, both, or neither.
 - [Feature] Each plot has an independent 33/50/66/100% width control. Viewer-wide width controls remain available, and Disk and Notes exports share one menu.
@@ -55,6 +64,7 @@
 - [Feature] LineCut previews update with live data and immediately when switching between X and Y. Unmeasured points no longer offset the slice.
 - [Feature] The Basket is limited to 50 measurements and shows a warning and status icon when full.
 - [Feature] The footer shows the full build version, including release-candidate tags, links to the changelog, and indicates backend connectivity. Docker and desktop packages pass the release tag to the frontend.
+- [Fix] The app log now records the whole session; it had stopped keeping Qimchi's own messages after startup.
 - [Fix] LineCut uses the selected direction immediately, without requiring the heat map to redraw first.
 - [Fix] Rotated heat-map axes and titles now account for axis step sizes. LineCut previews and results follow the rotated image correctly.
 - [Fix] Long Help entries wrap below their titles with consistent spacing.
@@ -69,6 +79,7 @@
 - [Fix] Data sliders can reach their maximum when the step does not divide the range exactly.
 - [Fix] Applying or removing a filter no longer resets data-slider positions, and removing the last filter keeps the plot on the slider's slice.
 - [Fix] The Filters panel's Sliders and Applied tabs follow the dark theme.
+- [Fix] Savitzky–Golay filtering now defaults to the X axis.
 - [Fix] Starting the walkthrough clears the Composer, so leftover axes no longer block its steps.
 - [Fix] The plot selected with `1`-`9` has a clearly visible blue outline.
 - [Fix] Long notifications and notification-log entries wrap within their containers.
@@ -126,10 +137,21 @@
 - [Fix] Live refreshes release previous figures instead of accumulating memory.
 - [Fix] Axes and colour bars show at least two labelled values.
 - [Fix] Closing the desktop window terminates the app on Windows and macOS.
-- [Fix] Windows updates wait for Qimchi to exit before replacing files, show installation progress, and relaunch the app. Launch attempts during an update show an update-in-progress message.
-- [Fix] macOS updates quit Qimchi after opening the new disk image.
+- [Fix] Windows updates now open the standard installer after Qimchi closes.
+- [Fix] macOS updates now replace and reopen Qimchi, with manual installation as a fallback.
+- [Fix] macOS disk images now include an Applications shortcut.
+- [Fix] Image export now starts Chrome correctly in macOS and Linux desktop builds.
+- [Fix] Complex phases are unwrapped across measured points.
+- [Fix] LineCut preview titles and hover labels now use the heat map's labels, units, and colours.
+- [Fix] Heat-map hover labels now reflect filters that change the plotted quantity.
+- [Fix] Heat-map hover labels stay above the LineCut guide.
+- [Fix] Composer heat maps now place the selected X and Y fields on the correct axes.
+- [Fix] Export timings are now optional under Settings > Developer.
+- [Fix] Image export can download Chrome and stops failed startup attempts after two minutes.
+- [Fix] Measurement notes, pooled sample notes, and dataset downloads now resolve live `memory://` measurements correctly. Measurement notes remain available before a live run has a disk path.
 - [Fix] Updating between release candidates no longer loads the previous frontend.
 - [Fix] Warning and error boxes are readable in dark mode, and Notification Log buttons no longer flash on hover.
+- [Misc] Every log line is timestamped. The logs record memory use once a minute (Qimchi, export workers, Chrome and the WebView), page errors, slow requests and a frozen interface, and routine polling no longer fills them.
 - [Misc] The notification log opens beside its rail button on the left.
 - [Misc] Renamed the Viewer toggle to "Show only live and pinned plots".
 - [Misc] Clear All now uses a labelled trash icon, and the maximized LineCut preview no longer duplicates the close action.

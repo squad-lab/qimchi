@@ -4,32 +4,37 @@ Plotly based data visualization tool for `xarray` data. Optimized to work with t
 
 This repository contains a unified FastAPI application that serves a React-based frontend for the Qimchi plotter.
 
-## What's new in 0.7.0
+## What's new in 0.7.0 ([Preview](https://gitlab.com/squad-lab/qimchi/-/blob/preview/CHANGELOG.md))
 
 > [!TIP]
-> 🖥️ **Desktop app:** a self-contained build that runs Qimchi in a native window, with no separate Git/Python/Node install. Per-OS installers -- a Windows `.exe`, a Linux AppImage, a macOS DMG, on the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases). The app checks for updates on startup and offers a one-click "Update now".
+> 🖥️ **Desktop app:** a self-contained build of Qimchi that runs in its own window, with no separate Git, Python or Node installation required. Installers for Windows (`.exe`), Linux (`.AppImage`) and macOS (`.dmg`) are available on the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases). The app checks for updates on startup and can install them with one click.
 
-- **A walkthrough for new users.** It opens on first launch and shows you around with two demo measurements that come with the app. Take it again any time from Help, or with the compass on the sidebar rail.
-- **More datasets supported:** MATLAB `.mat` files and complex-valued variables such as IQ data, which appear as their amplitude, phase, real and imaginary parts.
-- **Library:** heart, trash and tag your measurements. Marks are saved locally and shown in the Explorer. Select several measurements and apply any of them at once.
-- **Tags work like labels** -- a measurement can carry several. Filter from the searchable Tags dropdown, or type `#tag` (or `#"two words"`) in the Explorer search alongside an ordinary name search.
-- **Marks follow a measurement** even if you rename or move its file. Qimchi identifies it by its qanary ID, a QCoDeS run GUID, or -- failing both -- a signature derived from the data itself.
-- **Notes** live in the library instead of `.md` sidecars, so QCoDeS runs and artefacts can have notes too. Existing sidecar notes are imported automatically, and the runs of a QCoDeS database share one overall view.
-- **Dark mode**, with a toggle in the sidebar rail. Follows your system preference by default; plots, metadata and filters all follow the theme.
-- **Plot pinning:** hold a plot on its measurement while Next/Prev moves the others, to compare two datasets side by side. Adding a measurement also reproduces your custom plots for it, with the same variables and filters.
-- **UI improvements:** Explorer, Metadata, Notes and Live Measurements open one at a time from an icon rail, with `Alt+1`--`Alt+4` to switch between them. The Explorer can take over the whole window with `Shift+F`, and the Basket, Composer and Viewer get control ribbons of their own. Several parts of the UI have also been optimized to be faster and more responsive.
-- **Searchable help** (fuzzy, across every section) and **app zoom** from the rail, both remembered between sessions.
-- **QCoDeS and Quantify metadata** is shown as the run actually carries it, instead of the four qanary sections reading "N/A".
+- **New-user walkthrough:** opens on first launch with two bundled demo measurements. Restart it any time from Help or the compass in the sidebar.
+- **More dataset support:** MATLAB `.mat` files and complex-valued data such as IQ signals, shown as amplitude, phase, real and imaginary parts.
+- **Library tools:** heart, trash and tag measurements, with bulk actions and saved state shown in the Explorer.
+- **Flexible tags:** add multiple tags per measurement and filter with the Tags dropdown or `#tag` / `#"two words"` in search.
+- **Persistent measurement identity:** marks survive file renames and moves using qanary IDs, QCoDeS GUIDs or a data-derived signature.
+- **Built-in notes:** notes are stored in the library, work for live measurements and QCoDeS runs, and existing `.md` sidecars are imported automatically.
+- **Dark mode:** follows your system by default and can be toggled from the sidebar.
+- **Plot pinning:** keep one plot fixed while Next/Prev changes the others for side-by-side comparison. Custom plots are also recreated for newly added measurements.
+- **Live frontier LineCuts:** follow the row or column currently being measured on a live heat map, including swapped axes.
+- **Filter presets:** save and reuse filter configurations, toggle them from the Applied list without losing their settings, and apply input-resistance correction to heat maps.
+- **Live parameter tracking:** pin qanary parameters from Metadata and compare them across measurements.
+- **Better diagnostics and updates:** create bug-report bundles from Settings, with recent crash reports included by default, and see clearer update prompts with release notes.
+- **Improved UI:** sidebar panels are easier to switch between, Explorer can go full-window with `Shift+F`, and several views are faster and more responsive.
+- **Searchable Help and Settings:** find guidance or jump directly to a setting, with keyboard navigation in both. Persistent app zoom controls are available from the sidebar.
 
 Everything in this release is listed in the [changelog on `preview`](https://gitlab.com/squad-lab/qimchi/-/blob/preview/CHANGELOG.md).
 
 <!-- TODO: -->
 <!-- Full API documentation and more can be found [here](https://qimchi.squad-lab.org) -->
 
+---
+
 ## Table of Contents
 
 - [ Qimchi v0.7.0](#-qimchi-v070)
-  - [What's new in 0.7.0](#whats-new-in-070)
+  - [What's new in 0.7.0 (Preview)](#whats-new-in-070-preview)
   - [Table of Contents](#table-of-contents)
   - [Installation](#installation)
     - [Windows](#windows)
@@ -45,6 +50,8 @@ Everything in this release is listed in the [changelog on `preview`](https://git
   - [Supported Dataset Types](#supported-dataset-types)
   - [Measurements](#measurements)
   - [Authors](#authors)
+
+---
 
 ## Installation
 
@@ -433,6 +440,7 @@ Set these in `backend/.env` or via Docker environment:
 - `QIMCHI_DB_PATH`: Exact path to the library database, for a mounted volume (default: `<QIMCHI_HOME>/qimchi.db`)
 - `QIMCHI_LOG_PATH`: Exact path to the application log
 - `QIMCHI_LOG_LEVEL`: Application log level (default: `INFO`). `DEBUG` adds per-request detail, which is a lot during a live session
+- `QIMCHI_RESOURCE_LOG_INTERVAL`: Seconds between memory-use log entries; set to `0` to disable them (default: 60)
 - `QIMCHI_EXPORT_DIR`: Where the desktop app saves exported images when no export folder is set in Settings (default: `~/Downloads`)
 - `QIMCHI_LIVE_MAINTENANCE_INTERVAL`: Seconds between checks on the live-measurement list (default: 30)
 - `QIMCHI_LIVE_POLL_WINDOW`: Seconds that one fetch of a live measurement is shared by all the plots showing it (default: 0.5)
