@@ -1,18 +1,29 @@
 import { useState, useEffect, useMemo, memo } from "react";
 import { PROD_BACKEND_URL } from "../config";
-import { Eye, EyeOff, Expand, Minimize, Search, X, BadgeInfo } from "lucide-react";
+import {
+  BadgeInfo,
+  Check,
+  Copy,
+  Expand,
+  Eye,
+  EyeOff,
+  Minimize,
+  Pin,
+  PinOff,
+  Search,
+  X,
+} from "lucide-react";
 import axios from "axios";
 import JsonView from "@uiw/react-json-view";
 import { BasketItem } from "./Basket";
 import { useSidebarStore } from "../stores/sidebarStore";
+import { usePinnedParametersStore } from "../stores/pinnedParametersStore";
 import { useThemeStore } from "../stores/themeStore";
 import Tooltip from "./Tooltip";
 import { useToast } from "../hooks/useToast";
 import { parseMetadataValue } from "../utils/parseMetadataValue";
 
-// Whatever attrs the dataset carries. Not a fixed four keys: those are
-// qanary's sections, and a QCoDeS or Quantify run has its own entirely.
-// The backend orders them, qanary's first when present.
+// Dataset-defined metadata sections, ordered by the backend.
 type Metadata = Record<string, unknown>;
 
 // Sections that are habitually huge, so they open collapsed regardless of
@@ -24,6 +35,12 @@ const BULKY_META_KEYS = new Set([
   "Snapshot",
   "instruments",
 ]);
+
+// qanary stores parameters as `{value, unit, label}`.
+const PARAMETERS_SNAPSHOT_KEY = "Parameters Snapshot";
+
+const isParameterEntry = (value: unknown): boolean =>
+  typeof value === "object" && value !== null && !Array.isArray(value) && "value" in value;
 
 // The custom theme for the metadata JSON view
 const metadataCustomTheme = {
@@ -714,6 +731,7 @@ const MetadataCard = memo(
   }) => {
     const jsonTheme =
       useThemeStore((state) => state.theme) === "dark" ? metadataDarkTheme : metadataCustomTheme;
+    const { pinned, toggle: togglePin } = usePinnedParametersStore();
     return (
       <div className="mb-2 overflow-hidden rounded-lg border border-gray-300 last:mb-0">
         {/* Card Header */}
@@ -748,11 +766,7 @@ const MetadataCard = memo(
             {metadata &&
               Object.entries(metadata).map(([key, value]) => {
                 const parsedValue = parseMetadataValue(value);
-                // JsonView enumerates whatever it is given, so handing it a
-                // string spells that string out one character per row, and a
-                // number shows as "{} 0 items". Only trees go to the tree view;
-                // scalars are printed. This only began to matter once every
-                // attr was returned -- qanary's four sections are all objects.
+                // JsonView is for trees; render scalars directly.
                 const isTree = typeof parsedValue === "object" && parsedValue !== null;
 
                 return (
@@ -767,7 +781,55 @@ const MetadataCard = memo(
                         enableClipboard={true}
                         displayObjectSize={true}
                         collapsed={BULKY_META_KEYS.has(key) ? 0 : 2}
-                      />
+                      >
+                        {key === PARAMETERS_SNAPSHOT_KEY && (
+                          <JsonView.Copied
+                            render={(props, { value: node, keyName, parentValue }) => {
+                              const { onClick, style } = props as {
+                                onClick?: React.MouseEventHandler;
+                                style?: React.CSSProperties;
+                              };
+                              const copied = (props as { "data-copied"?: boolean })["data-copied"];
+                              const name = String(keyName);
+                              const pinnable =
+                                parentValue === parsedValue && isParameterEntry(node);
+                              const isPinned = pinnable && pinned.includes(name);
+                              return (
+                                <span className="inline-flex items-center gap-1.5" style={style}>
+                                  <span
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={onClick}
+                                    className="cursor-pointer"
+                                    aria-label="Copy"
+                                  >
+                                    {copied ? (
+                                      <Check size={12} className="text-green-600" />
+                                    ) : (
+                                      <Copy size={12} />
+                                    )}
+                                  </span>
+                                  {pinnable && (
+                                    <span
+                                      role="button"
+                                      tabIndex={0}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        togglePin(name);
+                                      }}
+                                      className={`cursor-pointer ${isPinned ? "text-blue-600" : ""}`}
+                                      aria-label={isPinned ? `Unpin ${name}` : `Pin ${name}`}
+                                      title={isPinned ? "Unpin" : "Pin to the floating window"}
+                                    >
+                                      {isPinned ? <PinOff size={12} /> : <Pin size={12} />}
+                                    </span>
+                                  )}
+                                </span>
+                              );
+                            }}
+                          />
+                        )}
+                      </JsonView>
                     ) : (
                       <div className="mt-0.5 font-mono text-xs break-all text-gray-700">
                         {parsedValue === "" || parsedValue === null ? (

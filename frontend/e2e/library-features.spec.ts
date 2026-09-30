@@ -184,6 +184,15 @@ test.describe("bulk library actions", () => {
     await expect(tagDialog).toBeVisible();
     await expect(tagDialog).toHaveCSS("z-index", "1600");
   });
+
+  test("the create-tag button stays transparent in dark mode", async ({ page }) => {
+    await page.evaluate(() => document.documentElement.classList.add("dark"));
+    await page.getByText(/1-aaaaaaaa/).click();
+    await page.getByRole("button", { name: /^Tag 1 dataset/ }).click();
+
+    const create = page.getByRole("button", { name: "Create and apply tag" });
+    await expect(create).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  });
 });
 
 test.describe("library unavailable", () => {

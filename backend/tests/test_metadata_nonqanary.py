@@ -1,12 +1,4 @@
-"""
-Metadata handling for non-qanary measurements.
-
-The endpoint used to return a fixed four keys -- Sweeps, Parameters Snapshot,
-Extra Metadata, Instruments Snapshot -- defaulting each to "N/A". A QCoDeS or
-Quantify run has none of them, so those datasets showed four rows of "N/A" and
-none of the metadata they actually carry.
-
-"""
+"""Metadata responses for qanary and other dataset formats."""
 
 import json
 
@@ -35,12 +27,7 @@ def _patch_loader(monkeypatch, dataset: xr.Dataset) -> None:
 
 @pytest.mark.asyncio
 async def test_a_qanary_dataset_shows_its_four_sections_and_nothing_else(monkeypatch):
-    """
-    qanary datasets are unchanged from before non-qanary support: four sections.
-
-    Its other attrs belong to the Basket's attribute strip. Listing them here
-    too buried the sections people open this pane for.
-    """
+    """Qanary metadata retains its four collapsible sections."""
     _patch_loader(
         monkeypatch,
         _dataset(
@@ -148,13 +135,7 @@ async def test_a_dataset_with_no_attrs_returns_nothing_to_show(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_attrs_payload_surfaces_qcodes_identity_fields(monkeypatch):
-    """
-    /load-attrs/ reported "N/A" for every field on a QCoDeS run.
-
-    ATTR_KEYS is qanary's vocabulary, so the Basket's attribute strip had
-    nothing to show for a run that does carry a run id, a guid and an
-    experiment name under different names.
-    """
+    """The attribute strip includes QCoDeS identity fields."""
     _patch_loader(
         monkeypatch,
         _dataset(
@@ -180,12 +161,7 @@ async def test_attrs_payload_surfaces_qcodes_identity_fields(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_attrs_payload_is_unchanged_for_a_qanary_dataset(monkeypatch):
-    """
-    A qanary payload must be byte-for-byte what it was.
-
-    It is cached and compared against freshly built payloads, so an extra key
-    here would mean a cache hit returning a different shape from a miss.
-    """
+    """Cached and fresh qanary payloads retain the same shape."""
     _patch_loader(
         monkeypatch,
         _dataset({"Cryostat": "BlueFors", "Measurement ID": "abc-123"}),
@@ -202,12 +178,7 @@ async def test_attrs_payload_is_unchanged_for_a_qanary_dataset(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_attrs_payload_skips_nested_values(monkeypatch):
-    """
-    The strip renders flat key/value pairs, so a nested snapshot is skipped.
-
-    Handing it a dict or a list would either break the render outright or bury
-    the fields worth reading.
-    """
+    """The flat attribute strip omits nested values."""
     _patch_loader(
         monkeypatch,
         _dataset({"name": {"nested": "value"}, "tuid": "20260911-120000-123-abcdef"}),
@@ -267,3 +238,28 @@ async def test_small_metadata_section_is_returned_unchanged(monkeypatch):
     out = await dirtree.get_metadata(PathData(path="/tmp/small.zarr"))
 
     assert out["Sweeps"] == {"x": [0, 1, 2]}
+
+
+@pytest.mark.asyncio
+async def test_pinned_parameters_come_back_in_engineering_units(monkeypatch):
+    from api.models import PinnedParametersRequest
+
+    snapshot = {
+        "dac_ch1": {"value": 0.0123456, "unit": "V", "label": "Voltage 1"},
+        "dmm_v1": {"value": 5.0760782441045915, "unit": "V", "label": "Voltmeter"},
+        "mode": {"value": "sweep", "unit": "", "label": "Mode"},
+    }
+    _patch_loader(monkeypatch, _dataset({"Parameters Snapshot": json.dumps(snapshot)}))
+
+    out = await dirtree.get_pinned_parameters(
+        PinnedParametersRequest(
+            path="run.zarr", names=["dmm_v1", "dac_ch1", "mode", "gone"]
+        )
+    )
+
+    assert out["parameters"] == [
+        {"name": "dmm_v1", "label": "Voltmeter", "display": "5.076 V"},
+        {"name": "dac_ch1", "label": "Voltage 1", "display": "12.35 mV"},
+        {"name": "mode", "label": "Mode", "display": "sweep"},
+        {"name": "gone", "missing": True},
+    ]

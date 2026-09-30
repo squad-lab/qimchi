@@ -16,6 +16,7 @@ import { useSidebarStore } from "./stores/sidebarStore";
 import { useThemeStore } from "./stores/themeStore";
 import HelpModal from "./components/HelpModal";
 import SettingsModal from "./components/SettingsModal";
+import PinnedParameters from "./components/PinnedParameters";
 import UpdateDialog from "./components/UpdateDialog";
 import { useDesktopUpdates } from "./hooks/useDesktopUpdates";
 import { useShortcut } from "./hooks/useGlobalShortcuts";
@@ -54,19 +55,14 @@ const AppContent: React.FC = () => {
   useLayoutEffect(() => {
     const root = document.documentElement;
 
-    // Theme changes touch many elements that normally animate hover/state
-    // colors. Disable those transitions for this style flush so the entire UI
-    // switches as one frame.
+    // Disable transitions so a theme change renders in one frame.
     root.classList.add("qimchi-theme-switching");
     root.classList.toggle("dark", theme === "dark");
     void root.offsetWidth;
     root.classList.remove("qimchi-theme-switching");
   }, [theme]);
 
-  // App zoom, as root font size rather than CSS `zoom`.
-  //
-  // `zoom` puts layout into a scaled coordinate space while pointer events and
-  // getBoundingClientRect stay in the viewport's.
+  // Use root font size for zoom to keep layout and pointer coordinates aligned.
   useLayoutEffect(() => {
     document.documentElement.style.fontSize = `${BASE_FONT_SIZE_PX * zoomLevel}px`;
   }, [zoomLevel]);
@@ -318,10 +314,8 @@ const AppContent: React.FC = () => {
     [registerWalkthrough],
   );
 
-  // Cycling handler that will be passed to both Sidebar and Viewer
   const handleCycleDataset = (direction: "prev" | "next") => {
-    // This is intentionally empty - the actual cycling is handled by DirTree
-    // which updates the basket items, and then Viewer responds to those changes
+    // DirTree owns cycling; Viewer reacts to the Basket update.
     console.log(`Cycling dataset: ${direction}`);
   };
 
@@ -432,6 +426,7 @@ const AppContent: React.FC = () => {
           setSettingsSection(undefined);
         }}
       />
+      <PinnedParameters basketItems={basketItems} />
       <UpdateDialog />
       <Walkthrough />
     </>
