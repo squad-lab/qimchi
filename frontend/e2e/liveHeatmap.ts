@@ -1,19 +1,12 @@
 import type { Page } from "@playwright/test";
 
 import { expect } from "./coverage";
-// Generated from the backend's own HeatMap figure for a live measurement: z is a
-// base64 typed array holding NaN for every point not measured yet. "later" has
-// more points measured and shifted values; "earlySwapped" has X and Y swapped.
+// Backend HeatMap fixtures for early, later, and axis-swapped live frames.
 import liveHeatmap from "./fixtures/live-heatmap.json" with { type: "json" };
 
 export type Frame = "early" | "later";
 
-/**
- * Mocks the API for one live heatmap measurement. Set `state.frame` to change
- * what the live poll returns; set `state.holdTransform` to a promise to keep a
- * filter or swap response in flight until it resolves. A poll that carries
- * filters returns `filteredFrame`, and `plotDelayMs` slows every poll down.
- */
+/** Mock one live heat map with controllable frames, transforms, and latency. */
 export async function mockLiveHeatmapApi(page: Page) {
   const state = {
     frame: "early" as Frame,
@@ -21,6 +14,8 @@ export async function mockLiveHeatmapApi(page: Page) {
     holdTransform: null as Promise<void> | null,
     filteredFrame: "later" as Frame,
     plotDelayMs: 0,
+    isLive: true,
+    notesRequests: [] as Record<string, unknown>[],
     transformRequests: [] as {
       filters_order: string[];
       filters_opts: Record<string, Record<string, unknown>>;
@@ -59,6 +54,7 @@ export async function mockLiveHeatmapApi(page: Page) {
     } else if (path === "/load-meta/") {
       await route.fulfill({ json: {} });
     } else if (path === "/load-notes/") {
+      state.notesRequests.push(request.postDataJSON());
       await route.fulfill({ json: { notes: "", last_saved: null } });
     } else if (path === "/plot/") {
       const body = request.postDataJSON();
@@ -79,7 +75,8 @@ export async function mockLiveHeatmapApi(page: Page) {
               id: `plot-${body.plotType}`,
               plot_ref: `plot-ref-${body.plotType}`,
               type: body.plotType,
-              is_live: true,
+              is_live: state.isLive,
+              resolved_fpath: state.isLive ? undefined : "/data/live-heat.zarr",
               plotJson,
             },
           ],
@@ -119,6 +116,9 @@ export function heatmapState(page: Page) {
       colorbar: heatmap.layout.coloraxis?.colorbar,
       previewX: preview ? Array.from(preview.data[0].x as number[]) : null,
       previewY: preview ? Array.from(preview.data[0].y as number[]) : null,
+      previewHover: preview ? (preview.data[0].hovertemplate as string) : null,
+      previewUnits: preview ? preview.layout.meta?.qimchi_units : null,
+      previewTitle: preview ? (preview.layout.title?.text as string) : null,
     };
   });
 }

@@ -7,6 +7,7 @@ import asyncio
 import base64
 import json
 import os
+import queue
 import shutil
 import sys
 import tempfile
@@ -27,6 +28,7 @@ from plotly import graph_objects as go
 from .data_loader import resolve_to_disk_path
 
 # Local imports
+from .diagnostics import register_gauge, sampler
 from .logger import logger
 from .notes import _measurement_notes_paths, _note_db_identity, append_measurement_note
 from .settings import ExportSettings, export_settings
@@ -35,8 +37,9 @@ router = APIRouter()
 
 
 # In-memory task registry for export tasks
-# Structure: { task_id: { "status": "pending|completed|failed", "result": {...}, "error": str, "created_at": datetime, "zip_path": str } }
+# Export task state keyed by task ID.
 _export_tasks: Dict[str, Dict] = {}
+register_gauge("export tasks", lambda: len(_export_tasks))
 
 _FILTER_DISPLAY_NAMES = {
     "diff": "Differentiate",
@@ -53,6 +56,7 @@ _FILTER_DISPLAY_NAMES = {
     "polyfit": "Polynomial Fit",
     "transform": "Scale",
     "rotate": "Rotate Heatmap",
+    "r_in_correction": "R_in Correction",
     "flip": "Flip Heatmap",
     "bg_corr_constant": "BG Correction (Constant)",
     "bg_corr_linear": "BG Correction (Linear)",
@@ -262,11 +266,50 @@ def _write_plotly_image(
     if not server_running:
         kwargs["kopts"] = {"page_generator": export_page_generator()}
 
-    image_bytes = kaleido.calc_fig_sync(fig, opts=opts, **kwargs)
+    if server_running:
+        image_bytes = _calc_fig_on_sync_server(server, fig, opts=opts, **kwargs)
+    else:
+        image_bytes = kaleido.calc_fig_sync(fig, opts=opts, **kwargs)
     if isinstance(image_bytes, str):
         image_bytes = image_bytes.encode("utf-8")
     target.write_bytes(image_bytes)
     _embed_fira_sans_in_svg(target)
+
+
+def _calc_fig_on_sync_server(server: Any, *args: Any, **kwargs: Any) -> Any:
+    """
+    Render on Kaleido's sync server and fail if Chrome exits.
+
+    Kaleido blocks if its server thread exits. Closing the dead server lets the
+    next render start a new Chrome process.
+
+    """
+    from kaleido._sync_server import Task
+
+    server._task_queue.put(Task("calc_fig", args, kwargs))
+    while True:
+        try:
+            result = server._return_queue.get(timeout=0.5)
+            break
+        except queue.Empty:
+            if not server._thread.is_alive():
+                server.close(silence_warnings=True)
+                raise RuntimeError(
+                    "Chrome closed while starting for image export; "
+                    "see the [chrome] lines in the desktop log"
+                ) from None
+    if isinstance(result, BaseException):
+        raise result
+    return result
+
+
+def _timings_in_archive(options: ExportSettings) -> bool:
+    """Return whether the export should include timings.json."""
+    return options.timings or os.environ.get("EXPORT_TIMING_LOG", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
 
 # Monospace glyphs are about 0.6 em wide; the footer is set at 15 px.
@@ -449,27 +492,7 @@ def _export_plot_images_sync(
     options: ExportSettings | None = None,
     name_suffix: str = "",
 ) -> Dict:
-    """
-    Synchronous function to export plot images (runs in executor).
-
-    Args:
-        plot_json (Dict): Plotly figure JSON
-        disk_fpath (str): dataset .zarr path on disk
-        relayout_data (Dict | None): optional relayout data to apply
-        export_pool: optional ProcessPoolExecutor for parallel writes
-        applied_filters (list[Dict] | None): ordered filters to print below the plot
-        measurement_info (Dict | None): Basket hover-card fields to print below the plot
-        options (ExportSettings | None): formats, variants and scale to write
-        name_suffix (str): keeps file names apart when several plots of one
-            dataset are exported in the same second
-
-    Returns:
-        Returns dict with:
-        - zip_path: path to created zip file
-        - saved_paths: dict of individual image paths
-        - timings: performance metrics
-
-    """
+    """Export plot variants and return the archive, image paths, and timings."""
     # Determine folder to save - "extras" (same as notes.py logic)
     dataset_path = Path(disk_fpath)
     dataset_uuid = dataset_path.stem
@@ -562,9 +585,7 @@ def _export_plot_images_sync(
             outlinecolor="white",
         )
     )
-    # Process workers use Plotly's native export size. The thread
-    # fallback historically requests 1920 x 1080. Reserve that exact original
-    # canvas, then let the footer extend only the image height below it.
+    # Preserve the original canvas and extend only the height for the footer.
     base_width, base_height = (
         (_PLOTLY_DEFAULT_WIDTH, _PLOTLY_DEFAULT_HEIGHT) if export_pool else (1920, 1080)
     )
@@ -667,9 +688,7 @@ def _export_plot_images_sync(
                     timings[f"{fmt}_{variant}"] = None
                     write_errors.append(f"{variant} {fmt}: {e}")
 
-    # Every variant failed. Zipping timings.json and metadata.json alone yields
-    # an archive that looks like a successful export but contains no plot, and
-    # the task would report success -- so fail the task instead.
+    # Do not report success when every image variant failed.
     if not saved_paths:
         detail = "; ".join(write_errors) or "no writer produced a file"
         raise RuntimeError(f"Plot image export produced no images: {detail}")
@@ -688,11 +707,12 @@ def _export_plot_images_sync(
     with zipfile.ZipFile(tmp_zip.name, "w", zipfile.ZIP_DEFLATED) as zf:
         for p in saved_paths.values():
             zf.write(p, arcname=Path(p).name)
-        try:
-            timings_bytes = json.dumps(timings, indent=2).encode("utf-8")
-            zf.writestr("timings.json", timings_bytes)
-        except Exception as e:
-            logger.error(f"Failed to write timings.json into zip: {e}")
+        if _timings_in_archive(options):
+            try:
+                timings_bytes = json.dumps(timings, indent=2).encode("utf-8")
+                zf.writestr("timings.json", timings_bytes)
+            except Exception as e:
+                logger.error(f"Failed to write timings.json into zip: {e}")
         try:
             # The same metadata the PNGs carry in their chunks, as a file --
             # greppable, and it survives anything that re-encodes the image.
@@ -709,18 +729,7 @@ def _export_plot_images_sync(
 
 
 def _desktop_export_dir(folder: str | None = None) -> Path | None:
-    """
-    Directory to save export zips into when running as the desktop app.
-
-    The pywebview/WebView2 shell silently drops browser-initiated downloads,
-    so in desktop mode the backend (which is local) writes the zip to disk
-    itself. Returns None in server/Docker mode, where the browser handles the
-    download as before. # TODO: Remove if webview is the only target.
-
-    Controlled by env: QIMCHI_DESKTOP=1 enables it. The destination is the
-    user's export folder setting, else QIMCHI_EXPORT_DIR, else ~/Downloads.
-
-    """
+    """Return the desktop export directory, or ``None`` outside desktop mode."""
     if os.environ.get("QIMCHI_DESKTOP", "").lower() not in ("1", "true", "yes"):
         return None
     override = folder or os.environ.get("QIMCHI_EXPORT_DIR")
@@ -770,6 +779,7 @@ async def _run_export_task(
         _export_tasks[task_id]["zip_path"] = result["zip_path"]
         _export_tasks[task_id]["zip_filename"] = result["zip_filename"]
         logger.info(f"Export task {task_id} completed successfully")
+        await asyncio.to_thread(sampler.snapshot, "after export")
 
         _save_to_desktop(task_id, result, options)
 
@@ -809,13 +819,7 @@ def _export_many_plot_images_sync(
     export_pool=None,
     options: ExportSettings | None = None,
 ) -> Dict:
-    """
-    Export plots concurrently into individual archives within one batch archive.
-
-    The export pool limits concurrent image writes. Failed plots are omitted and
-    reported; the batch fails only if no plot succeeds.
-
-    """
+    """Export plots into a batch archive, failing only if none succeed."""
     results: dict[int, Dict] = {}
     failures: list[str] = []
 
@@ -894,6 +898,7 @@ async def _run_batch_export_task(
             zip_filename=result["zip_filename"],
         )
         logger.info(f"Batch export task {task_id} completed")
+        await asyncio.to_thread(sampler.snapshot, "after batch export")
         _save_to_desktop(task_id, result, options)
     except Exception as e:
         logger.error(f"Batch export task {task_id} failed: {e}", exc_info=True)
@@ -903,19 +908,10 @@ async def _run_batch_export_task(
 
 def _resolve_fpath_to_disk(fpath: str) -> str:
     """
-    Resolve a file path to its disk location.
+    Resolve a dataset reference to its on-disk path.
 
     For memory:// paths (live measurements), query the live_measurements DB
     to get the actual disk path. For regular paths, return as-is.
-
-    Args:
-        fpath: File path, may be memory://measurement_id or regular disk path
-
-    Returns:
-        Disk path to the dataset
-
-    Raises:
-        ValueError: If memory:// path cannot be resolved to disk
 
     """
     try:
@@ -926,32 +922,14 @@ def _resolve_fpath_to_disk(fpath: str) -> str:
 
 # NOTE: Worker function must be module-level (picklable) for ProcessPoolExecutor on Windows
 def _library_metadata(dataset_path: Path, dataset_uuid: str) -> Dict[str, Any]:
-    """
-    What the library knows about the measurement being exported.
-
-    Thin wrapper over library.library_metadata so plot exports and dataset
-    downloads describe a measurement identically -- a tag list must mean the
-    same thing wherever it lands.
-
-    """
+    """Return the shared library metadata used by all exports."""
     from .library import library_metadata
 
     return library_metadata(dataset_path, dataset_uuid)
 
 
 def _embed_png_metadata(path: str, meta: Dict[str, Any]) -> None:
-    """
-    Write the export metadata into a PNG's text chunks.
-
-    PNG carries text rather than EXIF, and the keys land where any reader
-    looks: ImageDescription for a human, plus one JSON blob so the tags come
-    back out intact.
-
-    Args:
-        path (str): PNG file to annotate in place.
-        meta (Dict[str, Any]): Metadata to embed.
-
-    """
+    """Write human-readable and JSON metadata to a PNG's text chunks."""
     try:
         from PIL import Image, PngImagePlugin
 
@@ -974,54 +952,23 @@ def _embed_png_metadata(path: str, meta: Dict[str, Any]) -> None:
 def _write_image_worker(
     fig_dict: Dict, path_str: str, scale: float | None = None
 ) -> tuple[str, float]:
-    """
-    Reconstruct a figure from a dict and write image to path_str.
-
-    Args:
-        fig_dict (Dict): dict representation of a Plotly figure
-        path_str (str): output file path
-        scale (float | None): resolution multiplier, or Kaleido's default
-
-    Returns:
-        tuple[str, float]: (path_str, elapsed_seconds)
-
-    """
+    """Write a figure dict to an image and return its path and elapsed time."""
     import time
 
     from plotly import graph_objects as go
 
     fig = go.Figure(fig_dict)
-    # use same size/DPI targets as main process
-    # TODOLATER: Optimize # CONCERN:
-    # _width = 1920
-    # _height = 1080
-    # _scale = 300.0 / 96.0
     start = time.perf_counter()
     _write_plotly_image(
         fig,
         path_str,
-        # width=_width,
-        # height=_height,
         scale=scale,
     )
     return path_str, time.perf_counter() - start
 
 
 def warm_export_worker() -> float:
-    """
-    Render a throwaway PNG through the real export path.
-
-    Called in an export worker at startup: the first real export otherwise
-    pays for the worker process spawning, Kaleido's sync server starting and
-    Chrome booting, which is seconds of staring at a button. It writes an
-    empty figure to a temporary directory through :func:`_write_image_worker`
-    rather than rendering to bytes, so what gets warmed is exactly the path an
-    export takes -- and the file goes away with the directory.
-
-    Returns:
-        float: Seconds the throwaway render took.
-
-    """
+    """Warm an export worker with a temporary PNG and return the elapsed time."""
     figure = go.Figure({"data": [{"x": [0, 1], "y": [0, 1]}]})
     with tempfile.TemporaryDirectory(prefix="qimchi-warmup-") as tmp:
         _, elapsed = _write_image_worker(
@@ -1039,22 +986,7 @@ def _save_light_dark_pngs(
     applied_filters: list[Dict] | None = None,
     measurement_info: Dict | None = None,
 ) -> Dict:
-    """
-    Save only PNGs for light and dark variants and return paths dict.
-
-    Args:
-        plot_json: Plotly figure JSON
-        fpath: dataset .zarr path (may be memory:// path)
-        ts: optional timestamp string to include in filename; if None, use current time
-        only_light: if True, only save the light variant PNG
-        relayout_data: optional relayout data to apply
-        applied_filters: ordered filters to print below the plot
-        measurement_info: Basket hover-card fields to print below the plot
-
-    Returns:
-        Dict: keys: 'png_light', 'png_dark' (if only_light is False)
-
-    """
+    """Save light and optional dark PNG variants and return their paths."""
     # Resolve memory:// paths to disk paths
     disk_fpath = _resolve_fpath_to_disk(fpath)
 
@@ -1124,12 +1056,6 @@ def _save_light_dark_pngs(
         ".png"
     )
     out_dark = base_filename.with_name(base_filename.name + "_dark").with_suffix(".png")
-
-    # target size and DPI
-    # TODOLATER: Optimize # CONCERN:
-    # _width = 1920
-    # _height = 1080
-    # _scale = 300.0 / 96.0  # approximate scale to achieve 300 DPI from default 96
 
     if only_light:
         # Only write the light PNG
@@ -1245,7 +1171,7 @@ def _save_light_dark_pngs(
 @router.post("/export-plot-images")
 async def export_plot_images(request: Request) -> JSONResponse:
     """
-    Endpoint to export Plotly plot images in multiple formats (non-blocking).
+    Start a plot export and return a task ID for status polling.
 
     Returns immediately with a task_id. Client should poll /export-plot-images/status/{task_id}
     to check completion and get download URL.
@@ -1340,7 +1266,7 @@ async def export_plot_images(request: Request) -> JSONResponse:
 @router.post("/export-plot-images/batch")
 async def export_many_plot_images(request: Request) -> JSONResponse:
     """
-    Export several plots as one zip of per-plot zips (non-blocking).
+    Start a batch export and return a task ID for status polling.
 
     Expects JSON ``{"plots": [...]}``, each entry shaped like the body of
     ``POST /export-plot-images``. Poll the same status endpoint for the result.
@@ -1395,14 +1321,7 @@ async def export_many_plot_images(request: Request) -> JSONResponse:
 
 @router.get("/export-plot-images/status/{task_id}")
 async def get_export_status(task_id: str) -> JSONResponse:
-    """
-    Check the status of an export task.
-
-    Returns:
-        - status: "pending", "completed", or "failed"
-        - download_url: URL to download zip (if completed)
-        - error: error message (if failed)
-    """
+    """Return an export task's status, download URL, or error."""
     task = _export_tasks.get(task_id)
     if not task:
         return JSONResponse(
@@ -1468,15 +1387,7 @@ async def download_export(task_id: str):
 
 @router.post("/export-plot-images/send-to-notes")
 async def export_and_send_to_notes(request: Request) -> JSONResponse:
-    """
-    Save light/dark PNGs and append a markdown image link to the notes file for the dataset.
-
-    Expects JSON payload with:
-    - plot_json: Plotly figure JSON
-    - fpath: dataset .zarr path
-    - relayout_data: Optional dict with zoom/pan layout changes to preserve in export
-
-    """
+    """Save plot PNGs and append the light variant to the dataset notes."""
     data = await request.json()
     plot_json = data.get("plot_json")
     fpath = data.get("fpath")
@@ -1493,9 +1404,7 @@ async def export_and_send_to_notes(request: Request) -> JSONResponse:
             content={"success": False, "message": "Missing plot_json or fpath"},
         )
 
-    # Resolve the note's identity before rendering anything: a QCoDeS run is
-    # keyed by its registered UUID, and failing after the PNGs are written would
-    # leave images on disk with no note pointing at them.
+    # Resolve the note identity before writing images to avoid orphaned files.
     note_uuid = measurement_info.get("qimchi_db_uuid")
     try:
         _note_db_identity(fpath, note_uuid if isinstance(note_uuid, str) else None)
@@ -1558,16 +1467,7 @@ async def export_and_send_to_notes(request: Request) -> JSONResponse:
 
 @router.get("/export-plot-images/send-to-notes")
 async def export_send_to_notes_get(fpath: str) -> JSONResponse:
-    """
-    Return saved png paths for the given dataset extras folder (light/dark)
-
-    Args:
-        fpath (str): dataset .zarr path
-
-    Returns:
-        JSONResponse: success status and paths dict
-
-    """
+    """Return saved light and dark PNG paths for a dataset."""
     try:
         # Resolve memory:// paths to disk paths
         disk_fpath = _resolve_fpath_to_disk(fpath)

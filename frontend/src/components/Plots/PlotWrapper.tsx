@@ -15,6 +15,7 @@ import {
   ArrowLeftRight,
   PocketKnife,
   Scissors,
+  ScanLine,
   ScissorsLineDashed,
   Pin,
   PinOff,
@@ -64,8 +65,10 @@ import {
   registerPlotExport,
   type PlotExportPayload,
 } from "../../services/exportAPI";
-import { PLOT_WIDTHS } from "../../settings/userSettings";
+import { PLOT_WIDTHS, type LineCutDirection } from "../../settings/userSettings";
+import { findFrontier, type Frontier } from "../../utils/liveFrontier";
 import { engineeringPresentation, unitMetaFromLayout } from "./engineeringTicks";
+import { engineeringFormatter, type AxisUnitMeta } from "../../utils/engineeringFormat";
 import {
   cutPlotAxis,
   OBLIQUE_CUT_CAVEAT,
@@ -85,16 +88,23 @@ type PlotLiveStatus = "live" | "paused" | "error" | "completed";
 
 type LineCutMode = "x" | "y" | "oblique";
 
+/** Preset link to apply with the filters; null clears it. */
+type PresetLink = { presetId: number | null };
+
+// Horizontal cuts vary X and therefore use the fixed-Y mode.
+const LINE_CUT_MODE_FOR_DIRECTION: Record<LineCutDirection, LineCutMode> = {
+  horizontal: "y",
+  vertical: "x",
+  oblique: "oblique",
+};
+
 type QimchiAxesMeta = Partial<Record<"x" | "y", { variable?: string; dependent?: boolean }>>;
 
 class SupersededTransformError extends Error {}
 
 const COLORBAR_TITLE_ANNOTATION_NAME = "qimchi-colorbar-title";
 
-// Mirrors api/units.py::colorbar_title_font_size -- MathJax shrinks a
-// fraction's terms, so a derivative title needs a larger base size to stay
-// readable next to a plain one. Only a leading fraction counts: one inside a
-// scale suffix ("[/ 2e^2/h (2G_0)]") sits beside a full-sized label already.
+// Match the backend's larger base size for leading MathJax fractions.
 const COLORBAR_TITLE_FONT_SIZE = 16;
 const COLORBAR_TITLE_MATH_FONT_SIZE = 20;
 
@@ -330,9 +340,7 @@ const PlotWrapper: React.FC<Props> = ({
   const exportPlotJson = useMemo<PlotlyJSON>(
     () => ({
       ...customizedPlotJson,
-      // PlotComponent applies this typography while rendering, so apply the
-      // same layout before serialization rather than exporting the raw
-      // backend layout with different tick and nested-title font settings.
+      // Apply on-screen typography before serializing the export.
       layout: applyThemeToLayout(customizedPlotJson.layout, lightTheme),
     }),
     [customizedPlotJson],
@@ -634,6 +642,21 @@ const PlotWrapper: React.FC<Props> = ({
     yIndex: number;
   } | null>(null);
   const lastLineCutAxisRef = useRef<LineCutMode | null>(null);
+  // A live heat map's cut can follow its newest measured line.
+  const [isFollowingFrontier, setIsFollowingFrontier] = useState(false);
+  const frontierRef = useRef<Frontier | null>(null);
+  const isLivePlot =
+    plotConfig?.source === "memory" || plotStatus === "live" || plotStatus === "paused";
+  const stopFollowingFrontier = useCallback(() => {
+    setIsFollowingFrontier(false);
+    frontierRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (isLivePlot || !isFollowingFrontier) return;
+    stopFollowingFrontier();
+    setIsLineCutLocked(false);
+  }, [isFollowingFrontier, isLivePlot, stopFollowingFrontier]);
 
   const shiftHeld = usePainterStore((s) => s.shiftHeld);
 
@@ -679,6 +702,7 @@ const PlotWrapper: React.FC<Props> = ({
       showToast(refusal, "warning");
       return;
     }
+    stopFollowingFrontier();
     setLineCutAxis(mode);
     setObliqueStart(null);
     setLineCutPreviewJson(null);
@@ -781,8 +805,17 @@ const PlotWrapper: React.FC<Props> = ({
   const [areAxesSwapped, setAreAxesSwapped] = useState(false);
 
   // Persistence hook
-  const { getPlotState, setPlotAppearance, setPlotFilters, setPlotSliders, setPlotAxesSwapped } =
-    usePlotStore();
+  const {
+    getPlotState,
+    setPlotAppearance,
+    setPlotFilters,
+    setPlotPresetLink,
+    setPlotSliders,
+    setPlotAxesSwapped,
+  } = usePlotStore();
+  const presetLinkId = usePlotStore((state) =>
+    plotConfig?.id ? (state.plotStates[plotConfig.id]?.filter_preset_id ?? null) : null,
+  );
 
   const isArrayLikeValue = useCallback((value: unknown): boolean => {
     if (value == null) return false;
@@ -961,6 +994,7 @@ const PlotWrapper: React.FC<Props> = ({
       pointY: number,
       fallbackXIndex: number,
       fallbackYIndex: number,
+      override?: { axis: LineCutMode; label: string },
     ): PlotlyJSON | null => {
       const heatmapTrace = (customizedPlotJson.data || []).find(
         (t) => t.type === "heatmap",
@@ -973,7 +1007,7 @@ const PlotWrapper: React.FC<Props> = ({
       const zRows = toNumeric2DArray(heatmapTrace["z"]);
       if (zRows.length === 0) return null;
 
-      const activeAxis = lineCutAxis ?? lastLineCutAxisRef.current;
+      const activeAxis = override?.axis ?? lineCutAxis ?? lastLineCutAxisRef.current;
       if (!activeAxis) return null;
       lastLineCutAxisRef.current = activeAxis;
 
@@ -996,6 +1030,12 @@ const PlotWrapper: React.FC<Props> = ({
         return "Intensity";
       };
 
+      const units = unitMetaFromLayout(customizedPlotJson.layout);
+      const axisName = (axis: "x" | "y") =>
+        (units[axis] as { label?: string } | undefined)?.label || axis.toUpperCase();
+      const axisValue = (axis: "x" | "y", value: number) =>
+        engineeringFormatter(units[axis] as AxisUnitMeta | undefined, [value])(value);
+
       let slice: number[];
       let coords: number[];
       let title: string;
@@ -1010,16 +1050,17 @@ const PlotWrapper: React.FC<Props> = ({
         slice = cut.values;
         coords = alongAxis === "x" ? cut.x : cut.y;
         title =
-          `Cut from (${obliqueStart.x.toFixed(2)}, ${obliqueStart.y.toFixed(2)})` +
-          ` to (${end.x.toFixed(2)}, ${end.y.toFixed(2)})`;
+          `Cut from (${axisValue("x", obliqueStart.x)}, ${axisValue("y", obliqueStart.y)})` +
+          ` to (${axisValue("x", end.x)}, ${axisValue("y", end.y)})`;
       } else {
         slice = activeAxis === "x" ? zRows.map((row) => row[xIndex]) : zRows[yIndex] || [];
         alongAxis = activeAxis === "x" ? "y" : "x";
         coords = alongAxis === "y" ? yArr : xArr;
-        title =
+        const position =
           activeAxis === "x"
-            ? `Slice at X = ${pointX.toFixed(2)}`
-            : `Slice at Y = ${pointY.toFixed(2)}`;
+            ? `${axisName("x")} = ${axisValue("x", xArr[xIndex] ?? pointX)}`
+            : `${axisName("y")} = ${axisValue("y", yArr[yIndex] ?? pointY)}`;
+        title = override ? `${override.label} · ${position}` : `Slice at ${position}`;
       }
 
       // Pair each value with its coordinate before dropping unmeasured (NaN)
@@ -1033,6 +1074,17 @@ const PlotWrapper: React.FC<Props> = ({
       });
       if (previewY.length === 0) return null;
 
+      // Copy hover labels and units from the heat map.
+      const [xHover, yHover, zHover] = String(heatmapTrace["hovertemplate"] ?? "")
+        .replace("<extra></extra>", "")
+        .split("<br>");
+      const alongHover = alongAxis === "x" ? xHover : yHover?.replace(/%\{y/g, "%{x");
+      const valueHover = zHover?.replace(/%\{z/g, "%{y");
+      const hovertemplate =
+        alongHover && valueHover
+          ? `${alongHover}<br>${valueHover}<extra></extra>`
+          : "X: %{x:.3~s}<br>Y: %{y:.3~s}<extra></extra>";
+
       return {
         data: [
           {
@@ -1042,10 +1094,13 @@ const PlotWrapper: React.FC<Props> = ({
             mode: "lines",
             line: { color: "#2563eb", width: 3 },
             name: "LineCut Preview",
-            hovertemplate: "X: %{x:.2~f}<br>Y: %{y:.2~f}<extra></extra>",
+            hovertemplate,
+            // Use the heat map's neutral hover colours.
+            hoverlabel: { bgcolor: "#444", bordercolor: "#fff", font: { color: "#fff" } },
           },
         ],
         layout: {
+          meta: { qimchi_units: { x: units[alongAxis], y: units.z } },
           title: { text: title, font: { size: 16 } },
           uirevision: title,
           margin: { t: 48, r: 20, b: 52, l: 70 },
@@ -1125,6 +1180,11 @@ const PlotWrapper: React.FC<Props> = ({
   );
 
   const toggleLineCutLock = useStableCallback((cell: CutPoint) => {
+    if (isFollowingFrontier) {
+      stopFollowingFrontier();
+      setIsLineCutLocked(false);
+      return;
+    }
     if (isLineCutLocked) {
       setIsLineCutLocked(false);
       return;
@@ -1152,27 +1212,81 @@ const PlotWrapper: React.FC<Props> = ({
     }
   }, [isLineCutActive, lineCutAxis, obliqueStart]);
 
+  // Move the cut to the newest measured line and redraw its preview.
+  const followFrontier = useStableCallback(() => {
+    const heatmapTrace = (customizedPlotJson.data || []).find((t) => t.type === "heatmap") as
+      Record<string, unknown> | undefined;
+    if (!heatmapTrace?.["z"]) return;
+    const zRows = toNumeric2DArray(heatmapTrace["z"]);
+    const frontier = findFrontier(zRows, frontierRef.current);
+    if (!frontier) {
+      setLineCutPreviewJson(null);
+      return;
+    }
+    frontierRef.current = frontier;
+    const xs = toNumericArray(heatmapTrace["x"] || customizedPlotJson.layout?.xaxis?.tickvals);
+    const ys = toNumericArray(heatmapTrace["y"] || customizedPlotJson.layout?.yaxis?.tickvals);
+    const row = frontier.axis === "row";
+    const held = {
+      x: row ? (xs[0] ?? 0) : (xs[frontier.index] ?? frontier.index),
+      y: row ? (ys[frontier.index] ?? frontier.index) : (ys[0] ?? 0),
+      xIndex: row ? 0 : frontier.index,
+      yIndex: row ? frontier.index : 0,
+    };
+    const axis: LineCutMode = row ? "y" : "x";
+    setLineCutAxis(axis);
+    setObliqueStart(null);
+    setHoverData(held);
+    lastHoverDataRef.current = held;
+    setIsLineCutLocked(true);
+    try {
+      setLineCutPreviewJson(
+        buildLineCutPreview(held.x, held.y, held.xIndex, held.yIndex, {
+          axis,
+          label: row ? "Newest row" : "Newest column",
+        }),
+      );
+    } catch (err) {
+      console.error("LineCut preview generation error:", err);
+    }
+  });
+
+  useEffect(() => {
+    if (isLivePlot && isFollowingFrontier && isLineCutActive) followFrontier();
+  }, [isLivePlot, isFollowingFrontier, isLineCutActive, customizedPlotJson, followFrontier]);
+
+  useEffect(() => {
+    if (!isLineCutActive) stopFollowingFrontier();
+  }, [isLineCutActive, stopFollowingFrontier]);
+
   // Rebuild the preview at the locked position when the data changes (a live
   // measurement refreshing) or the cut direction is toggled.
   useEffect(() => {
     const hover = lastHoverDataRef.current;
-    if (!isLineCutActive || !hover) return;
+    if (!isLineCutActive || !hover || isFollowingFrontier) return;
     try {
       setLineCutPreviewJson(buildLineCutPreview(hover.x, hover.y, hover.xIndex, hover.yIndex));
     } catch (err) {
       console.error("LineCut preview generation error:", err);
     }
-  }, [isLineCutActive, buildLineCutPreview, customizedPlotJson, lineCutAxis, obliqueStart]);
+  }, [
+    isLineCutActive,
+    isFollowingFrontier,
+    buildLineCutPreview,
+    customizedPlotJson,
+    lineCutAxis,
+    obliqueStart,
+  ]);
 
-  // A locked hover position is in the old axes' coordinates after a swap. Its
-  // guide line would stretch the autoranged axes and squash the heatmap.
+  // Clear stale hover coordinates after swaps, except for a followed cut.
   const clearLineCutHover = useCallback(() => {
-    setIsLineCutLocked(false);
+    frontierRef.current = null;
+    if (!isFollowingFrontier) setIsLineCutLocked(false);
     setHoverData(null);
     lastHoverDataRef.current = null;
     setObliqueStart(null);
     setLineCutPreviewJson(null);
-  }, []);
+  }, [isFollowingFrontier]);
 
   const handleLineCutClick = useCallback(
     async (event?: Plotly.PlotMouseEvent) => {
@@ -1549,6 +1663,9 @@ const PlotWrapper: React.FC<Props> = ({
 
           setAppliedFilters(filtersFromConfig);
           setPlotFilters(plotConfig.id, filtersFromConfig);
+          if (plotConfig.filter_preset_id !== undefined) {
+            setPlotPresetLink(plotConfig.id, plotConfig.filter_preset_id);
+          }
         }
 
         if (plotConfig.slider && Object.keys(plotConfig.slider).length > 0) {
@@ -1566,33 +1683,31 @@ const PlotWrapper: React.FC<Props> = ({
     onSwapAxesChange,
     plotConfig?.filters_opts,
     plotConfig?.filters_order,
+    plotConfig?.filter_preset_id,
     plotConfig?.id,
     plotConfig?.slider,
     plotType,
     setPlotFilters,
+    setPlotPresetLink,
     setPlotSliders,
   ]); // Don't include originalPlotJson to avoid loops
 
   // Initialize when plotJson prop changes (new plot loaded)
   useEffect(() => {
-    // Skip initialization during filter operations to prevent conflicts
     if (isApplyingFiltersRef.current) {
       return;
     }
 
-    setOriginalPlotJson(plotJson); // Store the original unfiltered data
+    setOriginalPlotJson(plotJson);
     setBasePlotJson(plotJson);
 
-    // Don't immediately set customizedPlotJson here - let the appearance useEffect handle it
-    // This prevents flickering by ensuring appearance settings are applied before rendering
-  }, [plotJson]); // Only depend on plotJson changes
+    // Appearance is applied before customizedPlotJson is rendered.
+  }, [plotJson]);
 
   // Function to apply appearance settings to plotly JSON
   const applyAppearanceSettings = useCallback(
     (originalPlotJson: PlotlyJSON, settings: PlotAppearanceSettings): PlotlyJSON => {
-      // Shallow-clone the top level so trace metadata (colorscale, zmin, line…) and
-      // layout properties can be updated without mutating the source object, and
-      // without deep-cloning the large data arrays.
+      // Clone metadata without copying large data arrays.
       const updatedPlotJson: PlotlyJSON = { ...originalPlotJson };
 
       // Apply to data traces
@@ -1606,10 +1721,7 @@ const PlotWrapper: React.FC<Props> = ({
             updatedTrace.colorscale = getColorscaleData(settings.hmap.colorscale);
             updatedTrace.reversescale = isReversedColorscale(settings.hmap.colorscale);
             if (settings.hmap.rangecolor) {
-              // Convert percentages (0-100) to actual z-values.
-              // Try multiple sources for the data bounds in priority order:
-              //   1. Existing per-trace zmin/zmax (set by backend)
-              //   2. Scan the z array (if it's a plain JS array)
+              // Resolve z bounds from trace limits, then from the data array.
               let zMin = Infinity;
               let zMax = -Infinity;
 
@@ -1745,12 +1857,7 @@ const PlotWrapper: React.FC<Props> = ({
           );
           // Update or clear range
           if (settings.hmap.rangecolor) {
-            // Map percentages to actual data-space bounds.
-            // Try multiple sources for global min/max in priority order:
-            //   1. layout.coloraxis.cmin/cmax already computed by Plotly on
-            //      the previous render (most reliable — avoids having to parse z)
-            //   2. Per-trace zmin/zmax set by the backend
-            //   3. Scan the z arrays (plain JS arrays / TypedArrays)
+            // Resolve global bounds from Plotly, trace limits, then data arrays.
             let combinedMin = Infinity;
             let combinedMax = -Infinity;
 
@@ -2030,9 +2137,7 @@ const PlotWrapper: React.FC<Props> = ({
     [toNumeric2DArray, toNumericArray],
   );
 
-  // Apply current appearance settings when a new plot loads or when appearance settings change
-  // Use useMemo to prevent unnecessary re-calculations
-  // Temporary color scale preview from the Appearance panel.
+  // Memoize appearance updates and temporary colour-scale previews.
   const [previewColorscale, setPreviewColorscale] = useState<string | null>(null);
   useEffect(() => {
     if (!isAppearanceModalOpen) setPreviewColorscale(null);
@@ -2075,9 +2180,7 @@ const PlotWrapper: React.FC<Props> = ({
   // Close modals only when plot configuration changes (new plot loaded)
   // Close modals only when loading a completely new plot, not when refreshing the same plot
   useEffect(() => {
-    // For now, let's not auto-close modals on plot config changes
-    // This allows sliders to work without closing the modal
-    // We can revisit this if we need more sophisticated logic
+    // Keep modals open when slider-driven plot configuration changes.
     // console.log("Plot config changed:", plotConfig?.id);
   }, [plotConfig?.id]);
 
@@ -2114,10 +2217,7 @@ const PlotWrapper: React.FC<Props> = ({
     };
   }, []);
 
-  // Handle dataset changes by reapplying current filters/sliders with new dataset
-  // This allows cycling through datasets while preserving filter/slider state
-
-  // Helper function to compare filters and sliders to prevent unnecessary operations
+  // Compare filters and sliders before reapplying them to a cycled dataset.
   const filtersOrSlidersChanged = useCallback(
     (newFilters: AppliedFilter[], newSliders?: Record<string, SliderConfig>): boolean => {
       // Compare filters
@@ -2167,11 +2267,12 @@ const PlotWrapper: React.FC<Props> = ({
         filters: AppliedFilter[];
         sliders?: Record<string, SliderConfig>;
         swapAxesOverride?: boolean;
+        link?: PresetLink;
       } | null,
     ) => {
       if (!updateRequest) return;
 
-      const { filters, sliders, swapAxesOverride } = updateRequest;
+      const { filters, sliders, swapAxesOverride, link } = updateRequest;
       const shouldSwapAxes = plotType === "heatmap" && (swapAxesOverride ?? areAxesSwapped);
       // When filters are toggled in quick succession only the latest result may
       // land: an older response arriving last would put the plot back a step.
@@ -2184,8 +2285,7 @@ const PlotWrapper: React.FC<Props> = ({
       configUpdateScheduledRef.current = false;
       onTransformStart?.();
 
-      // Always use local filter application to avoid plot reload and modal closure
-      // This decouples filter application from plot refresh
+      // Apply filters locally without reloading the plot or closing the modal.
       // let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
       try {
@@ -2193,14 +2293,6 @@ const PlotWrapper: React.FC<Props> = ({
         // console.log(
         //   `[PlotWrapper] Starting filter application - blocking concurrent operations`
         // );
-
-        // // Safety fallback: Clear loading state after 3 seconds no matter what
-        // fallbackTimer = setTimeout(() => {
-        //   console.warn(
-        //     "Fallback timer: Clearing isApplyingFilters after 3 seconds"
-        //   );
-        //   setIsApplyingFilters(false);
-        // }, 3000);
 
         console.log("[PlotWrapper] Set isApplyingFilters to true");
 
@@ -2330,13 +2422,12 @@ const PlotWrapper: React.FC<Props> = ({
                   result.plot_json.layout = {};
                 }
 
-                // Batch ALL state updates together to prevent flickering
                 const slicedWithAppearance = applyAppearanceSettings(
                   result.plot_json,
                   appearanceSettings,
                 );
 
-                // Update all related state in one batch using concurrent features for smoother updates
+                // Commit the related state without intermediate renders.
                 startTransition(() => {
                   flushSync(() => {
                     setAppliedFilters(filters); // This should be empty array for this path
@@ -2348,10 +2439,6 @@ const PlotWrapper: React.FC<Props> = ({
 
                 // Clear loading overlay after a brief delay to ensure smooth transition
                 setTimeout(() => {
-                  // if (fallbackTimer) clearTimeout(fallbackTimer);
-                  // console.log(
-                  //   `[PlotWrapper] Filter application complete - re-enabling concurrent operations`
-                  // );
                   setIsApplyingFilters(false);
                 }, 100);
                 lastAppliedSliders.current = { ...keptSliders };
@@ -2409,7 +2496,7 @@ const PlotWrapper: React.FC<Props> = ({
                   appearanceSettings,
                 );
 
-                // Update all related state in one batch using concurrent features for smoother updates
+                // Commit the related state without intermediate renders.
                 startTransition(() => {
                   flushSync(() => {
                     setAppliedFilters(filters); // This should be empty array
@@ -2481,6 +2568,7 @@ const PlotWrapper: React.FC<Props> = ({
         // Save to store if available (for persistence)
         if (plotConfig?.id) {
           setPlotFilters(plotConfig.id, filters);
+          if (link) setPlotPresetLink(plotConfig.id, link.presetId);
           if (sliders) {
             setPlotSliders(plotConfig.id, sliders);
             // Also update the tracking reference for slider persistence
@@ -2488,7 +2576,7 @@ const PlotWrapper: React.FC<Props> = ({
           }
         }
 
-        // Show appropriate success message - only show for actual filter changes, not slider changes
+        // Slider-only changes do not need a filter toast.
         if (filters.length > 0) {
           showToast(`Applied ${filters.length} filter(s)`, "success");
         }
@@ -2522,28 +2610,36 @@ const PlotWrapper: React.FC<Props> = ({
   const queuedFiltersRef = useRef<{
     filters: AppliedFilter[];
     sliders?: Record<string, SliderConfig>;
+    link?: PresetLink;
   } | null>(null);
 
   // Simplified filter/slider handler with smart comparison to prevent unnecessary operations
   const handleFiltersApply = useStableCallback(
-    async (filters: AppliedFilter[], sliders?: Record<string, SliderConfig>) => {
+    async (filters: AppliedFilter[], sliders?: Record<string, SliderConfig>, link?: PresetLink) => {
       if (isApplyingFilters) {
-        queuedFiltersRef.current = { filters, sliders };
+        // Preserve the queued preset link across later filter changes.
+        const pendingLink = link ?? queuedFiltersRef.current?.link;
+        queuedFiltersRef.current = { filters, sliders, link: pendingLink };
         return;
       }
 
       // Smart comparison to prevent unnecessary operations when values haven't changed
       if (!filtersOrSlidersChanged(filters, sliders)) {
         console.log("[PlotWrapper] Filters/sliders unchanged, skipping operation");
+        if (link && plotConfig?.id) setPlotPresetLink(plotConfig.id, link.presetId);
         return;
       }
 
       console.log("[PlotWrapper] Filters/sliders changed, proceeding with operation");
 
       // Execute immediately without debouncing to fix refresh loop
-      await executeFiltersApply({ filters, sliders });
+      await executeFiltersApply({ filters, sliders, link });
     },
   );
+
+  const handlePresetLinkChange = useStableCallback((presetId: number | null) => {
+    if (plotConfig?.id) setPlotPresetLink(plotConfig.id, presetId);
+  });
 
   // Runs after the render that clears isApplyingFilters, so the comparison in
   // handleFiltersApply sees the state the previous operation left behind.
@@ -2551,7 +2647,7 @@ const PlotWrapper: React.FC<Props> = ({
     const queued = queuedFiltersRef.current;
     if (isApplyingFilters || !queued) return;
     queuedFiltersRef.current = null;
-    handleFiltersApply(queued.filters, queued.sliders);
+    handleFiltersApply(queued.filters, queued.sliders, queued.link);
   }, [isApplyingFilters, handleFiltersApply]);
 
   // Function to update the plot's data source without recreating the plot component
@@ -2672,10 +2768,7 @@ const PlotWrapper: React.FC<Props> = ({
               `[PlotWrapper] Error applying filters/sliders to new dataset:`,
               filterError,
             );
-            // TODOLATER: Check if needed
-            // Test Fallback: request a filtered/sliced plot directly from /plot/
-            // so dataset cycling does not silently drop filters for refs
-            // like sqlite#run_id=... when transform context is transient.
+            // Fall back to /plot/ when transform context is unavailable.
             try {
               const fallbackPlotResponse = await PlotAPI.createPlots({
                 fpaths: [newFpath],
@@ -2787,13 +2880,12 @@ const PlotWrapper: React.FC<Props> = ({
   useEffect(() => {
     const currentFpath = plotConfig?.fpath;
 
-    // Skip updates if filters are currently being applied to prevent race conditions
     if (isApplyingFilters) {
       console.log(`[PlotWrapper] Skipping dataset update while filters are being applied`);
       return;
     }
 
-    // Only trigger updateDataSource if this is a dataset cycle (not initial plot creation)
+    // Initial plot creation has no previous path.
     if (currentFpath && prevFpathRef.current && currentFpath !== prevFpathRef.current) {
       console.log(
         `[PlotWrapper] Dataset path changed from ${prevFpathRef.current} to ${currentFpath}`,
@@ -2866,11 +2958,15 @@ const PlotWrapper: React.FC<Props> = ({
 
   const enterLineCutMode = useCallback(() => {
     if (!isHeatmapPlot || isApplyingFilters) return;
+    const direction = useSettingsStore.getState().settings.plots.lineCutDirection;
+    let mode: LineCutMode = LINE_CUT_MODE_FOR_DIRECTION[direction];
+    if (mode === "oblique" && measuredAxisMessage()) mode = "y";
     setIsLineCutActive(true);
-    setLineCutAxis("y");
-    lastLineCutAxisRef.current = "y";
+    setLineCutAxis(mode);
+    lastLineCutAxisRef.current = mode;
+    setObliqueStart(null);
     setLineCutPreviewJson(null);
-  }, [isHeatmapPlot, isApplyingFilters]);
+  }, [isHeatmapPlot, isApplyingFilters, measuredAxisMessage]);
 
   const toggleLineCutMode = useCallback(() => {
     if (isLineCutActive) {
@@ -3177,8 +3273,7 @@ const PlotWrapper: React.FC<Props> = ({
     if (isHeatmapPlot && !is3DMode && bgCorrPoints.length === 1) {
       const p = bgCorrPoints[0];
       if (bgCorrMode === "row_mean" || bgCorrMode === "col_mean") {
-        // Use a Plotly layout SHAPE instead of a scatter trace so that the
-        // line does not affect autoscaling or require axis range locking.
+        // Layout shapes do not affect autoscaling.
         const lineShape: any =
           bgCorrMode === "row_mean"
             ? {
@@ -3237,10 +3332,8 @@ const PlotWrapper: React.FC<Props> = ({
     };
   }, [customizedPlotJson, bgCorrPoints, isBGCorrActive, isHeatmapPlot, is3DMode, bgCorrMode]);
 
-  // LineCut draws its guide over the heat map (LineCutGuide), so the figure
-  // itself stays the same while the pointer moves. It also keeps one config
-  // throughout: Plotly redraws from scratch when the config changes, and that
-  // throws away the user's zoom. Editing is off so clicks reach LineCut.
+  // Keep the LineCut figure/config stable to preserve zoom; draw its guide as
+  // an overlay and disable editing so it receives pointer events.
   const plotWithLineCutGuide = useMemo(() => {
     const basePlot = isBGCorrActive ? plotWithBGMarkers : customizedPlotJson;
     if (!isLineCutActive || !isHeatmapPlot) return basePlot;
@@ -3320,8 +3413,7 @@ const PlotWrapper: React.FC<Props> = ({
         setPlotAppearance(plotConfig.id, overrides);
       }
 
-      // The appearance will be applied by the useMemo and useEffect that watches customizedPlotJsonMemo
-      // This ensures we always apply appearance to the currently filtered data without triggering unnecessary re-renders
+      // The memoized plot reapplies appearance to the latest filtered data.
     },
     [plotConfig?.id, setPlotAppearance, setAppearanceSettings],
   );
@@ -3368,7 +3460,10 @@ const PlotWrapper: React.FC<Props> = ({
       const sliders = usePainterStore.getState().sourceSliders as
         Record<string, SliderConfig> | undefined;
       if (filters) {
-        handleFiltersApply(filters, sliders);
+        // Copy the source filter preset link too.
+        const sourceId = usePainterStore.getState().sourcePlotId;
+        const sourceLink = sourceId ? getPlotState(sourceId)?.filter_preset_id : undefined;
+        handleFiltersApply(filters, sliders, { presetId: sourceLink ?? null });
         if (plotConfig?.id) {
           setPlotFilters(plotConfig.id, filters);
           if (sliders) setPlotSliders(plotConfig.id, sliders);
@@ -3479,7 +3574,22 @@ const PlotWrapper: React.FC<Props> = ({
             </Tooltip>
           ))}
         </div>
-        {isLineCutLocked ? (
+        {isLivePlot && isFollowingFrontier ? (
+          <Tooltip content="Stop following, so the cut follows the pointer again" position="bottom">
+            <button
+              type="button"
+              onClick={() => {
+                stopFollowingFrontier();
+                setIsLineCutLocked(false);
+              }}
+              className="qimchi-dark-hover-plain flex items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+              aria-label="Stop following the newest line"
+            >
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" aria-hidden />
+              {frontierRef.current?.axis === "column" ? "Newest column" : "Newest row"}
+            </button>
+          </Tooltip>
+        ) : isLineCutLocked && !isFollowingFrontier ? (
           <Tooltip content="Unlock, so the cut follows the pointer again" position="bottom">
             <button
               type="button"
@@ -3497,6 +3607,37 @@ const PlotWrapper: React.FC<Props> = ({
           )
         )}
         <div className="flex-1" />
+        {isLivePlot && (
+          <Tooltip
+            content={
+              isFollowingFrontier
+                ? "Stop following the newest line"
+                : "Follow the newest line as the measurement runs"
+            }
+            position="bottom"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                if (isFollowingFrontier) {
+                  stopFollowingFrontier();
+                  setIsLineCutLocked(false);
+                } else {
+                  setIsFollowingFrontier(true);
+                }
+              }}
+              aria-pressed={isFollowingFrontier}
+              aria-label="Follow the newest line"
+              className={`rounded p-1 transition-colors ${
+                isFollowingFrontier
+                  ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                  : "qimchi-dark-hover-plain text-gray-500 hover:bg-gray-200 hover:text-gray-700"
+              }`}
+            >
+              <ScanLine size={14} />
+            </button>
+          </Tooltip>
+        )}
         {view === "popup" ? (
           <>
             <Tooltip content="Expand to the full window" position="bottom">
@@ -4303,6 +4444,8 @@ const PlotWrapper: React.FC<Props> = ({
         isOpen={isFiltersModalOpen}
         onClose={handleFiltersModalClose}
         onApplyFilters={handleFiltersApply}
+        presetId={presetLinkId}
+        onPresetLinkChange={handlePresetLinkChange}
         plotType={plotType}
         plotTitle={plotTitle}
         currentFilters={appliedFilters}

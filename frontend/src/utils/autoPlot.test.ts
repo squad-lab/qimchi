@@ -180,6 +180,16 @@ describe("replicatePlots", () => {
     expect(result.plotConfigs[0].filters_opts).toEqual({ scale: { factor: 3 } });
   });
 
+  it("carries the filters' preset link with them, and only with them", () => {
+    const linked = replicatePlots(item(["gate"], ["signal"]), [
+      { config, filters: [{ name: "scale", options: {} }], presetId: 7 },
+    ]);
+    expect(linked.plotConfigs[0].filter_preset_id).toBe(7);
+
+    const unfiltered = replicatePlots(item(["gate"], ["signal"]), [{ config, presetId: 7 }]);
+    expect(unfiltered.plotConfigs[0]).not.toHaveProperty("filter_preset_id");
+  });
+
   it("keeps an oblique LineCut's cut", () => {
     const cut = { start: { gate: 0, bias: 1 }, end: { gate: 2, bias: 3 } };
     const oblique = { ...config, indeps: ["gate", "bias"], cut };

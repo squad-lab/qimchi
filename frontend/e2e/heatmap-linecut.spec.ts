@@ -8,6 +8,7 @@ import {
   openLiveHeatmap,
   zoomHeatmap,
 } from "./liveHeatmap";
+import { mockSettingsApi } from "./settingsMock";
 
 async function enterLineCut(page: Page) {
   await page.getByRole("button", { name: "LineCut Tool" }).first().click();
@@ -577,4 +578,154 @@ test("X, Y and O only change the cut while LineCut is on", async ({ page }) => {
   await page.locator("body").press("o");
   await page.getByRole("button", { name: "LineCut Tool" }).first().click();
   await expect.poll(() => pressed("Horizontal")).toBe("true");
+});
+
+test("the linecut preview hovers with the heat map's labels and units", async ({ page }) => {
+  await mockLiveHeatmapApi(page);
+  const volts = (label: string) => ({
+    label,
+    unit: "V",
+    unit_text: "V",
+    engineering_titles: { "0": `${label} (V)`, "-3": `${label} (mV)` },
+    engineering_units_text: { "0": "V", "-3": "mV" },
+  });
+  await page.route("**/plot/", async (route) => {
+    const body = route.request().postDataJSON();
+    if (body.plotType !== "HeatMap") return route.fallback();
+    await route.fulfill({
+      json: {
+        success: true,
+        message: "created",
+        plots: [
+          {
+            id: "units",
+            plot_ref: "plot-ref-HeatMap",
+            type: "HeatMap",
+            is_live: true,
+            plotJson: {
+              data: [
+                {
+                  type: "heatmap",
+                  x: [0, 0.5, 1],
+                  y: [0, 1],
+                  z: [
+                    [4.8, 4.9, 5],
+                    [4.7, 4.8, 4.9],
+                  ],
+                  hovertemplate:
+                    "Voltage 2: %{x:.3~s}V<br>Voltage 1: %{y:.3~s}V<br>" +
+                    "Voltmeter: %{z:.3~s}V<extra></extra>",
+                },
+              ],
+              layout: {
+                meta: {
+                  qimchi_units: {
+                    x: volts("Voltage 2"),
+                    y: volts("Voltage 1"),
+                    z: volts("Voltmeter"),
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+    });
+  });
+  await openLiveHeatmap(page);
+  await enterLineCut(page);
+
+  // A cut at fixed x runs along y.
+  await hoverHeatmapAt(page, 0.5, 1);
+  await expect
+    .poll(async () => (await heatmapState(page))?.previewHover)
+    .toBe("Voltage 1: %{x:.3~s}V<br>Voltmeter: %{y:.3~s}V<extra></extra>");
+  const { previewUnits, previewTitle } = (await heatmapState(page))!;
+  expect(previewTitle).toBe("Slice at Voltage 2 = 500 mV");
+  expect(previewUnits.x.label).toBe("Voltage 1");
+  expect(previewUnits.y.label).toBe("Voltmeter");
+
+  await expect(page.locator(".hoverlayer .hovertext").first()).toBeVisible();
+  const stacking = await page.evaluate(() => {
+    const guide = document.querySelector("[data-linecut-guide]");
+    const plot = guide?.closest(".js-plotly-plot");
+    const tooltip = plot?.querySelector(".hoverlayer .hovertext");
+    const position =
+      guide && tooltip
+        ? guide.compareDocumentPosition(tooltip)
+        : Node.DOCUMENT_POSITION_DISCONNECTED;
+    return {
+      found: Boolean(guide && tooltip),
+      tooltipAboveGuide: Boolean(position & Node.DOCUMENT_POSITION_FOLLOWING),
+    };
+  });
+  expect(stacking.found).toBe(true);
+  expect(stacking.tooltipAboveGuide).toBe(true);
+});
+
+test("LineCut starts in the direction chosen in Settings", async ({ page }) => {
+  await mockLiveHeatmapApi(page);
+  await mockSettingsApi(page, { plots: { lineCutDirection: "vertical" } });
+  await openLiveHeatmap(page);
+
+  await page.getByRole("button", { name: "LineCut Tool" }).first().click();
+  const direction = page.getByRole("group", { name: "LineCut direction" }).first();
+  await expect(direction.getByRole("button", { name: "Vertical" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+});
+
+test("the cut can follow the newest line of a live heat map as it grows", async ({ page }) => {
+  const state = await mockLiveHeatmapApi(page);
+  await openLiveHeatmap(page);
+  await enterLineCut(page);
+
+  const follow = page.getByRole("button", { name: "Follow the newest line" }).first();
+  await follow.click();
+  await expect(follow).toHaveAttribute("aria-pressed", "true");
+
+  // The early frame has measured two of five gate values, column by column.
+  await expect
+    .poll(async () => (await heatmapState(page))?.previewTitle)
+    .toMatch(/^Newest column · /);
+  const early = (await heatmapState(page))!;
+  expect(early.previewY).toHaveLength(7);
+
+  state.frame = "later";
+  await expect
+    .poll(async () => (await heatmapState(page))?.previewTitle, { timeout: 5_000 })
+    .not.toBe(early.previewTitle);
+  expect((await heatmapState(page))!.previewTitle).toMatch(/^Newest column · /);
+
+  // Swapping the axes keeps following: the columns are now rows.
+  await page.mouse.move(0, 0);
+  await page
+    .getByRole("button", { name: /^Swap X (&|and) Y axes$/i })
+    .first()
+    .click();
+  await expect
+    .poll(async () => (await heatmapState(page))?.previewTitle, { timeout: 5_000 })
+    .toMatch(/^Newest row · /);
+  await expect(follow).toHaveAttribute("aria-pressed", "true");
+
+  // Choosing a direction by hand stops following.
+  await page.keyboard.press("x");
+  await expect(follow).toHaveAttribute("aria-pressed", "false");
+});
+
+test("Follow is removed when a live plot completes", async ({ page }) => {
+  const state = await mockLiveHeatmapApi(page);
+  await mockSettingsApi(page, { live: { minRefreshMs: 100 } });
+  await openLiveHeatmap(page);
+  await enterLineCut(page);
+
+  const follow = page.getByRole("button", { name: "Follow the newest line" }).first();
+  await expect(follow).toBeVisible();
+  await follow.click();
+  await expect(follow).toHaveAttribute("aria-pressed", "true");
+
+  state.isLive = false;
+  await expect(follow).toHaveCount(0, { timeout: 5_000 });
+  await expect(page.getByRole("button", { name: "Stop following the newest line" })).toHaveCount(0);
 });

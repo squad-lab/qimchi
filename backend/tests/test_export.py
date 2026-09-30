@@ -154,6 +154,11 @@ def test_image_writer_only_supplies_page_options_without_server(
         return b"image"
 
     monkeypatch.setattr(kaleido, "calc_fig_sync", fake_calc)
+    monkeypatch.setattr(
+        export,
+        "_calc_fig_on_sync_server",
+        lambda _server, figure, **kwargs: fake_calc(figure, **kwargs),
+    )
     output = tmp_path / "plot.png"
     figure = export.go.Figure(layout={"width": 321, "height": 123})
 
@@ -170,6 +175,38 @@ def test_image_writer_only_supplies_page_options_without_server(
         assert "kopts" not in calls[0][1]
     else:
         assert calls[0][1]["kopts"] == {"page_generator": page}
+
+
+def _fake_sync_server(thread_alive: bool, results: list):
+    import queue
+
+    closed = []
+    server = SimpleNamespace(
+        _task_queue=queue.Queue(),
+        _return_queue=queue.Queue(),
+        _thread=SimpleNamespace(is_alive=lambda: thread_alive),
+        close=lambda **_kwargs: closed.append(True),
+    )
+    for result in results:
+        server._return_queue.put(result)
+    return server, closed
+
+
+def test_sync_server_render_returns_the_result():
+    server, closed = _fake_sync_server(True, [b"image"])
+
+    assert export._calc_fig_on_sync_server(server, "fig", opts={}) == b"image"
+    task = server._task_queue.get_nowait()
+    assert (task.fn, task.args, task.kwargs) == ("calc_fig", ("fig",), {"opts": {}})
+    assert closed == []
+
+
+def test_sync_server_render_fails_instead_of_hanging_when_chrome_died():
+    server, closed = _fake_sync_server(False, [])
+
+    with pytest.raises(RuntimeError, match="Chrome closed while starting"):
+        export._calc_fig_on_sync_server(server, "fig", opts={})
+    assert closed == [True]
 
 
 def test_library_metadata_accepts_scalar_tag_query_results(tmp_path, monkeypatch):
@@ -266,6 +303,7 @@ def test_export_footer_preserves_explicit_plot_dimensions():
 
 
 def test_export_plot_images_sync_writes_variants_and_archive(tmp_path, monkeypatch):
+    monkeypatch.delenv("EXPORT_TIMING_LOG", raising=False)
     dataset = tmp_path / "run.zarr"
     dataset.mkdir()
     footer_texts = []
@@ -311,7 +349,9 @@ def test_export_plot_images_sync_writes_variants_and_archive(tmp_path, monkeypat
     assert all("<b>Custom Tags:</b> cold, reviewed" in text for text in footer_texts)
     assert all("Heart" not in text and "Trash" not in text for text in footer_texts)
     with zipfile.ZipFile(result["zip_path"]) as archive:
-        assert {"metadata.json", "timings.json"} <= set(archive.namelist())
+        names = set(archive.namelist())
+        assert "metadata.json" in names
+        assert "timings.json" not in names
         assert json.loads(archive.read("metadata.json"))["dataset_uuid"] == "run"
     Path(result["zip_path"]).unlink()
 
@@ -350,14 +390,7 @@ def test_desktop_export_folder_setting_wins_over_the_environment(tmp_path, monke
 def test_export_fails_rather_than_zipping_an_archive_with_no_images(
     tmp_path, monkeypatch
 ):
-    """
-    Every writer failing must fail the export, not produce a metadata-only zip.
-
-    A broken orjson install once made all four image writes raise while the task
-    still reported success, handing the user an archive containing only
-    timings.json and metadata.json -- a failure that looked exactly like a
-    working export.
-    """
+    """Fail the export when every image writer fails."""
     dataset = tmp_path / "run.zarr"
     dataset.mkdir()
 
@@ -391,12 +424,16 @@ def test_export_survives_a_partially_failed_write(tmp_path, monkeypatch):
         Image.new("RGB", (2, 2), "white").save(target)
 
     monkeypatch.setattr(export, "_write_plotly_image", fail_svg_only)
+
     plot = {
         "data": [{"type": "scatter", "x": [0, 1], "y": [2, 3]}],
         "layout": {"xaxis": {}, "yaxis": {}},
     }
 
-    result = export._export_plot_images_sync(plot, str(dataset))
+    # Enable the optional timings file.
+    result = export._export_plot_images_sync(
+        plot, str(dataset), options=export.ExportSettings(timings=True)
+    )
 
     assert set(result["saved_paths"]) == {"png_light", "png_dark"}
     assert result["timings"]["svg_light"] is None
@@ -443,13 +480,7 @@ def test_save_light_dark_pngs_supports_one_or_both_variants(tmp_path, monkeypatc
 
 
 def test_save_light_dark_pngs_writes_beside_the_dataset(tmp_path, monkeypatch):
-    """
-    The PNGs land in the dataset's own extras folder, named by uuid and time.
-
-    That folder is what the Notes panel and the download endpoints look in, so
-    the location is part of the contract, not an implementation detail.
-
-    """
+    """Write PNGs to the dataset extras folder used by notes and downloads."""
     dataset = tmp_path / "run.zarr"
 
     monkeypatch.setattr(export, "_resolve_fpath_to_disk", lambda _path: str(dataset))
@@ -492,13 +523,7 @@ def test_save_light_dark_pngs_stamps_a_timestamp_when_none_is_given(
 
 
 def test_find_fira_sans_fonts_prefers_the_built_assets(tmp_path, monkeypatch):
-    """
-    The export embeds the same fonts the app renders with.
-
-    Several roots are searched -- dev, Docker, frozen -- and a root only counts
-    when it has every weight, or an export would mix typefaces.
-
-    """
+    """Use a font root only when it contains every required weight."""
     assets = tmp_path / "frontend" / "dist" / "assets"
     assets.mkdir(parents=True)
     for weight in export._FIRA_SANS_WEIGHTS:

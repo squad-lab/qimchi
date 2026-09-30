@@ -180,10 +180,10 @@ const Viewer = ({
 
       if (!newIsMemory) {
         if (sameDataset && prevIsMemory) {
-          // Preserve the memory path we were already using for the same dataset
+          // Preserve the existing live-memory path.
           preferredPath = prevItem.path;
         } else if (isDatasetPath(newItem.path) && isLiveDataset && !isDiskFallback) {
-          // Prefer the memory URI when the basket item represents a live dataset with an in-memory store
+          // Prefer live memory while the dataset is still available there.
           const memoryPath = buildMemoryPath(newItem);
           if (memoryPath) {
             preferredPath = memoryPath;
@@ -198,10 +198,11 @@ const Viewer = ({
         // Lets a pinned plot's follower inherit its applied filters (those
         // live in plotStore, keyed by plot id, so they cannot be cloned).
         getFilters: (plotId) => getPlotState(plotId)?.applied_filters,
+        getPresetId: (plotId) => getPlotState(plotId)?.filter_preset_id,
       });
       console.log(`Updated ${plotConfigs.length} plots with new dataset: ${preferredPath}`);
 
-      // Keep the "previous" snapshot aligned with the path we actually applied to avoid flip-flop churn
+      // Track the applied path to prevent path oscillation.
       nextPreviousItems = basketItems.map((item) =>
         item.id === newItem.id ? { ...item, path: preferredPath } : item,
       );
@@ -243,13 +244,12 @@ const Viewer = ({
 
         processedAutoPlotItems.current.add(item.id);
 
-        // Mirror the plots already in the Viewer onto the new measurement, so
-        // the view the user has shaped (defaults removed, custom plots added,
-        // filters applied) carries over. Deduplicated by plot shape.
+        // Replicate the current view onto the new measurement by plot shape.
         const replicationSources = selectReplicationSources(
           plotConfigs,
           (plotId) => getPlotState(plotId)?.applied_filters,
           recreateCustomPlotsRef.current,
+          (plotId) => getPlotState(plotId)?.filter_preset_id,
         );
 
         const replicated = replicatePlots(item, replicationSources, {
@@ -455,9 +455,7 @@ const Viewer = ({
     [effectiveSelectedPlotId],
   );
 
-  // Independents currently on the composer's axes. The Basket narrows the
-  // dependents it offers to the ones that vary over them -- a dependent that
-  // does not share the chosen coordinate cannot be plotted against it.
+  // Limit Composer dependents to those defined over its selected axes.
   const shownPlotConfigs = useMemo(
     () =>
       liveOnlyPlots

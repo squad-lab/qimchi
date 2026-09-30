@@ -14,8 +14,9 @@ export const axisCombinations = (
   snapshot: ComposerSelectionSnapshot,
 ): { indeps: string[]; deps: string[] }[] => {
   if (snapshot.plotType === "HeatMap") {
+    // HeatMap maps independents as [y, x].
     return snapshot.x.flatMap((x) =>
-      snapshot.y.flatMap((y) => snapshot.z.map((z) => ({ indeps: [x, y], deps: [z] }))),
+      snapshot.y.flatMap((y) => snapshot.z.map((z) => ({ indeps: [y, x], deps: [z] }))),
     );
   }
   return snapshot.x.flatMap((x) => snapshot.y.map((y) => ({ indeps: [x], deps: [y] })));

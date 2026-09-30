@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
 
 from .data_loader import MEMORY_PROTOCOL, load_dataset_async, resolve_to_disk_path
+from .diagnostics import register_gauge
 
 # Local imports
 from .figures import (
@@ -37,6 +38,7 @@ router = APIRouter()
 
 # Runtime plot context registry used by unified transform endpoint.
 _PLOT_CONTEXTS: Dict[str, Dict] = {}
+register_gauge("plot contexts", lambda: len(_PLOT_CONTEXTS))
 
 
 class _UserFirst:
@@ -74,10 +76,7 @@ _user_first = _UserFirst()
 
 
 def _build_plot_ref(context: Dict) -> str:
-    """
-    Create a stable reference key for a plot context.
-
-    """
+    """Create a stable reference key for a plot context."""
     payload = json.dumps(context, sort_keys=True, default=str)
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:24]
 
@@ -126,16 +125,7 @@ def _resolve_context_fpath(
 
 
 def _validate_paths(fpaths: List[str]) -> bool:
-    """
-    Helper function to validate that all paths exist and are accessible.
-
-    Args:
-        fpaths (List[str]): List of file paths to validate.
-
-    Returns:
-        bool: True if all paths are valid, False otherwise.
-
-    """
+    """Return whether every dataset reference resolves to an existing path."""
     for fpath in fpaths:
         if fpath.startswith(MEMORY_PROTOCOL):
             # Memory-backed paths are validated at load time.
@@ -155,16 +145,7 @@ def _validate_paths(fpaths: List[str]) -> bool:
 
 
 def _validate_plot_type(plot_type: str) -> bool:
-    """
-    Helper function to validate that the plot type is supported.
-
-    Args:
-        plot_type (str): The type of plot to validate.
-
-    Returns:
-        bool: True if the plot type is supported, False otherwise.
-
-    """
+    """Return whether the plot type is supported."""
     supported_types = ["LinePlot", "HeatMap"]
 
     return plot_type in supported_types
@@ -173,12 +154,7 @@ def _validate_plot_type(plot_type: str) -> bool:
 def _apply_filters_sync(
     plots: List[Dict], filters_order: List, filters_opts: Dict
 ) -> List[Dict]:
-    """
-    Apply filters to a list of plot dicts synchronously.
-    Intended to be called via run_in_threadpool so filter numpy work
-    does not block the async event loop.
-
-    """
+    """Apply filters synchronously for execution in the thread pool."""
     filtered_plots = []
     for plot in plots:
         try:
@@ -329,21 +305,7 @@ def variable_dimensions(dataset: xr.Dataset, variables: List[str]) -> set:
 def gen_slider_config(
     dataset: xr.Dataset, indeps: List[str], deps: Optional[List[str]] = None
 ) -> Dict:
-    """
-    Generate slider configuration for dimensions not in independents.
-    Adapted from ``Plot._base()`` in the Qimchi Dash app.
-
-    Args:
-        dataset: The xarray dataset
-        indeps: List of independent variable names (dimensions being plotted)
-        deps: The plotted dependents. When given, only dimensions that a
-            plotted variable varies over get a slider; otherwise every
-            dimension of the dataset does.
-
-    Returns:
-        Dict: Slider configuration {dim: {min, max, step, value}}
-
-    """
+    """Configure sliders for relevant dimensions that are not being plotted."""
     slider_config = {}
     plotted = plotted_dimensions(dataset, indeps)
     relevant = None if deps is None else variable_dimensions(dataset, deps)
@@ -397,18 +359,7 @@ def gen_slider_config(
 def apply_data_slicing(
     dataset: xr.Dataset, indeps: List[str], slider: Dict
 ) -> xr.Dataset:
-    """
-    Apply data slicing based on slider values for dimensions not in independents.
-
-    Args:
-        dataset: The xarray dataset
-        indeps: List of independent variable names (dimensions being plotted)
-        slider: Dict of slider configurations {dim: {min, max, step, value}}
-
-    Returns:
-        xr.Dataset: Sliced dataset with selected values for non-independent dimensions
-
-    """
+    """Slice non-plotted dimensions at their slider values."""
     if not slider:
         logger.debug("No slider configuration provided, returning original dataset")
         return dataset
@@ -442,14 +393,12 @@ def apply_data_slicing(
             logger.warning(
                 f"sel(method='nearest') failed: {e}. Falling back to manual isel."
             )
-            # Fallback for duplicate coordinate values ("reindexing only valid for uniquely valued Index objects")
+            # Fall back to indexes for duplicate coordinates.
             isel_dict = {}
             for dim, val in slider_vals.items():
                 if dim in dataset.coords:
                     arr = dataset.coords[dim].values
-                    # Extract the numerical value (handling datetimes or other types gracefully if needed, but assuming numerical)
                     try:
-                        # Find the index of the closest value
                         idx = int(np.nanargmin(np.abs(arr - float(val))))
                         isel_dict[dim] = idx
                     except Exception as fallback_err:
@@ -516,16 +465,7 @@ def _cut_extent(values: np.ndarray, start: float, end: float) -> float:
 def apply_line_cut(
     dataset: xr.Dataset, indeps: List[str], deps: List[str], cut: Dict
 ) -> tuple[xr.Dataset, str, str]:
-    """
-    Interpolate dependent variables along a line between two heat-map points.
-
-    Select the variable with the larger normalized change as the plot x-axis.
-    Return the other variable as companion hover data.
-
-    Returns:
-        tuple: the dataset along the cut, the x-axis variable, the companion.
-
-    """
+    """Interpolate a line cut and choose its dominant variable as the x-axis."""
     if len(indeps) != 2:
         raise ValueError("A cut needs the heat map's two axes as its independents")
     start, end = cut.get("start") or {}, cut.get("end") or {}
@@ -587,30 +527,12 @@ def create_line_plots(
     slider: Dict = None,
     cut: Optional[Dict] = None,
 ) -> List[Dict]:
-    """
-    Creates LinePlot(s) based on the datasets and parameters.
-    Automatically generates slider configurations for dimensions not being plotted.
-
-    Args:
-        datasets (List[xr.Dataset]): List of datasets to plot.
-        fpaths (List[str]): List of file paths corresponding to datasets.
-        indeps (List[str]): List of independent variable names.
-        deps (List[str]): List of dependent variable names.
-        slider (Dict): Optional slider configuration to override auto-generation.
-        cut (Dict): Optional straight cut through the two independents, with
-            ``start`` and ``end`` points keyed by variable (see ``apply_line_cut``).
-
-    Returns:
-        List[Dict]: List of plot dictionaries containing plot data and metadata.
-
-    """
+    """Create line plots with sliders for unplotted dimensions."""
     plots = []
 
     # Create separate plots for each dataset and each dependent variable
     for i, (dataset, fpath) in enumerate(zip(datasets, fpaths)):
         try:
-            # logger.debug(f"create_line_plots | dataset {i} dims={list(dataset.dims)} vars={list(dataset.data_vars)[:10]} coords={list(dataset.coords)[:10]}")
-            # logger.debug(f"create_line_plots | indeps={indeps} deps={deps} slider={bool(slider)}")
             metadata = dataset.attrs
 
             # Always generate accurate slider configuration from the dataset dimensions
@@ -692,12 +614,6 @@ def create_line_plots(
                     }
                 )
 
-                # DEBUG: Save plot to file for cging
-                # plot_figure.write_html(f"line_plot_{i}_{dataset_name}_{dep}.html")
-                # logger.debug(
-                #     f"Created line plot for dataset {i} ({dataset_name}) with {dep} vs {', '.join(indeps)}"
-                # )
-
         except HTTPException:
             raise
         except Exception as e:
@@ -738,32 +654,12 @@ def create_heat_maps(
     slider: Dict = None,
     swap_xy: bool = False,
 ) -> List[Dict]:
-    """
-    Creates HeatMap(s) based on the datasets and parameters.
-
-    Args:
-        datasets (List[xr.Dataset]): List of datasets to plot.
-        fpaths (List[str]): List of file paths corresponding to datasets.
-        indeps (List[str]): List of independent variable names (X, Y axes).
-        deps (List[str]): List of dependent variable names (Z values).
-        slider (Dict, optional): Slider configuration for slicing data.
-        swap_xy (bool, optional): Whether to swap the X and Y axes.
-
-    Returns:
-        List[Dict]: List of plot dictionaries containing plot data and metadata.
-
-    """
+    """Create heat maps, interpreting independents as ``[y, x]``."""
     plots = []
 
     # For HeatMaps, always create separate plots (bind has no effect)
     for i, (dataset, fpath) in enumerate(zip(datasets, fpaths)):
         try:
-            # logger.debug(
-            #     f"create_heat_maps | dataset {i} dims={list(dataset.dims)} vars={list(dataset.data_vars)[:10]} coords={list(dataset.coords)[:10]}"
-            # )
-            # logger.debug(
-            #     f"create_heat_maps | indeps={indeps} deps={deps} slider={bool(slider)}"
-            # )
             metadata = dataset.attrs
 
             # Always generate accurate slider configuration from the dataset dimensions
@@ -788,17 +684,17 @@ def create_heat_maps(
                     detail="HeatMap requires at least 2 independent variables (X and Y axes)",
                 )
 
-            # Use first two independents as X, Y and all dependents as Z values
+            # HeatMap maps independents as [y, x].
             if swap_xy:
-                x_var, y_var = indeps[1], indeps[0]
+                y_var, x_var = indeps[1], indeps[0]
             else:
-                x_var, y_var = indeps[0], indeps[1]
+                y_var, x_var = indeps[0], indeps[1]
 
             for dep in deps:
                 heat_map = HeatMap(
                     metadata=metadata,
                     data=dataset,
-                    independents=[x_var, y_var],
+                    independents=[y_var, x_var],
                     dependents=[dep],
                     theme=DEFAULT_THEME,
                 )
@@ -846,12 +742,6 @@ def create_heat_maps(
                     }
                 )
 
-                # DEBUG: Save plot to file for debugging
-                # plot_figure.write_html(f"heat_map_{i}_{dataset_name}_{dep}.html")
-                # logger.debug(
-                #     f"Created heat map for dataset {i} ({dataset_name}) with {dep} vs {x_var}, {y_var}"
-                # )
-
         except HTTPException:
             raise
         except Exception as e:
@@ -865,16 +755,7 @@ def create_heat_maps(
 
 @router.post("/plot/")
 async def create_plots(request: PlotRequest) -> PlotResponse:
-    """
-    Creates plots based on the provided parameters.
-
-    Args:
-        request: PlotRequest containing paths, variables, plot type, and bind option
-
-    Returns:
-        PlotResponse containing the generated plots or error information
-
-    """
+    """Create the plots described by a request."""
     is_live_poll = any(
         fpath.startswith(MEMORY_PROTOCOL) for fpath in (request.fpaths or [])
     )
@@ -891,7 +772,6 @@ async def _create_plots(request: PlotRequest) -> PlotResponse:
     logger.debug("Dependents requested: %s", request.deps)
     logger.debug("Independents requested: %s", request.indeps)
 
-    # Extra debug: ensure lists are present
     if not request.fpaths or len(request.fpaths) == 0:
         logger.warning("Plot request missing fpaths")
         return PlotResponse(
@@ -939,7 +819,7 @@ async def _create_plots(request: PlotRequest) -> PlotResponse:
                 dataset.attrs["path"] = fpath
                 datasets.append(dataset)
             except Exception as e:
-                # For live measurements, silently skip update on transient errors (file locking, permission issues)
+                # Keep the current live plot on transient read errors.
                 if fpath.startswith(MEMORY_PROTOCOL):
                     logger.warning(
                         f"Transient file access error for live dataset {fpath}: {type(e).__name__}: {e}. Skipping update."

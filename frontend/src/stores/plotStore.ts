@@ -8,7 +8,12 @@ interface PlotStoreState {
   plotStates: Record<string, PlotPersistentState>;
   /** Store the plot's appearance as its differences from the user's defaults. */
   setPlotAppearance: (plotId: string, overrides: Record<string, unknown>) => void;
+  /** Set filters; an empty list also clears the preset link. */
   setPlotFilters: (plotId: string, filters: AppliedFilter[]) => void;
+  /** Set or clear the plot's preset link. */
+  setPlotPresetLink: (plotId: string, presetId: number | null) => void;
+  /** Clear a preset link from all plots. */
+  unlinkPreset: (presetId: number) => void;
   setPlotSliders: (plotId: string, sliders: Record<string, SliderConfig>) => void;
   setPlotAxesSwapped: (plotId: string, swapped: boolean) => void;
   getPlotState: (plotId: string) => PlotPersistentState | undefined;
@@ -37,16 +42,41 @@ export const usePlotStore = create<PlotStoreState>()(
       },
 
       setPlotFilters: (plotId: string, filters: AppliedFilter[]) => {
-        set((state) => ({
-          plotStates: {
-            ...state.plotStates,
-            [plotId]: {
-              ...state.plotStates[plotId],
-              id: plotId,
-              applied_filters: filters,
-            },
-          },
-        }));
+        set((state) => {
+          const next: PlotPersistentState = {
+            ...state.plotStates[plotId],
+            id: plotId,
+            applied_filters: filters,
+          };
+          // A preset link is invalid without filters.
+          if (filters.length === 0) delete next.filter_preset_id;
+          return { plotStates: { ...state.plotStates, [plotId]: next } };
+        });
+      },
+
+      setPlotPresetLink: (plotId: string, presetId: number | null) => {
+        set((state) => {
+          const next: PlotPersistentState = { ...state.plotStates[plotId], id: plotId };
+          if (presetId === null) delete next.filter_preset_id;
+          else next.filter_preset_id = presetId;
+          return { plotStates: { ...state.plotStates, [plotId]: next } };
+        });
+      },
+
+      unlinkPreset: (presetId: number) => {
+        set((state) => {
+          const linked = Object.values(state.plotStates).filter(
+            (plot) => plot.filter_preset_id === presetId,
+          );
+          if (linked.length === 0) return state;
+          const plotStates = { ...state.plotStates };
+          for (const plot of linked) {
+            const next = { ...plot };
+            delete next.filter_preset_id;
+            plotStates[plot.id] = next;
+          }
+          return { plotStates };
+        });
       },
 
       setPlotSliders: (plotId: string, sliders: Record<string, SliderConfig>) => {

@@ -63,4 +63,39 @@ describe("plotStore", () => {
 
     expect(usePlotStore.getState().plotStates).toEqual({});
   });
+
+  it("links a plot's filters to a preset until they are cleared", () => {
+    const store = usePlotStore.getState();
+    store.setPlotFilters("plot-1", [{ name: "flip", options: {} }] as never);
+    store.setPlotPresetLink("plot-1", 4);
+    store.setPlotFilters("plot-1", [{ name: "diff", options: {} }] as never);
+    expect(usePlotStore.getState().getPlotState("plot-1")?.filter_preset_id).toBe(4);
+
+    usePlotStore.getState().setPlotFilters("plot-1", []);
+    expect(usePlotStore.getState().getPlotState("plot-1")).not.toHaveProperty("filter_preset_id");
+  });
+
+  it("drops every link to a removed preset, and nothing else", () => {
+    const store = usePlotStore.getState();
+    store.setPlotPresetLink("plot-1", 4);
+    store.setPlotPresetLink("plot-2", 4);
+    store.setPlotPresetLink("plot-3", 5);
+
+    usePlotStore.getState().unlinkPreset(4);
+
+    const states = usePlotStore.getState().plotStates;
+    expect(states["plot-1"]).not.toHaveProperty("filter_preset_id");
+    expect(states["plot-2"]).not.toHaveProperty("filter_preset_id");
+    expect(states["plot-3"].filter_preset_id).toBe(5);
+    // Nothing to unlink leaves the state object as it was.
+    const before = usePlotStore.getState().plotStates;
+    usePlotStore.getState().unlinkPreset(99);
+    expect(usePlotStore.getState().plotStates).toBe(before);
+  });
+
+  it("forgets a removed plot's link along with the rest of its state", () => {
+    usePlotStore.getState().setPlotPresetLink("plot-1", 4);
+    usePlotStore.getState().keepOnly([]);
+    expect(usePlotStore.getState().plotStates).toEqual({});
+  });
 });

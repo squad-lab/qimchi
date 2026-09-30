@@ -1,10 +1,4 @@
-"""
-Unit normalization, algebra, and display helpers for Qimchi plots.
-
-Plot data always remains in the units recorded by the instrument.  This module
-only describes those units and produces display strings.
-
-"""
+"""Normalize and display units without changing the underlying plot data."""
 
 from __future__ import annotations
 
@@ -25,9 +19,7 @@ COLORBAR_GUTTER_MIN_PX = 110
 COLORBAR_GUTTER_MAX_PX = 180
 # Covers the annotation's 0.02-paper offset from the plot's right edge.
 COLORBAR_GUTTER_PADDING_PX = 16
-# Mean glyph advance for Fira Sans, in em. Deliberately below the nominal
-# ~0.55: MathJax sets a fraction's terms smaller than the surrounding type,
-# and _plain_latex_length counts the longer term at full size.
+# Fira Sans glyph width adjusted for MathJax's smaller fraction terms.
 _COLORBAR_GLYPH_EM = 0.45
 TITLE_TEMPLATE_KEY = "title_template"
 
@@ -140,13 +132,7 @@ SCALE_QUANTITIES: dict[str, dict[str, float | str]] = {
 
 @dataclass(frozen=True)
 class Unit:
-    """
-    A scale and symbolic unit-factor expression.
-
-    ``scale`` converts one unit of the expression to its unprefixed canonical
-    form.  For example, ``mV`` is ``Unit({"V": 1}, 1e-3)``.
-
-    """
+    """A symbolic unit expression and its scale relative to canonical units."""
 
     factors: tuple[tuple[str, int], ...] = ()
     scale: float = 1.0
@@ -370,10 +356,7 @@ def _format_factors(
     denominator = [(symbol, -power) for symbol, power in factors.items() if power < 0]
     numerator.sort()
     denominator.sort()
-    # A prefix only carries the intended factor of 10 on a first-power symbol:
-    # "kV²" would scale by 10⁶, not 10³. Where it cannot, the unit is rendered
-    # unprefixed and _axis_unit_layout_definition drops that exponent, so ticks
-    # are never rescaled against a title that does not say so.
+    # Prefix only first-power units; for example, kV² scales by 10⁶, not 10³.
     if prefix_exponent and prefix is not None:
         if numerator and numerator[0][1] == 1:
             numerator[0] = (f"{prefix}{numerator[0][0]}", 1)
@@ -519,13 +502,7 @@ def resolve_axis_definition(
 
 
 def scale_quantity_label_suffix(expression: Any) -> str:
-    """Return the plain-text label suffix marking a quantity-scaled axis.
-
-    The filter divides by the constant, but the axis reads as a multiple of
-    it -- a value of 3 on a "[x G_0]" axis *is* 3 G0 -- so the suffix is
-    written as a multiplication.
-
-    """
+    """Return the multiplier suffix for a quantity-scaled axis."""
     return f" [x {expression}]"
 
 
@@ -534,7 +511,7 @@ def _split_scale_suffix(label: Any) -> tuple[str, str]:
     for quantity in SCALE_QUANTITIES.values():
         expression = str(quantity["expression"])
         latex_expression = quantity["latex_expression"]
-        # "[/ ...]" was the wording during 0.7.0 development only.
+        # Accept the legacy division-style suffix.
         for suffix in (
             scale_quantity_label_suffix(expression),
             f" [/ {expression}]",
@@ -565,12 +542,7 @@ def axis_title(definition: Mapping[str, Any]) -> str:
 
 
 def plain_axis_title(definition: Mapping[str, Any]) -> str:
-    """Return an unformatted "Label (unit)" title.
-
-    Plotly renders hover text as HTML, not MathJax, so a TeX axis title shows
-    up there as its own source. Hover boxes use this instead.
-
-    """
+    """Return a plain ``Label (unit)`` title for Plotly hover text."""
     normalized = axis_definition(definition.get("label"), definition.get("unit"))
     unit = render_unit(normalized["unit"])
     return f"{normalized['label']} ({unit})" if unit else normalized["label"]
@@ -585,7 +557,9 @@ def hover_entry(definition: Mapping[str, Any], placeholder: str) -> str:
 
     if symbol and not unit.opaque and unit.scale == 1.0:
         # Three significant figures cap the mantissa at two decimal places.
-        return f"{label}: %{{{placeholder}:.3~s}}{symbol}"
+        # Separate a numeric value from units that begin with a digit.
+        separator = " " if symbol[0].isdigit() else ""
+        return f"{label}: %{{{placeholder}:.3~s}}{separator}{symbol}"
     if symbol:
         return f"{label} ({symbol}): %{{{placeholder}:.2~f}}"
     return f"{label}: %{{{placeholder}:.2~f}}"
@@ -616,9 +590,7 @@ def _axis_unit_layout_definition(definition: Mapping[str, Any]) -> dict[str, Any
             prefix_exponent=exponent,
             latex=True,
         )
-        # A unit that cannot carry this prefix (V², say) renders unchanged.
-        # Offering it would let the frontend divide the ticks by 10^exponent
-        # under a title still reading the unprefixed unit.
+        # Do not offer prefixes that the rendered unit cannot represent.
         if exponent and latex_unit == unprefixed:
             continue
         units[str(exponent)] = latex_unit
@@ -682,19 +654,7 @@ def _derivative_title_with_rendered_unit(
 
 
 def colorbar_title_font_size(text: Any) -> int:
-    """Size the colorbar title to its content and to the gutter it must fit.
-
-    MathJax draws a fraction's numerator and denominator well below the
-    requested size, so a derivative title starts larger. Only the leading term
-    counts: a fraction that merely appears inside a scale suffix --
-    "[x 2e^2/h (2G_0)]" -- leaves the label itself full-sized, and enlarging
-    that overshoots.
-
-    A long title is then stepped back down far enough to fit the widest gutter
-    worth spending on it, so that it is never clipped and the plot never loses
-    more than that gutter.
-
-    """
+    """Fit a colorbar title to its gutter, starting fractions at a larger size."""
     body = sanitize_label(text, "").lstrip("$")
     base = (
         COLORBAR_TITLE_MATH_FONT_SIZE
@@ -710,13 +670,7 @@ def colorbar_title_font_size(text: Any) -> int:
 
 
 def _plain_latex_length(text: Any) -> int:
-    """Approximate how many glyphs a TeX title renders as.
-
-    Only rough sizing is needed -- enough to reserve a gutter -- so control
-    sequences collapse to what they draw and a fraction counts as its longer
-    term, since numerator and denominator stack.
-
-    """
+    """Estimate rendered TeX width, counting a fraction by its longer term."""
     body = sanitize_label(text, "").strip("$")
     # Innermost fractions first, so nested ones collapse from the inside out.
     fraction = re.compile(r"\\frac\{([^{}]*)\}\{([^{}]*)\}")
@@ -735,15 +689,7 @@ def _plain_latex_length(text: Any) -> int:
 
 
 def colorbar_gutter_px(title: Any, font_size: int | None = None) -> int:
-    """Return a right margin wide enough for the colorbar and its title.
-
-    The title sits in the figure's right margin, so a long one -- a derivative
-    with a scale suffix and a unit -- is clipped on screen and in exports
-    alike unless the margin grows with it. The estimate covers every
-    engineering prefix of the same title, so switching prefixes never re-flows
-    the plot.
-
-    """
+    """Return a capped right gutter wide enough for the colorbar title."""
     size = font_size if font_size is not None else colorbar_title_font_size(title)
     # A glyph of slack covers the engineering prefix the frontend may add.
     estimate = (_plain_latex_length(title) + 1) * _COLORBAR_GLYPH_EM * size
@@ -863,6 +809,25 @@ def axis_title_template_from_figure(figure: Any, axis: str) -> dict[str, Any] | 
     return dict(template) if isinstance(template, Mapping) else None
 
 
+def set_figure_hover_entry(
+    figure: Any, axis: str, definition: Mapping[str, Any], label: Any = None
+) -> None:
+    """Update an axis entry in every trace's hover template."""
+    entry = hover_entry(
+        {"label": label or definition.get("label"), "unit": definition.get("unit")},
+        axis,
+    )
+    placeholder = f"%{{{axis}"
+    for trace in figure.data:
+        template = getattr(trace, "hovertemplate", None)
+        if not isinstance(template, str) or placeholder not in template:
+            continue
+        extra = "<extra></extra>" if template.endswith("<extra></extra>") else ""
+        body = template[: len(template) - len(extra)]
+        lines = [entry if placeholder in line else line for line in body.split("<br>")]
+        trace.hovertemplate = "<br>".join(lines) + extra
+
+
 def set_figure_axis_definition(
     figure: Any,
     axis: str,
@@ -889,6 +854,7 @@ def set_figure_axis_definition(
     figure.update_layout(meta=current_meta)
     if not update_title:
         return
+    set_figure_hover_entry(figure, axis, normalized)
     title = axis_title(normalized)
     if axis == "z":
         set_figure_colorbar_title(figure, title)
@@ -933,6 +899,14 @@ def set_figure_derivative_axis_definition(
     definitions[axis] = enriched
     current_meta[UNIT_META_KEY] = definitions
     figure.update_layout(meta=current_meta)
+    # Hover labels do not render TeX; use the plain-text title.
+    compact_symbol = "y" if compact_denominator == "y" else "x"
+    set_figure_hover_entry(
+        figure,
+        axis,
+        normalized,
+        label=f"dz/d{compact_symbol}" if compact else None,
+    )
 
     title = derivative_axis_title(
         numerator_label,

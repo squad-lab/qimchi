@@ -24,16 +24,16 @@ describe("axisCombinations", () => {
     ]);
   });
 
-  it("makes one heat map per Y and Z pair", () => {
+  it("makes one heat map per Y and Z pair, with the Composer's X along X", () => {
     expect(
       axisCombinations(
         snapshot({ plotType: "HeatMap", x: ["f"], y: ["v1", "v2"], z: ["mag", "phase"] }),
       ),
     ).toEqual([
-      { indeps: ["f", "v1"], deps: ["mag"] },
-      { indeps: ["f", "v1"], deps: ["phase"] },
-      { indeps: ["f", "v2"], deps: ["mag"] },
-      { indeps: ["f", "v2"], deps: ["phase"] },
+      { indeps: ["v1", "f"], deps: ["mag"] },
+      { indeps: ["v1", "f"], deps: ["phase"] },
+      { indeps: ["v2", "f"], deps: ["mag"] },
+      { indeps: ["v2", "f"], deps: ["phase"] },
     ]);
   });
 

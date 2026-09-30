@@ -175,6 +175,8 @@ export function generateAutoPlotConfigs(
 export interface ReplicationSource {
   config: PlotConfiguration;
   filters?: AppliedFilter[];
+  /** Preset linked to these filters. */
+  presetId?: number;
 }
 
 export interface ReplicationResult {
@@ -188,6 +190,7 @@ export function selectReplicationSources(
   configs: PlotConfiguration[],
   filtersFor: (plotId: string) => AppliedFilter[] | undefined,
   includeCustom: boolean,
+  presetFor: (plotId: string) => number | undefined = () => undefined,
 ): ReplicationSource[] {
   const seen = new Set<string>();
   const sources: ReplicationSource[] = [];
@@ -201,20 +204,13 @@ export function selectReplicationSources(
     ].join("|");
     if (seen.has(shape)) continue;
     seen.add(shape);
-    sources.push({ config, filters: filtersFor(config.id) });
+    sources.push({ config, filters: filtersFor(config.id), presetId: presetFor(config.id) });
   }
 
   return sources;
 }
 
-/**
- * Recreate the Viewer's plots against a newly added measurement: same plot
- * type, same dependents/independents, same filters. This is what makes a
- * view the user has shaped -- plots added, removed or filtered -- carry over
- * to each new measurement.
- *
- * A plot is only replicated when EVERY variable it uses exists in the target measurement
- */
+/** Replicate compatible Viewer plots and filters onto a new measurement. */
 export function replicatePlots(
   item: BasketItem,
   sources: ReplicationSource[],
@@ -232,8 +228,8 @@ export function replicatePlots(
   const fpath = item.path;
   const source = isMemoryPath(fpath) ? "memory" : "disk";
 
-  for (const { config, filters } of sources) {
-    // Composer plots and saved LineCuts are custom plots.
+  for (const { config, filters, presetId } of sources) {
+    // Composer plots and saved LineCuts are custom.
     if (!includeCustom && config.origin === "custom") continue;
 
     const missing = [
@@ -252,12 +248,14 @@ export function replicatePlots(
     // replica gets a fresh id, so the filters have to travel in the config.
     let filters_order = config.filters_order;
     let filters_opts = config.filters_opts;
+    let filter_preset_id: number | undefined;
     if (filters?.length) {
       filters_order = filters.map((f) => f.name);
       filters_opts = filters.reduce<Record<string, unknown>>((acc, f) => {
         acc[f.name] = f.options;
         return acc;
       }, {});
+      filter_preset_id = presetId;
     }
 
     result.plotConfigs.push({
@@ -268,6 +266,7 @@ export function replicatePlots(
       cut: config.cut,
       filters_order,
       filters_opts,
+      ...(filter_preset_id === undefined ? {} : { filter_preset_id }),
       slider: config.slider,
       appearance_settings: config.appearance_settings,
       source,

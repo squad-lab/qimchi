@@ -38,28 +38,55 @@ const nearest = (values: number[], target: number): number => {
   return best;
 };
 
-/**
- * The LineCut guide, drawn over the heat map instead of into its figure, and
- * moved straight from the pointer. Placed in the same positioned container
- * as the heat map's Plot.
- */
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** Draw the LineCut guide in Plotly's overlay layer, below its hover labels. */
 const LineCutGuide = ({ mode, hovered, start, xs, ys, locked = false, onToggleLock }: Props) => {
-  const clipId = useId();
-  const svgRef = useRef<SVGSVGElement>(null);
-  const clipRef = useRef<SVGRectElement>(null);
-  const haloRef = useRef<SVGLineElement>(null);
-  const lineRef = useRef<SVGLineElement>(null);
-  const dotRef = useRef<SVGCircleElement>(null);
-  // The cell under the pointer while it is over the plot area.
+  const clipId = `linecut-${useId().replace(/:/g, "")}`;
+  const hostRef = useRef<HTMLSpanElement>(null);
   const pointerRef = useRef<CutPoint | null>(null);
   const propsRef = useRef({ mode, hovered, start, xs, ys, locked, onToggleLock });
   propsRef.current = { mode, hovered, start, xs, ys, locked, onToggleLock };
 
   useEffect(() => {
-    const svg = svgRef.current;
-    const container = svg?.parentElement;
-    if (!svg || !container) return;
+    const container = hostRef.current?.parentElement;
+    if (!container) return;
     const plotOf = () => container.querySelector(".js-plotly-plot") as PlotElement | null;
+
+    const guide = document.createElementNS(SVG_NS, "g");
+    const clipPath = document.createElementNS(SVG_NS, "clipPath");
+    const clip = document.createElementNS(SVG_NS, "rect");
+    const halo = document.createElementNS(SVG_NS, "line");
+    const line = document.createElementNS(SVG_NS, "line");
+    const dot = document.createElementNS(SVG_NS, "circle");
+    guide.style.pointerEvents = "none";
+    guide.setAttribute("clip-path", `url(#${clipId})`);
+    clipPath.setAttribute("id", clipId);
+    clipPath.appendChild(clip);
+    halo.setAttribute("stroke", "#ffffff");
+    halo.setAttribute("stroke-width", "2.5");
+    line.setAttribute("stroke", "#ef4444");
+    line.setAttribute("stroke-width", "1.5");
+    dot.setAttribute("r", "4.5");
+    dot.setAttribute("fill", "#ef4444");
+    dot.setAttribute("stroke", "#ffffff");
+    dot.setAttribute("stroke-width", "2");
+    guide.append(halo, line, dot);
+
+    const attachGuide = (plot: PlotElement): SVGSVGElement | null => {
+      const mainSvg = plot.querySelector("svg.main-svg") as SVGSVGElement | null;
+      if (!mainSvg) return null;
+      const defs = mainSvg.querySelector("defs");
+      if (defs && clipPath.parentNode !== defs) defs.appendChild(clipPath);
+      const layer = mainSvg.querySelector(".layer-above");
+      if (layer && guide.parentNode !== layer) {
+        layer.appendChild(guide);
+      } else if (!layer && guide.parentNode !== mainSvg) {
+        const hoverLayer = mainSvg.querySelector(".hoverlayer");
+        mainSvg.insertBefore(guide, hoverLayer?.parentNode === mainSvg ? hoverLayer : null);
+      }
+      return mainSvg;
+    };
 
     const cellAt = (event: MouseEvent): CutPoint | null => {
       const plot = plotOf();
@@ -94,33 +121,33 @@ const LineCutGuide = ({ mode, hovered, start, xs, ys, locked = false, onToggleLo
     container.addEventListener("pointerleave", onPointerLeave);
     container.addEventListener("contextmenu", onContextMenu);
 
-    // Drawn every frame, so zooming, panning and resizing carry the guide
-    // with the heat map without React having to notice.
     let frame = 0;
     const draw = () => {
       frame = requestAnimationFrame(draw);
-      const parts = [clipRef.current, haloRef.current, lineRef.current, dotRef.current];
-      if (parts.some((part) => !part)) return;
-      const [clip, halo, line, dot] = parts as [
-        SVGRectElement,
-        SVGLineElement,
-        SVGLineElement,
-        SVGCircleElement,
-      ];
-
       const current = propsRef.current;
+      guide.setAttribute(
+        "data-linecut-guide",
+        JSON.stringify({
+          mode: current.mode,
+          hovered: current.hovered,
+          start: current.start,
+          locked: current.locked,
+        }),
+      );
       const at = current.locked ? current.hovered : (pointerRef.current ?? current.hovered);
       const plot = plotOf();
       const xa = plot?._fullLayout?.xaxis;
       const ya = plot?._fullLayout?.yaxis;
       const visible = current.mode === "oblique" ? current.start !== null : at !== null;
       if (!plot || !xa || !ya || !visible) {
-        svg.style.display = "none";
+        guide.style.display = "none";
         return;
       }
-      svg.style.display = "";
+      const mainSvg = attachGuide(plot);
+      if (!mainSvg) return;
+      guide.style.display = "";
 
-      const box = svg.getBoundingClientRect();
+      const box = mainSvg.getBoundingClientRect();
       const area = plot.getBoundingClientRect();
       const left = area.left - box.left + xa._offset;
       const top = area.top - box.top + ya._offset;
@@ -164,28 +191,12 @@ const LineCutGuide = ({ mode, hovered, start, xs, ys, locked = false, onToggleLo
       container.removeEventListener("pointermove", onPointerMove);
       container.removeEventListener("pointerleave", onPointerLeave);
       container.removeEventListener("contextmenu", onContextMenu);
+      guide.remove();
+      clipPath.remove();
     };
-  }, []);
+  }, [clipId]);
 
-  return (
-    <svg
-      ref={svgRef}
-      className="pointer-events-none absolute inset-0 z-10 h-full w-full"
-      data-linecut-guide={JSON.stringify({ mode, hovered, start, locked })}
-      aria-hidden
-    >
-      <defs>
-        <clipPath id={clipId}>
-          <rect ref={clipRef} />
-        </clipPath>
-      </defs>
-      <g clipPath={`url(#${clipId})`}>
-        <line ref={haloRef} stroke="#ffffff" strokeWidth={2.5} />
-        <line ref={lineRef} stroke="#ef4444" strokeWidth={1.5} />
-        <circle ref={dotRef} r={4.5} fill="#ef4444" stroke="#ffffff" strokeWidth={2} />
-      </g>
-    </svg>
-  );
+  return <span ref={hostRef} className="hidden" aria-hidden />;
 };
 
 export default LineCutGuide;

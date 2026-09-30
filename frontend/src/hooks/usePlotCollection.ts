@@ -25,16 +25,14 @@ export interface UsePlotCollectionReturn {
   /** Pin/unpin a plot so Next/Prev leaves it on its own measurement. */
   setPlotPinned: (id: string, pinned: boolean) => void;
   clearPlots: () => void;
-  /**
-   * Repoint unpinned plots at a new dataset (Next/Prev). Pinned plots stay put
-   * and gain a following counterpart so the new dataset is not left without
-   * that view -- see the implementation.
-   */
+  /** Repoint unpinned plots and clone followers for pinned plots. */
   updatePlotDataSource: (
     newFpath: string,
     options?: {
       preferMemory?: boolean;
       getFilters?: (plotId: string) => AppliedFilter[] | undefined;
+      /** Return the preset link to copy to a follower. */
+      getPresetId?: (plotId: string) => number | undefined;
     },
   ) => void;
 }
@@ -163,6 +161,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
       options?: {
         preferMemory?: boolean;
         getFilters?: (plotId: string) => AppliedFilter[] | undefined;
+        getPresetId?: (plotId: string) => number | undefined;
       },
     ) => {
       const preferMemoryExplicit = Boolean(options?.preferMemory);
@@ -192,13 +191,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
           };
         });
 
-        // A pin is for COMPARING: hold this view on measurement A while the
-        // rest follow to B. So every pinned plot needs a changing counterpart that
-        // does follow -- otherwise pinning the only heatmap means the new
-        // dataset simply has no heatmap.
-        //
-        // Only create one when no unpinned plot of the same shape already
-        // exists, or each Next/Prev press would clone the pinned plot again.
+        // Give each pinned plot one unpinned follower of the same shape.
         const liveShapes = new Set(repointed.filter((plot) => !plot.pinned).map(plotShape));
 
         const replacements = repointed
@@ -208,6 +201,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
             // plotStore keys state by plot id and the clone gets a new one, so
             // any applied filters have to travel in the config.
             const filters = options?.getFilters?.(plot.id);
+            const presetId = options?.getPresetId?.(plot.id);
             const carried = filters?.length
               ? {
                   filters_order: filters.map((f) => f.name),
@@ -215,6 +209,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
                     acc[f.name] = f.options;
                     return acc;
                   }, {}),
+                  ...(presetId === undefined ? {} : { filter_preset_id: presetId }),
                 }
               : {
                   filters_order: plot.filters_order,
