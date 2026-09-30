@@ -20,6 +20,8 @@ import {
   AlertTriangle,
   ListOrdered,
   Crosshair,
+  Zap,
+  Bookmark,
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { Rnd } from "react-rnd";
@@ -41,6 +43,12 @@ import Tooltip from "../Tooltip";
 import RadialDial from "./RadialDial";
 import AppliedFilterOrder from "./AppliedFilterOrder";
 import { FILTER_LABELS } from "../../utils/filterNames";
+import TexMath from "../TexMath";
+import { AppliedPreset, SavedPresets } from "./FilterPresets";
+import { presetSummary } from "../../utils/filterPresets";
+import type { FilterPreset } from "../../services/libraryAPI";
+import { useFilterPresetsStore } from "../../stores/filterPresetsStore";
+import { useLibraryStore } from "../../stores/libraryStore";
 
 type BGCorrPoint = {
   x: number;
@@ -53,7 +61,16 @@ type BGCorrPoint = {
 interface FiltersModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onApplyFilters: (filters: AppliedFilter[], sliders?: Record<string, SliderConfig>) => void;
+  /** Apply filters and optionally update their preset link. */
+  onApplyFilters: (
+    filters: AppliedFilter[],
+    sliders?: Record<string, SliderConfig>,
+    link?: { presetId: number | null },
+  ) => void;
+  /** Preset linked to the current filters. */
+  presetId?: number | null;
+  /** Set or clear the current preset link. */
+  onPresetLinkChange?: (presetId: number | null) => void;
   plotType?: string;
   plotTitle?: string;
   currentFilters: AppliedFilter[];
@@ -101,6 +118,7 @@ const FILTER_CATEGORIES = {
     "bg_corr_plane",
     "log_scale",
     "transform",
+    "r_in_correction",
     "rotate",
   ],
 };
@@ -142,6 +160,31 @@ const FILTER_DEFINITIONS = {
     icon: SlidersHorizontal,
     description: "Normalize data along specified axis",
   },
+  polyfit: {
+    name: FILTER_LABELS.polyfit,
+    icon: ChartLine,
+    description: "Fit a polynomial to the line plot",
+  },
+  transform: {
+    name: FILTER_LABELS.transform,
+    icon: Ruler,
+    description: "Scale or invert Y/Z data with smart unit handling",
+  },
+  r_in_correction: {
+    name: FILTER_LABELS.r_in_correction,
+    icon: Zap,
+    description: "Correct bias for the voltage drop across an inline resistance",
+  },
+  rotate: {
+    name: FILTER_LABELS.rotate,
+    icon: Rotate3D,
+    description: "Rotate heatmap by specified angle. Use mouse/arrow keys to adjust angle.",
+  },
+  flip: {
+    name: FILTER_LABELS.flip,
+    icon: FlipHorizontal,
+    description: "Invert the color scale by multiplying Z-axis data by -1",
+  },
   gamma_corr: {
     name: FILTER_LABELS.gamma_corr,
     icon: Contrast,
@@ -161,27 +204,6 @@ const FILTER_DEFINITIONS = {
     name: FILTER_LABELS.rescale_intensity,
     icon: Sliders,
     description: "Rescale intensity values to full range",
-  },
-
-  polyfit: {
-    name: FILTER_LABELS.polyfit,
-    icon: ChartLine,
-    description: "Fit a polynomial to the line plot",
-  },
-  transform: {
-    name: FILTER_LABELS.transform,
-    icon: Ruler,
-    description: "Scale or invert Y/Z data with smart unit handling",
-  },
-  rotate: {
-    name: FILTER_LABELS.rotate,
-    icon: Rotate3D,
-    description: "Rotate heatmap by specified angle. Use mouse/arrow keys to adjust angle.",
-  },
-  flip: {
-    name: FILTER_LABELS.flip,
-    icon: FlipHorizontal,
-    description: "Invert the color scale by multiplying Z-axis data by -1",
   },
   bg_corr_constant: {
     name: FILTER_LABELS.bg_corr_constant,
@@ -210,6 +232,16 @@ const FILTER_DEFINITIONS = {
   },
 };
 
+// Typeset the R_in label; other labels are plain text.
+const filterTitle = (key: string): React.ReactNode =>
+  key === "r_in_correction" ? (
+    <>
+      <TexMath tex="R_\mathrm{in}" fallback="R_in" /> Correction
+    </>
+  ) : (
+    FILTER_DEFINITIONS[key as keyof typeof FILTER_DEFINITIONS].name
+  );
+
 // Default filter options
 const DEFAULT_FILTER_OPTIONS = {
   log_scale: {
@@ -219,7 +251,7 @@ const DEFAULT_FILTER_OPTIONS = {
     enabled: false,
     window: 5,
     polyorder: 2,
-    axis: 2,
+    axis: 0,
     deriv: 0,
     delta: 1.0,
     mode: "interp",
@@ -269,6 +301,12 @@ const DEFAULT_FILTER_OPTIONS = {
   rotate: {
     enabled: false,
     angle: 0,
+  },
+  r_in_correction: {
+    enabled: false,
+    r_in: 0,
+    r_in_unit: "kΩ",
+    bias_axis: "x",
   },
   bg_corr_constant: {
     enabled: false,
@@ -339,6 +377,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   isOpen,
   onClose,
   onApplyFilters,
+  presetId = null,
+  onPresetLinkChange,
   plotType = "line",
   plotTitle,
   currentFilters,
@@ -371,7 +411,15 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
 
   // Add sliders as a tab if there are any available - put it at the top
   const hasSliders = Object.keys(availableSliders).length > 0;
-  const allTabs = [...(hasSliders ? ["sliders"] : []), "applied", ...filterKeys];
+  const allTabs = [...(hasSliders ? ["sliders"] : []), "applied", "presets", ...filterKeys];
+
+  const dbAvailable = useLibraryStore((state) => state.dbAvailable);
+  const presets = useFilterPresetsStore((state) => state.presets);
+  const presetsError = useFilterPresetsStore((state) => state.error);
+  const linkedPreset = presets?.find((preset) => preset.id === presetId) ?? null;
+  const presetsUnavailable = dbAvailable
+    ? null
+    : "Presets are saved in the library database, which is unavailable this session.";
 
   const unavailableReason = (key: string): string | null =>
     xAxisIsMeasured && NEEDS_A_SWEPT_X[key]
@@ -452,8 +500,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
         filterConfig[setting] = value;
       }
 
-      // Only apply filters if this filter is currently enabled and we're not changing the 'enabled' state
-      // This prevents duplicate applications when toggling filters on/off
+      // Toggling enabled is applied by the toggle handler.
       if (setting !== "enabled") {
         const filter = newSettings[filterKey as keyof FilterSettings];
         const isEnabled =
@@ -481,14 +528,12 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
     // Build the new filter list immediately based on current state and toggle action
     const appliedFilters: AppliedFilter[] = [];
 
-    // Calculate new filter order
+    // Keep configured filters in the list so they can be switched back on there.
     let newOrder: string[];
     if (!wasEnabled) {
-      // Filter is being enabled - add to end if not already in order
       newOrder = filterOrder.includes(filterKey) ? filterOrder : [...filterOrder, filterKey];
     } else {
-      // Filter is being disabled - remove from order
-      newOrder = filterOrder.filter((key) => key !== filterKey);
+      newOrder = filterOrder;
     }
 
     // Build applied filters based on new order
@@ -546,16 +591,13 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
       }
     });
 
-    // Apply filters first (single call)
     onApplyFilters(appliedFilters);
 
-    // Then update state (no additional calls since we removed the logic from state setters)
     setLocalFilterSettings((prev) => {
       const newSettings = { ...prev };
       const filterConfig = newSettings[filterKey as keyof FilterSettings];
 
       if (filterConfig && typeof filterConfig === "object" && "enabled" in filterConfig) {
-        // Create a new object instead of mutating the existing one
         (newSettings as Record<string, unknown>)[filterKey] = {
           ...(filterConfig as Record<string, unknown>),
           enabled: !(filterConfig as Record<string, unknown>).enabled,
@@ -563,7 +605,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
       } else if (typeof filterConfig === "boolean") {
         (newSettings as Record<string, unknown>)[filterKey] = !filterConfig;
       } else {
-        // Initialize with default but preserve any existing settings
+        // Preserve existing options when enabling the filter.
         const defaultOptions =
           DEFAULT_FILTER_OPTIONS[filterKey as keyof typeof DEFAULT_FILTER_OPTIONS];
         (newSettings as Record<string, unknown>)[filterKey] = {
@@ -579,9 +621,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
     setFilterOrder(newOrder);
   };
 
-  // Apply filters when state changes (only after user interaction)
-  // Removed the automatic useEffect to prevent infinite loops
-  // Filters are now applied directly in the toggleFilter function
+  // Apply filters directly from user actions, not a state-watching effect.
 
   const isFilterEnabled = (filterKey: string): boolean => {
     const filter = localFilterSettings[filterKey as keyof FilterSettings];
@@ -755,6 +795,77 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   };
 
   const appliedOrder = filterOrder.filter((key) => isFilterEnabled(key));
+
+  const removeFilter = (filterKey: string) => {
+    const nextOrder = filterOrder.filter((key) => key !== filterKey);
+    const nextSettings = { ...localFilterSettings };
+    const filterConfig = nextSettings[filterKey as keyof FilterSettings];
+    (nextSettings as Record<string, unknown>)[filterKey] =
+      filterConfig && typeof filterConfig === "object"
+        ? { ...(filterConfig as Record<string, unknown>), enabled: false }
+        : false;
+    setLocalFilterSettings(nextSettings);
+    setFilterOrder(nextOrder);
+    onApplyFilters(buildAppliedFilters(nextOrder));
+  };
+
+  useEffect(() => {
+    if (isOpen && dbAvailable) void useFilterPresetsStore.getState().load();
+  }, [isOpen, dbAvailable]);
+
+  // Clear links to presets removed from another panel.
+  useEffect(() => {
+    if (presets && presetId !== null && !presets.some((preset) => preset.id === presetId)) {
+      onPresetLinkChange?.(null);
+    }
+  }, [presets, presetId, onPresetLinkChange]);
+
+  const presetUnusableReason = (preset: FilterPreset): string | null => {
+    const missing = preset.filters.filter((filter) => !filterKeys.includes(filter.name));
+    if (missing.length === 0) return null;
+    const kind = plotType === "heatmap" ? "heat maps" : "line plots";
+    return `${presetSummary(missing)} ${missing.length === 1 ? "isn't" : "aren't"} available for ${kind}.`;
+  };
+
+  const applyPreset = (preset: FilterPreset) => {
+    const filters: AppliedFilter[] = preset.filters.map((filter) => ({
+      name: filter.name,
+      options: filter.options ?? {},
+    }));
+    const { settings, order } = settingsFromAppliedFilters(filters, localFilterSettings);
+    setLocalFilterSettings(settings);
+    setFilterOrder(order);
+    onApplyFilters(filters, localSliders, { presetId: preset.id });
+    showToast(`Applied \u201c${preset.name}\u201d`, "success");
+  };
+
+  const saveNewPreset = async (name: string): Promise<string | null> => {
+    const result = await useFilterPresetsStore.getState().create(name, buildAppliedFilters());
+    if (!result.preset) return result.error;
+    onPresetLinkChange?.(result.preset.id);
+    showToast(`Saved \u201c${result.preset.name}\u201d`, "success");
+    return null;
+  };
+
+  const replacePresetFilters = async (target: FilterPreset): Promise<string | null> => {
+    const result = await useFilterPresetsStore
+      .getState()
+      .update(target.id, { filters: buildAppliedFilters() }, "The preset could not be saved.");
+    if (!result.preset) return result.error;
+    onPresetLinkChange?.(result.preset.id);
+    showToast(`Updated \u201c${result.preset.name}\u201d`, "success");
+    return null;
+  };
+
+  const renamePreset = async (target: FilterPreset, name: string): Promise<string | null> => {
+    if (name === target.name) return null;
+    const result = await useFilterPresetsStore
+      .getState()
+      .update(target.id, { name }, "The preset could not be renamed.");
+    return result.preset ? null : result.error;
+  };
+
+  const removePreset = (target: FilterPreset) => useFilterPresetsStore.getState().remove(target.id);
 
   // Reorder enabled filters without discarding settings for disabled filters.
   const reorderFilters = (order: string[]) => {
@@ -1021,6 +1132,30 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                     );
                   }
 
+                  if (key === "presets") {
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => setActiveTab(key)}
+                        className={`w-full px-3 py-2.5 text-sm font-medium transition-colors flex items-center gap-2 border-b-2 border-gray-300 ${
+                          activeTab === key
+                            ? "text-blue-600 bg-blue-50 border-l-4 border-l-blue-600 shadow-inner dark:text-blue-300 dark:border-l-blue-400"
+                            : "qimchi-dark-hover-plain text-blue-700 hover:text-blue-800 hover:bg-blue-50 bg-linear-to-r from-blue-50 to-sky-50 border-l-2 border-l-blue-300 dark:from-blue-950/50 dark:to-sky-950/30 dark:text-blue-300 dark:hover:text-blue-200 dark:border-l-blue-700"
+                        }`}
+                        aria-controls={`tab-panel-${key}`}
+                        role="tab"
+                      >
+                        <Bookmark size={18} className="text-blue-600 dark:text-blue-300" />
+                        <span className="text-left flex-1 font-semibold">Saved Presets</span>
+                        {presets && presets.length > 0 && (
+                          <span className="rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white">
+                            {presets.length}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  }
+
                   if (key === "sliders") {
                     // Special handling for sliders tab
                     const hasActiveSliders = Object.keys(localSliders).length > 0;
@@ -1080,7 +1215,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                           reason ? "text-gray-300" : isEnabled ? "text-green-600" : "text-gray-400"
                         }
                       />
-                      <span className="text-left flex-1">{filterDef.name}</span>
+                      <span className="text-left flex-1">{filterTitle(key)}</span>
                       {isEnabled && !reason && (
                         // One-based position in the applied filter order.
                         <span
@@ -1119,23 +1254,62 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                         <ListOrdered size={22} className="text-gray-600" />
                         <h3 className="text-lg font-semibold text-gray-800">Applied</h3>
                       </div>
-                      {appliedOrder.length > 0 ? (
+                      {filterOrder.length > 0 ? (
                         <>
                           <p className="mb-3 text-xs text-gray-500">
-                            Filters run from top to bottom. Drag a filter or use its arrows to
-                            reorder it.
+                            Filters run from top to bottom. Toggle, drag, or use the arrows to
+                            manage them.
                           </p>
                           <AppliedFilterOrder
-                            order={appliedOrder}
+                            order={filterOrder}
+                            isEnabled={isFilterEnabled}
+                            onToggle={toggleFilter}
                             onReorder={reorderFilters}
-                            onRemove={toggleFilter}
+                            onRemove={removeFilter}
                           />
+                          <div className="mt-4 border-t border-gray-200 pt-4">
+                            <AppliedPreset
+                              filters={buildAppliedFilters()}
+                              linked={linkedPreset}
+                              disabledReason={presetsUnavailable}
+                              onSaveNew={saveNewPreset}
+                              onUpdate={replacePresetFilters}
+                              onRevert={applyPreset}
+                              onUnlink={() => onPresetLinkChange?.(null)}
+                            />
+                          </div>
                         </>
                       ) : (
                         <p className="text-sm text-gray-500">
-                          No filters are applied. Choose one from the list and press Apply.
+                          No filters applied. Choose a filter or apply a saved preset.
                         </p>
                       )}
+                    </div>
+                  );
+                }
+
+                if (activeTab === "presets") {
+                  return (
+                    <div className="h-full flex flex-col">
+                      <div className="mb-3 flex items-center gap-2">
+                        <Bookmark size={22} className="text-gray-600" />
+                        <h3 className="text-lg font-semibold text-gray-800">Saved Presets</h3>
+                      </div>
+                      <p className="mb-3 text-xs text-gray-500">
+                        Applying a preset replaces this plot&apos;s filters.
+                      </p>
+                      <SavedPresets
+                        presets={presets}
+                        filters={buildAppliedFilters()}
+                        linkedId={presetId}
+                        error={presetsUnavailable ?? presetsError}
+                        unusableReason={presetUnusableReason}
+                        onApply={applyPreset}
+                        onSaveNew={saveNewPreset}
+                        onReplace={replacePresetFilters}
+                        onRename={renamePreset}
+                        onDelete={removePreset}
+                      />
                     </div>
                   );
                 }
@@ -1283,7 +1457,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                         {/* Tooltip with description */}
                         <div className="flex justify-between items-center w-full">
                           <h3 className="text-lg font-semibold text-gray-800">
-                            {FILTER_DEFINITIONS[activeTab as keyof typeof FILTER_DEFINITIONS].name}
+                            {filterTitle(activeTab)}
                           </h3>
                           <Tooltip
                             // TODOLATER: Looks a bit weird covering the title
@@ -1794,6 +1968,73 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               ticks={15}
                               className="rounded-lg"
                             />
+                          </div>
+                        </div>
+                      )}
+
+                      {activeTab === "r_in_correction" && (
+                        <div className="space-y-4">
+                          <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                            <div className="text-center text-gray-800">
+                              <TexMath
+                                tex="V_\mathrm{S} = V_\mathrm{b} - I \, R_\mathrm{in}"
+                                fallback="V_S = V_b − I × R_in"
+                                display
+                              />
+                            </div>
+                            <p className="mt-2 text-xs leading-relaxed text-gray-600">
+                              Subtracts the voltage dropped across the inline resistance from the
+                              applied bias V<sub>b</sub>, taking the heat map&apos;s values as the
+                              measured current I. The bias axis then shows the voltage across the
+                              sample, V<sub>S</sub>.
+                            </p>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Inline resistance R<sub>in</sub>
+                            </label>
+                            <div className="flex gap-2">
+                              <NumericInput
+                                value={(filterConfig as Record<string, unknown>).r_in as number}
+                                onChange={(value) => updateFilterSetting(activeTab, "r_in", value)}
+                                className="min-w-0 flex-1 p-2 border border-gray-300 rounded"
+                                aria-label="Inline resistance"
+                                title="Inline resistance"
+                              />
+                              <select
+                                value={
+                                  (filterConfig as Record<string, unknown>).r_in_unit as string
+                                }
+                                onChange={(e) =>
+                                  updateFilterSetting(activeTab, "r_in_unit", e.target.value)
+                                }
+                                className="p-2 border border-gray-300 rounded"
+                                aria-label="Inline resistance unit"
+                                title="Inline resistance unit"
+                              >
+                                <option value="Ω">Ω</option>
+                                <option value="kΩ">kΩ</option>
+                                <option value="MΩ">MΩ</option>
+                                <option value="GΩ">GΩ</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Bias axis
+                            </label>
+                            <select
+                              value={(filterConfig as Record<string, unknown>).bias_axis as string}
+                              onChange={(e) =>
+                                updateFilterSetting(activeTab, "bias_axis", e.target.value)
+                              }
+                              className="w-full p-2 border border-gray-300 rounded"
+                              aria-label="Bias axis"
+                              title="Bias axis"
+                            >
+                              <option value="x">X axis</option>
+                              <option value="y">Y axis</option>
+                            </select>
                           </div>
                         </div>
                       )}

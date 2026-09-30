@@ -287,6 +287,7 @@ test("rapid filter parameter changes keep every applied filter", async ({ page }
   }
 
   const windowSize = panel.getByLabel("Savitzky-Golay window size");
+  await expect(panel.getByLabel("Savitzky-Golay axis")).toHaveValue("0");
   await windowSize.focus();
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("ArrowRight");
@@ -296,6 +297,7 @@ test("rapid filter parameter changes keep every applied filter", async ({ page }
   const last = state.transformRequests.at(-1)!;
   expect(last.filters_order).toEqual(["diff_x", "savgol"]);
   expect(last.filters_opts.savgol.window).toBe(11);
+  expect(last.filters_opts.savgol.axis).toBe(0);
   expect(state.transformRequests.every((request) => request.filters_order.length > 0)).toBe(true);
 });
 
@@ -316,15 +318,20 @@ test("applied filters can be reordered and removed from their list", async ({ pa
   const lastOrder = () => state.transformRequests.at(-1)?.filters_order;
   await expect.poll(lastOrder).toEqual(["diff_x", "savgol"]);
 
+  const savgolToggle = applied.getByRole("switch", { name: "Disable Savitzky-Golay" });
+  await expect(savgolToggle).not.toHaveAttribute("title");
+  await savgolToggle.hover();
+  await expect(page.getByRole("tooltip")).toHaveText("Disable Savitzky-Golay");
+
   // The arrows move a filter one place and redraw with the new order.
   await applied.getByRole("button", { name: "Apply Savitzky-Golay earlier" }).click();
   await expect(applied.getByRole("listitem")).toHaveText([/Savitzky-Golay/, /Diff along Y/]);
   await expect.poll(lastOrder).toEqual(["savgol", "diff_x"]);
   await expect(panel.getByRole("tab", { name: /Savitzky-Golay/ })).toContainText("1");
 
-  // Dragging a row by its name does the same, applied once on drop.
+  // Dragging a row by its grip does the same, applied once on drop.
   const requestsBeforeDrag = state.transformRequests.length;
-  const grip = applied.getByText("Savitzky-Golay", { exact: true });
+  const grip = applied.locator(".lucide-grip-vertical").first();
   const target = applied.getByRole("listitem").nth(1);
   const from = (await grip.boundingBox())!;
   const to = (await target.boundingBox())!;
@@ -339,6 +346,14 @@ test("applied filters can be reordered and removed from their list", async ({ pa
   await expect(applied.getByRole("listitem")).toHaveText([/Diff along Y/, /Savitzky-Golay/]);
   await expect.poll(lastOrder).toEqual(["diff_x", "savgol"]);
   expect(state.transformRequests.length).toBe(requestsBeforeDrag + 1);
+
+  // The compact switch keeps a disabled filter in the list so it can be restored quickly.
+  await applied.getByRole("switch", { name: "Disable Savitzky-Golay" }).click();
+  await expect(applied.getByRole("listitem")).toHaveCount(2);
+  await expect(applied.getByRole("switch", { name: "Enable Savitzky-Golay" })).not.toBeChecked();
+  await expect.poll(lastOrder).toEqual(["diff_x"]);
+  await applied.getByRole("switch", { name: "Enable Savitzky-Golay" }).click();
+  await expect.poll(lastOrder).toEqual(["diff_x", "savgol"]);
 
   await applied.getByRole("button", { name: "Remove Diff along Y" }).click();
   await expect(applied.getByRole("listitem")).toHaveText([/Savitzky-Golay/]);
@@ -445,4 +460,49 @@ test("turning on background correction keeps the zoom", async ({ page }) => {
 
   await page.waitForTimeout(1_000);
   expect((await heatmapState(page))!.xRange).toEqual(zoomed);
+});
+
+test("the R_in correction filter shows its equation and sends its resistance", async ({ page }) => {
+  const state = await mockLiveHeatmapApi(page);
+  await openLiveHeatmap(page);
+
+  await page.getByTitle("Apply Filters & Sliders").first().click();
+  const panel = page.locator('[data-tour="filters-panel"]');
+  await panel.getByRole("tab", { name: "R_in Correction" }).click();
+  const equation = panel.getByRole("math", { name: "V_S = V_b − I × R_in" });
+  await expect(equation).toBeVisible();
+  // MathJax replaces the fallback with SVG.
+  await expect(equation.locator("svg")).toBeAttached();
+  // The formula does not open MathJax UI.
+  await equation.click();
+  await expect(page.getByText("MathJax Expression Explorer Help")).toHaveCount(0);
+  await expect(panel.locator("mjx-container[tabindex]")).toHaveCount(0);
+
+  await panel.getByLabel("Inline resistance", { exact: true }).fill("12");
+  await panel.getByLabel("Inline resistance unit").selectOption("MΩ");
+  await panel.getByLabel("Bias axis").selectOption("y");
+  await panel.getByText("Apply", { exact: true }).click();
+
+  await expect
+    .poll(() => state.transformRequests.at(-1)?.filters_opts.r_in_correction)
+    .toMatchObject({ r_in: 12, r_in_unit: "MΩ", bias_axis: "y" });
+  expect(state.transformRequests.at(-1)!.filters_order).toEqual(["r_in_correction"]);
+  if (process.env.SHOT_DIR) await panel.screenshot({ path: `${process.env.SHOT_DIR}/bias.png` });
+});
+
+test("contrast filters follow Flip Heatmap in the filter menu", async ({ page }) => {
+  await mockLiveHeatmapApi(page);
+  await openLiveHeatmap(page);
+
+  await page.getByTitle("Apply Filters & Sliders").first().click();
+  const panel = page.locator('[data-tour="filters-panel"]');
+  const labels = (await panel.getByRole("tab").allTextContents()).map((label) => label.trim());
+  const flip = labels.indexOf("Flip Heatmap");
+
+  expect(labels.slice(flip + 1, flip + 5)).toEqual([
+    "Gamma Correction",
+    "Log Correction",
+    "Sigmoid Correction",
+    "Rescale Intensity",
+  ]);
 });

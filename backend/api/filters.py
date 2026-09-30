@@ -34,6 +34,7 @@ from .units import (
     inverse_unit,
     latex_text,
     multiply_units,
+    parse_unit,
     render_unit,
     scale_quantity_label_suffix,
     set_figure_axis_definition,
@@ -72,7 +73,7 @@ DEFAULT_SAVGOL_OPTS = {
     "polyorder": 2,
     # NOTE: -1 is default for savgol_filter AKA column-wise for 2D heatmap. "2" here means along both axes.
     # NOTE: See filters.py::Smooth.apply_2d() for more details.
-    "axis": 2,
+    "axis": 0,
     "deriv": 0,
     "delta": 1.0,
     "mode": "interp",
@@ -116,20 +117,18 @@ DEFAULT_ROTA_OPTS = {
     "angle": 0,
 }
 
+DEFAULT_R_IN_CORRECTION_OPTS = {
+    "r_in": 0.0,
+    "r_in_unit": "kΩ",
+    "bias_axis": "x",
+}
+
+# Supported resistance units in ohms.
+_RESISTANCE_UNITS = {"Ω": 1.0, "kΩ": 1e3, "MΩ": 1e6, "GΩ": 1e9}
+
 
 def _format_number(value: float, default_precision: float = 3) -> str:
-    """
-    Format a number with scientific notation if it is too small or too large.
-    Otherwise, format it with a default precision.
-
-    Args:
-        value (float): The number to format.
-        default_precision (int): The default number of decimal places to use.
-
-    Returns:
-        str: The formatted number as a string.
-
-    """
+    """Format extreme values in scientific notation and others at fixed precision."""
     if abs(value) < 0.001 or abs(value) >= 10000:
         return f"{value:.3e}"
     else:
@@ -138,18 +137,7 @@ def _format_number(value: float, default_precision: float = 3) -> str:
 
 
 def _safe_init(options: dict, key: str, default: dict) -> dict:
-    """
-    Helper function to safely initialize the options.
-
-    Args:
-        options (dict): Options dict.
-        key (str): Key to get the value from the options dict.
-        default (dict): Default options dict.
-
-    Returns:
-        dict: Safe options dict.
-
-    """
+    """Read an option or return its default."""
     return options.get(key, default) if options else default
 
 
@@ -199,19 +187,9 @@ def _physical_polynomial_coefficients(poly: Polynomial) -> list[float]:
 
 
 def _pprint_poly(poly: Polynomial, notation: str = "scientific") -> str:
-    """
-    Helper function to pretty-print a polynomial equation in LaTeX.
+    """Render a polynomial as LaTeX."""
 
-    Args:
-        poly (Polynomial): Polynomial object.
-    Returns:
-        str: Pretty-printed polynomial equation in LaTeX
-
-    """
-
-    # ``Polynomial.fit`` works in a mapped numerical domain.  Convert before
-    # reading coefficients so the displayed equation is in the physical x
-    # coordinate used by the plot.
+    # Convert mapped coefficients back to the plot's physical x coordinate.
     coefficients = _physical_polynomial_coefficients(poly)
     terms: list[str] = []
     for power in range(len(coefficients) - 1, -1, -1):
@@ -238,22 +216,7 @@ def _pprint_poly(poly: Polynomial, notation: str = "scientific") -> str:
 
 
 def _extract_axis_data(data_dict: dict, axis_name: str) -> np.ndarray:
-    """
-    Helper function to extract axis data from Plotly figure data structure.
-    Handles both direct array format and _inputArray format from React frontend,
-    as well as the encoded format from go.Figure.to_dict().
-
-    Args:
-        data_dict (dict): The data dictionary from figure["data"][0]
-        axis_name (str): Name of the axis ("x", "y", or "z")
-
-    Returns:
-        np.ndarray: Extracted axis data as numpy array
-
-    Raises:
-        ValueError: If no axis data is found
-
-    """
+    """Extract an axis from direct, React ``_inputArray``, or encoded data."""
     if axis_name not in data_dict:
         raise ValueError(f"No {axis_name}-axis data found in figure")
 
@@ -311,15 +274,7 @@ class Filter:
         num_axes: int,
         options: dict = None,
     ) -> None:
-        """
-        Filter Base Class
-
-        Args:
-            figure (dict): Dict representation of a Plotly Figure object to apply filters to.
-            num_axes (int): Number of axes in the figure
-            options (dict, optional): Options for the filter. Default is None.
-
-        """
+        """Initialize shared figure data and axis definitions."""
         self._name = self.__class__.__name__
 
         # Store original dict for data extraction
@@ -371,13 +326,7 @@ class Filter:
             )
 
     def apply(self, *args, **kwargs):
-        """
-        Calls the appropriate apply method based on the number of axes.
-
-        Raises:
-            NotImplementedError: If the number of axes is not 1 or 2.
-
-        """
+        """Apply the 1D or 2D implementation and return the figure and warnings."""
         try:
             match self.num_axes:
                 case 1:
@@ -409,14 +358,7 @@ class Filter:
         fil: str,
         definition: dict[str, str] | None = None,
     ) -> None:
-        """
-        Updates the 2D HeatMap plot with new Z-axis data & label and re-scales the colorbar.
-
-        Args:
-            z_data (np.ndarray): Z-axis data.
-            fil (str): Filter name to append to plot title.
-
-        """
+        """Replace heat-map values and rescale the color axis."""
         # Update the coloraxis properties
         self.new_fig.update_layout(
             coloraxis=dict(cmin=np.nanmin(z_data), cmax=np.nanmax(z_data))
@@ -430,16 +372,7 @@ class Filter:
 
 class FlipHeatMap(Filter):
     def __init__(self, figure: dict, num_axes: int, options: dict = None) -> None:
-        """
-        Flip HeatMap Filter by multiplying the Z-axis data by -1.
-        This is useful for inverting the color scale of a heatmap.
-
-        Args:
-            figure (dict): Plotly Figure object to apply filters to.
-            num_axes (int): Number of axes in the figure.
-            options (dict, optional): Options for the filter. Default is None.
-
-        """
+        """Initialize a filter that negates heat-map values."""
         super().__init__(figure, num_axes, options)
 
     def apply_1d(self):
@@ -459,15 +392,7 @@ class FlipHeatMap(Filter):
 
 class Differentiate(Filter):
     def __init__(self, figure: dict, num_axes: int, options: dict = None) -> None:
-        """
-        Differentiation Filter
-
-        Args:
-            figure (dict): Plotly Figure object to apply filters to.
-            num_axes (int): Number of axes in the figure.
-            options (dict, optional): Options for the filter. Default is None.
-
-        """
+        """Initialize numerical differentiation."""
         super().__init__(figure, num_axes, options)
 
     def apply_1d(self):
@@ -622,18 +547,7 @@ class Scale(Filter):
 
 class Smooth(Filter):
     def __init__(self, figure: dict, num_axes: int, options: dict = None) -> None:
-        """
-        Smoothing Filter
-
-        Features:
-            - Savitzky-Golay filter
-
-        Args:
-            figure (dict): Plotly Figure object to apply filters to.
-            num_axes (int): Number of axes in the figure.
-            options (dict, optional): Options for the filter. Default is None.
-
-        """
+        """Initialize Savitzky-Golay smoothing."""
         super().__init__(figure, num_axes, options)
         self.window = _safe_init(options, "window", DEFAULT_SAVGOL_OPTS["window"])
         self.polyorder = _safe_init(
@@ -774,8 +688,7 @@ class Smooth(Filter):
                 f"Original window: {self.window}, Safe window for axis 0: {window_x}, axis 1: {window_y}"
             )
 
-            # For axis=2, we smooth along 0 then 1. Need to clean both directions or just clean all.
-            # Easiest is to clean along axis 0, smooth, then clean the result along axis 1 (though smoothing shouldn't introduce NaNs)
+            # Axis 2 smooths each heat-map dimension in sequence.
             clean_z = self._fill_nans(self.z_axis, axis=0)
 
             z_data_x = savgol_filter(
@@ -840,13 +753,8 @@ class Smooth(Filter):
 class SimpleMovingAverage(Filter):
     def __init__(self, figure: dict, num_axes: int, options: dict = None) -> None:
         """
-        Simple Moving Average Filter.
+        Initialize a same-length simple moving average.
         # NOTE: Output length is same as the input length because of `mode="same"` in `np.convolve()`
-
-        Args:
-            figure (dict): Plotly Figure object to apply filters to.
-            num_axes (int): Number of axes in the figure.
-            options (dict, optional): Options for the filter. Default is None.
 
         """
         super().__init__(figure, num_axes, options)
@@ -872,7 +780,6 @@ class SimpleMovingAverage(Filter):
             f"SMA: Original window={self.window}, safe_window={safe_window}, data_length={data_length}"
         )
 
-        # NOTE: Output length is same as the input length because of `mode="same"` in `np.convolve()`
         self.new_fig.data[0].y = np.convolve(
             self.y_axis, np.ones(safe_window) / safe_window, mode="same"
         )
@@ -888,15 +795,7 @@ class SimpleMovingAverage(Filter):
 
 class Normalize(Filter):
     def __init__(self, figure: dict, num_axes: int, options: dict = None) -> None:
-        """
-        Normalization Filter
-
-        Args:
-            figure (dict): Plotly Figure object to apply filters to.
-            num_axes (int): Number of axes in the figure.
-            options (dict, optional): Options for the filter. Default is None.
-
-        """
+        """Initialize normalization along the selected axis."""
         super().__init__(figure, num_axes, options)
         # str: "x" or "y" or "z"
         self.axis = _safe_init(options, "axis", DEFAULT_NORM_AXIS)
@@ -939,15 +838,7 @@ class Normalize(Filter):
 
 class GammaCorrection(Filter):
     def __init__(self, figure: dict, num_axes: int, options: dict = None) -> None:
-        """
-        Gamma Correction Filter. Uses `skimage.exposure.adjust_gamma()`.
-
-        Args:
-            figure (dict): Plotly Figure object to apply filters to.
-            num_axes (int): Number of axes in the figure.
-            options (dict, optional): Options for the filter. Default is None.
-
-        """
+        """Gamma Correction Filter. Uses `skimage.exposure.adjust_gamma()`."""
         super().__init__(figure, num_axes, options)
         logger.debug(f"GammaCorrection | options: {options}")
         self.gamma = _safe_init(options, "gamma", DEFAULT_GC_OPTS["gamma"])
@@ -994,15 +885,7 @@ class GammaCorrection(Filter):
 
 class LogCorrection(Filter):
     def __init__(self, figure: dict, num_axes: int, options: dict = None) -> None:
-        """
-        Logarithmic Correction Filter. Uses `skimage.exposure.adjust_log()`.
-
-        Args:
-            figure (dict): Plotly Figure object to apply filters to.
-            num_axes (int): Number of axes in the figure.
-            options (dict, optional): Options for the filter. Default is None.
-
-        """
+        """Initialize logarithmic correction. Uses `skimage.exposure.adjust_log()`."""
         super().__init__(figure, num_axes, options)
         self.gain = _safe_init(options, "gain", DEFAULT_LC_OPTS["gain"])
         self.inv = _safe_init(options, "inv", DEFAULT_LC_OPTS["inv"])
@@ -1050,15 +933,7 @@ class LogCorrection(Filter):
 
 class SigmoidCorrection(Filter):
     def __init__(self, figure: dict, num_axes: int, options: dict = None) -> None:
-        """
-        Sigmoid Correction Filter. Uses `skimage.exposure.adjust_sigmoid()`.
-
-        Args:
-            figure (dict): Plotly Figure object to apply filters to.
-            num_axes (int): Number of axes in the figure.
-            options (dict, optional): Options for the filter. Default is None.
-
-        """
+        """Initialize sigmoid correction. Uses `skimage.exposure.adjust_sigmoid()`."""
         super().__init__(figure, num_axes, options)
         self.cutoff = _safe_init(options, "cutoff", DEFAULT_SC_OPTS["cutoff"])
         self.gain = _safe_init(options, "gain", DEFAULT_SC_OPTS["gain"])
@@ -1108,15 +983,7 @@ class SigmoidCorrection(Filter):
 
 class RescaleIntensity(Filter):
     def __init__(self, figure: dict, num_axes: int, options: dict = None) -> None:
-        """
-        Rescale Intensity Filter. Uses `skimage.exposure.rescale_intensity()`.
-
-        Args:
-            figure (dict): Plotly Figure object to apply filters to.
-            num_axes (int): Number of axes in the figure.
-            options (dict, optional): Options for the filter. Default is None.
-
-        """
+        """Initialize min-max intensity rescaling. Uses `skimage.exposure.rescale_intensity()`."""
         super().__init__(figure, num_axes, options)
         self.in_range = _safe_init(options, "in_range", DEFAULT_RI_OPTS["in_range"])
 
@@ -1130,7 +997,8 @@ class RescaleIntensity(Filter):
     def apply_2d(self):
         """
         Applies the rescale intensity filter to a 2D plot. Uses the min-max scaling method.
-        # TODOLATER: Can allow specifying the range to scale to. See: https://scikit-image.org/docs/stable/api/skimage.exposure.html#skimage.exposure.rescale_intensity
+        # TODOLATER: Can allow specifying the range to scale to.
+        # See: https://scikit-image.org/docs/stable/api/skimage.exposure.html#skimage.exposure.rescale_intensity
 
         """
         logger.debug("Applying Rescale Intensity...")
@@ -1142,15 +1010,7 @@ class RescaleIntensity(Filter):
 
 class LogScale(Filter):
     def __init__(self, figure: dict, num_axes: int, options: dict = None) -> None:
-        """
-        Logarithmic Scaling Filter.
-
-        Args:
-            figure (dict): Plotly Figure object to apply filters to.
-            num_axes (int): Number of axes in the figure.
-            options (dict, optional): Options for the filter. Default is None.
-
-        """
+        """Initialize natural-log scaling."""
         super().__init__(figure, num_axes, options)
 
     def apply_1d(self):
@@ -1171,15 +1031,7 @@ class LogScale(Filter):
 
 class PolyFit(Filter):
     def __init__(self, figure: dict, num_axes: int, options: dict = None) -> None:
-        """
-        Polynomial Fitting Filter. Uses `numpy.polynomial.polynomial.Polynomial.fit()`.
-
-        Args:
-            figure (dict): Plotly Figure object to apply filters to.
-            num_axes (int): Number of axes in the figure.
-            options (dict, optional): Options for the filter. Default is None.
-
-        """
+        """Initialize polynomial fitting. Uses `numpy.polynomial.polynomial.Polynomial.fit()`."""
         super().__init__(figure, num_axes, options)
         self.deg = _safe_init(options, "deg", DEFAULT_POLYFIT_OPTS["deg"])
         self.window = _safe_init(options, "window", DEFAULT_POLYFIT_OPTS["window"])
@@ -1220,10 +1072,7 @@ class PolyFit(Filter):
             )
         )
 
-        # Add the equation to the plot
-        # TODOLATER: Add a helper function that does the following::
-        # TODOLATER: - [x] Add pretty-printed (LaTeX) polynomial equation with wrapped text
-        # TODOLATER: - [ ] Add support for auto-wrapped text - See _pprint_poly()
+        # Add the fitted equation.
         self.new_fig.add_annotation(
             # Center
             x=0.95,
@@ -1235,13 +1084,6 @@ class PolyFit(Filter):
             showarrow=False,
             font=dict(size=16, color="rebeccapurple"),
             bgcolor="white",
-            # TODOLATER: Add if needed
-            # BUG: Displaces the LaTeX-ified text
-            # bordercolor="rebeccapurple",
-            # borderwidth=1,
-            # borderpad=4,
-            # opacity=0.8,
-            # width=200,  # To fit the text (text can overflow and get cut off)
         )
 
     def apply_2d(self):
@@ -1254,15 +1096,7 @@ class PolyFit(Filter):
 
 class BackgroundCorrection(Filter):
     def __init__(self, figure: dict, num_axes: int, options: dict = None) -> None:
-        """
-        Background Correction Filter.
-
-        Args:
-            figure (dict): Plotly Figure object to apply filters to.
-            num_axes (int): Number of axes in the figure.
-            options (dict, optional): Options for the filter. Default is None.
-
-        """
+        """Initialize background correction from selected points."""
         super().__init__(figure, num_axes, options)
         self.mode = _safe_init(options, "mode", "constant")
         self.points = _safe_init(options, "points", [])
@@ -1313,15 +1147,7 @@ class BackgroundCorrection(Filter):
             return
 
     def apply_2d(self):
-        """
-        Applies the background correction filter to a 2D plot (heatmap).
-        Modes:
-        - constant: subtract a scalar (from first point's Z)
-        - row_mean: subtract the mean of a selected row
-        - col_mean: subtract the mean of a selected column
-        - plane: subtract a plane defined by 3 points
-
-        """
+        """Subtract a constant, row/column mean, or three-point plane."""
         if not self.points:
             logger.warning("Background Correction 2D: No points provided.")
             return
@@ -1432,15 +1258,7 @@ def _centre_and_step(values: np.ndarray) -> tuple[float, float]:
 
 class RotateHeatMap(Filter):
     def __init__(self, figure: dict, num_axes: int, options: dict = None) -> None:
-        """
-        Rotates HeatMap by specified angle.
-
-        Args:
-            figure (dict): Plotly Figure object to apply filters to.
-            num_axes (int): Number of axes in the figure.
-            options (dict, optional): Options for the filter. Default is None.
-
-        """
+        """Initialize heat-map rotation."""
         super().__init__(figure, num_axes, options)
         self.angle = _safe_init(options, "angle", DEFAULT_ROTA_OPTS["angle"])
 
@@ -1491,9 +1309,7 @@ class RotateHeatMap(Filter):
             cval=np.nan,  # Empty space with np.nan (white)
             prefilter=False,
         )
-        # Preserve the original axis spacing and center the output on the input.
-        # Relative to that center, columns are c*x + s*(dx/dy)*y and rows are
-        # -s*(dy/dx)*x + c*y.
+        # Rotate about the input center while preserving axis spacing.
         x_values = _axis_values(self.x_axis)
         y_values = _axis_values(self.y_axis)
         x_centre, dx = _centre_and_step(x_values)
@@ -1547,6 +1363,72 @@ class RotateHeatMap(Filter):
         self._hmap_update(z_rotated, fil=f"Rot({self.angle}°)")
 
 
+class RInCorrection(Filter):
+    def __init__(self, figure: dict, num_axes: int, options: dict = None) -> None:
+        """
+        Correct inline-resistor voltage drop and resample onto a shared grid.
+
+
+        Uses ``V_S = V_b - I * R_in``, with the heat-map values as current. Each
+        sweep is resampled to a shared V_S grid; out-of-range values remain empty.
+        """
+
+        super().__init__(figure, num_axes, options)
+        defaults = DEFAULT_R_IN_CORRECTION_OPTS
+        self.r_in = float(_safe_init(options, "r_in", defaults["r_in"]) or 0.0)
+        self.r_in_unit = str(_safe_init(options, "r_in_unit", defaults["r_in_unit"]))
+        self.bias_axis = str(_safe_init(options, "bias_axis", defaults["bias_axis"]))
+
+    def apply_1d(self):
+        raise NotImplementedError("R_in correction is only available for heat maps.")
+
+    def apply_2d(self):
+        along_x = self.bias_axis != "y"
+        bias = _axis_values(self.x_axis if along_x else self.y_axis)
+        definition = self.x_definition if along_x else self.y_definition
+
+        # Normalize bias sweeps to rows for resampling.
+        current = np.asarray(self.z_axis, dtype=float)
+        lines = current if along_x else current.T
+
+        bias_scale = parse_unit(definition["unit"]).scale or 1.0
+        current_scale = parse_unit(self.z_definition["unit"]).scale or 1.0
+        ohms = self.r_in * _RESISTANCE_UNITS.get(self.r_in_unit, 1.0)
+        drop = lines * current_scale * ohms / bias_scale
+        sample_bias = bias[np.newaxis, :] - drop
+
+        finite = np.isfinite(sample_bias) & np.isfinite(lines)
+        if not finite.any():
+            raise ValueError("R_in correction needs measured points.")
+
+        grid = np.linspace(
+            np.min(sample_bias[finite]), np.max(sample_bias[finite]), bias.size
+        )
+        resampled = np.full((lines.shape[0], grid.size), np.nan)
+        for index, (line_bias, line_values, keep) in enumerate(
+            zip(sample_bias, lines, finite)
+        ):
+            if keep.sum() < 2:
+                continue
+            order = np.argsort(line_bias[keep])
+            xs = line_bias[keep][order]
+            resampled[index] = np.interp(
+                grid, xs, line_values[keep][order], left=np.nan, right=np.nan
+            )
+
+        z_data = resampled if along_x else resampled.T
+        if along_x:
+            self.new_fig.data[0].x = grid
+        else:
+            self.new_fig.data[0].y = grid
+        self._hmap_update(z_data, fil="R_in correction")
+        set_figure_axis_definition(
+            self.new_fig,
+            "x" if along_x else "y",
+            axis_definition("Sample bias", definition["unit"]),
+        )
+
+
 # These filters require an ordered, evenly sampled x sweep.
 _NEEDS_A_SWEPT_X = {
     "diff": "a derivative",
@@ -1582,7 +1464,7 @@ def apply_filters(
     fig_num_axes: int,
 ) -> dict:
     """
-    Applies the filters to the figure dict.
+    Apply the requested filters to a figure in order.
 
     Args:
         filters_order (list): List of filters to apply, in order.
@@ -1697,6 +1579,12 @@ def apply_filters(
             case "log_scale":
                 logger.debug("apply_filters | Applying `Logarithmic Scaling` filter...")
                 filt_obj = LogScale(fig_tmp, fig_num_axes, opts)
+                filt_fig, filter_warnings = filt_obj.apply()
+                all_warnings.extend(filter_warnings)
+
+            case "r_in_correction":
+                logger.debug("apply_filters | Applying `R_in Correction` filter...")
+                filt_obj = RInCorrection(fig_tmp, fig_num_axes, opts)
                 filt_fig, filter_warnings = filt_obj.apply()
                 all_warnings.extend(filter_warnings)
 

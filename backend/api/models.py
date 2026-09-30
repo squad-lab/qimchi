@@ -9,6 +9,11 @@ from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
+class PinnedParametersRequest(BaseModel):
+    path: str
+    names: List[str]
+
+
 class PathData(BaseModel):
     path: str
     note_scope: Literal["measurement", "sample"] = "measurement"

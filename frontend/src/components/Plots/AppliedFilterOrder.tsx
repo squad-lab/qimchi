@@ -4,10 +4,13 @@ import { ArrowDown, ArrowUp, GripVertical, X } from "lucide-react";
 
 import { filterLabel } from "../../utils/filterNames";
 import { moveItem } from "../../utils/moveItem";
+import Tooltip from "../Tooltip";
 
 type Props = {
-  /** Applied filter keys, first applied first. */
+  /** Configured filter keys, first applied first. */
   order: string[];
+  isEnabled: (key: string) => boolean;
+  onToggle: (key: string) => void;
   onReorder: (order: string[]) => void;
   onRemove: (key: string) => void;
 };
@@ -21,6 +24,7 @@ type RowProps = {
   filterKey: string;
   index: number;
   count: number;
+  enabled: boolean;
   dragging: boolean;
   dropSide: DropTarget["side"] | null;
   registerNode: (key: string, node: HTMLLIElement | null) => void;
@@ -28,6 +32,7 @@ type RowProps = {
   onDrag: (event: DraggableEvent) => void;
   onDragStop: () => void;
   onMove: (to: number) => void;
+  onToggle: () => void;
   onRemove: () => void;
 };
 
@@ -37,6 +42,7 @@ const Row = ({
   filterKey,
   index,
   count,
+  enabled,
   dragging,
   dropSide,
   registerNode,
@@ -44,6 +50,7 @@ const Row = ({
   onDrag,
   onDragStop,
   onMove,
+  onToggle,
   onRemove,
 }: RowProps) => {
   const nodeRef = useRef<HTMLLIElement | null>(null);
@@ -63,8 +70,8 @@ const Row = ({
         }}
         className={`relative flex cursor-grab touch-none select-none items-center gap-2 rounded border px-2 py-1.5 text-sm ${
           dragging
-            ? "z-10 cursor-grabbing border-blue-400 bg-blue-50 opacity-90 shadow-lg"
-            : "border-gray-200 bg-gray-50"
+            ? "z-10 cursor-grabbing border-blue-400 bg-blue-50 opacity-90 shadow-lg dark:bg-[#223244]"
+            : "border-gray-200 bg-gray-50 dark:border-[#3e4451] dark:bg-[#21252b]"
         }`}
       >
         {dropSide && (
@@ -76,50 +83,80 @@ const Row = ({
             }`}
           />
         )}
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-600 text-[11px] font-bold text-white">
+        <span
+          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white ${
+            enabled ? "bg-green-600" : "bg-gray-400 dark:bg-[#5c6370]"
+          }`}
+        >
           {index + 1}
         </span>
         <span className="shrink-0 text-gray-400" aria-hidden>
           <GripVertical size={14} />
         </span>
-        <span className="min-w-0 flex-1 truncate text-gray-700" title={label}>
+        <span
+          className={`min-w-0 flex-1 truncate ${
+            enabled ? "text-gray-700" : "text-gray-400 line-through dark:text-[#828997]"
+          }`}
+        >
           {label}
         </span>
         <span className="flex shrink-0 items-center" data-no-drag>
-          <button
-            type="button"
-            className="shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700 disabled:opacity-30"
-            aria-label={`Apply ${label} earlier`}
-            disabled={index === 0}
-            onClick={() => onMove(index - 1)}
+          <Tooltip
+            content={`${enabled ? "Disable" : "Enable"} ${label}`}
+            position="top"
+            className="!inline-flex"
           >
-            <ArrowUp size={14} />
-          </button>
-          <button
-            type="button"
-            className="shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700 disabled:opacity-30"
-            aria-label={`Apply ${label} later`}
-            disabled={index === count - 1}
-            onClick={() => onMove(index + 1)}
-          >
-            <ArrowDown size={14} />
-          </button>
-          <button
-            type="button"
-            className="shrink-0 rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
-            aria-label={`Remove ${label}`}
-            onClick={onRemove}
-          >
-            <X size={14} />
-          </button>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={enabled}
+              className="qimchi-dark-hover-plain mr-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-gray-400 bg-transparent hover:border-green-600 hover:bg-green-50 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-green-500 dark:border-[#828997] dark:hover:border-[#98c379]"
+              aria-label={`${enabled ? "Disable" : "Enable"} ${label}`}
+              onClick={onToggle}
+            >
+              {enabled && <span className="h-2 w-2 rounded-full bg-green-600 dark:bg-[#98c379]" />}
+            </button>
+          </Tooltip>
+          <Tooltip content={`Apply ${label} earlier`} position="top" className="!inline-flex">
+            <button
+              type="button"
+              className="qimchi-dark-hover-plain shrink-0 rounded bg-transparent p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700 disabled:opacity-30"
+              aria-label={`Apply ${label} earlier`}
+              disabled={index === 0}
+              onClick={() => onMove(index - 1)}
+            >
+              <ArrowUp size={14} />
+            </button>
+          </Tooltip>
+          <Tooltip content={`Apply ${label} later`} position="top" className="!inline-flex">
+            <button
+              type="button"
+              className="qimchi-dark-hover-plain shrink-0 rounded bg-transparent p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700 disabled:opacity-30"
+              aria-label={`Apply ${label} later`}
+              disabled={index === count - 1}
+              onClick={() => onMove(index + 1)}
+            >
+              <ArrowDown size={14} />
+            </button>
+          </Tooltip>
+          <Tooltip content={`Remove ${label}`} position="top" className="!inline-flex">
+            <button
+              type="button"
+              className="qimchi-dark-hover-plain shrink-0 rounded bg-transparent p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+              aria-label={`Remove ${label}`}
+              onClick={onRemove}
+            >
+              <X size={14} />
+            </button>
+          </Tooltip>
         </span>
       </li>
     </DraggableCore>
   );
 };
 
-/** The applied filters in the order they run, reordered by dragging a row or with its arrows. */
-const AppliedFilterOrder = ({ order, onReorder, onRemove }: Props) => {
+/** Configured filters in execution order, including filters temporarily switched off. */
+const AppliedFilterOrder = ({ order, isEnabled, onToggle, onReorder, onRemove }: Props) => {
   const nodes = useRef(new Map<string, HTMLLIElement>());
   const drag = useRef<{ key: string; startY: number } | null>(null);
   const dropRef = useRef<DropTarget | null>(null);
@@ -188,6 +225,7 @@ const AppliedFilterOrder = ({ order, onReorder, onRemove }: Props) => {
             filterKey={key}
             index={index}
             count={order.length}
+            enabled={isEnabled(key)}
             dragging={draggingKey === key}
             dropSide={dropTarget?.key === key ? dropTarget.side : null}
             registerNode={registerNode}
@@ -195,6 +233,7 @@ const AppliedFilterOrder = ({ order, onReorder, onRemove }: Props) => {
             onDrag={handleDrag}
             onDragStop={handleDragStop}
             onMove={(to) => onReorder(moveItem(order, index, to))}
+            onToggle={() => onToggle(key)}
             onRemove={() => onRemove(key)}
           />
         ))}

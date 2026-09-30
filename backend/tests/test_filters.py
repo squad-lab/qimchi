@@ -52,6 +52,10 @@ def _axis(figure, name):
     return filters._extract_axis_data(figure["data"][0], name)
 
 
+def test_savgol_defaults_to_x_axis():
+    assert filters.DEFAULT_SAVGOL_OPTS["axis"] == 0
+
+
 def test_number_option_and_polynomial_helpers():
     assert filters._format_number(0.0001) == "1.000e-04"
     assert filters._format_number(12.3456, 2) == "12.35"
@@ -690,13 +694,7 @@ def test_scaled_colorbar_title_keeps_the_plain_font_size(heat_figure):
 
 
 def test_a_transform_slices_at_the_slider_position_before_filtering(monkeypatch):
-    """
-    The transform regenerates from the dataset, so the slider has to come with it.
-
-    A LineCut is a slice at a position the user picked; re-running a filter on
-    it without that position silently rebuilds the plot at the default slice --
-    the minimum -- so PolyFit fitted a different line from the one on screen.
-    """
+    """Regenerated transforms must retain the selected slider position."""
     import numpy as np
     import xarray as xr
 
@@ -901,3 +899,124 @@ def test_a_rotated_point_can_be_traced_back_to_the_data(angle, spot):
     assert found_col == pytest.approx(col, abs=0.75)
     assert rotation["x"] == pytest.approx(list(x))
     assert rotation["y"] == pytest.approx(list(y))
+
+
+def test_heatmap_hover_follows_a_filter_that_changes_z():
+    import numpy as np
+    import xarray as xr
+
+    from api.figures import HeatMap
+
+    dataset = xr.Dataset(
+        {
+            "v": (
+                ("a", "b"),
+                np.arange(9.0).reshape(3, 3),
+                {"label": "Ratio", "unit": ""},
+            )
+        },
+        coords={
+            "a": ("a", [0.0, 1.0, 2.0], {"label": "Voltage 1", "unit": "V"}),
+            "b": ("b", [0.0, 1.0, 2.0], {"label": "Voltage 2", "unit": "V"}),
+        },
+    )
+    figure = HeatMap({}, dataset, ["a", "b"], ["v"]).plot().to_dict()
+
+    result, _warnings = filters.apply_filters(["diff_x"], {"diff_x": {}}, figure, 2)
+
+    assert result["data"][0]["hovertemplate"] == (
+        "Voltage 2: %{x:.3~s}V<br>Voltage 1: %{y:.3~s}V<br>"
+        "dz/dy: %{z:.3~s} 1/V<extra></extra>"
+    )
+
+
+def _z(figure):
+    rows = np.size(_axis(figure, "y"))
+    return np.asarray(_axis(figure, "z"), dtype=float).reshape(rows, -1)
+
+
+def _bias_heat_figure(current_unit: str = "nA"):
+    import xarray as xr
+
+    from api.figures import HeatMap
+
+    bias = np.linspace(-1.0, 1.0, 21)
+    gate = np.array([0.0, 1.0])
+    # First sweep: I = V_b nA. Second sweep: I = 0.
+    current = np.vstack([bias, np.zeros_like(bias)])
+    dataset = xr.Dataset(
+        {"i": (("g", "b"), current, {"label": "Current", "unit": current_unit})},
+        coords={
+            "g": ("g", gate, {"label": "Gate", "unit": "V"}),
+            "b": ("b", bias, {"label": "Bias", "unit": "V"}),
+        },
+    )
+    return HeatMap({}, dataset, ["g", "b"], ["i"]).plot().to_dict()
+
+
+def test_r_in_correction_moves_the_bias_axis_to_the_sample_voltage():
+    figure = _bias_heat_figure()
+
+    result, _warnings = filters.apply_filters(
+        ["r_in_correction"],
+        {"r_in_correction": {"r_in": 0.5, "r_in_unit": "GΩ", "bias_axis": "x"}},
+        figure,
+        2,
+    )
+
+    # The first sweep has V_S = V_b / 2.
+    grid = np.asarray(_axis(result, "x"), dtype=float)
+    assert grid[0] == pytest.approx(-1.0)
+    assert grid[-1] == pytest.approx(1.0)
+    first_row = _z(result)[0]
+    inside = np.abs(grid) <= 0.5
+    np.testing.assert_allclose(first_row[inside], 2 * grid[inside], atol=1e-9)
+    assert np.isnan(first_row[~inside]).all()
+    assert result["layout"]["meta"]["qimchi_units"]["x"]["label"] == "Sample bias"
+    assert result["data"][0]["hovertemplate"].startswith("Sample bias: ")
+
+
+def test_r_in_correction_without_a_resistor_changes_nothing():
+    figure = _bias_heat_figure()
+    z = _z(figure)
+
+    result, _warnings = filters.apply_filters(
+        ["r_in_correction"],
+        {"r_in_correction": {"r_in": 0, "r_in_unit": "kΩ", "bias_axis": "x"}},
+        figure,
+        2,
+    )
+
+    np.testing.assert_allclose(_z(result), z)
+
+
+def test_r_in_correction_works_along_y_and_before_other_filters():
+    figure = _bias_heat_figure()
+    swapped = {
+        **figure,
+        "data": [
+            {
+                **figure["data"][0],
+                "x": _axis(figure, "y").tolist(),
+                "y": _axis(figure, "x").tolist(),
+                "z": _z(figure).T.tolist(),
+            }
+        ],
+    }
+    units = swapped["layout"]["meta"]["qimchi_units"]
+    units["x"], units["y"] = units["y"], units["x"]
+
+    result, _warnings = filters.apply_filters(
+        ["r_in_correction", "flip"],
+        {
+            "r_in_correction": {"r_in": 0.5, "r_in_unit": "GΩ", "bias_axis": "y"},
+            "flip": {},
+        },
+        swapped,
+        2,
+    )
+
+    grid = np.asarray(_axis(result, "y"), dtype=float)
+    first_column = _z(result)[:, 0]
+    inside = np.abs(grid) <= 0.5
+    np.testing.assert_allclose(first_column[inside], -2 * grid[inside], atol=1e-9)

@@ -1,6 +1,4 @@
-// Filter keys are the backend's identifiers and are persisted in saved plot
-// state, so they stay as-is. Note the diff keys name the array axis that is
-// differentiated over, which is the opposite of the plot axis a user sees.
+// Persist backend filter keys; derivative keys name array axes, not plot axes.
 export const FILTER_LABELS: Record<string, string> = {
   diff: "Differentiate",
   diff_y: "Diff along X",
@@ -16,6 +14,7 @@ export const FILTER_LABELS: Record<string, string> = {
   polyfit: "Polynomial Fit",
   transform: "Scale",
   rotate: "Rotate Heatmap",
+  r_in_correction: "R_in Correction",
   flip: "Flip Heatmap",
   bg_corr_constant: "BG Correction (Constant)",
   bg_corr_linear: "BG Correction (Linear)",

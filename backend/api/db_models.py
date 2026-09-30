@@ -1,25 +1,36 @@
 """
-SQLModel table definitions for the Qimchi database (``~/.qimchi/qimchi.db``).
+Database models used by Qimchi.
 
-Tables: ``users``, ``user_settings``, ``measurements``, ``measurement_state``
-(hearts/trash), ``notes``, ``tags`` and ``measurement_tags``. Alembic owns the
-schema (``backend/migrations``, head ``0008_user_settings``) -- changing a model
-here needs a matching migration, or an existing database will not match.
+The database lives at ``~/.qimchi/qimchi.db`` and contains tables for users,
+user settings, measurements, measurement state (hearts/trash), notes, tags,
+and measurement-tag relationships.
 
-- Everything keys on the measurement UUID, never on ``abs_path`` -- so future
-  cross-node sync stays additive. ``shared/identity.py`` resolves it: the
-  qanary ``Measurement ID``, else a QCoDeS run ``guid``, else a
-  content-signature uuid5. ``measurements.uuid_origin`` records which tier
-  answered.
-- ``user_id`` is present from the start; desktop runs a single implicit
-  ``local`` user (``LOCAL_USER_ID``), so auth stays additive too.
-- ``measurements`` doubles as the metadata cache: ``metadata_json`` holds the
-  ``/load-attrs/`` payload and ``source_fingerprint`` the stat signature it
-  was built from (see ``api/library.py``).
-- ``notes`` and ``measurement_tags`` are deliberately NOT foreign-keyed to
-  ``measurements``, so datasets the library never registered (QCoDeS runs,
-  artefacts) can still carry them.
+The schema is managed by Alembic in ``backend/migrations``.Any changes to
+these models should therefore be accompanied by a matching migration,
+so existing databases stay compatible.
 
+A few implementation details are worth keeping in mind:
+
+- Measurements are identified by UUID rather than ``abs_path``. This keeps the
+  database independent of where a dataset happens to live and makes future
+  cross-node syncing easier. ``shared/identity.py`` resolves the UUID from the
+  qanary ``Measurement ID`` when available, then a QCoDeS run ``guid``, and
+  finally a content-signature-based UUID5. ``measurements.uuid_origin`` records
+  which method was used.
+
+- ``user_id`` is included in the schema from the beginning. Desktop Qimchi uses
+  a single implicit ``local`` user (``LOCAL_USER_ID``), which leaves room for
+  authentication or multiple users later without changing the basic data model.
+
+- ``measurements`` also acts as the metadata cache. ``metadata_json`` stores the
+  ``/load-attrs/`` payload, while ``source_fingerprint`` stores the filesystem
+  signature used to determine whether that cached metadata is still current.
+  See ``api/library.py`` for the corresponding logic.
+
+- ``notes`` and ``measurement_tags`` intentionally do not have foreign keys to
+  ``measurements``. This allows notes and tags to be attached to datasets that
+  have not been registered in the library, such as QCoDeS runs or other
+  artefacts.
 """
 
 from datetime import datetime, timezone
@@ -50,9 +61,9 @@ class User(SQLModel, table=True):
 
 class UserSettings(SQLModel, table=True):
     """
-    A user's preferences, as one JSON document whose shape the frontend owns.
+    Frontend-owned preference overrides stored as one JSON document.
 
-    Only values the user changed are stored; everything else falls back to the
+    Only values the user changed are stored. Everything else falls back to the
     defaults in code, so adding a setting needs no migration.
 
     """
@@ -65,14 +76,7 @@ class UserSettings(SQLModel, table=True):
 
 
 class Measurement(SQLModel, table=True):
-    """
-    A measurement, identified by its node-stable UUID.
-
-    ``abs_path`` is node-local (for resolution/Explorer only) and is never used
-    as a key. ``metadata_json`` caches the dataset attrs loaded on first open;
-    the dataset on disk remains the source of truth.
-
-    """
+    """A measurement keyed by stable UUID, with a node-local path and attrs cache."""
 
     __tablename__ = "measurements"
 
@@ -86,9 +90,7 @@ class Measurement(SQLModel, table=True):
     device_type: str | None = None
     experiment: str | None = None
     metadata_json: str | None = None  # cached attrs (JSON string)
-    # Cheap stat signature (mtime+size) of the dataset when metadata_json was
-    # written. The cache is only served when this still matches, so an edited
-    # dataset is reloaded rather than serving stale attrs.
+    # Dataset mtime and size when metadata_json was written.
     source_fingerprint: str | None = None
     first_seen: datetime = Field(default_factory=_utcnow)
     last_opened: datetime = Field(default_factory=_utcnow)
@@ -114,7 +116,6 @@ class Note(SQLModel, table=True):
     overall measurement note and the QCoDeS run integer for a run-wise note.
     It is intentionally NOT foreign-keyed to ``measurements`` so legacy notes
     can still be imported before their measurement is registered.
-
     """
 
     __tablename__ = "notes"
@@ -147,20 +148,26 @@ class MeasurementTag(SQLModel, table=True):
     tag_id: int = Field(primary_key=True, foreign_key="tags.id", index=True)
 
 
+class FilterPreset(SQLModel, table=True):
+    """A named filter sequence and its options."""
+
+    __tablename__ = "filter_presets"
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_filter_presets_user_name"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    name: str
+    filters_json: str = "[]"
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
 class DatasetScanCache(SQLModel, table=True):
     """
-    Per-dataset values that a directory scan would otherwise recompute.
+    Node-local Explorer scan cache keyed by absolute path.
 
-    Keyed on ``abs_path`` rather than the measurement UUID, on purpose: this is
-    a node-local scratch cache for the Explorer, and resolving a UUID means
-    opening the dataset -- the very cost the cache exists to avoid. Nothing
-    user-owned lives here, so losing the table only costs a slower scan.
-
-    ``fingerprint`` is the store directory's stat signature. A zarr store is
-    thousands of chunk files, so computing its size and modification time is
-    the dominant per-dataset cost of a scan; both are reused while the
-    fingerprint matches, and recomputed the moment it does not.
-
+    Size and mtime remain valid while the store fingerprint matches.
     """
 
     __tablename__ = "dataset_scan_cache"
