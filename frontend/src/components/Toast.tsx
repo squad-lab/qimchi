@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { X, AlertCircle, CheckCircle, Info, AlertTriangle } from "lucide-react";
-import { ToastContext, LogItem } from "../hooks/useToast";
+import { ToastContext, LogItem, ToastAction } from "../hooks/useToast";
 import NotificationLogModal from "./NotificationLogModal";
 import { useShortcut } from "../hooks/useGlobalShortcuts";
 
@@ -10,6 +10,9 @@ interface ToastProps {
   duration?: number;
   onClose?: () => void;
   className?: string;
+  action?: ToastAction;
+  /** Pause automatic dismissal. */
+  paused?: boolean;
 }
 
 interface ToastItem {
@@ -17,11 +20,19 @@ interface ToastItem {
   message: string;
   type: "success" | "error" | "warning" | "info";
   duration: number;
+  action?: ToastAction;
 }
 
-export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => {
+// The log is a running history, so it needs a ceiling: a long session with
+// live measurements can raise thousands of notifications, each holding its
+// metadata.
+const MAX_LOG_ENTRIES = 500;
+
+export const ToastProvider: React.FC<{
+  children: React.ReactNode;
+  /** How many notifications the log keeps; only tests pass a smaller one. */
+  maxLogEntries?: number;
+}> = ({ children, maxLogEntries = MAX_LOG_ENTRIES }) => {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
@@ -33,31 +44,30 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
       duration: number = 3000,
       source?: string,
       metadata?: any,
+      action?: ToastAction,
     ) => {
-      const id =
-        Date.now().toString() + Math.random().toString(36).substr(2, 9);
-      const newToast: ToastItem = { id, message, type, duration };
+      const id = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      const newToast: ToastItem = { id, message, type, duration, action };
 
       setToasts((prev) => [...prev, newToast]);
-      setLogs((prev) => [
-        {
-          id,
-          message,
-          type,
-          timestamp: new Date().toISOString(),
-          source,
-          metadata,
-        },
-        ...prev,
-      ]);
+      setLogs((prev) =>
+        [
+          {
+            id,
+            message,
+            type,
+            timestamp: new Date().toISOString(),
+            source,
+            metadata,
+          },
+          ...prev,
+        ].slice(0, maxLogEntries),
+      );
 
-      // Auto-remove toast after duration
-      setTimeout(() => {
-        setToasts((prev) => prev.filter((toast) => toast.id !== id));
-      }, duration);
+      // Each card owns its pausable dismiss timer.
     },
-    [],
-  ); // No dependencies - uses setToasts functional update
+    [maxLogEntries],
+  ); // Otherwise independent: it uses the setToasts/setLogs updaters
 
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
@@ -71,10 +81,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
     setIsLogModalOpen(false);
   });
 
-  const contextValue = useMemo(
-    () => ({ showToast, openLogModal }),
-    [showToast, openLogModal],
-  );
+  const contextValue = useMemo(() => ({ showToast, openLogModal }), [showToast, openLogModal]);
 
   return (
     <ToastContext.Provider value={contextValue}>
@@ -90,21 +97,81 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 };
 
+// Collapse notifications into a deck and expand them on hover.
+const STACK_PEEK_PX = 10;
+const STACK_SCALE_STEP = 0.04;
+const STACK_GAP_PX = 8;
+const CARDS_VISIBLE_IN_STACK = 3;
+// Fallback until a card has been measured.
+const ASSUMED_CARD_HEIGHT_PX = 56;
+
 const ToastContainer: React.FC<{
   toasts: ToastItem[];
   onRemove: (id: string) => void;
 }> = ({ toasts, onRemove }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [heights, setHeights] = useState<Record<string, number>>({});
+
+  // Index zero is the front card.
+  const ordered = useMemo(() => [...toasts].reverse(), [toasts]);
+
+  const measure = useCallback((id: string, node: HTMLDivElement | null) => {
+    if (!node) return;
+    const height = node.offsetHeight;
+    setHeights((prev) => (prev[id] === height ? prev : { ...prev, [id]: height }));
+  }, []);
+
+  useEffect(() => {
+    if (!toasts.length) setIsExpanded(false);
+  }, [toasts.length]);
+
+  if (!ordered.length) return null;
+
+  // Expanded cards clear the full height of those before them.
+  const offsets = ordered.map((_, index) =>
+    isExpanded
+      ? ordered
+          .slice(0, index)
+          .reduce(
+            (sum, front) => sum + (heights[front.id] || ASSUMED_CARD_HEIGHT_PX) + STACK_GAP_PX,
+            0,
+          )
+      : index * STACK_PEEK_PX,
+  );
+
   return (
-    <div className="fixed bottom-4 right-4 z-50 space-y-2">
-      {toasts.map((toast) => (
-        <Toast
-          key={toast.id}
-          message={toast.message}
-          type={toast.type}
-          duration={toast.duration}
-          onClose={() => onRemove(toast.id)}
-        />
-      ))}
+    <div
+      className="fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))]"
+      onMouseEnter={() => setIsExpanded(true)}
+      onMouseLeave={() => setIsExpanded(false)}
+    >
+      {ordered.map((toast, index) => {
+        const buried = !isExpanded && index >= CARDS_VISIBLE_IN_STACK;
+        return (
+          <div
+            key={toast.id}
+            ref={(node) => measure(toast.id, node)}
+            className="absolute bottom-0 right-0 w-full origin-bottom transition-all duration-200 ease-out"
+            style={{
+              transform: `translateY(${-offsets[index]}px) scale(${
+                isExpanded ? 1 : 1 - index * STACK_SCALE_STEP
+              })`,
+              zIndex: ordered.length - index,
+              opacity: buried ? 0 : 1,
+              pointerEvents: buried ? "none" : "auto",
+            }}
+          >
+            <Toast
+              message={toast.message}
+              type={toast.type}
+              duration={toast.duration}
+              action={toast.action}
+              paused={isExpanded}
+              onClose={() => onRemove(toast.id)}
+            />
+          </div>
+        );
+      })}
     </div>
   );
 };
@@ -115,11 +182,14 @@ const Toast: React.FC<ToastProps> = ({
   duration = 3000,
   onClose,
   className = "",
+  action,
+  paused = false,
 }) => {
   const [isVisible, setIsVisible] = useState(true);
   const [isExiting, setIsExiting] = useState(false);
 
   useEffect(() => {
+    if (paused) return;
     const timer = setTimeout(() => {
       setIsExiting(true);
       setTimeout(() => {
@@ -129,7 +199,7 @@ const Toast: React.FC<ToastProps> = ({
     }, duration);
 
     return () => clearTimeout(timer);
-  }, [duration, onClose]);
+  }, [duration, onClose, paused]);
 
   const getToastStyles = () => {
     switch (type) {
@@ -175,15 +245,26 @@ const Toast: React.FC<ToastProps> = ({
         flex items-center space-x-3 p-4 rounded-lg border shadow-lg transition-all duration-200
         ${styles.bg} ${styles.border} ${styles.text}
         ${
-          isExiting
-            ? "opacity-0 transform translate-x-full"
-            : "opacity-100 transform translate-x-0"
+          isExiting ? "opacity-0 transform translate-x-full" : "opacity-100 transform translate-x-0"
         }
         ${className}
       `}
     >
       {styles.icon}
-      <span className="flex-1 text-sm font-medium">{message}</span>
+      <span className="min-w-0 flex-1 text-sm font-medium wrap-anywhere">{message}</span>
+      {action && (
+        <button
+          type="button"
+          onClick={() => {
+            action.onClick();
+            setIsVisible(false);
+            onClose?.();
+          }}
+          className="rounded px-2 py-1 text-sm font-semibold underline underline-offset-2 hover:bg-black/5"
+        >
+          {action.label}
+        </button>
+      )}
       <button
         onClick={() => {
           setIsExiting(true);

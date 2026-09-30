@@ -4,7 +4,7 @@ import { Data, Layout, Config } from "plotly.js";
 
 // Local imports
 import { PROD_BACKEND_URL } from "../config";
-import type { SliderConfig } from "../components/interfaces";
+import type { LineCut, SliderConfig } from "../components/interfaces";
 
 const API_BASE_URL = PROD_BACKEND_URL;
 
@@ -19,6 +19,7 @@ export interface PlotRequest {
   source?: "memory" | "disk"; // Source of the data (memory for live, disk for ended measurements)
   signal?: AbortSignal; // For request cancellation
   swap_xy?: boolean;
+  cut?: LineCut;
 }
 
 // SliderConfig imported from centralized interfaces
@@ -45,6 +46,7 @@ export interface PlotResponse {
   success: boolean;
   message: string;
   skip_update?: boolean; // E.g., transient error
+  invalid?: boolean; // The request is permanently invalid and should not be retried.
 }
 
 export interface TransformPlotRequest {
@@ -79,7 +81,7 @@ export class PlotAPI {
       return resp.data as PlotResponse;
     } catch (error) {
       // Handle abort errors gracefully
-      if (axios.isCancel(error) || (error as any).name === 'AbortError') {
+      if (axios.isCancel(error) || (error as any).name === "AbortError") {
         console.log("[PlotAPI] Request cancelled");
         throw error; // Re-throw to let caller handle
       }
@@ -87,15 +89,12 @@ export class PlotAPI {
       return {
         plots: [],
         success: false,
-        message:
-          error instanceof Error ? error.message : "Unknown error occurred",
+        message: error instanceof Error ? error.message : "Unknown error occurred",
       };
     }
   }
 
-  static async transformPlot(
-    request: TransformPlotRequest,
-  ): Promise<TransformPlotResponse> {
+  static async transformPlot(request: TransformPlotRequest): Promise<TransformPlotResponse> {
     try {
       const resp = await axios.post(`${API_BASE_URL}/transform-plot`, request, {
         headers: { "Content-Type": "application/json" },

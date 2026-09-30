@@ -34,6 +34,13 @@ export type ShortcutAction =
   | "toggle-sidebar"
   | "toggle-metadata"
   | "toggle-notes"
+  | "show-explorer"
+  | "show-metadata"
+  | "show-notes"
+  | "show-live"
+  | "toggle-basket"
+  | "toggle-composer"
+  | "toggle-explorer-expanded"
   | "clear-composer"
   | "clear-basket"
   | "clear-viewer"
@@ -58,6 +65,7 @@ export type ShortcutAction =
   | "selected-export-images"
   | "selected-remove-plot"
   | "toggle-help"
+  | "toggle-settings"
   | "escape";
 
 interface ShortcutConfig {
@@ -67,60 +75,70 @@ interface ShortcutConfig {
 }
 
 // Single-file mapping for all global shortcuts
-export const KEYBOARD_SHORTCUTS: Record<
-  string,
-  ShortcutConfig | ShortcutConfig[]
-> = {
+export const KEYBOARD_SHORTCUTS: Record<string, ShortcutConfig | ShortcutConfig[]> = {
   escape: { action: "escape" },
   esc: { action: "escape" },
   p: { action: "plot" },
   l: { action: "lineplot" },
-  f: { action: "selected-open-filters" },
+  f: [
+    { action: "selected-open-filters" },
+    { action: "toggle-explorer-expanded", shift: true }, // Shift+F
+  ],
   a: { action: "selected-open-appearance" },
   b: [
     { action: "selected-toggle-bgcorr" },
+    { action: "toggle-basket", alt: true }, // Alt+B
     { action: "clear-basket", alt: true, shift: true }, // Alt+Shift+B
   ],
-  s: { action: "selected-swap-axes" },
+  s: [
+    { action: "selected-swap-axes" },
+    { action: "toggle-settings", shift: true }, // Shift+S
+  ],
   x: { action: "selected-enter-linecut", shift: true },
-  "1": { action: "select-plot-1" },
-  "2": { action: "select-plot-2" },
-  "3": { action: "select-plot-3" },
-  "4": { action: "select-plot-4" },
+  // Bare digits pick a plot; Alt+digit opens the matching sidebar pane.
+  "1": [{ action: "select-plot-1" }, { action: "show-explorer", alt: true }],
+  "2": [{ action: "select-plot-2" }, { action: "show-metadata", alt: true }],
+  "3": [{ action: "select-plot-3" }, { action: "show-notes", alt: true }],
+  "4": [{ action: "select-plot-4" }, { action: "show-live", alt: true }],
   "5": { action: "select-plot-5" },
   "6": { action: "select-plot-6" },
   "7": { action: "select-plot-7" },
   "8": { action: "select-plot-8" },
   "9": { action: "select-plot-9" },
-  m: [
-    { action: "selected-toggle-maximize" },
-    { action: "toggle-metadata", shift: true },
+  m: [{ action: "selected-toggle-maximize" }, { action: "toggle-metadata", shift: true }],
+  e: [{ action: "selected-export-images" }, { action: "toggle-sidebar", shift: true }],
+  n: [{ action: "selected-send-to-notes" }, { action: "toggle-notes", shift: true }],
+  r: [{ action: "selected-reset-plot" }, { action: "refresh-dir", shift: true }],
+  c: [
+    { action: "toggle-composer", alt: true }, // Alt+C
+    { action: "clear-composer", alt: true, shift: true }, // Alt+Shift+C
   ],
-  e: [
-    { action: "selected-export-images" },
-    { action: "toggle-sidebar", shift: true },
-  ],
-  n: [
-    { action: "selected-send-to-notes" },
-    { action: "toggle-notes", shift: true },
-  ],
-  r: [
-    { action: "selected-reset-plot" },
-    { action: "refresh-dir", shift: true },
-  ],
-  c: { action: "clear-composer", alt: true, shift: true }, // Alt+Shift+C
-  v: { action: "clear-viewer", alt: true, shift: true },   // Alt+Shift+V
+  v: { action: "clear-viewer", alt: true, shift: true }, // Alt+Shift+V
   h: [
     { action: "heatmap" },
-    { action: "toggle-help", shift: true },                 // Shift+H
+    { action: "toggle-help", shift: true }, // Shift+H
   ],
-  "delete": { action: "selected-remove-plot" },
+  delete: { action: "selected-remove-plot" },
+};
+
+// macOS composes Option+<key> into a different character, so e.key never
+// matches an Alt shortcut there. e.code names the physical key and is
+// unaffected, so fall back to it while Alt is held. Only while Alt is held:
+// on non-QWERTY layouts e.code is the QWERTY position, not the printed key,
+// and using it for bare letters would fire the wrong shortcut.
+const physicalKey = (e: KeyboardEvent): string | null => {
+  const code = e.code;
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3).toLowerCase();
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  if (/^Numpad[0-9]$/.test(code)) return code.slice(6);
+  return null;
 };
 
 export const useGlobalShortcutsInit = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
+      const altKey = e.altKey ? physicalKey(e) : null;
       // Always allow Escape, even when an input/textarea has focus.
       if (e.repeat || (key !== "escape" && key !== "esc" && isEditableTarget(e.target))) {
         return;
@@ -131,20 +149,22 @@ export const useGlobalShortcutsInit = () => {
         return;
       }
 
-      for (const [mappedKey, rawConfig] of Object.entries(KEYBOARD_SHORTCUTS)) {
-        if (key === mappedKey) {
-          const configs = Array.isArray(rawConfig) ? rawConfig : [rawConfig];
-          for (const config of configs) {
-            const requiresAlt = config.alt || false;
-            const requiresShift = config.shift || false;
+      // Physical key first, composed character second: on a non-QWERTY layout
+      // e.code is the QWERTY position, so e.key stays the fallback.
+      const candidates = altKey && altKey !== key ? [altKey, key] : [key];
 
-            if (e.altKey === requiresAlt && e.shiftKey === requiresShift) {
-              e.preventDefault();
-              window.dispatchEvent(
-                new CustomEvent(`qimchi:shortcut:${config.action}`)
-              );
-              return;
-            }
+      for (const candidate of candidates) {
+        const rawConfig = KEYBOARD_SHORTCUTS[candidate];
+        if (!rawConfig) continue;
+        const configs = Array.isArray(rawConfig) ? rawConfig : [rawConfig];
+        for (const config of configs) {
+          const requiresAlt = config.alt || false;
+          const requiresShift = config.shift || false;
+
+          if (e.altKey === requiresAlt && e.shiftKey === requiresShift) {
+            e.preventDefault();
+            window.dispatchEvent(new CustomEvent(`qimchi:shortcut:${config.action}`));
+            return;
           }
         }
       }

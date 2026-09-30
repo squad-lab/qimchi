@@ -1,29 +1,23 @@
-import {
-  Menu,
-  ChevronLeft,
-  FolderTree,
-  NotebookPen,
-  BadgeInfo,
-} from "lucide-react";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { useEffect, useRef } from "react";
+import { Panel, PanelResizeHandle, type ImperativePanelHandle } from "react-resizable-panels";
 
 // Local imports
 import Notes from "./Notes";
 import Explorer from "./Explorer";
+import ExplorerLayer from "./ExplorerLayer";
 import Metadata from "./Metadata";
 import BrandingFooter from "./BrandingFooter";
 import { TreeNode } from "./treeUtils";
 import { BasketItem } from "./Basket";
 import { AttrData } from "./interfaces";
-import { useSidebarStore } from "../stores/sidebarStore";
-import { themeClasses } from "../theme";
+import { useSidebarStore, SidebarSection, explorerSections } from "../stores/sidebarStore";
 
 // Type definitions for props
 interface SidebarProps {
   defaultWidth?: number; // In percentage (0-100)
   onSelectNode: (node: TreeNode) => void;
   basketItems: BasketItem[];
-  onAddToBasket: (item: BasketItem) => void;
+  onAddToBasket: (item: BasketItem) => boolean;
   onRemoveBasketItem: (id: string) => void;
   onUpdateBasketItemAttributes: (itemId: string, attributes: AttrData) => void;
   onStartLoadingAttributes: (itemId: string) => void;
@@ -33,11 +27,7 @@ interface SidebarProps {
   notesSelectedItemId: string | null;
   onNotesSelectedItemChange: (itemId: string | null) => void;
   onCycleDataset?: (direction: "prev" | "next") => void; // For cycling through datasets
-  onOpenHelp?: () => void; // For opening the Help modal
 }
-
-const sectionButtonBaseClass =
-  "text-lg font-semibold p-2 transition-colors w-full text-center";
 
 const Sidebar = ({
   defaultWidth = 20,
@@ -52,28 +42,30 @@ const Sidebar = ({
   notesSelectedItemId,
   onNotesSelectedItemChange,
   onCycleDataset,
-  onOpenHelp,
 }: SidebarProps) => {
   // Use Zustand store for panel states
   const {
     sidebarCollapsed,
-    explorerCollapsed,
-    metadataCollapsed,
-    notesCollapsed,
+    activeSection,
+    explorerExpanded,
     setSidebarCollapsed,
-    setExplorerCollapsed,
-    setMetadataCollapsed,
     setNotesCollapsed,
   } = useSidebarStore();
+  const panelRef = useRef<ImperativePanelHandle>(null);
+
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    if (sidebarCollapsed && !panel.isCollapsed()) panel.collapse();
+    if (!sidebarCollapsed && panel.isCollapsed()) panel.expand();
+  }, [sidebarCollapsed]);
 
   const handleSelectNode = (node: TreeNode) => {
     onSelectNode(node);
     // console.log("Selected node:", node);
   };
 
-  const handleAddToBasket = (item: BasketItem) => {
-    onAddToBasket(item);
-  };
+  const handleAddToBasket = (item: BasketItem) => onAddToBasket(item);
 
   const handleOpenNotes = (node: TreeNode) => {
     // Ensure sidebar and Notes panel are visible before opening notes
@@ -82,139 +74,65 @@ const Sidebar = ({
     onOpenNotes(node);
   };
 
+  // Sections stay mounted and are hidden with `display: none` so switching tabs
+  // keeps DirTree's tree, the metadata search and unsaved note text alive.
+  const sectionStyle = (id: SidebarSection) => ({
+    display: activeSection === id ? "block" : "none",
+  });
+
+  // Explorer and Live are the same component in two modes, so the pane is shown
+  // for either tab (see SidebarSection in stores/sidebarStore).
+  const explorerStyle = {
+    display: activeSection !== null && explorerSections.includes(activeSection) ? "block" : "none",
+  };
+
   return (
     <>
-      {/* Sidebar collapse/expand button */}
-      <button
-        onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-        className="p-2 rounded hover:bg-gray-200"
-        title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-      >
-        {sidebarCollapsed ? <Menu size={15} /> : <ChevronLeft size={15} />}
-      </button>
-      {/* Sidebar */}
+      {/* Sidebar body: exactly one section, full height */}
       <Panel
+        ref={panelRef}
         defaultSize={defaultWidth}
         collapsible
-        // TODOLATER: Remove if the skip is annoying.
-        minSize={sidebarCollapsed ? 0 : 18}
-        className={`${sidebarCollapsed ? "max-w-0" : ""}`}
-        style={{ display: sidebarCollapsed ? "none" : "block" }}
+        collapsedSize={0}
+        minSize={18}
+        onCollapse={() => setSidebarCollapsed(true)}
+        onExpand={() => setSidebarCollapsed(false)}
       >
-        <div className="flex flex-col h-screen">
-          <div className="flex-1 overflow-hidden">
-            <PanelGroup
-              direction="vertical"
-              className="h-full"
-              autoSaveId="qimchi-sidebar-layout"
-            >
-              {/* Explorer */}
-              <button
-                onClick={() => setExplorerCollapsed(!explorerCollapsed)}
-                className={`${sectionButtonBaseClass} ${
-                  themeClasses.accentBg
-                } ${themeClasses.accentHoverBg} ${
-                  explorerCollapsed ? "mb-0" : "mb-0"
-                }`}
-                title={
-                  explorerCollapsed ? "Expand Explorer" : "Collapse Explorer"
-                }
-              >
-                <h2 className="flex items-center justify-center gap-2">
-                  <FolderTree size={20} /> Explorer
-                </h2>
-              </button>
-              <Panel
-                order={1}
-                collapsible
-                className={"bg-gray-100" + (explorerCollapsed ? " p-2" : "")}
-                style={{ display: explorerCollapsed ? "none" : "block" }}
-              >
-                <Explorer
-                  onSelectNode={handleSelectNode}
-                  basketItems={basketItems}
-                  onAddToBasket={handleAddToBasket}
-                  onRemoveBasketItem={onRemoveBasketItem}
-                  onUpdateBasketItemAttributes={onUpdateBasketItemAttributes}
-                  onStartLoadingAttributes={onStartLoadingAttributes}
-                  onOpenNotes={handleOpenNotes}
-                  onOpenSampleNotes={onOpenSampleNotes}
-                  onCycleDataset={onCycleDataset}
-                  onOpenHelp={onOpenHelp}
-                />
-              </Panel>
-
-              {/* Metadata */}
-              <PanelResizeHandle
-                className="h-1.5 bg-gray-300 hover:bg-blue-500 transition-colors"
-                style={{ display: metadataCollapsed ? "none" : "block" }}
+        <div className="flex flex-col h-full">
+          <div className="flex-1 overflow-hidden bg-gray-100" data-tour="sidebar">
+            <ExplorerLayer expanded={explorerExpanded} style={explorerStyle}>
+              <Explorer
+                onSelectNode={handleSelectNode}
+                basketItems={basketItems}
+                onAddToBasket={handleAddToBasket}
+                onRemoveBasketItem={onRemoveBasketItem}
+                onUpdateBasketItemAttributes={onUpdateBasketItemAttributes}
+                onStartLoadingAttributes={onStartLoadingAttributes}
+                onOpenNotes={handleOpenNotes}
+                onOpenSampleNotes={onOpenSampleNotes}
+                onCycleDataset={onCycleDataset}
               />
-              <button
-                onClick={() => setMetadataCollapsed(!metadataCollapsed)}
-                className={`${sectionButtonBaseClass} ${
-                  themeClasses.accentBg
-                } ${themeClasses.accentHoverBg} ${
-                  metadataCollapsed ? "mb-0" : "mb-0"
-                }`}
-                title={
-                  metadataCollapsed ? "Expand Metadata" : "Collapse Metadata"
-                }
-              >
-                <h2 className="flex items-center justify-center gap-2">
-                  <BadgeInfo size={21} /> Metadata
-                </h2>
-              </button>
-              <Panel
-                order={2}
-                collapsible
-                className={"bg-gray-100" + (notesCollapsed ? " p-2" : "")}
-                style={{ display: metadataCollapsed ? "none" : "block" }}
-              >
-                <Metadata basketItems={basketItems} />
-              </Panel>
+            </ExplorerLayer>
 
-              {/* Notes */}
-              <PanelResizeHandle
-                className="h-1.5 bg-gray-300 hover:bg-blue-500 transition-colors"
-                style={{ display: notesCollapsed ? "none" : "block" }}
+            <div className="h-full" style={sectionStyle("metadata")}>
+              <Metadata basketItems={basketItems} />
+            </div>
+
+            <div className="h-full" style={sectionStyle("notes")}>
+              <Notes
+                basketItems={basketItems}
+                isCollapsed={activeSection !== "notes"}
+                selectedItemId={notesSelectedItemId}
+                onSelectedItemChange={onNotesSelectedItemChange}
               />
-              <button
-                onClick={() => setNotesCollapsed(!notesCollapsed)}
-                className={`${sectionButtonBaseClass} ${
-                  themeClasses.accentBg
-                } ${themeClasses.accentHoverBg} ${
-                  notesCollapsed ? "mb-0" : "mb-0"
-                }`}
-                title={notesCollapsed ? "Expand Notes" : "Collapse Notes"}
-              >
-                <h2 className="flex items-center justify-center gap-2">
-                  <NotebookPen size={20} /> Notes
-                </h2>
-              </button>
-              <Panel
-                order={3}
-                collapsible
-                className={"bg-gray-100" + (notesCollapsed ? " p-2" : "")}
-                style={{ display: notesCollapsed ? "none" : "block" }}
-              >
-                <Notes
-                  basketItems={basketItems}
-                  isCollapsed={notesCollapsed}
-                  selectedItemId={notesSelectedItemId}
-                  onSelectedItemChange={onNotesSelectedItemChange}
-                />
-              </Panel>
-            </PanelGroup>
+            </div>
           </div>
 
           {/* Branding Footer */}
           <BrandingFooter />
         </div>
       </Panel>
-      <PanelResizeHandle
-        className="w-1.5 bg-gray-300 hover:bg-blue-500 transition-colors"
-        style={{ display: sidebarCollapsed ? "none" : "block" }}
-      />
+      <PanelResizeHandle className="w-1.5 bg-gray-300 hover:bg-blue-500 transition-colors" />
     </>
   );
 };

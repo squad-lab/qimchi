@@ -106,6 +106,15 @@ This is the easiest and most stable integration path.
 - NetCDF/HDF5: `NetcdfHdf5Provider` in `backend/api/data_loader.py`
   - Uses xarray engines and normalized dependency errors.
 
+- MATLAB (`.mat`, v4 to v7.3): `MatlabProvider` in `backend/api/data_loader.py`
+  - Reads v4 to v7 files with `scipy.io.loadmat`, and `-v7.3` files (HDF5 inside) with h5py, decoded into the same values `loadmat` gives. Evenly ordered 1-D arrays become coordinates and every other array is laid out over them.
+  - Scalars, text and struct fields go into the dataset's attributes. They show up as metadata.
+  - In `-v7.3` files, empty arrays, sparse matrices, function handles and MATLAB objects are skipped. Without h5py, a `-v7.3` file is refused with a message saying how to re-save it.
+
+## Complex-Valued Data
+
+You don't need to handle complex numbers yourself. Whatever a provider returns passes through `load_data_sync` / `load_data_async`, which split every complex data variable into `<name>_amplitude`, `<name>_phase` (radians), `<name>_real` and `<name>_imag`. The measurement's identity is unchanged by the split, so hearts, tags and notes stay attached.
+
 ## Optional UX Integration (Discovery + Frontend)
 
 For custom file suffixes to appear in the file tree and be selectable in UI:
@@ -113,7 +122,8 @@ For custom file suffixes to appear in the file tree and be selectable in UI:
 1. Update directory discovery in `backend/api/dirtree.py`:
    - Include new suffix in `fd` search.
    - Assign a dataset tag for nodes.
-2. Update frontend recognition in `frontend/src/utils/datasetPaths.ts`:
+2. Add the suffix to the dataset lists in `backend/api/download.py` (folder and multi-file downloads) and `backend/api/notes.py` (the pooled sample notes).
+3. Update frontend recognition in `frontend/src/utils/datasetPaths.ts`:
    - Add extension(s) and tag(s).
 
 If you only load by explicit path/API calls, this step is optional.

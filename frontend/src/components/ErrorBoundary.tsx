@@ -5,6 +5,8 @@
 
 import React from "react";
 
+import { reportClientError } from "../utils/clientLog";
+
 interface ErrorBoundaryState {
   hasError: boolean;
   error?: Error;
@@ -15,10 +17,7 @@ interface ErrorBoundaryProps {
   fallback?: React.ReactNode;
 }
 
-class ErrorBoundary extends React.Component<
-  ErrorBoundaryProps,
-  ErrorBoundaryState
-> {
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
@@ -30,6 +29,11 @@ class ErrorBoundary extends React.Component<
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error("Error caught by boundary:", error, errorInfo);
+    reportClientError(
+      `${error.name}: ${error.message}`,
+      `${error.stack ?? ""}${errorInfo.componentStack ?? ""}`,
+      "ErrorBoundary",
+    );
   }
 
   render() {
@@ -37,25 +41,18 @@ class ErrorBoundary extends React.Component<
       return (
         this.props.fallback || (
           <div className="p-6 bg-red-50 border border-red-200 rounded-lg m-4">
-            <h2 className="text-lg font-semibold text-red-800 mb-2">
-              Something went wrong
-            </h2>
+            <h2 className="text-lg font-semibold text-red-800 mb-2">Something went wrong</h2>
             <p className="text-red-600 mb-4">
-              An error occurred while processing your request. Please try
-              refreshing the page.
+              An error occurred while processing your request. Please try refreshing the page.
             </p>
             <details className="text-sm text-red-700">
-              <summary className="cursor-pointer font-medium">
-                Error details
-              </summary>
+              <summary className="cursor-pointer font-medium">Error details</summary>
               <pre className="mt-2 bg-red-100 p-2 rounded text-xs overflow-auto">
                 {this.state.error?.toString()}
               </pre>
             </details>
             <button
-              onClick={() =>
-                this.setState({ hasError: false, error: undefined })
-              }
+              onClick={() => this.setState({ hasError: false, error: undefined })}
               className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
             >
               Try Again

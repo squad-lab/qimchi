@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 
 interface TooltipProps {
@@ -16,6 +16,9 @@ const Tooltip: React.FC<TooltipProps> = ({
 }) => {
   const [isVisible, setIsVisible] = useState(false);
   const [positionClass, setPositionClass] = useState("");
+  // The side actually used, which may differ from `position` when the
+  // requested side has no room (see the flip below). The arrow follows this.
+  const [resolvedPosition, setResolvedPosition] = useState(position);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
   const portalRef = useRef<HTMLDivElement | null>(null);
@@ -27,6 +30,22 @@ const Tooltip: React.FC<TooltipProps> = ({
 
     const triggerRect = triggerRef.current.getBoundingClientRect();
 
+    // Flip a top/bottom tooltip to the other side when the requested one would
+    // run off the viewport -- buttons in a toolbar sitting at y=0 (the section
+    // rail, the Explorer path row) otherwise render their tooltip off-screen.
+    // The tooltip is not mounted yet, so its extent has to be estimated; this
+    // is deliberately generous so a two-line tooltip still flips.
+    const TOOLTIP_CLEARANCE = 56;
+    let side = position;
+    if (position === "top" && triggerRect.top < TOOLTIP_CLEARANCE) {
+      side = "bottom";
+    } else if (
+      position === "bottom" &&
+      window.innerHeight - triggerRect.bottom < TOOLTIP_CLEARANCE
+    ) {
+      side = "top";
+    }
+
     // Compute coords in viewport space and set CSS variables on :root so
     // the portal-rendered tooltip can use position:fixed and escape ancestor
     // clipping (overflow:hidden). This avoids inline styles which trigger
@@ -35,7 +54,7 @@ const Tooltip: React.FC<TooltipProps> = ({
     let top = triggerRect.top;
     let transform = "translate(-50%, -100%)";
 
-    switch (position) {
+    switch (side) {
       case "top":
         top = triggerRect.top - 8;
         transform = "translate(-50%, -100%)";
@@ -74,18 +93,37 @@ const Tooltip: React.FC<TooltipProps> = ({
       // ignore in SSR or restricted environments
     }
 
-    setPositionClass(`tooltip-${position}`);
+    setPositionClass(`tooltip-${side}`);
+    setResolvedPosition(side);
   }, [position]);
 
   // No rAF: we compute position before mounting the tooltip so it doesn't flash at 0,0
 
+  // Keep a long tooltip inside the window: shift it back by however far it spills over.
+  useLayoutEffect(() => {
+    const tooltip = tooltipRef.current;
+    const container = portalRef.current;
+    if (!isVisible || !tooltip || !container) return;
+    const MARGIN = 8;
+    const rect = tooltip.getBoundingClientRect();
+    const shift = (start: number, end: number, limit: number) =>
+      start < MARGIN ? MARGIN - start : end > limit - MARGIN ? limit - MARGIN - end : 0;
+    const dx = shift(rect.left, rect.right, window.innerWidth);
+    const dy = shift(rect.top, rect.bottom, window.innerHeight);
+    if (dx) {
+      const left = parseFloat(container.style.getPropertyValue("--tooltip-left")) || 0;
+      container.style.setProperty("--tooltip-left", `${left + dx}px`);
+    }
+    if (dy) {
+      const top = parseFloat(container.style.getPropertyValue("--tooltip-top")) || 0;
+      container.style.setProperty("--tooltip-top", `${top + dy}px`);
+    }
+  }, [isVisible, content]);
+
   // When tooltip mounts, set aria-hidden appropriately
   useEffect(() => {
     if (!tooltipRef.current) return;
-    tooltipRef.current.setAttribute(
-      "aria-hidden",
-      isVisible ? "false" : "true"
-    );
+    tooltipRef.current.setAttribute("aria-hidden", isVisible ? "false" : "true");
   }, [isVisible]);
 
   // Use pointer events and short timers to avoid flicker / race conditions when quickly moving pointer
@@ -180,10 +218,8 @@ const Tooltip: React.FC<TooltipProps> = ({
         if (tooltipEl && path.includes(tooltipEl)) clickedInside = true;
       } else {
         const target = e.target as Node | null;
-        if (triggerEl && target && triggerEl.contains(target))
-          clickedInside = true;
-        if (tooltipEl && target && tooltipEl.contains(target))
-          clickedInside = true;
+        if (triggerEl && target && triggerEl.contains(target)) clickedInside = true;
+        if (tooltipEl && target && tooltipEl.contains(target)) clickedInside = true;
       }
 
       if (!clickedInside) hideTooltipImmediate();
@@ -220,7 +256,7 @@ const Tooltip: React.FC<TooltipProps> = ({
               ref={tooltipRef}
               role="tooltip"
               className={
-                `tooltip-positioned ${positionClass} px-3 py-2 text-sm text-white bg-gray-900 rounded-lg shadow-lg transition-opacity duration-150 ` +
+                `tooltip-positioned pointer-events-none ${positionClass} px-3 py-2 text-sm text-white bg-gray-900 rounded-lg shadow-lg transition-opacity duration-150 ` +
                 (isVisible ? "opacity-100" : "opacity-0")
               }
             >
@@ -228,19 +264,19 @@ const Tooltip: React.FC<TooltipProps> = ({
               {/* Small arrow attached to the tooltip */}
               <div
                 className={`absolute w-2 h-2 bg-gray-900 transform rotate-45 ${
-                  position === "top"
+                  resolvedPosition === "top"
                     ? "bottom-[-4px] left-1/2 -translate-x-1/2"
-                    : position === "bottom"
-                    ? "top-[-4px] left-1/2 -translate-x-1/2"
-                    : position === "left"
-                    ? "right-[-4px] top-1/2 -translate-y-1/2"
-                    : position === "center"
-                    ? "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
-                    : "left-[-4px] top-1/2 -translate-y-1/2"
+                    : resolvedPosition === "bottom"
+                      ? "top-[-4px] left-1/2 -translate-x-1/2"
+                      : resolvedPosition === "left"
+                        ? "right-[-4px] top-1/2 -translate-y-1/2"
+                        : resolvedPosition === "center"
+                          ? "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+                          : "left-[-4px] top-1/2 -translate-y-1/2"
                 }`}
               />
             </div>,
-            portalRef.current
+            portalRef.current,
           )
         : null}
     </>

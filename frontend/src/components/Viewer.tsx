@@ -2,12 +2,21 @@ import axios from "axios";
 import { PROD_BACKEND_URL } from "../config";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Panel } from "react-resizable-panels";
-import { ChartScatter } from "lucide-react";
+import {
+  ChartScatter,
+  CopyPlus,
+  ImageDown,
+  Loader2,
+  Radio,
+  RulerDimensionLine,
+  Trash2,
+} from "lucide-react";
 
 // Local imports
 import Basket, { BasketFieldSelection, BasketItem } from "./Basket";
 import { TreeNode } from "./treeUtils";
 import { AttrData } from "./interfaces";
+import { axisCombinations, missingAxesMessage } from "../utils/composerAxes";
 import PlotComposer, {
   ComposerSelectionSnapshot,
   PlotComposerHandle,
@@ -15,15 +24,19 @@ import PlotComposer, {
 } from "./PlotComposer";
 import PlotContainer from "./PlotContainer";
 import { usePlotCollection } from "../hooks/usePlotCollection";
+import { collectPlotExports, exportManyPlotImages } from "../services/exportAPI";
 import { usePlotStore } from "../stores/plotStore";
 import { useSidebarStore } from "../stores/sidebarStore";
+import SectionRibbon, { ribbonButtonClass } from "./SectionRibbon";
 import { useToast } from "../hooks/useToast";
 import Tooltip from "./Tooltip";
-import { generateAutoPlotConfigs } from "../utils/autoPlot";
+import RibbonFlyout from "./Plots/RibbonFlyout";
 import {
-  useGlobalShortcutsInit,
-  useShortcut,
-} from "../hooks/useGlobalShortcuts";
+  generateAutoPlotConfigs,
+  replicatePlots,
+  selectReplicationSources,
+} from "../utils/autoPlot";
+import { useGlobalShortcutsInit, useShortcut } from "../hooks/useGlobalShortcuts";
 import {
   computeSharedFields,
   getEligibleDatasetsForComposer,
@@ -31,6 +44,10 @@ import {
   isComposerCompatibleWithDataset,
 } from "../utils/datasetFieldSelectors";
 import { isDatasetPath, isMemoryPath } from "../utils/datasetPaths";
+import { finishArchiveDownload } from "../utils/download";
+import { useSettingsStore } from "../stores/settingsStore";
+import { PLOT_WIDTHS, type PlotWidthPercent } from "../settings/userSettings";
+import { useWalkthroughStore } from "../walkthrough/walkthroughStore";
 
 interface ViewerProps {
   defaultWidth?: number; // In percentage (0-100)
@@ -38,7 +55,7 @@ interface ViewerProps {
   basketItems: BasketItem[];
   onRemoveBasketItem: (id: string) => void;
   onClearBasket: () => void;
-  onAddToBasket: (item: BasketItem) => void;
+  onAddToBasket: (item: BasketItem) => boolean;
   selectedNode?: TreeNode | null;
   loadingAttributes: Set<string>;
   onStartLoadingAttributes: (itemId: string) => void;
@@ -57,9 +74,32 @@ const Viewer = ({
   onUpdateBasketItemAttributes,
   onOpenNotesItem,
 }: ViewerProps) => {
-  const { plotConfigs, addPlot, removePlot, clearPlots, updatePlotDataSource } =
-    usePlotCollection();
+  const {
+    plotConfigs,
+    addPlot,
+    addPlots,
+    removePlot,
+    movePlot,
+    setPlotPinned,
+    clearPlots,
+    updatePlotDataSource,
+  } = usePlotCollection();
   const { getPlotState } = usePlotStore();
+
+  const plotConfigsRef = useRef(plotConfigs);
+  plotConfigsRef.current = plotConfigs;
+  const registerWalkthrough = useWalkthroughStore((state) => state.registerBridge);
+  useEffect(
+    () =>
+      registerWalkthrough({
+        plots: () => plotConfigsRef.current,
+        addPlot,
+        removePlot,
+        clearPlots,
+        clearComposer: () => composerActionRef.current?.clearComposer(),
+      }),
+    [registerWalkthrough, addPlot, removePlot, clearPlots],
+  );
   const {
     sidebarCollapsed,
     metadataCollapsed,
@@ -69,26 +109,34 @@ const Viewer = ({
     setNotesCollapsed,
   } = useSidebarStore();
   const { showToast } = useToast();
-  // Global default percent and per-plot overrides
-  const [plotWidthPercent, setPlotWidthPercent] = useState<number>(50);
-  const [perPlotWidthMap, setPerPlotWidthMap] = useState<
-    Record<string, number>
-  >({});
-  // Global squarify toggle affecting all plots
-  const [isSquareModeGlobal, setIsSquareModeGlobal] = useState<boolean>(false);
-  const [selectedDatasetIds, setSelectedDatasetIds] = useState<Set<string>>(
-    new Set(),
-  );
+  // The width and squarify buttons edit the saved settings; per-plot widths
+  // are for this session only.
+  const plotWidthPercent = useSettingsStore((state) => state.settings.general.plotWidth);
+  const isSquareModeGlobal = useSettingsStore((state) => state.settings.plots.squarify);
+  const recreateCustomPlots = useSettingsStore((state) => state.settings.plots.recreateCustomPlots);
+  // Preserve hidden plot state while displaying only live or pinned plots.
+  const liveOnlyPlots = useSidebarStore((state) => state.liveOnlyPlots);
+  const setLiveOnlyPlots = useSidebarStore((state) => state.setLiveOnlyPlots);
+  const plottingBehaviour = useSettingsStore((state) => state.settings.plots.plottingBehaviour);
+  const setPlotWidthPercent = (percent: number) => {
+    if (PLOT_WIDTHS.includes(percent as PlotWidthPercent)) {
+      useSettingsStore.getState().update(["general", "plotWidth"], percent);
+    }
+  };
+  const [perPlotWidthMap, setPerPlotWidthMap] = useState<Record<string, number>>({});
+  const [selectedDatasetIds, setSelectedDatasetIds] = useState<Set<string>>(new Set());
   const [selectedPlotId, setSelectedPlotId] = useState<string | null>(null);
-  const [viewerHeight, setViewerHeight] = useState<string>(
-    "calc(100vh - 200px)",
-  );
+  const [viewerHeight, setViewerHeight] = useState<string>("calc(100vh - 200px)");
 
   const basketRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const composerActionRef = useRef<PlotComposerHandle | null>(null);
   const previousBasketItems = useRef<BasketItem[]>([]);
+  // Read the latest setting without retriggering the auto-plot effect.
+  const recreateCustomPlotsRef = useRef(recreateCustomPlots);
+  recreateCustomPlotsRef.current = recreateCustomPlots;
+
   const processedAutoPlotItems = useRef<Set<string>>(new Set());
   const previousSelectionKeyRef = useRef<string>("");
 
@@ -102,10 +150,7 @@ const Viewer = ({
     );
 
     const buildMemoryPath = (item: BasketItem): string | null => {
-      const baseName = item.name?.replace(
-        /\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i,
-        "",
-      );
+      const baseName = item.name?.replace(/\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i, "");
       if (!baseName) {
         return null;
       }
@@ -135,14 +180,10 @@ const Viewer = ({
 
       if (!newIsMemory) {
         if (sameDataset && prevIsMemory) {
-          // Preserve the memory path we were already using for the same dataset
+          // Preserve the existing live-memory path.
           preferredPath = prevItem.path;
-        } else if (
-          isDatasetPath(newItem.path) &&
-          isLiveDataset &&
-          !isDiskFallback
-        ) {
-          // Prefer the memory URI when the basket item represents a live dataset with an in-memory store
+        } else if (isDatasetPath(newItem.path) && isLiveDataset && !isDiskFallback) {
+          // Prefer live memory while the dataset is still available there.
           const memoryPath = buildMemoryPath(newItem);
           if (memoryPath) {
             preferredPath = memoryPath;
@@ -150,15 +191,18 @@ const Viewer = ({
         }
       }
 
-      const preferMemory =
-        isMemoryPath(preferredPath) || isMemoryPath(prevItem.path);
+      const preferMemory = isMemoryPath(preferredPath) || isMemoryPath(prevItem.path);
 
-      updatePlotDataSource(preferredPath, { preferMemory });
-      console.log(
-        `Updated ${plotConfigs.length} plots with new dataset: ${preferredPath}`,
-      );
+      updatePlotDataSource(preferredPath, {
+        preferMemory,
+        // Lets a pinned plot's follower inherit its applied filters (those
+        // live in plotStore, keyed by plot id, so they cannot be cloned).
+        getFilters: (plotId) => getPlotState(plotId)?.applied_filters,
+        getPresetId: (plotId) => getPlotState(plotId)?.filter_preset_id,
+      });
+      console.log(`Updated ${plotConfigs.length} plots with new dataset: ${preferredPath}`);
 
-      // Keep the "previous" snapshot aligned with the path we actually applied to avoid flip-flop churn
+      // Track the applied path to prevent path oscillation.
       nextPreviousItems = basketItems.map((item) =>
         item.id === newItem.id ? { ...item, path: preferredPath } : item,
       );
@@ -166,7 +210,7 @@ const Viewer = ({
 
     // Update the reference for next comparison
     previousBasketItems.current = nextPreviousItems;
-  }, [basketItems, plotConfigs.length, updatePlotDataSource]);
+  }, [basketItems, getPlotState, plotConfigs.length, updatePlotDataSource]);
 
   // Auto-create default plots when new items with attributes are added to basket
   useEffect(() => {
@@ -184,20 +228,12 @@ const Viewer = ({
       // Skip auto-plotting if there are existing plots AND this specific item already has plots
       // Check if any existing plot uses this item's path (either directly or via memory://)
       if (plotConfigs.length > 0) {
-        const itemBaseName = item.name?.replace(
-          /\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i,
-          "",
-        );
+        const itemBaseName = item.name?.replace(/\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i, "");
         const itemMemoryPath =
-          isDatasetPath(item.path) && itemBaseName
-            ? `memory://${itemBaseName}`
-            : null;
+          isDatasetPath(item.path) && itemBaseName ? `memory://${itemBaseName}` : null;
 
         const hasExistingPlots = plotConfigs.some((config) => {
-          return (
-            config.fpath === item.path ||
-            (itemMemoryPath && config.fpath === itemMemoryPath)
-          );
+          return config.fpath === item.path || (itemMemoryPath && config.fpath === itemMemoryPath);
         });
 
         if (hasExistingPlots) {
@@ -206,7 +242,34 @@ const Viewer = ({
           return;
         }
 
-        // Find the first heatmap and lineplot that have filters to copy
+        processedAutoPlotItems.current.add(item.id);
+
+        // Replicate the current view onto the new measurement by plot shape.
+        const replicationSources = selectReplicationSources(
+          plotConfigs,
+          (plotId) => getPlotState(plotId)?.applied_filters,
+          recreateCustomPlotsRef.current,
+          (plotId) => getPlotState(plotId)?.filter_preset_id,
+        );
+
+        const replicated = replicatePlots(item, replicationSources, {
+          includeCustom: recreateCustomPlotsRef.current,
+        });
+
+        if (replicated.plotConfigs.length > 0) {
+          addPlots(replicated.plotConfigs);
+          const skipMsg = replicated.skipped.length
+            ? ` (skipped ${replicated.skipped.join("; ")})`
+            : "";
+          showToast(`Recreated ${replicated.plotConfigs.length} plot(s)${skipMsg}`, "success");
+          return;
+        }
+
+        // None of the Viewer's plots fit this measurement's variables, so
+        // fall back to its default plots, with the filters of a plot of the
+        // same type.
+        if (plottingBehaviour === "none") return;
+
         const heatmapFilters = plotConfigs
           .filter((config) => config.plotType === "HeatMap")
           .map((config) => getPlotState(config.id)?.applied_filters)
@@ -217,48 +280,38 @@ const Viewer = ({
           .map((config) => getPlotState(config.id)?.applied_filters)
           .find((filters) => filters && filters.length > 0);
 
-        // Mark as processed
-        processedAutoPlotItems.current.add(item.id);
-
-        // Generate auto-plot configs with copied filters
         const result = generateAutoPlotConfigs(
           item,
           heatmapFilters,
           lineplotFilters,
+          plottingBehaviour,
         );
 
         if (result.success && result.plotConfigs.length > 0) {
-          // Add each generated plot config to the viewer
-          result.plotConfigs.forEach((config) => {
-            addPlot(config);
-          });
+          addPlots(result.plotConfigs);
           const filterMsg =
-            (heatmapFilters?.length ?? 0) > 0 ||
-            (lineplotFilters?.length ?? 0) > 0
+            (heatmapFilters?.length ?? 0) > 0 || (lineplotFilters?.length ?? 0) > 0
               ? " with copied filters"
               : "";
           showToast(result.message + filterMsg, "success");
-        } else {
+        } else if (
+          !result.message.includes("not a valid measurement") &&
+          !result.message.includes("no independents or dependents")
+        ) {
           // Only show error if there were actual issues (not just non-qualifying items)
-          if (
-            !result.message.includes("not a valid measurement") &&
-            !result.message.includes("no independents or dependents")
-          ) {
-            showToast(result.message, "error");
-          }
+          showToast(result.message, "error");
         }
       } else {
         // No existing plots - mark as processed
         processedAutoPlotItems.current.add(item.id);
+        if (plottingBehaviour === "none") return;
 
         // Generate auto-plot configs without copied filters (first dataset)
-        const result = generateAutoPlotConfigs(item);
+        const result = generateAutoPlotConfigs(item, undefined, undefined, plottingBehaviour);
 
         if (result.success && result.plotConfigs.length > 0) {
           // Add each generated plot config to the viewer
-          result.plotConfigs.forEach((config) => {
-            addPlot(config);
-          });
+          addPlots(result.plotConfigs);
           showToast(result.message, "success");
         } else {
           // Only show error if there were actual issues (not just non-qualifying items)
@@ -274,10 +327,11 @@ const Viewer = ({
   }, [
     basketItems,
     loadingAttributes,
-    addPlot,
+    addPlots,
     showToast,
     plotConfigs,
     getPlotState,
+    plottingBehaviour,
   ]);
 
   // Calculate dynamic height based on actual rendered heights
@@ -287,8 +341,7 @@ const Viewer = ({
       const composerHeight = composerRef.current.offsetHeight;
       const containerPadding = 16; // p-2 = 8px top + 8px bottom = 16px
       const gap = 16; // gap-2 = 8px * 2 = 16px (two gaps: basket-composer, composer-viewer)
-      const totalUsedHeight =
-        basketHeight + composerHeight + containerPadding + gap;
+      const totalUsedHeight = basketHeight + composerHeight + containerPadding + gap;
 
       setViewerHeight(`calc(100vh - ${totalUsedHeight}px)`);
     }
@@ -337,8 +390,7 @@ const Viewer = ({
       }
     };
     window.addEventListener("plot-size-preset", handler as EventListener);
-    return () =>
-      window.removeEventListener("plot-size-preset", handler as EventListener);
+    return () => window.removeEventListener("plot-size-preset", handler as EventListener);
   }, []);
 
   // Keep processedAutoPlotItems in sync: remove IDs for items no longer in the basket
@@ -355,9 +407,7 @@ const Viewer = ({
   // Keep selected dataset IDs valid as basket contents change.
   const effectiveSelectedDatasetIds = useMemo(() => {
     const existingIds = new Set(basketItems.map((item) => item.id));
-    const next = new Set(
-      Array.from(selectedDatasetIds).filter((id) => existingIds.has(id)),
-    );
+    const next = new Set(Array.from(selectedDatasetIds).filter((id) => existingIds.has(id)));
 
     if (next.size === 0 && basketItems.length === 1) {
       next.add(basketItems[0].id);
@@ -405,10 +455,66 @@ const Viewer = ({
     [effectiveSelectedPlotId],
   );
 
-  const selectedDatasets = getSelectedDatasets(
-    basketItems,
-    effectiveSelectedDatasetIds,
+  // Limit Composer dependents to those defined over its selected axes.
+  const shownPlotConfigs = useMemo(
+    () =>
+      liveOnlyPlots
+        ? plotConfigs.filter((config) => config.pinned || config.source === "memory")
+        : plotConfigs,
+    [liveOnlyPlots, plotConfigs],
   );
+  const hiddenPlotCount = plotConfigs.length - shownPlotConfigs.length;
+
+  const [exportingAll, setExportingAll] = useState(false);
+  const handleExportAll = async () => {
+    const plots = collectPlotExports(shownPlotConfigs.map((plot) => plot.id));
+    if (plots.length === 0) {
+      showToast("There are no drawn plots to export yet.", "warning");
+      return;
+    }
+    setExportingAll(true);
+    showToast(
+      `Exporting ${plots.length} plot${plots.length === 1 ? "" : "s"}. This may take a moment.`,
+      "info",
+    );
+    try {
+      const outcome = await exportManyPlotImages(plots);
+      const where = outcome.savedTo
+        ? `Saved to ${outcome.savedTo}`
+        : `Downloaded ${outcome.filename}`;
+      const failures = outcome.failures ?? [];
+      if (failures.length > 0) {
+        showToast(
+          `${where}, but ${failures.length} plot${failures.length === 1 ? "" : "s"} could not be exported: ${failures.join("; ")}`,
+          "warning",
+          8000,
+        );
+      } else {
+        showToast(where, "success");
+      }
+    } catch (error: any) {
+      console.error("Export of all plots failed:", error);
+      showToast(
+        error.response?.data?.message || error.message || "Failed to export the plots",
+        "error",
+      );
+    } finally {
+      setExportingAll(false);
+    }
+  };
+
+  const [composerIndeps, setComposerIndeps] = useState<string[]>([]);
+  const handleComposerSelectionChange = useCallback((snapshot: ComposerSelectionSnapshot) => {
+    // Keep the previous array when the names are unchanged: this feeds a
+    // memoised prop chain down to every basket card.
+    setComposerIndeps((prev) =>
+      prev.length === snapshot.indeps.length && prev.every((name, i) => name === snapshot.indeps[i])
+        ? prev
+        : snapshot.indeps,
+    );
+  }, []);
+
+  const selectedDatasets = getSelectedDatasets(basketItems, effectiveSelectedDatasetIds);
   const sharedFields = computeSharedFields(selectedDatasets);
   const enforceSharedGating =
     effectiveSelectedDatasetIds.size > 1 &&
@@ -423,81 +529,35 @@ const Viewer = ({
 
   useGlobalShortcutsInit();
 
-  useShortcut("heatmap", () =>
-    composerActionRef.current?.setComposerPlotType("HeatMap"),
-  );
-  useShortcut("lineplot", () =>
-    composerActionRef.current?.setComposerPlotType("LinePlot"),
-  );
-  useShortcut("plot", () =>
-    composerActionRef.current?.createPlotFromComposer(),
-  );
+  useShortcut("heatmap", () => composerActionRef.current?.setComposerPlotType("HeatMap"));
+  useShortcut("lineplot", () => composerActionRef.current?.setComposerPlotType("LinePlot"));
+  useShortcut("plot", () => composerActionRef.current?.createPlotFromComposer());
   useShortcut("toggle-sidebar", () => setSidebarCollapsed(!sidebarCollapsed));
-  useShortcut("toggle-metadata", () =>
-    setMetadataCollapsed(!metadataCollapsed),
-  );
+  useShortcut("toggle-metadata", () => setMetadataCollapsed(!metadataCollapsed));
   useShortcut("toggle-notes", () => setNotesCollapsed(!notesCollapsed));
-  useShortcut("clear-composer", () =>
-    composerActionRef.current?.clearComposer(),
-  );
+  useShortcut("clear-composer", () => composerActionRef.current?.clearComposer());
   useShortcut("clear-basket", () => onClearBasket());
   useShortcut("clear-viewer", () => clearPlots());
 
-  useShortcut("select-plot-1", () =>
-    setSelectedPlotId(plotConfigs[0]?.id ?? null),
-  );
-  useShortcut("select-plot-2", () =>
-    setSelectedPlotId(plotConfigs[1]?.id ?? null),
-  );
-  useShortcut("select-plot-3", () =>
-    setSelectedPlotId(plotConfigs[2]?.id ?? null),
-  );
-  useShortcut("select-plot-4", () =>
-    setSelectedPlotId(plotConfigs[3]?.id ?? null),
-  );
-  useShortcut("select-plot-5", () =>
-    setSelectedPlotId(plotConfigs[4]?.id ?? null),
-  );
-  useShortcut("select-plot-6", () =>
-    setSelectedPlotId(plotConfigs[5]?.id ?? null),
-  );
-  useShortcut("select-plot-7", () =>
-    setSelectedPlotId(plotConfigs[6]?.id ?? null),
-  );
-  useShortcut("select-plot-8", () =>
-    setSelectedPlotId(plotConfigs[7]?.id ?? null),
-  );
-  useShortcut("select-plot-9", () =>
-    setSelectedPlotId(plotConfigs[8]?.id ?? null),
-  );
+  useShortcut("select-plot-1", () => setSelectedPlotId(plotConfigs[0]?.id ?? null));
+  useShortcut("select-plot-2", () => setSelectedPlotId(plotConfigs[1]?.id ?? null));
+  useShortcut("select-plot-3", () => setSelectedPlotId(plotConfigs[2]?.id ?? null));
+  useShortcut("select-plot-4", () => setSelectedPlotId(plotConfigs[3]?.id ?? null));
+  useShortcut("select-plot-5", () => setSelectedPlotId(plotConfigs[4]?.id ?? null));
+  useShortcut("select-plot-6", () => setSelectedPlotId(plotConfigs[5]?.id ?? null));
+  useShortcut("select-plot-7", () => setSelectedPlotId(plotConfigs[6]?.id ?? null));
+  useShortcut("select-plot-8", () => setSelectedPlotId(plotConfigs[7]?.id ?? null));
+  useShortcut("select-plot-9", () => setSelectedPlotId(plotConfigs[8]?.id ?? null));
 
-  useShortcut("selected-enter-linecut", () =>
-    dispatchSelectedPlotShortcut("enter-linecut"),
-  );
-  useShortcut("selected-open-filters", () =>
-    dispatchSelectedPlotShortcut("open-filters"),
-  );
-  useShortcut("selected-open-appearance", () =>
-    dispatchSelectedPlotShortcut("open-appearance"),
-  );
-  useShortcut("selected-toggle-maximize", () =>
-    dispatchSelectedPlotShortcut("toggle-maximize"),
-  );
-  useShortcut("selected-toggle-bgcorr", () =>
-    dispatchSelectedPlotShortcut("toggle-bgcorr"),
-  );
-  useShortcut("selected-swap-axes", () =>
-    dispatchSelectedPlotShortcut("swap-axes"),
-  );
-  useShortcut("selected-reset-plot", () =>
-    dispatchSelectedPlotShortcut("reset-plot"),
-  );
-  useShortcut("selected-send-to-notes", () =>
-    dispatchSelectedPlotShortcut("send-to-notes"),
-  );
-  useShortcut("selected-export-images", () =>
-    dispatchSelectedPlotShortcut("export-images"),
-  );
+  useShortcut("selected-enter-linecut", () => dispatchSelectedPlotShortcut("enter-linecut"));
+  useShortcut("selected-open-filters", () => dispatchSelectedPlotShortcut("open-filters"));
+  useShortcut("selected-open-appearance", () => dispatchSelectedPlotShortcut("open-appearance"));
+  useShortcut("selected-toggle-maximize", () => dispatchSelectedPlotShortcut("toggle-maximize"));
+  useShortcut("selected-toggle-bgcorr", () => dispatchSelectedPlotShortcut("toggle-bgcorr"));
+  useShortcut("selected-swap-axes", () => dispatchSelectedPlotShortcut("swap-axes"));
+  useShortcut("selected-reset-plot", () => dispatchSelectedPlotShortcut("reset-plot"));
+  useShortcut("selected-send-to-notes", () => dispatchSelectedPlotShortcut("send-to-notes"));
+  useShortcut("selected-export-images", () => dispatchSelectedPlotShortcut("export-images"));
   useShortcut("selected-remove-plot", () => {
     if (effectiveSelectedPlotId) {
       removePlot(effectiveSelectedPlotId);
@@ -519,10 +579,7 @@ const Viewer = ({
     return `Selected: ${effectiveSelectedDatasetIds.size} datasets`;
   };
 
-  const handleToggleDatasetSelection = (
-    datasetId: string,
-    multiSelect: boolean,
-  ) => {
+  const handleToggleDatasetSelection = (datasetId: string, multiSelect: boolean) => {
     setSelectedDatasetIds((prev) => {
       const next = new Set(prev);
 
@@ -555,58 +612,55 @@ const Viewer = ({
 
   const handleCreatePlot = (snapshot: ComposerSelectionSnapshot) => {
     if (!snapshot.hasRequiredAxes) {
-      showToast("Select required X and Y fields before plotting.", "warning");
+      showToast(missingAxesMessage(snapshot), "warning");
       return;
     }
 
     if (effectiveSelectedDatasetIds.size === 0) {
-      showToast(
-        "Select at least one dataset in Basket before plotting.",
-        "warning",
-      );
+      showToast("Select at least one dataset in Basket before plotting.", "warning");
       return;
     }
 
-    const currentlySelected = getSelectedDatasets(
-      basketItems,
-      effectiveSelectedDatasetIds,
-    );
+    const currentlySelected = getSelectedDatasets(basketItems, effectiveSelectedDatasetIds);
     if (currentlySelected.length === 0) {
       showToast("No selected datasets are available for plotting.", "error");
       return;
     }
 
-    const eligibility = getEligibleDatasetsForComposer(currentlySelected, {
-      indeps: snapshot.indeps,
-      deps: snapshot.deps,
-    });
-
-    if (eligibility.eligible.length === 0) {
-      showToast(
-        "No selected datasets can be plotted with the current composer settings.",
-        "error",
-      );
-      return;
-    }
-
-    eligibility.eligible.forEach((dataset) => {
-      const sourceByPath: "memory" | "disk" = isMemoryPath(dataset.path)
-        ? "memory"
-        : "disk";
-
-      addPlot({
-        fpath: dataset.path,
-        indeps: snapshot.indeps,
-        deps: snapshot.deps,
+    let created = 0;
+    let skipped = false;
+    axisCombinations(snapshot).forEach(({ indeps, deps }) => {
+      const eligibility = getEligibleDatasetsForComposer(currentlySelected, {
+        indeps,
+        deps,
         plotType: snapshot.plotType,
-        source: sourceByPath,
-        preferredSource: sourceByPath,
+      });
+      if (eligibility.ineligible.length > 0 || eligibility.unknown.length > 0) skipped = true;
+
+      eligibility.eligible.forEach((dataset) => {
+        const sourceByPath: "memory" | "disk" = isMemoryPath(dataset.path) ? "memory" : "disk";
+        created += 1;
+        addPlot({
+          // Mark Composer plots for replication to measurements added later.
+          origin: "custom",
+          fpath: dataset.path,
+          indeps,
+          deps,
+          plotType: snapshot.plotType,
+          source: sourceByPath,
+          preferredSource: sourceByPath,
+        });
       });
     });
 
-    if (eligibility.ineligible.length > 0 || eligibility.unknown.length > 0) {
+    if (created === 0) {
+      showToast("No selected datasets can be plotted with the current composer settings.", "error");
+      return;
+    }
+
+    if (skipped) {
       showToast(
-        "Some selected datasets do not share the required indeps/deps and were skipped.",
+        "Some plots were skipped, because not every selected measurement has these fields or they cannot be plotted against each other.",
         "warning",
       );
     }
@@ -614,15 +668,11 @@ const Viewer = ({
 
   useEffect(() => {
     if (effectiveSelectedDatasetIds.size !== 1) {
-      previousSelectionKeyRef.current = Array.from(effectiveSelectedDatasetIds)
-        .sort()
-        .join("|");
+      previousSelectionKeyRef.current = Array.from(effectiveSelectedDatasetIds).sort().join("|");
       return;
     }
 
-    const selectionKey = Array.from(effectiveSelectedDatasetIds)
-      .sort()
-      .join("|");
+    const selectionKey = Array.from(effectiveSelectedDatasetIds).sort().join("|");
     if (selectionKey === previousSelectionKeyRef.current) {
       return;
     }
@@ -644,16 +694,12 @@ const Viewer = ({
     }
 
     const compatibility = isComposerCompatibleWithDataset(
-      { indeps: snapshot.indeps, deps: snapshot.deps },
+      { indeps: snapshot.indeps, deps: snapshot.deps, plotType: snapshot.plotType },
       selectedDataset.attributes,
     );
 
     if (compatibility === false) {
-      showToast(
-        "Selected dataset does not match current composer fields.",
-        "warning",
-        3000,
-      );
+      showToast("Selected dataset does not match current composer fields.", "warning", 3000);
       composer.clearComposer();
     }
   }, [effectiveSelectedDatasetIds, selectedDatasets, showToast]);
@@ -663,9 +709,7 @@ const Viewer = ({
       // console.log("Downloading items:", items);
 
       // Filter only dataset files
-      const datasetItems = items.filter(
-        (item) => item.type === "file" && isDatasetPath(item.path),
-      );
+      const datasetItems = items.filter((item) => item.type === "file" && isDatasetPath(item.path));
 
       if (datasetItems.length === 0) {
         showToast("No dataset files to download", "warning");
@@ -677,26 +721,19 @@ const Viewer = ({
       const paths = datasetItems.map((item) => ({ path: item.path }));
 
       // Call the backend download-selected endpoint
-      const response = await axios.post(
-        `${PROD_BACKEND_URL}/download-selected/`,
-        paths,
-        { responseType: "blob" },
-      );
+      const response = await axios.post(`${PROD_BACKEND_URL}/download-selected/`, paths, {
+        responseType: "blob",
+      });
 
-      // Create a download link
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute(
-        "download",
+      const result = finishArchiveDownload(
+        response,
         `selected_datasets_${datasetItems.length}_files.zip`,
       );
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
 
       console.log("Download initiated successfully");
+      if (result.savedTo) {
+        showToast(`Saved to ${result.savedTo}`, "success");
+      }
     } catch {
       // console.error("Error downloading selected items:", error);
       showToast("Failed to download selected items", "error");
@@ -704,11 +741,8 @@ const Viewer = ({
   };
 
   const handleDropItem = async (item: BasketItem) => {
-    // Add the item to basket immediately (without attributes)
-    onAddToBasket(item);
-
-    // Load attributes from backend asynchronously if it's a file
-    if (item.type === "file") {
+    // Attributes are only worth fetching for an item the basket accepted.
+    if (onAddToBasket(item) && item.type === "file") {
       // Start loading state
       onStartLoadingAttributes(item.id);
 
@@ -737,9 +771,9 @@ const Viewer = ({
   return (
     <Panel defaultSize={defaultWidth}>
       <div className="h-full flex flex-col bg-gray-100 border-r shadow-inner">
-        <div ref={containerRef} className="flex flex-col h-full p-2 gap-2">
+        <div ref={containerRef} className="flex flex-col h-full p-2 gap-2" data-tour="viewer">
           {/* Basket Component */}
-          <div ref={basketRef} className="shrink-0">
+          <div ref={basketRef} className="shrink-0" data-tour="basket">
             <Basket
               items={basketItems}
               selectedDatasetIds={effectiveSelectedDatasetIds}
@@ -753,6 +787,7 @@ const Viewer = ({
               enforceSharedGating={enforceSharedGating}
               onAutofillComposerField={handleAutofillComposerField}
               onOpenNotesItem={onOpenNotesItem}
+              composerIndeps={composerIndeps}
             />
           </div>
 
@@ -760,167 +795,215 @@ const Viewer = ({
           <div
             ref={composerRef}
             className="shrink-0 border border-gray-200 rounded-lg"
+            data-tour="composer"
           >
             <PlotComposer
               ref={composerActionRef}
               onCreatePlot={handleCreatePlot}
+              onSelectionChange={handleComposerSelectionChange}
               selectionContextLabel={getSelectionContextLabel()}
             />
           </div>
 
           {/* Main Content Area - Plots Viewer */}
           <div
-            className="flex-1 bg-white rounded-lg border border-gray-300 flex flex-col"
+            className="flex-1 bg-white rounded-lg border border-gray-300 flex items-stretch"
             style={{ maxHeight: viewerHeight }}
+            data-tour="plots"
           >
-            <div className="flex items-center justify-between shrink-0 bg-gray-50 border-b border-gray-200 rounded-t-lg p-2">
-              <h3 className="font-semibold text-gray-900 flex items-center">
-                <ChartScatter
-                  size={16}
-                  className="mr-1.5 align-middle mb-0.5"
-                />{" "}
-                Viewer<span className="ml-[1.5px]">({plotConfigs.length})</span>
-              </h3>
-              <div className="flex items-center space-x-2">
-                {/* Squarify toggle - applies to all plots */}
-                <Tooltip
-                  content={
-                    isSquareModeGlobal
-                      ? "Unsquarify all plots"
-                      : "Squarify all plots"
-                  }
-                  position="left"
-                >
-                  <button
-                    title={
-                      isSquareModeGlobal ? "Unsquarify all" : "Squarify all"
-                    }
-                    onClick={() => {
-                      // Toggle local state and broadcast
-                      const next = !isSquareModeGlobal;
-                      setIsSquareModeGlobal(next);
-                      try {
-                        window.dispatchEvent(
-                          new CustomEvent("plot-squarify", {
-                            detail: { enabled: next },
-                          }),
-                        );
-                      } catch {
-                        /* ignore */
-                      }
-                    }}
-                    className={`p-1.5 rounded transition-colors duration-150 ${
-                      isSquareModeGlobal ? "bg-blue-50" : "hover:bg-gray-200"
-                    }`}
-                  >
-                    <svg
-                      className={`w-4 h-4 ${
-                        isSquareModeGlobal ? "text-blue-600" : "text-gray-600"
-                      }`}
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect
-                        x="3"
-                        y="3"
-                        width="18"
-                        height="18"
-                        rx="2"
-                        ry="2"
-                      ></rect>
-                      <rect
-                        x="8"
-                        y="8"
-                        width="8"
-                        height="8"
-                        rx="1"
-                        ry="1"
-                      ></rect>
-                    </svg>
-                  </button>
-                </Tooltip>
-
-                {/* Size preset ButtonGroup - affects all plots by default */}
-                <div className="inline-flex items-center bg-white border border-gray-200 rounded">
-                  {[33, 50, 66, 100].map((pct, idx) => (
-                    <Tooltip
-                      key={pct}
-                      content={`${pct}% width (all plots)`}
-                      position="left"
-                    >
-                      <button
-                        onClick={() => {
-                          // When applying globally, clear per-plot overrides
-                          setPlotWidthPercent(pct);
-                          setPerPlotWidthMap({});
-                          try {
-                            window.dispatchEvent(
-                              new CustomEvent("plot-size-preset", {
-                                detail: { id: null, percent: pct },
-                              }),
-                            );
-                          } catch {
-                            /* ignore */
-                          }
-                        }}
-                        title={`${pct}% width`}
-                        className={`px-2 py-1 text-xs font-medium ${
-                          plotWidthPercent === pct
-                            ? "bg-gray-100"
-                            : "hover:bg-gray-50"
-                        } ${idx > 0 ? "-ml-px" : ""}`}
-                      >
-                        {pct}
-                      </button>
-                    </Tooltip>
-                  ))}
-                </div>
-
-                <Tooltip
-                  content="Remove all plots from the viewer"
-                  position="left"
-                >
-                  <button
-                    onClick={clearPlots}
-                    className="px-3 py-1 text-sm text-red-600 hover:bg-gray-300 rounded transition-colors"
-                  >
-                    Clear All Plots
-                  </button>
-                </Tooltip>
-              </div>
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-              {plotConfigs.length > 0 ? (
+            <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
+              {shownPlotConfigs.length > 0 ? (
                 <div className="p-2">
                   <PlotContainer
-                    plotConfigs={plotConfigs}
+                    plotConfigs={shownPlotConfigs}
                     onRemovePlot={removePlot}
+                    onMovePlot={movePlot}
+                    onSetPlotPinned={setPlotPinned}
                     onAddPlot={addPlot}
                     widthPercent={plotWidthPercent}
                     perPlotWidthMap={perPlotWidthMap}
                     selectedPlotId={effectiveSelectedPlotId}
                     onSelectPlot={setSelectedPlotId}
+                    basketItems={basketItems}
                   />
                 </div>
               ) : (
                 <div className="h-full flex items-center justify-center text-gray-500 p-4">
                   <div className="text-center">
-                    <ChartScatter
-                      size={48}
-                      className="mx-auto mb-2 opacity-50"
-                    />
-                    <p>No plots to display</p>
+                    <ChartScatter size={48} className="mx-auto mb-2 opacity-50" />
+                    <p>
+                      {hiddenPlotCount > 0
+                        ? "No live or pinned plots to display"
+                        : "No plots to display"}
+                    </p>
                     <p className="text-sm mt-1">
-                      Create a plot using the composer above
+                      {hiddenPlotCount > 0
+                        ? `${hiddenPlotCount} plot(s) hidden while showing live and pinned only`
+                        : "Create a plot using the composer above"}
                     </p>
                   </div>
                 </div>
               )}
             </div>
+            <SectionRibbon label="Viewer" Icon={ChartScatter} count={plotConfigs.length}>
+              {/* Live and pinned plots only */}
+              <Tooltip
+                content={
+                  liveOnlyPlots
+                    ? `Show all plots${hiddenPlotCount > 0 ? ` (${hiddenPlotCount} hidden)` : ""}`
+                    : "Show only live and pinned plots"
+                }
+                position="left"
+              >
+                <button
+                  onClick={() => setLiveOnlyPlots(!liveOnlyPlots)}
+                  className={`flex h-7 w-7 items-center justify-center rounded transition-colors duration-150 ${
+                    liveOnlyPlots
+                      ? "animate-pulse bg-red-50 ring-2 ring-inset ring-red-400"
+                      : "qimchi-dark-hover-plain hover:bg-gray-200"
+                  }`}
+                  aria-label={liveOnlyPlots ? "Show all plots" : "Show only live and pinned plots"}
+                  aria-pressed={liveOnlyPlots}
+                >
+                  <Radio size={16} className={liveOnlyPlots ? "text-red-600" : "text-gray-600"} />
+                </button>
+              </Tooltip>
+
+              {/* Plot replication mode */}
+              <Tooltip
+                content={
+                  recreateCustomPlots
+                    ? "New measurements recreate every plot"
+                    : "New measurements get default plots only"
+                }
+                position="left"
+              >
+                <button
+                  onClick={() =>
+                    useSettingsStore
+                      .getState()
+                      .update(["plots", "recreateCustomPlots"], !recreateCustomPlots)
+                  }
+                  className={`flex h-7 w-7 items-center justify-center rounded transition-colors duration-150 ${
+                    recreateCustomPlots ? "bg-blue-50" : "qimchi-dark-hover-plain hover:bg-gray-200"
+                  }`}
+                  aria-label={
+                    recreateCustomPlots
+                      ? "Recreate custom plots for new measurements"
+                      : "Recreate default plots only for new measurements"
+                  }
+                  aria-pressed={recreateCustomPlots}
+                >
+                  <CopyPlus
+                    size={16}
+                    className={recreateCustomPlots ? "text-blue-600" : "text-gray-600"}
+                  />
+                </button>
+              </Tooltip>
+
+              {/* Squarify toggle - applies to all plots */}
+              <Tooltip
+                content={isSquareModeGlobal ? "Unsquarify all plots" : "Squarify all plots"}
+                position="left"
+              >
+                <button
+                  onClick={() =>
+                    useSettingsStore.getState().update(["plots", "squarify"], !isSquareModeGlobal)
+                  }
+                  className={`flex h-7 w-7 items-center justify-center rounded transition-colors duration-150 ${
+                    isSquareModeGlobal ? "bg-blue-50" : "qimchi-dark-hover-plain hover:bg-gray-200"
+                  }`}
+                  aria-label={isSquareModeGlobal ? "Unsquarify all" : "Squarify all"}
+                >
+                  <svg
+                    className={`w-4 h-4 ${isSquareModeGlobal ? "text-blue-600" : "text-gray-600"}`}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <rect x="8" y="8" width="8" height="8" rx="1" ry="1"></rect>
+                  </svg>
+                </button>
+              </Tooltip>
+
+              <RibbonFlyout
+                label="Plot width"
+                icon={<RulerDimensionLine size={16} className="text-gray-600" />}
+              >
+                {(close) =>
+                  PLOT_WIDTHS.map((pct) => (
+                    <button
+                      key={pct}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={plotWidthPercent === pct}
+                      onClick={() => {
+                        setPlotWidthPercent(pct);
+                        setPerPlotWidthMap({});
+                        try {
+                          window.dispatchEvent(
+                            new CustomEvent("plot-size-preset", {
+                              detail: { id: null, percent: pct },
+                            }),
+                          );
+                        } catch {
+                          /* ignore */
+                        }
+                        close();
+                      }}
+                      aria-label={`${pct}% width (all plots)`}
+                      className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                        plotWidthPercent === pct
+                          ? "bg-blue-100 text-blue-700"
+                          : "qimchi-dark-hover-plain text-gray-700 hover:bg-gray-100"
+                      }`}
+                    >
+                      {pct}
+                    </button>
+                  ))
+                }
+              </RibbonFlyout>
+
+              <Tooltip
+                content={
+                  exportingAll
+                    ? "Exporting plots..."
+                    : hiddenPlotCount > 0
+                      ? "Export the shown plots as images"
+                      : "Export all plots as images"
+                }
+                position="left"
+              >
+                <button
+                  onClick={() => void handleExportAll()}
+                  type="button"
+                  disabled={exportingAll || shownPlotConfigs.length === 0}
+                  aria-label="Export all plots"
+                  className={`${ribbonButtonClass} disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  {exportingAll ? (
+                    <Loader2 size={16} className="animate-spin text-gray-600" aria-hidden="true" />
+                  ) : (
+                    <ImageDown size={16} className="text-gray-600" aria-hidden="true" />
+                  )}
+                </button>
+              </Tooltip>
+
+              <Tooltip content="Clear All Plots (Alt+Shift+V)" position="left">
+                <button
+                  onClick={clearPlots}
+                  type="button"
+                  aria-label="Clear All Plots"
+                  className={`${ribbonButtonClass} text-red-600`}
+                >
+                  <Trash2 size={16} aria-hidden="true" />
+                </button>
+              </Tooltip>
+            </SectionRibbon>
           </div>
         </div>
       </div>

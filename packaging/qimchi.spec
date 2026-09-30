@@ -14,7 +14,7 @@ sys._MEIPASS inside a frozen build points to _internal/, so config.py finds
 fd via  os.path.join(sys._MEIPASS, "fd[.exe]")  in both modes.
 
 Build:
-    Windows:  build_local.ps1
+    Windows:  scripts/build_windows.ps1
     macOS:    scripts/build_macos.sh
     Direct:   pyinstaller --clean --noconfirm \
                   --distpath packaging/build \
@@ -60,7 +60,7 @@ _use_upx = sys.platform != "darwin"
 
 # fd binary: vendor/<platform>/fd[.exe]
 # Only Windows is packaged today; Linux/macOS stubs are for future use.
-# build_local.ps1 / CI download the binary before invoking PyInstaller.
+# build_windows.ps1 / CI download the binary before invoking PyInstaller.
 _fd_by_platform = {
     "win32":  os.path.join(_repo_root, "vendor", "fd-windows", "fd.exe"),
     "linux":  os.path.join(_repo_root, "vendor", "fd-linux",   "fd"),
@@ -73,9 +73,24 @@ datas = [
     (_backend_stage, "backend"),
 ]
 datas += collect_data_files("qcodes")
+# Choreographer reads its pinned Chrome version from package data.
+datas += collect_data_files("choreographer")
+# Frozen builds use certifi for HTTPS verification.
+datas += collect_data_files("certifi")
 # copy_metadata ensures importlib.metadata.version("qimchi-api") works in the
 # frozen build so the updater can compare the running version against releases.
 datas += copy_metadata("qimchi-api")
+
+# Alembic migrations are loaded from the filesystem by path (not imported), so
+# they must be bundled as data at _internal/migrations/. api/shared/db.py's
+# run_migrations() resolves them via sys._MEIPASS/migrations when frozen.
+datas += [(os.path.join(_repo_root, "backend", "migrations"), "migrations")]
+# Some DB deps read their own package metadata at import time.
+for _pkg in ("alembic", "sqlalchemy", "sqlmodel", "mako"):
+    try:
+        datas += copy_metadata(_pkg)
+    except Exception:
+        pass
 
 hiddenimports = [
     "main",
@@ -96,7 +111,15 @@ hiddenimports = [
     "uvicorn.lifespan.on",
 ]
 hiddenimports += collect_submodules("api")
+if os.path.isfile(os.path.join(_backend_stage, "api", "_build_version.py")):
+    hiddenimports += ["api._build_version"]
 hiddenimports += collect_submodules("qcodes")
+# DB stack: alembic + sqlalchemy pull dialects/migration modules dynamically;
+# greenlet + mako are imported indirectly. Collect them so the frozen app can
+# run migrations on startup.
+hiddenimports += collect_submodules("alembic")
+hiddenimports += collect_submodules("sqlalchemy")
+hiddenimports += ["sqlmodel", "greenlet", "mako", "mako.template"]
 # pywebview loads its platform backend dynamically; name it explicitly so
 # PyInstaller includes it.
 if sys.platform == "linux":
@@ -113,7 +136,8 @@ if _fd_src and os.path.isfile(_fd_src):
 
 a = Analysis(
     [_launcher_path],
-    pathex=[os.path.join(_repo_root, "backend")],
+    # Prefer the staged backend because it contains the generated release tag.
+    pathex=[_backend_stage, os.path.join(_repo_root, "backend")],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,

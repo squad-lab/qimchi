@@ -9,6 +9,11 @@ export interface LogItem {
   metadata?: any;
 }
 
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 export interface ToastContextType {
   showToast: (
     message: string,
@@ -16,6 +21,7 @@ export interface ToastContextType {
     duration?: number,
     source?: string,
     metadata?: any,
+    action?: ToastAction,
   ) => void;
   openLogModal: () => void;
 }

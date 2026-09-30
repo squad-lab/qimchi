@@ -1,0 +1,1952 @@
+{
+  "early": {
+    "data": [
+      {
+        "coloraxis": "coloraxis",
+        "name": "0",
+        "x": { "dtype": "f8", "bdata": "mpmZmZmZ+b8AAAAAAAD4v2ZmZmZmZva/zczMzMzM9L8zMzMzMzPzvw==" },
+        "y": {
+          "dtype": "f8",
+          "bdata": "AAAAAFempkEAAABAovKmQQAAAIDtPqdBAAAAwDiLp0EAAAAAhNenQQAAAEDPI6hBAAAAgBpwqEE="
+        },
+        "z": {
+          "dtype": "f4",
+          "bdata": "/+bbLv/mWy8AAMB/AADAfwAAwH9/5PEuv+VmLwAAwH8AAMB/AADAf//wAy9/5HEvAADAfwAAwH8AAMB/v+8OLz/jfC8AAMB/AADAfwAAwH9/7hkv//CDLwAAwH8AAMB/AADAfz/tJC9fcIkvAADAfwAAwH8AAMB//+svL7/vji8AAMB/AADAfwAAwH8=",
+          "shape": "7, 5"
+        },
+        "type": "heatmap",
+        "xaxis": "x",
+        "yaxis": "y",
+        "hovertemplate": "Gate (V): %{x}<br>Frequency (Hz): %{y}<br>Lockin R (A): %{z}<extra></extra>"
+      }
+    ],
+    "layout": {
+      "template": {
+        "data": {
+          "histogram2dcontour": [
+            {
+              "type": "histogram2dcontour",
+              "colorbar": { "outlinewidth": 0, "ticks": "" },
+              "colorscale": [
+                [0.0, "#0d0887"],
+                [0.1111111111111111, "#46039f"],
+                [0.2222222222222222, "#7201a8"],
+                [0.3333333333333333, "#9c179e"],
+                [0.4444444444444444, "#bd3786"],
+                [0.5555555555555556, "#d8576b"],
+                [0.6666666666666666, "#ed7953"],
+                [0.7777777777777778, "#fb9f3a"],
+                [0.8888888888888888, "#fdca26"],
+                [1.0, "#f0f921"]
+              ]
+            }
+          ],
+          "choropleth": [{ "type": "choropleth", "colorbar": { "outlinewidth": 0, "ticks": "" } }],
+          "histogram2d": [
+            {
+              "type": "histogram2d",
+              "colorbar": { "outlinewidth": 0, "ticks": "" },
+              "colorscale": [
+                [0.0, "#0d0887"],
+                [0.1111111111111111, "#46039f"],
+                [0.2222222222222222, "#7201a8"],
+                [0.3333333333333333, "#9c179e"],
+                [0.4444444444444444, "#bd3786"],
+                [0.5555555555555556, "#d8576b"],
+                [0.6666666666666666, "#ed7953"],
+                [0.7777777777777778, "#fb9f3a"],
+                [0.8888888888888888, "#fdca26"],
+                [1.0, "#f0f921"]
+              ]
+            }
+          ],
+          "heatmap": [
+            {
+              "type": "heatmap",
+              "colorbar": { "outlinewidth": 0, "ticks": "" },
+              "colorscale": [
+                [0.0, "#0d0887"],
+                [0.1111111111111111, "#46039f"],
+                [0.2222222222222222, "#7201a8"],
+                [0.3333333333333333, "#9c179e"],
+                [0.4444444444444444, "#bd3786"],
+                [0.5555555555555556, "#d8576b"],
+                [0.6666666666666666, "#ed7953"],
+                [0.7777777777777778, "#fb9f3a"],
+                [0.8888888888888888, "#fdca26"],
+                [1.0, "#f0f921"]
+              ]
+            }
+          ],
+          "contourcarpet": [
+            { "type": "contourcarpet", "colorbar": { "outlinewidth": 0, "ticks": "" } }
+          ],
+          "contour": [
+            {
+              "type": "contour",
+              "colorbar": { "outlinewidth": 0, "ticks": "" },
+              "colorscale": [
+                [0.0, "#0d0887"],
+                [0.1111111111111111, "#46039f"],
+                [0.2222222222222222, "#7201a8"],
+                [0.3333333333333333, "#9c179e"],
+                [0.4444444444444444, "#bd3786"],
+                [0.5555555555555556, "#d8576b"],
+                [0.6666666666666666, "#ed7953"],
+                [0.7777777777777778, "#fb9f3a"],
+                [0.8888888888888888, "#fdca26"],
+                [1.0, "#f0f921"]
+              ]
+            }
+          ],
+          "surface": [
+            {
+              "type": "surface",
+              "colorbar": { "outlinewidth": 0, "ticks": "" },
+              "colorscale": [
+                [0.0, "#0d0887"],
+                [0.1111111111111111, "#46039f"],
+                [0.2222222222222222, "#7201a8"],
+                [0.3333333333333333, "#9c179e"],
+                [0.4444444444444444, "#bd3786"],
+                [0.5555555555555556, "#d8576b"],
+                [0.6666666666666666, "#ed7953"],
+                [0.7777777777777778, "#fb9f3a"],
+                [0.8888888888888888, "#fdca26"],
+                [1.0, "#f0f921"]
+              ]
+            }
+          ],
+          "mesh3d": [{ "type": "mesh3d", "colorbar": { "outlinewidth": 0, "ticks": "" } }],
+          "scatter": [
+            {
+              "fillpattern": { "fillmode": "overlay", "size": 10, "solidity": 0.2 },
+              "type": "scatter"
+            }
+          ],
+          "parcoords": [
+            { "type": "parcoords", "line": { "colorbar": { "outlinewidth": 0, "ticks": "" } } }
+          ],
+          "scatterpolargl": [
+            {
+              "type": "scatterpolargl",
+              "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } }
+            }
+          ],
+          "bar": [
+            {
+              "error_x": { "color": "#2a3f5f" },
+              "error_y": { "color": "#2a3f5f" },
+              "marker": {
+                "line": { "color": "#E5ECF6", "width": 0.5 },
+                "pattern": { "fillmode": "overlay", "size": 10, "solidity": 0.2 }
+              },
+              "type": "bar"
+            }
+          ],
+          "scattergeo": [
+            { "type": "scattergeo", "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } } }
+          ],
+          "scatterpolar": [
+            { "type": "scatterpolar", "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } } }
+          ],
+          "histogram": [
+            {
+              "marker": { "pattern": { "fillmode": "overlay", "size": 10, "solidity": 0.2 } },
+              "type": "histogram"
+            }
+          ],
+          "scattergl": [
+            { "type": "scattergl", "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } } }
+          ],
+          "scatter3d": [
+            {
+              "type": "scatter3d",
+              "line": { "colorbar": { "outlinewidth": 0, "ticks": "" } },
+              "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } }
+            }
+          ],
+          "scattermap": [
+            { "type": "scattermap", "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } } }
+          ],
+          "scatterternary": [
+            {
+              "type": "scatterternary",
+              "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } }
+            }
+          ],
+          "scattercarpet": [
+            {
+              "type": "scattercarpet",
+              "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } }
+            }
+          ],
+          "carpet": [
+            {
+              "aaxis": {
+                "endlinecolor": "#2a3f5f",
+                "gridcolor": "white",
+                "linecolor": "white",
+                "minorgridcolor": "white",
+                "startlinecolor": "#2a3f5f"
+              },
+              "baxis": {
+                "endlinecolor": "#2a3f5f",
+                "gridcolor": "white",
+                "linecolor": "white",
+                "minorgridcolor": "white",
+                "startlinecolor": "#2a3f5f"
+              },
+              "type": "carpet"
+            }
+          ],
+          "table": [
+            {
+              "cells": { "fill": { "color": "#EBF0F8" }, "line": { "color": "white" } },
+              "header": { "fill": { "color": "#C8D4E3" }, "line": { "color": "white" } },
+              "type": "table"
+            }
+          ],
+          "barpolar": [
+            {
+              "marker": {
+                "line": { "color": "#E5ECF6", "width": 0.5 },
+                "pattern": { "fillmode": "overlay", "size": 10, "solidity": 0.2 }
+              },
+              "type": "barpolar"
+            }
+          ],
+          "pie": [{ "automargin": true, "type": "pie" }]
+        },
+        "layout": {
+          "autotypenumbers": "strict",
+          "colorway": [
+            "#636efa",
+            "#EF553B",
+            "#00cc96",
+            "#ab63fa",
+            "#FFA15A",
+            "#19d3f3",
+            "#FF6692",
+            "#B6E880",
+            "#FF97FF",
+            "#FECB52"
+          ],
+          "font": { "color": "#2a3f5f" },
+          "hovermode": "closest",
+          "hoverlabel": { "align": "left" },
+          "paper_bgcolor": "white",
+          "plot_bgcolor": "#E5ECF6",
+          "polar": {
+            "bgcolor": "#E5ECF6",
+            "angularaxis": { "gridcolor": "white", "linecolor": "white", "ticks": "" },
+            "radialaxis": { "gridcolor": "white", "linecolor": "white", "ticks": "" }
+          },
+          "ternary": {
+            "bgcolor": "#E5ECF6",
+            "aaxis": { "gridcolor": "white", "linecolor": "white", "ticks": "" },
+            "baxis": { "gridcolor": "white", "linecolor": "white", "ticks": "" },
+            "caxis": { "gridcolor": "white", "linecolor": "white", "ticks": "" }
+          },
+          "coloraxis": { "colorbar": { "outlinewidth": 0, "ticks": "" } },
+          "colorscale": {
+            "sequential": [
+              [0.0, "#0d0887"],
+              [0.1111111111111111, "#46039f"],
+              [0.2222222222222222, "#7201a8"],
+              [0.3333333333333333, "#9c179e"],
+              [0.4444444444444444, "#bd3786"],
+              [0.5555555555555556, "#d8576b"],
+              [0.6666666666666666, "#ed7953"],
+              [0.7777777777777778, "#fb9f3a"],
+              [0.8888888888888888, "#fdca26"],
+              [1.0, "#f0f921"]
+            ],
+            "sequentialminus": [
+              [0.0, "#0d0887"],
+              [0.1111111111111111, "#46039f"],
+              [0.2222222222222222, "#7201a8"],
+              [0.3333333333333333, "#9c179e"],
+              [0.4444444444444444, "#bd3786"],
+              [0.5555555555555556, "#d8576b"],
+              [0.6666666666666666, "#ed7953"],
+              [0.7777777777777778, "#fb9f3a"],
+              [0.8888888888888888, "#fdca26"],
+              [1.0, "#f0f921"]
+            ],
+            "diverging": [
+              [0, "#8e0152"],
+              [0.1, "#c51b7d"],
+              [0.2, "#de77ae"],
+              [0.3, "#f1b6da"],
+              [0.4, "#fde0ef"],
+              [0.5, "#f7f7f7"],
+              [0.6, "#e6f5d0"],
+              [0.7, "#b8e186"],
+              [0.8, "#7fbc41"],
+              [0.9, "#4d9221"],
+              [1, "#276419"]
+            ]
+          },
+          "xaxis": {
+            "gridcolor": "white",
+            "linecolor": "white",
+            "ticks": "",
+            "title": { "standoff": 15 },
+            "zerolinecolor": "white",
+            "automargin": true,
+            "zerolinewidth": 2
+          },
+          "yaxis": {
+            "gridcolor": "white",
+            "linecolor": "white",
+            "ticks": "",
+            "title": { "standoff": 15 },
+            "zerolinecolor": "white",
+            "automargin": true,
+            "zerolinewidth": 2
+          },
+          "scene": {
+            "xaxis": {
+              "backgroundcolor": "#E5ECF6",
+              "gridcolor": "white",
+              "linecolor": "white",
+              "showbackground": true,
+              "ticks": "",
+              "zerolinecolor": "white",
+              "gridwidth": 2
+            },
+            "yaxis": {
+              "backgroundcolor": "#E5ECF6",
+              "gridcolor": "white",
+              "linecolor": "white",
+              "showbackground": true,
+              "ticks": "",
+              "zerolinecolor": "white",
+              "gridwidth": 2
+            },
+            "zaxis": {
+              "backgroundcolor": "#E5ECF6",
+              "gridcolor": "white",
+              "linecolor": "white",
+              "showbackground": true,
+              "ticks": "",
+              "zerolinecolor": "white",
+              "gridwidth": 2
+            }
+          },
+          "shapedefaults": { "line": { "color": "#2a3f5f" } },
+          "annotationdefaults": { "arrowcolor": "#2a3f5f", "arrowhead": 0, "arrowwidth": 1 },
+          "geo": {
+            "bgcolor": "white",
+            "landcolor": "#E5ECF6",
+            "subunitcolor": "white",
+            "showland": true,
+            "showlakes": true,
+            "lakecolor": "white"
+          },
+          "title": { "x": 0.05 }
+        }
+      },
+      "xaxis": {
+        "anchor": "y",
+        "domain": [0.0, 1.0],
+        "title": { "text": "$\\mathrm{Gate}\\;\\left(\\mathrm{V}\\right)$" },
+        "minor": { "nticks": 5, "tickcolor": "gray", "tickwidth": 2, "ticklen": 5 },
+        "ticks": "outside",
+        "showline": true,
+        "mirror": true,
+        "automargin": true,
+        "zeroline": false,
+        "linewidth": 2,
+        "showgrid": false,
+        "exponentformat": "power",
+        "showexponent": "last",
+        "tickformat": "",
+        "minexponent": 0,
+        "nticks": 5,
+        "tickcolor": "gray",
+        "tickwidth": 2,
+        "ticklen": 5,
+        "tickangle": 0
+      },
+      "yaxis": {
+        "anchor": "x",
+        "domain": [0.0, 1.0],
+        "autorange": true,
+        "title": { "text": "$\\mathrm{Frequency}\\;\\left(\\mathrm{Hz}\\right)$" },
+        "minor": { "nticks": 5, "tickcolor": "gray", "tickwidth": 2, "ticklen": 5 },
+        "ticks": "outside",
+        "showline": true,
+        "mirror": true,
+        "automargin": true,
+        "zeroline": false,
+        "linewidth": 2,
+        "showgrid": false,
+        "exponentformat": "power",
+        "showexponent": "last",
+        "tickformat": "",
+        "minexponent": 0,
+        "nticks": 5,
+        "tickcolor": "gray",
+        "tickwidth": 2,
+        "ticklen": 5,
+        "tickangle": 0
+      },
+      "coloraxis": {
+        "colorbar": {
+          "title": { "text": "", "side": "top" },
+          "exponentformat": "power",
+          "showexponent": "last",
+          "tickformat": "~s",
+          "minexponent": 0,
+          "ticklen": 5,
+          "outlinewidth": 2,
+          "thicknessmode": "pixels",
+          "thickness": 20,
+          "x": 1.02,
+          "xanchor": "left",
+          "lenmode": "fraction",
+          "len": 0.78,
+          "y": 0.45,
+          "yanchor": "middle"
+        },
+        "colorscale": [
+          [0.0, "#440154"],
+          [0.1111111111111111, "#482878"],
+          [0.2222222222222222, "#3e4989"],
+          [0.3333333333333333, "#31688e"],
+          [0.4444444444444444, "#26828e"],
+          [0.5555555555555556, "#1f9e89"],
+          [0.6666666666666666, "#35b779"],
+          [0.7777777777777777, "#6ece58"],
+          [0.8888888888888888, "#b5de2b"],
+          [1.0, "#fde725"]
+        ],
+        "cmin": 1e-10,
+        "cmax": 2.6000000000000003e-10
+      },
+      "margin": { "t": 40, "l": 50, "r": 110, "b": 50 },
+      "title": {
+        "font": {
+          "family": "Fira Sans, Arial, sans-serif",
+          "size": 16,
+          "color": "rgba(0,0,0,0.6)"
+        },
+        "text": "current vs voltage, frequency",
+        "x": 0.5,
+        "y": 0.97
+      },
+      "font": { "family": "Fira Sans, Arial, sans-serif", "size": 16 },
+      "annotations": [
+        {
+          "align": "left",
+          "font": { "size": 16 },
+          "name": "qimchi-colorbar-title",
+          "showarrow": false,
+          "text": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{A}\\right)$",
+          "textangle": 0,
+          "x": 1.02,
+          "xanchor": "left",
+          "xref": "paper",
+          "y": 0.88,
+          "yanchor": "bottom",
+          "yref": "paper"
+        }
+      ],
+      "meta": {
+        "qimchi_units": {
+          "x": {
+            "label": "Gate",
+            "unit": "V",
+            "engineering_scale": 1.0,
+            "unit_text": "V",
+            "engineering_units": {
+              "24": "\\mathrm{YV}",
+              "21": "\\mathrm{ZV}",
+              "18": "\\mathrm{EV}",
+              "15": "\\mathrm{PV}",
+              "12": "\\mathrm{TV}",
+              "9": "\\mathrm{GV}",
+              "6": "\\mathrm{MV}",
+              "3": "\\mathrm{kV}",
+              "0": "\\mathrm{V}",
+              "-3": "\\mathrm{mV}",
+              "-6": "\\mu\\mathrm{V}",
+              "-9": "\\mathrm{nV}",
+              "-12": "\\mathrm{pV}",
+              "-15": "\\mathrm{fV}",
+              "-18": "\\mathrm{aV}",
+              "-21": "\\mathrm{zV}",
+              "-24": "\\mathrm{yV}"
+            },
+            "engineering_units_text": {
+              "24": "YV",
+              "21": "ZV",
+              "18": "EV",
+              "15": "PV",
+              "12": "TV",
+              "9": "GV",
+              "6": "MV",
+              "3": "kV",
+              "0": "V",
+              "-3": "mV",
+              "-6": "\u00b5V",
+              "-9": "nV",
+              "-12": "pV",
+              "-15": "fV",
+              "-18": "aV",
+              "-21": "zV",
+              "-24": "yV"
+            },
+            "engineering_titles": {
+              "24": "$\\mathrm{Gate}\\;\\left(\\mathrm{YV}\\right)$",
+              "21": "$\\mathrm{Gate}\\;\\left(\\mathrm{ZV}\\right)$",
+              "18": "$\\mathrm{Gate}\\;\\left(\\mathrm{EV}\\right)$",
+              "15": "$\\mathrm{Gate}\\;\\left(\\mathrm{PV}\\right)$",
+              "12": "$\\mathrm{Gate}\\;\\left(\\mathrm{TV}\\right)$",
+              "9": "$\\mathrm{Gate}\\;\\left(\\mathrm{GV}\\right)$",
+              "6": "$\\mathrm{Gate}\\;\\left(\\mathrm{MV}\\right)$",
+              "3": "$\\mathrm{Gate}\\;\\left(\\mathrm{kV}\\right)$",
+              "0": "$\\mathrm{Gate}\\;\\left(\\mathrm{V}\\right)$",
+              "-3": "$\\mathrm{Gate}\\;\\left(\\mathrm{mV}\\right)$",
+              "-6": "$\\mathrm{Gate}\\;\\left(\\mu\\mathrm{V}\\right)$",
+              "-9": "$\\mathrm{Gate}\\;\\left(\\mathrm{nV}\\right)$",
+              "-12": "$\\mathrm{Gate}\\;\\left(\\mathrm{pV}\\right)$",
+              "-15": "$\\mathrm{Gate}\\;\\left(\\mathrm{fV}\\right)$",
+              "-18": "$\\mathrm{Gate}\\;\\left(\\mathrm{aV}\\right)$",
+              "-21": "$\\mathrm{Gate}\\;\\left(\\mathrm{zV}\\right)$",
+              "-24": "$\\mathrm{Gate}\\;\\left(\\mathrm{yV}\\right)$"
+            }
+          },
+          "y": {
+            "label": "Frequency",
+            "unit": "Hz",
+            "engineering_scale": 1.0,
+            "unit_text": "Hz",
+            "engineering_units": {
+              "24": "\\mathrm{YHz}",
+              "21": "\\mathrm{ZHz}",
+              "18": "\\mathrm{EHz}",
+              "15": "\\mathrm{PHz}",
+              "12": "\\mathrm{THz}",
+              "9": "\\mathrm{GHz}",
+              "6": "\\mathrm{MHz}",
+              "3": "\\mathrm{kHz}",
+              "0": "\\mathrm{Hz}",
+              "-3": "\\mathrm{mHz}",
+              "-6": "\\mu\\mathrm{Hz}",
+              "-9": "\\mathrm{nHz}",
+              "-12": "\\mathrm{pHz}",
+              "-15": "\\mathrm{fHz}",
+              "-18": "\\mathrm{aHz}",
+              "-21": "\\mathrm{zHz}",
+              "-24": "\\mathrm{yHz}"
+            },
+            "engineering_units_text": {
+              "24": "YHz",
+              "21": "ZHz",
+              "18": "EHz",
+              "15": "PHz",
+              "12": "THz",
+              "9": "GHz",
+              "6": "MHz",
+              "3": "kHz",
+              "0": "Hz",
+              "-3": "mHz",
+              "-6": "\u00b5Hz",
+              "-9": "nHz",
+              "-12": "pHz",
+              "-15": "fHz",
+              "-18": "aHz",
+              "-21": "zHz",
+              "-24": "yHz"
+            },
+            "engineering_titles": {
+              "24": "$\\mathrm{Frequency}\\;\\left(\\mathrm{YHz}\\right)$",
+              "21": "$\\mathrm{Frequency}\\;\\left(\\mathrm{ZHz}\\right)$",
+              "18": "$\\mathrm{Frequency}\\;\\left(\\mathrm{EHz}\\right)$",
+              "15": "$\\mathrm{Frequency}\\;\\left(\\mathrm{PHz}\\right)$",
+              "12": "$\\mathrm{Frequency}\\;\\left(\\mathrm{THz}\\right)$",
+              "9": "$\\mathrm{Frequency}\\;\\left(\\mathrm{GHz}\\right)$",
+              "6": "$\\mathrm{Frequency}\\;\\left(\\mathrm{MHz}\\right)$",
+              "3": "$\\mathrm{Frequency}\\;\\left(\\mathrm{kHz}\\right)$",
+              "0": "$\\mathrm{Frequency}\\;\\left(\\mathrm{Hz}\\right)$",
+              "-3": "$\\mathrm{Frequency}\\;\\left(\\mathrm{mHz}\\right)$",
+              "-6": "$\\mathrm{Frequency}\\;\\left(\\mu\\mathrm{Hz}\\right)$",
+              "-9": "$\\mathrm{Frequency}\\;\\left(\\mathrm{nHz}\\right)$",
+              "-12": "$\\mathrm{Frequency}\\;\\left(\\mathrm{pHz}\\right)$",
+              "-15": "$\\mathrm{Frequency}\\;\\left(\\mathrm{fHz}\\right)$",
+              "-18": "$\\mathrm{Frequency}\\;\\left(\\mathrm{aHz}\\right)$",
+              "-21": "$\\mathrm{Frequency}\\;\\left(\\mathrm{zHz}\\right)$",
+              "-24": "$\\mathrm{Frequency}\\;\\left(\\mathrm{yHz}\\right)$"
+            }
+          },
+          "z": {
+            "label": "Lockin R",
+            "unit": "A",
+            "engineering_scale": 1.0,
+            "unit_text": "A",
+            "engineering_units": {
+              "24": "\\mathrm{YA}",
+              "21": "\\mathrm{ZA}",
+              "18": "\\mathrm{EA}",
+              "15": "\\mathrm{PA}",
+              "12": "\\mathrm{TA}",
+              "9": "\\mathrm{GA}",
+              "6": "\\mathrm{MA}",
+              "3": "\\mathrm{kA}",
+              "0": "\\mathrm{A}",
+              "-3": "\\mathrm{mA}",
+              "-6": "\\mu\\mathrm{A}",
+              "-9": "\\mathrm{nA}",
+              "-12": "\\mathrm{pA}",
+              "-15": "\\mathrm{fA}",
+              "-18": "\\mathrm{aA}",
+              "-21": "\\mathrm{zA}",
+              "-24": "\\mathrm{yA}"
+            },
+            "engineering_units_text": {
+              "24": "YA",
+              "21": "ZA",
+              "18": "EA",
+              "15": "PA",
+              "12": "TA",
+              "9": "GA",
+              "6": "MA",
+              "3": "kA",
+              "0": "A",
+              "-3": "mA",
+              "-6": "\u00b5A",
+              "-9": "nA",
+              "-12": "pA",
+              "-15": "fA",
+              "-18": "aA",
+              "-21": "zA",
+              "-24": "yA"
+            },
+            "engineering_titles": {
+              "24": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{YA}\\right)$",
+              "21": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{ZA}\\right)$",
+              "18": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{EA}\\right)$",
+              "15": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{PA}\\right)$",
+              "12": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{TA}\\right)$",
+              "9": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{GA}\\right)$",
+              "6": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{MA}\\right)$",
+              "3": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{kA}\\right)$",
+              "0": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{A}\\right)$",
+              "-3": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{mA}\\right)$",
+              "-6": "$\\mathrm{Lockin\\ R}\\;\\left(\\mu\\mathrm{A}\\right)$",
+              "-9": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{nA}\\right)$",
+              "-12": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{pA}\\right)$",
+              "-15": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{fA}\\right)$",
+              "-18": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{aA}\\right)$",
+              "-21": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{zA}\\right)$",
+              "-24": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{yA}\\right)$"
+            }
+          }
+        }
+      }
+    }
+  },
+  "later": {
+    "data": [
+      {
+        "coloraxis": "coloraxis",
+        "name": "0",
+        "x": { "dtype": "f8", "bdata": "mpmZmZmZ+b8AAAAAAAD4v2ZmZmZmZva/zczMzMzM9L8zMzMzMzPzvw==" },
+        "y": {
+          "dtype": "f8",
+          "bdata": "AAAAAFempkEAAABAovKmQQAAAIDtPqdBAAAAwDiLp0EAAAAAhNenQQAAAEDPI6hBAAAAgBpwqEE="
+        },
+        "z": {
+          "dtype": "f4",
+          "bdata": "P+0kL19wiS8fasAv32P3LwAAwH//6y8vv++OL3/pxS8/4/wvAADAf7/qOi8fb5Qv32jLL08xATAAAMB/f+lFL3/umS8/6NAv//ADMAAAwH8/6FAv322fL59n1i+vsAYwAADAf//mWy8/7aQv/+bbL19wCTAAAMB/v+VmL59sqi9fZuEvDzAMMAAAwH8=",
+          "shape": "7, 5"
+        },
+        "type": "heatmap",
+        "xaxis": "x",
+        "yaxis": "y",
+        "hovertemplate": "Gate (V): %{x}<br>Frequency (Hz): %{y}<br>Lockin R (A): %{z}<extra></extra>"
+      }
+    ],
+    "layout": {
+      "template": {
+        "data": {
+          "histogram2dcontour": [
+            {
+              "type": "histogram2dcontour",
+              "colorbar": { "outlinewidth": 0, "ticks": "" },
+              "colorscale": [
+                [0.0, "#0d0887"],
+                [0.1111111111111111, "#46039f"],
+                [0.2222222222222222, "#7201a8"],
+                [0.3333333333333333, "#9c179e"],
+                [0.4444444444444444, "#bd3786"],
+                [0.5555555555555556, "#d8576b"],
+                [0.6666666666666666, "#ed7953"],
+                [0.7777777777777778, "#fb9f3a"],
+                [0.8888888888888888, "#fdca26"],
+                [1.0, "#f0f921"]
+              ]
+            }
+          ],
+          "choropleth": [{ "type": "choropleth", "colorbar": { "outlinewidth": 0, "ticks": "" } }],
+          "histogram2d": [
+            {
+              "type": "histogram2d",
+              "colorbar": { "outlinewidth": 0, "ticks": "" },
+              "colorscale": [
+                [0.0, "#0d0887"],
+                [0.1111111111111111, "#46039f"],
+                [0.2222222222222222, "#7201a8"],
+                [0.3333333333333333, "#9c179e"],
+                [0.4444444444444444, "#bd3786"],
+                [0.5555555555555556, "#d8576b"],
+                [0.6666666666666666, "#ed7953"],
+                [0.7777777777777778, "#fb9f3a"],
+                [0.8888888888888888, "#fdca26"],
+                [1.0, "#f0f921"]
+              ]
+            }
+          ],
+          "heatmap": [
+            {
+              "type": "heatmap",
+              "colorbar": { "outlinewidth": 0, "ticks": "" },
+              "colorscale": [
+                [0.0, "#0d0887"],
+                [0.1111111111111111, "#46039f"],
+                [0.2222222222222222, "#7201a8"],
+                [0.3333333333333333, "#9c179e"],
+                [0.4444444444444444, "#bd3786"],
+                [0.5555555555555556, "#d8576b"],
+                [0.6666666666666666, "#ed7953"],
+                [0.7777777777777778, "#fb9f3a"],
+                [0.8888888888888888, "#fdca26"],
+                [1.0, "#f0f921"]
+              ]
+            }
+          ],
+          "contourcarpet": [
+            { "type": "contourcarpet", "colorbar": { "outlinewidth": 0, "ticks": "" } }
+          ],
+          "contour": [
+            {
+              "type": "contour",
+              "colorbar": { "outlinewidth": 0, "ticks": "" },
+              "colorscale": [
+                [0.0, "#0d0887"],
+                [0.1111111111111111, "#46039f"],
+                [0.2222222222222222, "#7201a8"],
+                [0.3333333333333333, "#9c179e"],
+                [0.4444444444444444, "#bd3786"],
+                [0.5555555555555556, "#d8576b"],
+                [0.6666666666666666, "#ed7953"],
+                [0.7777777777777778, "#fb9f3a"],
+                [0.8888888888888888, "#fdca26"],
+                [1.0, "#f0f921"]
+              ]
+            }
+          ],
+          "surface": [
+            {
+              "type": "surface",
+              "colorbar": { "outlinewidth": 0, "ticks": "" },
+              "colorscale": [
+                [0.0, "#0d0887"],
+                [0.1111111111111111, "#46039f"],
+                [0.2222222222222222, "#7201a8"],
+                [0.3333333333333333, "#9c179e"],
+                [0.4444444444444444, "#bd3786"],
+                [0.5555555555555556, "#d8576b"],
+                [0.6666666666666666, "#ed7953"],
+                [0.7777777777777778, "#fb9f3a"],
+                [0.8888888888888888, "#fdca26"],
+                [1.0, "#f0f921"]
+              ]
+            }
+          ],
+          "mesh3d": [{ "type": "mesh3d", "colorbar": { "outlinewidth": 0, "ticks": "" } }],
+          "scatter": [
+            {
+              "fillpattern": { "fillmode": "overlay", "size": 10, "solidity": 0.2 },
+              "type": "scatter"
+            }
+          ],
+          "parcoords": [
+            { "type": "parcoords", "line": { "colorbar": { "outlinewidth": 0, "ticks": "" } } }
+          ],
+          "scatterpolargl": [
+            {
+              "type": "scatterpolargl",
+              "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } }
+            }
+          ],
+          "bar": [
+            {
+              "error_x": { "color": "#2a3f5f" },
+              "error_y": { "color": "#2a3f5f" },
+              "marker": {
+                "line": { "color": "#E5ECF6", "width": 0.5 },
+                "pattern": { "fillmode": "overlay", "size": 10, "solidity": 0.2 }
+              },
+              "type": "bar"
+            }
+          ],
+          "scattergeo": [
+            { "type": "scattergeo", "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } } }
+          ],
+          "scatterpolar": [
+            { "type": "scatterpolar", "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } } }
+          ],
+          "histogram": [
+            {
+              "marker": { "pattern": { "fillmode": "overlay", "size": 10, "solidity": 0.2 } },
+              "type": "histogram"
+            }
+          ],
+          "scattergl": [
+            { "type": "scattergl", "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } } }
+          ],
+          "scatter3d": [
+            {
+              "type": "scatter3d",
+              "line": { "colorbar": { "outlinewidth": 0, "ticks": "" } },
+              "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } }
+            }
+          ],
+          "scattermap": [
+            { "type": "scattermap", "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } } }
+          ],
+          "scatterternary": [
+            {
+              "type": "scatterternary",
+              "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } }
+            }
+          ],
+          "scattercarpet": [
+            {
+              "type": "scattercarpet",
+              "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } }
+            }
+          ],
+          "carpet": [
+            {
+              "aaxis": {
+                "endlinecolor": "#2a3f5f",
+                "gridcolor": "white",
+                "linecolor": "white",
+                "minorgridcolor": "white",
+                "startlinecolor": "#2a3f5f"
+              },
+              "baxis": {
+                "endlinecolor": "#2a3f5f",
+                "gridcolor": "white",
+                "linecolor": "white",
+                "minorgridcolor": "white",
+                "startlinecolor": "#2a3f5f"
+              },
+              "type": "carpet"
+            }
+          ],
+          "table": [
+            {
+              "cells": { "fill": { "color": "#EBF0F8" }, "line": { "color": "white" } },
+              "header": { "fill": { "color": "#C8D4E3" }, "line": { "color": "white" } },
+              "type": "table"
+            }
+          ],
+          "barpolar": [
+            {
+              "marker": {
+                "line": { "color": "#E5ECF6", "width": 0.5 },
+                "pattern": { "fillmode": "overlay", "size": 10, "solidity": 0.2 }
+              },
+              "type": "barpolar"
+            }
+          ],
+          "pie": [{ "automargin": true, "type": "pie" }]
+        },
+        "layout": {
+          "autotypenumbers": "strict",
+          "colorway": [
+            "#636efa",
+            "#EF553B",
+            "#00cc96",
+            "#ab63fa",
+            "#FFA15A",
+            "#19d3f3",
+            "#FF6692",
+            "#B6E880",
+            "#FF97FF",
+            "#FECB52"
+          ],
+          "font": { "color": "#2a3f5f" },
+          "hovermode": "closest",
+          "hoverlabel": { "align": "left" },
+          "paper_bgcolor": "white",
+          "plot_bgcolor": "#E5ECF6",
+          "polar": {
+            "bgcolor": "#E5ECF6",
+            "angularaxis": { "gridcolor": "white", "linecolor": "white", "ticks": "" },
+            "radialaxis": { "gridcolor": "white", "linecolor": "white", "ticks": "" }
+          },
+          "ternary": {
+            "bgcolor": "#E5ECF6",
+            "aaxis": { "gridcolor": "white", "linecolor": "white", "ticks": "" },
+            "baxis": { "gridcolor": "white", "linecolor": "white", "ticks": "" },
+            "caxis": { "gridcolor": "white", "linecolor": "white", "ticks": "" }
+          },
+          "coloraxis": { "colorbar": { "outlinewidth": 0, "ticks": "" } },
+          "colorscale": {
+            "sequential": [
+              [0.0, "#0d0887"],
+              [0.1111111111111111, "#46039f"],
+              [0.2222222222222222, "#7201a8"],
+              [0.3333333333333333, "#9c179e"],
+              [0.4444444444444444, "#bd3786"],
+              [0.5555555555555556, "#d8576b"],
+              [0.6666666666666666, "#ed7953"],
+              [0.7777777777777778, "#fb9f3a"],
+              [0.8888888888888888, "#fdca26"],
+              [1.0, "#f0f921"]
+            ],
+            "sequentialminus": [
+              [0.0, "#0d0887"],
+              [0.1111111111111111, "#46039f"],
+              [0.2222222222222222, "#7201a8"],
+              [0.3333333333333333, "#9c179e"],
+              [0.4444444444444444, "#bd3786"],
+              [0.5555555555555556, "#d8576b"],
+              [0.6666666666666666, "#ed7953"],
+              [0.7777777777777778, "#fb9f3a"],
+              [0.8888888888888888, "#fdca26"],
+              [1.0, "#f0f921"]
+            ],
+            "diverging": [
+              [0, "#8e0152"],
+              [0.1, "#c51b7d"],
+              [0.2, "#de77ae"],
+              [0.3, "#f1b6da"],
+              [0.4, "#fde0ef"],
+              [0.5, "#f7f7f7"],
+              [0.6, "#e6f5d0"],
+              [0.7, "#b8e186"],
+              [0.8, "#7fbc41"],
+              [0.9, "#4d9221"],
+              [1, "#276419"]
+            ]
+          },
+          "xaxis": {
+            "gridcolor": "white",
+            "linecolor": "white",
+            "ticks": "",
+            "title": { "standoff": 15 },
+            "zerolinecolor": "white",
+            "automargin": true,
+            "zerolinewidth": 2
+          },
+          "yaxis": {
+            "gridcolor": "white",
+            "linecolor": "white",
+            "ticks": "",
+            "title": { "standoff": 15 },
+            "zerolinecolor": "white",
+            "automargin": true,
+            "zerolinewidth": 2
+          },
+          "scene": {
+            "xaxis": {
+              "backgroundcolor": "#E5ECF6",
+              "gridcolor": "white",
+              "linecolor": "white",
+              "showbackground": true,
+              "ticks": "",
+              "zerolinecolor": "white",
+              "gridwidth": 2
+            },
+            "yaxis": {
+              "backgroundcolor": "#E5ECF6",
+              "gridcolor": "white",
+              "linecolor": "white",
+              "showbackground": true,
+              "ticks": "",
+              "zerolinecolor": "white",
+              "gridwidth": 2
+            },
+            "zaxis": {
+              "backgroundcolor": "#E5ECF6",
+              "gridcolor": "white",
+              "linecolor": "white",
+              "showbackground": true,
+              "ticks": "",
+              "zerolinecolor": "white",
+              "gridwidth": 2
+            }
+          },
+          "shapedefaults": { "line": { "color": "#2a3f5f" } },
+          "annotationdefaults": { "arrowcolor": "#2a3f5f", "arrowhead": 0, "arrowwidth": 1 },
+          "geo": {
+            "bgcolor": "white",
+            "landcolor": "#E5ECF6",
+            "subunitcolor": "white",
+            "showland": true,
+            "showlakes": true,
+            "lakecolor": "white"
+          },
+          "title": { "x": 0.05 }
+        }
+      },
+      "xaxis": {
+        "anchor": "y",
+        "domain": [0.0, 1.0],
+        "title": { "text": "$\\mathrm{Gate}\\;\\left(\\mathrm{V}\\right)$" },
+        "minor": { "nticks": 5, "tickcolor": "gray", "tickwidth": 2, "ticklen": 5 },
+        "ticks": "outside",
+        "showline": true,
+        "mirror": true,
+        "automargin": true,
+        "zeroline": false,
+        "linewidth": 2,
+        "showgrid": false,
+        "exponentformat": "power",
+        "showexponent": "last",
+        "tickformat": "",
+        "minexponent": 0,
+        "nticks": 5,
+        "tickcolor": "gray",
+        "tickwidth": 2,
+        "ticklen": 5,
+        "tickangle": 0
+      },
+      "yaxis": {
+        "anchor": "x",
+        "domain": [0.0, 1.0],
+        "autorange": true,
+        "title": { "text": "$\\mathrm{Frequency}\\;\\left(\\mathrm{Hz}\\right)$" },
+        "minor": { "nticks": 5, "tickcolor": "gray", "tickwidth": 2, "ticklen": 5 },
+        "ticks": "outside",
+        "showline": true,
+        "mirror": true,
+        "automargin": true,
+        "zeroline": false,
+        "linewidth": 2,
+        "showgrid": false,
+        "exponentformat": "power",
+        "showexponent": "last",
+        "tickformat": "",
+        "minexponent": 0,
+        "nticks": 5,
+        "tickcolor": "gray",
+        "tickwidth": 2,
+        "ticklen": 5,
+        "tickangle": 0
+      },
+      "coloraxis": {
+        "colorbar": {
+          "title": { "text": "", "side": "top" },
+          "exponentformat": "power",
+          "showexponent": "last",
+          "tickformat": "~s",
+          "minexponent": 0,
+          "ticklen": 5,
+          "outlinewidth": 2,
+          "thicknessmode": "pixels",
+          "thickness": 20,
+          "x": 1.02,
+          "xanchor": "left",
+          "lenmode": "fraction",
+          "len": 0.78,
+          "y": 0.45,
+          "yanchor": "middle"
+        },
+        "colorscale": [
+          [0.0, "#440154"],
+          [0.1111111111111111, "#482878"],
+          [0.2222222222222222, "#3e4989"],
+          [0.3333333333333333, "#31688e"],
+          [0.4444444444444444, "#26828e"],
+          [0.5555555555555556, "#1f9e89"],
+          [0.6666666666666666, "#35b779"],
+          [0.7777777777777777, "#6ece58"],
+          [0.8888888888888888, "#b5de2b"],
+          [1.0, "#fde725"]
+        ],
+        "cmin": 1.5e-10,
+        "cmax": 5.1e-10
+      },
+      "margin": { "t": 40, "l": 50, "r": 110, "b": 50 },
+      "title": {
+        "font": {
+          "family": "Fira Sans, Arial, sans-serif",
+          "size": 16,
+          "color": "rgba(0,0,0,0.6)"
+        },
+        "text": "current vs voltage, frequency",
+        "x": 0.5,
+        "y": 0.97
+      },
+      "font": { "family": "Fira Sans, Arial, sans-serif", "size": 16 },
+      "annotations": [
+        {
+          "align": "left",
+          "font": { "size": 16 },
+          "name": "qimchi-colorbar-title",
+          "showarrow": false,
+          "text": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{A}\\right)$",
+          "textangle": 0,
+          "x": 1.02,
+          "xanchor": "left",
+          "xref": "paper",
+          "y": 0.88,
+          "yanchor": "bottom",
+          "yref": "paper"
+        }
+      ],
+      "meta": {
+        "qimchi_units": {
+          "x": {
+            "label": "Gate",
+            "unit": "V",
+            "engineering_scale": 1.0,
+            "unit_text": "V",
+            "engineering_units": {
+              "24": "\\mathrm{YV}",
+              "21": "\\mathrm{ZV}",
+              "18": "\\mathrm{EV}",
+              "15": "\\mathrm{PV}",
+              "12": "\\mathrm{TV}",
+              "9": "\\mathrm{GV}",
+              "6": "\\mathrm{MV}",
+              "3": "\\mathrm{kV}",
+              "0": "\\mathrm{V}",
+              "-3": "\\mathrm{mV}",
+              "-6": "\\mu\\mathrm{V}",
+              "-9": "\\mathrm{nV}",
+              "-12": "\\mathrm{pV}",
+              "-15": "\\mathrm{fV}",
+              "-18": "\\mathrm{aV}",
+              "-21": "\\mathrm{zV}",
+              "-24": "\\mathrm{yV}"
+            },
+            "engineering_units_text": {
+              "24": "YV",
+              "21": "ZV",
+              "18": "EV",
+              "15": "PV",
+              "12": "TV",
+              "9": "GV",
+              "6": "MV",
+              "3": "kV",
+              "0": "V",
+              "-3": "mV",
+              "-6": "\u00b5V",
+              "-9": "nV",
+              "-12": "pV",
+              "-15": "fV",
+              "-18": "aV",
+              "-21": "zV",
+              "-24": "yV"
+            },
+            "engineering_titles": {
+              "24": "$\\mathrm{Gate}\\;\\left(\\mathrm{YV}\\right)$",
+              "21": "$\\mathrm{Gate}\\;\\left(\\mathrm{ZV}\\right)$",
+              "18": "$\\mathrm{Gate}\\;\\left(\\mathrm{EV}\\right)$",
+              "15": "$\\mathrm{Gate}\\;\\left(\\mathrm{PV}\\right)$",
+              "12": "$\\mathrm{Gate}\\;\\left(\\mathrm{TV}\\right)$",
+              "9": "$\\mathrm{Gate}\\;\\left(\\mathrm{GV}\\right)$",
+              "6": "$\\mathrm{Gate}\\;\\left(\\mathrm{MV}\\right)$",
+              "3": "$\\mathrm{Gate}\\;\\left(\\mathrm{kV}\\right)$",
+              "0": "$\\mathrm{Gate}\\;\\left(\\mathrm{V}\\right)$",
+              "-3": "$\\mathrm{Gate}\\;\\left(\\mathrm{mV}\\right)$",
+              "-6": "$\\mathrm{Gate}\\;\\left(\\mu\\mathrm{V}\\right)$",
+              "-9": "$\\mathrm{Gate}\\;\\left(\\mathrm{nV}\\right)$",
+              "-12": "$\\mathrm{Gate}\\;\\left(\\mathrm{pV}\\right)$",
+              "-15": "$\\mathrm{Gate}\\;\\left(\\mathrm{fV}\\right)$",
+              "-18": "$\\mathrm{Gate}\\;\\left(\\mathrm{aV}\\right)$",
+              "-21": "$\\mathrm{Gate}\\;\\left(\\mathrm{zV}\\right)$",
+              "-24": "$\\mathrm{Gate}\\;\\left(\\mathrm{yV}\\right)$"
+            }
+          },
+          "y": {
+            "label": "Frequency",
+            "unit": "Hz",
+            "engineering_scale": 1.0,
+            "unit_text": "Hz",
+            "engineering_units": {
+              "24": "\\mathrm{YHz}",
+              "21": "\\mathrm{ZHz}",
+              "18": "\\mathrm{EHz}",
+              "15": "\\mathrm{PHz}",
+              "12": "\\mathrm{THz}",
+              "9": "\\mathrm{GHz}",
+              "6": "\\mathrm{MHz}",
+              "3": "\\mathrm{kHz}",
+              "0": "\\mathrm{Hz}",
+              "-3": "\\mathrm{mHz}",
+              "-6": "\\mu\\mathrm{Hz}",
+              "-9": "\\mathrm{nHz}",
+              "-12": "\\mathrm{pHz}",
+              "-15": "\\mathrm{fHz}",
+              "-18": "\\mathrm{aHz}",
+              "-21": "\\mathrm{zHz}",
+              "-24": "\\mathrm{yHz}"
+            },
+            "engineering_units_text": {
+              "24": "YHz",
+              "21": "ZHz",
+              "18": "EHz",
+              "15": "PHz",
+              "12": "THz",
+              "9": "GHz",
+              "6": "MHz",
+              "3": "kHz",
+              "0": "Hz",
+              "-3": "mHz",
+              "-6": "\u00b5Hz",
+              "-9": "nHz",
+              "-12": "pHz",
+              "-15": "fHz",
+              "-18": "aHz",
+              "-21": "zHz",
+              "-24": "yHz"
+            },
+            "engineering_titles": {
+              "24": "$\\mathrm{Frequency}\\;\\left(\\mathrm{YHz}\\right)$",
+              "21": "$\\mathrm{Frequency}\\;\\left(\\mathrm{ZHz}\\right)$",
+              "18": "$\\mathrm{Frequency}\\;\\left(\\mathrm{EHz}\\right)$",
+              "15": "$\\mathrm{Frequency}\\;\\left(\\mathrm{PHz}\\right)$",
+              "12": "$\\mathrm{Frequency}\\;\\left(\\mathrm{THz}\\right)$",
+              "9": "$\\mathrm{Frequency}\\;\\left(\\mathrm{GHz}\\right)$",
+              "6": "$\\mathrm{Frequency}\\;\\left(\\mathrm{MHz}\\right)$",
+              "3": "$\\mathrm{Frequency}\\;\\left(\\mathrm{kHz}\\right)$",
+              "0": "$\\mathrm{Frequency}\\;\\left(\\mathrm{Hz}\\right)$",
+              "-3": "$\\mathrm{Frequency}\\;\\left(\\mathrm{mHz}\\right)$",
+              "-6": "$\\mathrm{Frequency}\\;\\left(\\mu\\mathrm{Hz}\\right)$",
+              "-9": "$\\mathrm{Frequency}\\;\\left(\\mathrm{nHz}\\right)$",
+              "-12": "$\\mathrm{Frequency}\\;\\left(\\mathrm{pHz}\\right)$",
+              "-15": "$\\mathrm{Frequency}\\;\\left(\\mathrm{fHz}\\right)$",
+              "-18": "$\\mathrm{Frequency}\\;\\left(\\mathrm{aHz}\\right)$",
+              "-21": "$\\mathrm{Frequency}\\;\\left(\\mathrm{zHz}\\right)$",
+              "-24": "$\\mathrm{Frequency}\\;\\left(\\mathrm{yHz}\\right)$"
+            }
+          },
+          "z": {
+            "label": "Lockin R",
+            "unit": "A",
+            "engineering_scale": 1.0,
+            "unit_text": "A",
+            "engineering_units": {
+              "24": "\\mathrm{YA}",
+              "21": "\\mathrm{ZA}",
+              "18": "\\mathrm{EA}",
+              "15": "\\mathrm{PA}",
+              "12": "\\mathrm{TA}",
+              "9": "\\mathrm{GA}",
+              "6": "\\mathrm{MA}",
+              "3": "\\mathrm{kA}",
+              "0": "\\mathrm{A}",
+              "-3": "\\mathrm{mA}",
+              "-6": "\\mu\\mathrm{A}",
+              "-9": "\\mathrm{nA}",
+              "-12": "\\mathrm{pA}",
+              "-15": "\\mathrm{fA}",
+              "-18": "\\mathrm{aA}",
+              "-21": "\\mathrm{zA}",
+              "-24": "\\mathrm{yA}"
+            },
+            "engineering_units_text": {
+              "24": "YA",
+              "21": "ZA",
+              "18": "EA",
+              "15": "PA",
+              "12": "TA",
+              "9": "GA",
+              "6": "MA",
+              "3": "kA",
+              "0": "A",
+              "-3": "mA",
+              "-6": "\u00b5A",
+              "-9": "nA",
+              "-12": "pA",
+              "-15": "fA",
+              "-18": "aA",
+              "-21": "zA",
+              "-24": "yA"
+            },
+            "engineering_titles": {
+              "24": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{YA}\\right)$",
+              "21": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{ZA}\\right)$",
+              "18": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{EA}\\right)$",
+              "15": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{PA}\\right)$",
+              "12": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{TA}\\right)$",
+              "9": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{GA}\\right)$",
+              "6": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{MA}\\right)$",
+              "3": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{kA}\\right)$",
+              "0": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{A}\\right)$",
+              "-3": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{mA}\\right)$",
+              "-6": "$\\mathrm{Lockin\\ R}\\;\\left(\\mu\\mathrm{A}\\right)$",
+              "-9": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{nA}\\right)$",
+              "-12": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{pA}\\right)$",
+              "-15": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{fA}\\right)$",
+              "-18": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{aA}\\right)$",
+              "-21": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{zA}\\right)$",
+              "-24": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{yA}\\right)$"
+            }
+          }
+        }
+      }
+    }
+  },
+  "earlySwapped": {
+    "data": [
+      {
+        "coloraxis": "coloraxis",
+        "name": "0",
+        "x": {
+          "dtype": "f8",
+          "bdata": "AAAAAFempkEAAABAovKmQQAAAIDtPqdBAAAAwDiLp0EAAAAAhNenQQAAAEDPI6hBAAAAgBpwqEE="
+        },
+        "y": { "dtype": "f8", "bdata": "mpmZmZmZ+b8AAAAAAAD4v2ZmZmZmZva/zczMzMzM9L8zMzMzMzPzvw==" },
+        "z": {
+          "dtype": "f4",
+          "bdata": "/+bbLn/k8S7/8AMvv+8OL3/uGS8/7SQv/+svL//mWy+/5WYvf+RxLz/jfC//8IMvX3CJL7/vji8AAMB/AADAfwAAwH8AAMB/AADAfwAAwH8AAMB/AADAfwAAwH8AAMB/AADAfwAAwH8AAMB/AADAfwAAwH8AAMB/AADAfwAAwH8AAMB/AADAfwAAwH8=",
+          "shape": "5, 7"
+        },
+        "type": "heatmap",
+        "xaxis": "x",
+        "yaxis": "y",
+        "hovertemplate": "Frequency (Hz): %{x}<br>Gate (V): %{y}<br>Lockin R (A): %{z}<extra></extra>"
+      }
+    ],
+    "layout": {
+      "template": {
+        "data": {
+          "histogram2dcontour": [
+            {
+              "type": "histogram2dcontour",
+              "colorbar": { "outlinewidth": 0, "ticks": "" },
+              "colorscale": [
+                [0.0, "#0d0887"],
+                [0.1111111111111111, "#46039f"],
+                [0.2222222222222222, "#7201a8"],
+                [0.3333333333333333, "#9c179e"],
+                [0.4444444444444444, "#bd3786"],
+                [0.5555555555555556, "#d8576b"],
+                [0.6666666666666666, "#ed7953"],
+                [0.7777777777777778, "#fb9f3a"],
+                [0.8888888888888888, "#fdca26"],
+                [1.0, "#f0f921"]
+              ]
+            }
+          ],
+          "choropleth": [{ "type": "choropleth", "colorbar": { "outlinewidth": 0, "ticks": "" } }],
+          "histogram2d": [
+            {
+              "type": "histogram2d",
+              "colorbar": { "outlinewidth": 0, "ticks": "" },
+              "colorscale": [
+                [0.0, "#0d0887"],
+                [0.1111111111111111, "#46039f"],
+                [0.2222222222222222, "#7201a8"],
+                [0.3333333333333333, "#9c179e"],
+                [0.4444444444444444, "#bd3786"],
+                [0.5555555555555556, "#d8576b"],
+                [0.6666666666666666, "#ed7953"],
+                [0.7777777777777778, "#fb9f3a"],
+                [0.8888888888888888, "#fdca26"],
+                [1.0, "#f0f921"]
+              ]
+            }
+          ],
+          "heatmap": [
+            {
+              "type": "heatmap",
+              "colorbar": { "outlinewidth": 0, "ticks": "" },
+              "colorscale": [
+                [0.0, "#0d0887"],
+                [0.1111111111111111, "#46039f"],
+                [0.2222222222222222, "#7201a8"],
+                [0.3333333333333333, "#9c179e"],
+                [0.4444444444444444, "#bd3786"],
+                [0.5555555555555556, "#d8576b"],
+                [0.6666666666666666, "#ed7953"],
+                [0.7777777777777778, "#fb9f3a"],
+                [0.8888888888888888, "#fdca26"],
+                [1.0, "#f0f921"]
+              ]
+            }
+          ],
+          "contourcarpet": [
+            { "type": "contourcarpet", "colorbar": { "outlinewidth": 0, "ticks": "" } }
+          ],
+          "contour": [
+            {
+              "type": "contour",
+              "colorbar": { "outlinewidth": 0, "ticks": "" },
+              "colorscale": [
+                [0.0, "#0d0887"],
+                [0.1111111111111111, "#46039f"],
+                [0.2222222222222222, "#7201a8"],
+                [0.3333333333333333, "#9c179e"],
+                [0.4444444444444444, "#bd3786"],
+                [0.5555555555555556, "#d8576b"],
+                [0.6666666666666666, "#ed7953"],
+                [0.7777777777777778, "#fb9f3a"],
+                [0.8888888888888888, "#fdca26"],
+                [1.0, "#f0f921"]
+              ]
+            }
+          ],
+          "surface": [
+            {
+              "type": "surface",
+              "colorbar": { "outlinewidth": 0, "ticks": "" },
+              "colorscale": [
+                [0.0, "#0d0887"],
+                [0.1111111111111111, "#46039f"],
+                [0.2222222222222222, "#7201a8"],
+                [0.3333333333333333, "#9c179e"],
+                [0.4444444444444444, "#bd3786"],
+                [0.5555555555555556, "#d8576b"],
+                [0.6666666666666666, "#ed7953"],
+                [0.7777777777777778, "#fb9f3a"],
+                [0.8888888888888888, "#fdca26"],
+                [1.0, "#f0f921"]
+              ]
+            }
+          ],
+          "mesh3d": [{ "type": "mesh3d", "colorbar": { "outlinewidth": 0, "ticks": "" } }],
+          "scatter": [
+            {
+              "fillpattern": { "fillmode": "overlay", "size": 10, "solidity": 0.2 },
+              "type": "scatter"
+            }
+          ],
+          "parcoords": [
+            { "type": "parcoords", "line": { "colorbar": { "outlinewidth": 0, "ticks": "" } } }
+          ],
+          "scatterpolargl": [
+            {
+              "type": "scatterpolargl",
+              "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } }
+            }
+          ],
+          "bar": [
+            {
+              "error_x": { "color": "#2a3f5f" },
+              "error_y": { "color": "#2a3f5f" },
+              "marker": {
+                "line": { "color": "#E5ECF6", "width": 0.5 },
+                "pattern": { "fillmode": "overlay", "size": 10, "solidity": 0.2 }
+              },
+              "type": "bar"
+            }
+          ],
+          "scattergeo": [
+            { "type": "scattergeo", "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } } }
+          ],
+          "scatterpolar": [
+            { "type": "scatterpolar", "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } } }
+          ],
+          "histogram": [
+            {
+              "marker": { "pattern": { "fillmode": "overlay", "size": 10, "solidity": 0.2 } },
+              "type": "histogram"
+            }
+          ],
+          "scattergl": [
+            { "type": "scattergl", "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } } }
+          ],
+          "scatter3d": [
+            {
+              "type": "scatter3d",
+              "line": { "colorbar": { "outlinewidth": 0, "ticks": "" } },
+              "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } }
+            }
+          ],
+          "scattermap": [
+            { "type": "scattermap", "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } } }
+          ],
+          "scatterternary": [
+            {
+              "type": "scatterternary",
+              "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } }
+            }
+          ],
+          "scattercarpet": [
+            {
+              "type": "scattercarpet",
+              "marker": { "colorbar": { "outlinewidth": 0, "ticks": "" } }
+            }
+          ],
+          "carpet": [
+            {
+              "aaxis": {
+                "endlinecolor": "#2a3f5f",
+                "gridcolor": "white",
+                "linecolor": "white",
+                "minorgridcolor": "white",
+                "startlinecolor": "#2a3f5f"
+              },
+              "baxis": {
+                "endlinecolor": "#2a3f5f",
+                "gridcolor": "white",
+                "linecolor": "white",
+                "minorgridcolor": "white",
+                "startlinecolor": "#2a3f5f"
+              },
+              "type": "carpet"
+            }
+          ],
+          "table": [
+            {
+              "cells": { "fill": { "color": "#EBF0F8" }, "line": { "color": "white" } },
+              "header": { "fill": { "color": "#C8D4E3" }, "line": { "color": "white" } },
+              "type": "table"
+            }
+          ],
+          "barpolar": [
+            {
+              "marker": {
+                "line": { "color": "#E5ECF6", "width": 0.5 },
+                "pattern": { "fillmode": "overlay", "size": 10, "solidity": 0.2 }
+              },
+              "type": "barpolar"
+            }
+          ],
+          "pie": [{ "automargin": true, "type": "pie" }]
+        },
+        "layout": {
+          "autotypenumbers": "strict",
+          "colorway": [
+            "#636efa",
+            "#EF553B",
+            "#00cc96",
+            "#ab63fa",
+            "#FFA15A",
+            "#19d3f3",
+            "#FF6692",
+            "#B6E880",
+            "#FF97FF",
+            "#FECB52"
+          ],
+          "font": { "color": "#2a3f5f" },
+          "hovermode": "closest",
+          "hoverlabel": { "align": "left" },
+          "paper_bgcolor": "white",
+          "plot_bgcolor": "#E5ECF6",
+          "polar": {
+            "bgcolor": "#E5ECF6",
+            "angularaxis": { "gridcolor": "white", "linecolor": "white", "ticks": "" },
+            "radialaxis": { "gridcolor": "white", "linecolor": "white", "ticks": "" }
+          },
+          "ternary": {
+            "bgcolor": "#E5ECF6",
+            "aaxis": { "gridcolor": "white", "linecolor": "white", "ticks": "" },
+            "baxis": { "gridcolor": "white", "linecolor": "white", "ticks": "" },
+            "caxis": { "gridcolor": "white", "linecolor": "white", "ticks": "" }
+          },
+          "coloraxis": { "colorbar": { "outlinewidth": 0, "ticks": "" } },
+          "colorscale": {
+            "sequential": [
+              [0.0, "#0d0887"],
+              [0.1111111111111111, "#46039f"],
+              [0.2222222222222222, "#7201a8"],
+              [0.3333333333333333, "#9c179e"],
+              [0.4444444444444444, "#bd3786"],
+              [0.5555555555555556, "#d8576b"],
+              [0.6666666666666666, "#ed7953"],
+              [0.7777777777777778, "#fb9f3a"],
+              [0.8888888888888888, "#fdca26"],
+              [1.0, "#f0f921"]
+            ],
+            "sequentialminus": [
+              [0.0, "#0d0887"],
+              [0.1111111111111111, "#46039f"],
+              [0.2222222222222222, "#7201a8"],
+              [0.3333333333333333, "#9c179e"],
+              [0.4444444444444444, "#bd3786"],
+              [0.5555555555555556, "#d8576b"],
+              [0.6666666666666666, "#ed7953"],
+              [0.7777777777777778, "#fb9f3a"],
+              [0.8888888888888888, "#fdca26"],
+              [1.0, "#f0f921"]
+            ],
+            "diverging": [
+              [0, "#8e0152"],
+              [0.1, "#c51b7d"],
+              [0.2, "#de77ae"],
+              [0.3, "#f1b6da"],
+              [0.4, "#fde0ef"],
+              [0.5, "#f7f7f7"],
+              [0.6, "#e6f5d0"],
+              [0.7, "#b8e186"],
+              [0.8, "#7fbc41"],
+              [0.9, "#4d9221"],
+              [1, "#276419"]
+            ]
+          },
+          "xaxis": {
+            "gridcolor": "white",
+            "linecolor": "white",
+            "ticks": "",
+            "title": { "standoff": 15 },
+            "zerolinecolor": "white",
+            "automargin": true,
+            "zerolinewidth": 2
+          },
+          "yaxis": {
+            "gridcolor": "white",
+            "linecolor": "white",
+            "ticks": "",
+            "title": { "standoff": 15 },
+            "zerolinecolor": "white",
+            "automargin": true,
+            "zerolinewidth": 2
+          },
+          "scene": {
+            "xaxis": {
+              "backgroundcolor": "#E5ECF6",
+              "gridcolor": "white",
+              "linecolor": "white",
+              "showbackground": true,
+              "ticks": "",
+              "zerolinecolor": "white",
+              "gridwidth": 2
+            },
+            "yaxis": {
+              "backgroundcolor": "#E5ECF6",
+              "gridcolor": "white",
+              "linecolor": "white",
+              "showbackground": true,
+              "ticks": "",
+              "zerolinecolor": "white",
+              "gridwidth": 2
+            },
+            "zaxis": {
+              "backgroundcolor": "#E5ECF6",
+              "gridcolor": "white",
+              "linecolor": "white",
+              "showbackground": true,
+              "ticks": "",
+              "zerolinecolor": "white",
+              "gridwidth": 2
+            }
+          },
+          "shapedefaults": { "line": { "color": "#2a3f5f" } },
+          "annotationdefaults": { "arrowcolor": "#2a3f5f", "arrowhead": 0, "arrowwidth": 1 },
+          "geo": {
+            "bgcolor": "white",
+            "landcolor": "#E5ECF6",
+            "subunitcolor": "white",
+            "showland": true,
+            "showlakes": true,
+            "lakecolor": "white"
+          },
+          "title": { "x": 0.05 }
+        }
+      },
+      "xaxis": {
+        "anchor": "y",
+        "domain": [0.0, 1.0],
+        "title": { "text": "$\\mathrm{Frequency}\\;\\left(\\mathrm{Hz}\\right)$" },
+        "minor": { "nticks": 5, "tickcolor": "gray", "tickwidth": 2, "ticklen": 5 },
+        "ticks": "outside",
+        "showline": true,
+        "mirror": true,
+        "automargin": true,
+        "zeroline": false,
+        "linewidth": 2,
+        "showgrid": false,
+        "exponentformat": "power",
+        "showexponent": "last",
+        "tickformat": "",
+        "minexponent": 0,
+        "nticks": 5,
+        "tickcolor": "gray",
+        "tickwidth": 2,
+        "ticklen": 5,
+        "tickangle": 0
+      },
+      "yaxis": {
+        "anchor": "x",
+        "domain": [0.0, 1.0],
+        "autorange": true,
+        "title": { "text": "$\\mathrm{Gate}\\;\\left(\\mathrm{V}\\right)$" },
+        "minor": { "nticks": 5, "tickcolor": "gray", "tickwidth": 2, "ticklen": 5 },
+        "ticks": "outside",
+        "showline": true,
+        "mirror": true,
+        "automargin": true,
+        "zeroline": false,
+        "linewidth": 2,
+        "showgrid": false,
+        "exponentformat": "power",
+        "showexponent": "last",
+        "tickformat": "",
+        "minexponent": 0,
+        "nticks": 5,
+        "tickcolor": "gray",
+        "tickwidth": 2,
+        "ticklen": 5,
+        "tickangle": 0
+      },
+      "coloraxis": {
+        "colorbar": {
+          "title": { "text": "", "side": "top" },
+          "exponentformat": "power",
+          "showexponent": "last",
+          "tickformat": "~s",
+          "minexponent": 0,
+          "ticklen": 5,
+          "outlinewidth": 2,
+          "thicknessmode": "pixels",
+          "thickness": 20,
+          "x": 1.02,
+          "xanchor": "left",
+          "lenmode": "fraction",
+          "len": 0.78,
+          "y": 0.45,
+          "yanchor": "middle"
+        },
+        "colorscale": [
+          [0.0, "#440154"],
+          [0.1111111111111111, "#482878"],
+          [0.2222222222222222, "#3e4989"],
+          [0.3333333333333333, "#31688e"],
+          [0.4444444444444444, "#26828e"],
+          [0.5555555555555556, "#1f9e89"],
+          [0.6666666666666666, "#35b779"],
+          [0.7777777777777777, "#6ece58"],
+          [0.8888888888888888, "#b5de2b"],
+          [1.0, "#fde725"]
+        ],
+        "cmin": 1e-10,
+        "cmax": 2.6000000000000003e-10
+      },
+      "margin": { "t": 40, "l": 50, "r": 110, "b": 50 },
+      "title": {
+        "font": {
+          "family": "Fira Sans, Arial, sans-serif",
+          "size": 16,
+          "color": "rgba(0,0,0,0.6)"
+        },
+        "text": "current vs frequency, voltage",
+        "x": 0.5,
+        "y": 0.97
+      },
+      "font": { "family": "Fira Sans, Arial, sans-serif", "size": 16 },
+      "annotations": [
+        {
+          "align": "left",
+          "font": { "size": 16 },
+          "name": "qimchi-colorbar-title",
+          "showarrow": false,
+          "text": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{A}\\right)$",
+          "textangle": 0,
+          "x": 1.02,
+          "xanchor": "left",
+          "xref": "paper",
+          "y": 0.88,
+          "yanchor": "bottom",
+          "yref": "paper"
+        }
+      ],
+      "meta": {
+        "qimchi_units": {
+          "x": {
+            "label": "Frequency",
+            "unit": "Hz",
+            "engineering_scale": 1.0,
+            "unit_text": "Hz",
+            "engineering_units": {
+              "24": "\\mathrm{YHz}",
+              "21": "\\mathrm{ZHz}",
+              "18": "\\mathrm{EHz}",
+              "15": "\\mathrm{PHz}",
+              "12": "\\mathrm{THz}",
+              "9": "\\mathrm{GHz}",
+              "6": "\\mathrm{MHz}",
+              "3": "\\mathrm{kHz}",
+              "0": "\\mathrm{Hz}",
+              "-3": "\\mathrm{mHz}",
+              "-6": "\\mu\\mathrm{Hz}",
+              "-9": "\\mathrm{nHz}",
+              "-12": "\\mathrm{pHz}",
+              "-15": "\\mathrm{fHz}",
+              "-18": "\\mathrm{aHz}",
+              "-21": "\\mathrm{zHz}",
+              "-24": "\\mathrm{yHz}"
+            },
+            "engineering_units_text": {
+              "24": "YHz",
+              "21": "ZHz",
+              "18": "EHz",
+              "15": "PHz",
+              "12": "THz",
+              "9": "GHz",
+              "6": "MHz",
+              "3": "kHz",
+              "0": "Hz",
+              "-3": "mHz",
+              "-6": "\u00b5Hz",
+              "-9": "nHz",
+              "-12": "pHz",
+              "-15": "fHz",
+              "-18": "aHz",
+              "-21": "zHz",
+              "-24": "yHz"
+            },
+            "engineering_titles": {
+              "24": "$\\mathrm{Frequency}\\;\\left(\\mathrm{YHz}\\right)$",
+              "21": "$\\mathrm{Frequency}\\;\\left(\\mathrm{ZHz}\\right)$",
+              "18": "$\\mathrm{Frequency}\\;\\left(\\mathrm{EHz}\\right)$",
+              "15": "$\\mathrm{Frequency}\\;\\left(\\mathrm{PHz}\\right)$",
+              "12": "$\\mathrm{Frequency}\\;\\left(\\mathrm{THz}\\right)$",
+              "9": "$\\mathrm{Frequency}\\;\\left(\\mathrm{GHz}\\right)$",
+              "6": "$\\mathrm{Frequency}\\;\\left(\\mathrm{MHz}\\right)$",
+              "3": "$\\mathrm{Frequency}\\;\\left(\\mathrm{kHz}\\right)$",
+              "0": "$\\mathrm{Frequency}\\;\\left(\\mathrm{Hz}\\right)$",
+              "-3": "$\\mathrm{Frequency}\\;\\left(\\mathrm{mHz}\\right)$",
+              "-6": "$\\mathrm{Frequency}\\;\\left(\\mu\\mathrm{Hz}\\right)$",
+              "-9": "$\\mathrm{Frequency}\\;\\left(\\mathrm{nHz}\\right)$",
+              "-12": "$\\mathrm{Frequency}\\;\\left(\\mathrm{pHz}\\right)$",
+              "-15": "$\\mathrm{Frequency}\\;\\left(\\mathrm{fHz}\\right)$",
+              "-18": "$\\mathrm{Frequency}\\;\\left(\\mathrm{aHz}\\right)$",
+              "-21": "$\\mathrm{Frequency}\\;\\left(\\mathrm{zHz}\\right)$",
+              "-24": "$\\mathrm{Frequency}\\;\\left(\\mathrm{yHz}\\right)$"
+            }
+          },
+          "y": {
+            "label": "Gate",
+            "unit": "V",
+            "engineering_scale": 1.0,
+            "unit_text": "V",
+            "engineering_units": {
+              "24": "\\mathrm{YV}",
+              "21": "\\mathrm{ZV}",
+              "18": "\\mathrm{EV}",
+              "15": "\\mathrm{PV}",
+              "12": "\\mathrm{TV}",
+              "9": "\\mathrm{GV}",
+              "6": "\\mathrm{MV}",
+              "3": "\\mathrm{kV}",
+              "0": "\\mathrm{V}",
+              "-3": "\\mathrm{mV}",
+              "-6": "\\mu\\mathrm{V}",
+              "-9": "\\mathrm{nV}",
+              "-12": "\\mathrm{pV}",
+              "-15": "\\mathrm{fV}",
+              "-18": "\\mathrm{aV}",
+              "-21": "\\mathrm{zV}",
+              "-24": "\\mathrm{yV}"
+            },
+            "engineering_units_text": {
+              "24": "YV",
+              "21": "ZV",
+              "18": "EV",
+              "15": "PV",
+              "12": "TV",
+              "9": "GV",
+              "6": "MV",
+              "3": "kV",
+              "0": "V",
+              "-3": "mV",
+              "-6": "\u00b5V",
+              "-9": "nV",
+              "-12": "pV",
+              "-15": "fV",
+              "-18": "aV",
+              "-21": "zV",
+              "-24": "yV"
+            },
+            "engineering_titles": {
+              "24": "$\\mathrm{Gate}\\;\\left(\\mathrm{YV}\\right)$",
+              "21": "$\\mathrm{Gate}\\;\\left(\\mathrm{ZV}\\right)$",
+              "18": "$\\mathrm{Gate}\\;\\left(\\mathrm{EV}\\right)$",
+              "15": "$\\mathrm{Gate}\\;\\left(\\mathrm{PV}\\right)$",
+              "12": "$\\mathrm{Gate}\\;\\left(\\mathrm{TV}\\right)$",
+              "9": "$\\mathrm{Gate}\\;\\left(\\mathrm{GV}\\right)$",
+              "6": "$\\mathrm{Gate}\\;\\left(\\mathrm{MV}\\right)$",
+              "3": "$\\mathrm{Gate}\\;\\left(\\mathrm{kV}\\right)$",
+              "0": "$\\mathrm{Gate}\\;\\left(\\mathrm{V}\\right)$",
+              "-3": "$\\mathrm{Gate}\\;\\left(\\mathrm{mV}\\right)$",
+              "-6": "$\\mathrm{Gate}\\;\\left(\\mu\\mathrm{V}\\right)$",
+              "-9": "$\\mathrm{Gate}\\;\\left(\\mathrm{nV}\\right)$",
+              "-12": "$\\mathrm{Gate}\\;\\left(\\mathrm{pV}\\right)$",
+              "-15": "$\\mathrm{Gate}\\;\\left(\\mathrm{fV}\\right)$",
+              "-18": "$\\mathrm{Gate}\\;\\left(\\mathrm{aV}\\right)$",
+              "-21": "$\\mathrm{Gate}\\;\\left(\\mathrm{zV}\\right)$",
+              "-24": "$\\mathrm{Gate}\\;\\left(\\mathrm{yV}\\right)$"
+            }
+          },
+          "z": {
+            "label": "Lockin R",
+            "unit": "A",
+            "engineering_scale": 1.0,
+            "unit_text": "A",
+            "engineering_units": {
+              "24": "\\mathrm{YA}",
+              "21": "\\mathrm{ZA}",
+              "18": "\\mathrm{EA}",
+              "15": "\\mathrm{PA}",
+              "12": "\\mathrm{TA}",
+              "9": "\\mathrm{GA}",
+              "6": "\\mathrm{MA}",
+              "3": "\\mathrm{kA}",
+              "0": "\\mathrm{A}",
+              "-3": "\\mathrm{mA}",
+              "-6": "\\mu\\mathrm{A}",
+              "-9": "\\mathrm{nA}",
+              "-12": "\\mathrm{pA}",
+              "-15": "\\mathrm{fA}",
+              "-18": "\\mathrm{aA}",
+              "-21": "\\mathrm{zA}",
+              "-24": "\\mathrm{yA}"
+            },
+            "engineering_units_text": {
+              "24": "YA",
+              "21": "ZA",
+              "18": "EA",
+              "15": "PA",
+              "12": "TA",
+              "9": "GA",
+              "6": "MA",
+              "3": "kA",
+              "0": "A",
+              "-3": "mA",
+              "-6": "\u00b5A",
+              "-9": "nA",
+              "-12": "pA",
+              "-15": "fA",
+              "-18": "aA",
+              "-21": "zA",
+              "-24": "yA"
+            },
+            "engineering_titles": {
+              "24": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{YA}\\right)$",
+              "21": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{ZA}\\right)$",
+              "18": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{EA}\\right)$",
+              "15": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{PA}\\right)$",
+              "12": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{TA}\\right)$",
+              "9": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{GA}\\right)$",
+              "6": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{MA}\\right)$",
+              "3": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{kA}\\right)$",
+              "0": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{A}\\right)$",
+              "-3": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{mA}\\right)$",
+              "-6": "$\\mathrm{Lockin\\ R}\\;\\left(\\mu\\mathrm{A}\\right)$",
+              "-9": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{nA}\\right)$",
+              "-12": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{pA}\\right)$",
+              "-15": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{fA}\\right)$",
+              "-18": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{aA}\\right)$",
+              "-21": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{zA}\\right)$",
+              "-24": "$\\mathrm{Lockin\\ R}\\;\\left(\\mathrm{yA}\\right)$"
+            }
+          }
+        }
+      }
+    }
+  }
+}

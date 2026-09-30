@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { PROD_BACKEND_URL } from "./config";
 
 // Local imports
 import BaseLayout from "./components/BaseLayout";
 import Sidebar from "./components/Sidebar";
+import SidebarRail from "./components/SidebarRail";
 import Viewer from "./components/Viewer";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ToastProvider } from "./components/Toast";
@@ -12,20 +13,59 @@ import { TreeNode } from "./components/treeUtils";
 import { BasketItem } from "./components/Basket";
 import { AttrData } from "./components/interfaces";
 import { useSidebarStore } from "./stores/sidebarStore";
+import { useThemeStore } from "./stores/themeStore";
 import HelpModal from "./components/HelpModal";
+import SettingsModal from "./components/SettingsModal";
+import PinnedParameters from "./components/PinnedParameters";
+import UpdateDialog from "./components/UpdateDialog";
+import { useDesktopUpdates } from "./hooks/useDesktopUpdates";
 import { useShortcut } from "./hooks/useGlobalShortcuts";
+import { isDatasetPath, detectDatasetKind } from "./utils/datasetPaths";
+import { useToast } from "./hooks/useToast";
+import { BASKET_FULL_MESSAGE, MAX_BASKET_ITEMS } from "./utils/basketLimit";
+import { useSettingsStore } from "./stores/settingsStore";
+import { useSettingsSync } from "./hooks/useSettingsSync";
+import Walkthrough from "./walkthrough/Walkthrough";
+import { useWalkthroughStore } from "./walkthrough/walkthroughStore";
+import { isHeldBackByWalkthrough } from "./walkthrough/steps";
+import { isPathTrashed, useLibraryStore } from "./stores/libraryStore";
 
-const App: React.FC = () => {
+// Browser default, and what the rem-based Tailwind scales assume at 100%.
+const BASE_FONT_SIZE_PX = 16;
+
+const AppContent: React.FC = () => {
   const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
+  // Several adds can run in one event (a multi-selection, a drop), before the
+  // state re-renders, so the limit is checked against this synchronous copy.
+  const basketItemsRef = useRef<BasketItem[]>([]);
+  const lastLimitWarningRef = useRef(0);
+  const { showToast } = useToast();
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
-  const [loadingAttributes, setLoadingAttributes] = useState<Set<string>>(
-    new Set(),
-  );
-  const [notesSelectedItemId, setNotesSelectedItemId] = useState<string | null>(
-    null,
-  );
+  const [loadingAttributes, setLoadingAttributes] = useState<Set<string>>(new Set());
+  const [notesSelectedItemId, setNotesSelectedItemId] = useState<string | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
-  const { setSidebarCollapsed, setNotesCollapsed } = useSidebarStore();
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<string | undefined>();
+  const { setSidebarCollapsed, setNotesCollapsed, updateExplorerState } = useSidebarStore();
+  const theme = useThemeStore((state) => state.theme);
+  const zoomLevel = useSettingsStore((state) => state.settings.general.zoom);
+  useSettingsSync();
+  useDesktopUpdates();
+
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+
+    // Disable transitions so a theme change renders in one frame.
+    root.classList.add("qimchi-theme-switching");
+    root.classList.toggle("dark", theme === "dark");
+    void root.offsetWidth;
+    root.classList.remove("qimchi-theme-switching");
+  }, [theme]);
+
+  // Use root font size for zoom to keep layout and pointer coordinates aligned.
+  useLayoutEffect(() => {
+    document.documentElement.style.fontSize = `${BASE_FONT_SIZE_PX * zoomLevel}px`;
+  }, [zoomLevel]);
 
   const datasetKeys = useMemo(
     () =>
@@ -42,11 +82,14 @@ const App: React.FC = () => {
     [basketItems],
   );
 
-  const openNotesPanel = (openPanel: boolean) => {
-    if (!openPanel) return;
-    setSidebarCollapsed(false);
-    setNotesCollapsed(false);
-  };
+  const openNotesPanel = useCallback(
+    (openPanel: boolean) => {
+      if (!openPanel) return;
+      setSidebarCollapsed(false);
+      setNotesCollapsed(false);
+    },
+    [setNotesCollapsed, setSidebarCollapsed],
+  );
 
   const handleSelectNode = (node: TreeNode) => {
     // console.log("Selected node:", node);
@@ -70,7 +113,7 @@ const App: React.FC = () => {
         tags: node.tags,
       };
 
-      handleAddToBasket(newBasketItem);
+      if (!handleAddToBasket(newBasketItem)) return;
 
       // Load attributes for the new item
       try {
@@ -115,33 +158,54 @@ const App: React.FC = () => {
     setNotesSelectedItemId(itemId);
   };
 
-  const handleAddToBasket = (item: BasketItem) => {
+  // Returns whether the item was newly added, so callers skip loading its attributes otherwise.
+  const handleAddToBasket = (item: BasketItem): boolean => {
     try {
       // Validate item before adding
       if (!item || !item.id || !item.name || !item.path) {
         console.error("Invalid item passed to handleAddToBasket:", item);
-        return;
+        return false;
       }
 
-      let added = false;
-      setBasketItems((prev) => {
-        // Check if item already exists in basket
-        if (prev.some((existing) => existing.id === item.id)) {
-          console.log("Item already in basket:", item.name);
-          return prev;
+      if (isHeldBackByWalkthrough(item.path)) {
+        showToast("Not yet! This one is a surprise for later in the walkthrough.", "info", 4000);
+        return false;
+      }
+
+      if (isPathTrashed(useLibraryStore.getState().statesByPath, item.path)) {
+        showToast(
+          "Restore this measurement or its parent folder before adding it to the Basket.",
+          "warning",
+          4000,
+          "Trashed measurement",
+        );
+        return false;
+      }
+
+      const current = basketItemsRef.current;
+      if (current.some((existing) => existing.id === item.id)) {
+        return false;
+      }
+      if (current.length >= MAX_BASKET_ITEMS) {
+        // One warning for a whole multi-item add, not one per item.
+        const now = Date.now();
+        if (now - lastLimitWarningRef.current > 2000) {
+          lastLimitWarningRef.current = now;
+          showToast(BASKET_FULL_MESSAGE, "warning", 6000, "Basket");
         }
-        console.log("Added to basket:", item.name);
-        added = true;
-        // Prepend so newly added items appear at the beginning of the basket.
-        return [item, ...prev];
-      });
-
-      // Keep Notes dropdown aligned to the latest added basket item.
-      if (added) {
-        setNotesSelectedItemId(item.id);
+        return false;
       }
+
+      // Prepend so newly added items appear at the beginning of the basket.
+      const next = [item, ...current];
+      basketItemsRef.current = next;
+      setBasketItems(next);
+      // Keep Notes dropdown aligned to the latest added basket item.
+      setNotesSelectedItemId(item.id);
+      return true;
     } catch (error) {
       console.error("Error adding item to basket:", error);
+      return false;
     }
   };
 
@@ -171,28 +235,27 @@ const App: React.FC = () => {
 
     window.addEventListener("notes:open", handleNotesOpen as EventListener);
     return () => {
-      window.removeEventListener(
-        "notes:open",
-        handleNotesOpen as EventListener,
-      );
+      window.removeEventListener("notes:open", handleNotesOpen as EventListener);
     };
-  }, [datasetKeys]);
+  }, [datasetKeys, openNotesPanel]);
 
   const handleRemoveBasketItem = (id: string) => {
-    setBasketItems((prev) => prev.filter((item) => item.id !== id));
+    const next = basketItemsRef.current.filter((item) => item.id !== id);
+    basketItemsRef.current = next;
+    setBasketItems(next);
   };
 
   const handleClearBasket = () => {
+    basketItemsRef.current = [];
     setBasketItems([]);
   };
 
-  const handleUpdateBasketItemAttributes = (
-    itemId: string,
-    attributes: AttrData,
-  ) => {
-    setBasketItems((prev) =>
-      prev.map((item) => (item.id === itemId ? { ...item, attributes } : item)),
+  const handleUpdateBasketItemAttributes = (itemId: string, attributes: AttrData) => {
+    const next = basketItemsRef.current.map((item) =>
+      item.id === itemId ? { ...item, attributes } : item,
     );
+    basketItemsRef.current = next;
+    setBasketItems(next);
     // Remove from loading state when attributes are loaded
     setLoadingAttributes((prev) => {
       const newSet = new Set(prev);
@@ -205,19 +268,110 @@ const App: React.FC = () => {
     setLoadingAttributes((prev) => new Set(prev).add(itemId));
   };
 
-  // Cycling handler that will be passed to both Sidebar and Viewer
+  const addDatasetToBasket = (item: BasketItem) => {
+    if (!handleAddToBasket(item)) return;
+    handleStartLoadingAttributes(item.id);
+    axios
+      .post(`${PROD_BACKEND_URL}/load-attrs/`, { path: item.path })
+      .then((response) => handleUpdateBasketItemAttributes(item.id, response.data))
+      .catch((error) => {
+        console.error("Attribute load failed:", error);
+        setLoadingAttributes((prev) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        });
+      });
+  };
+  const addDatasetToBasketRef = useRef(addDatasetToBasket);
+  addDatasetToBasketRef.current = addDatasetToBasket;
+
+  const registerWalkthrough = useWalkthroughStore((state) => state.registerBridge);
+  const walkthroughActive = useWalkthroughStore((state) => state.active);
+  useEffect(() => {
+    useWalkthroughStore.getState().setPaused(isHelpOpen || isSettingsOpen);
+  }, [isHelpOpen, isSettingsOpen]);
+  // Close Help and Settings when the walkthrough starts.
+  useEffect(() => {
+    if (!walkthroughActive) return;
+    setIsHelpOpen(false);
+    setIsSettingsOpen(false);
+  }, [walkthroughActive]);
+  useEffect(
+    () =>
+      registerWalkthrough({
+        addToBasket: (item) => addDatasetToBasketRef.current(item),
+        basketItems: () => basketItemsRef.current,
+        removeFromBasket: (id) => {
+          basketItemsRef.current = basketItemsRef.current.filter((item) => item.id !== id);
+          setBasketItems(basketItemsRef.current);
+        },
+        clearBasket: () => {
+          basketItemsRef.current = [];
+          setBasketItems([]);
+        },
+      }),
+    [registerWalkthrough],
+  );
+
   const handleCycleDataset = (direction: "prev" | "next") => {
-    // This is intentionally empty - the actual cycling is handled by DirTree
-    // which updates the basket items, and then Viewer responds to those changes
+    // DirTree owns cycling; Viewer reacts to the Basket update.
     console.log(`Cycling dataset: ${direction}`);
   };
 
   useShortcut("toggle-help", () => setIsHelpOpen((prev) => !prev));
+  useShortcut("toggle-settings", () => setIsSettingsOpen((prev) => !prev));
+
+  // TODO: WIP <:egg:>
+  // Deep-link open (used by the open_in_qimchi MCP tool). On first load, read
+  // ?dataset=<abs path> or ?folder=<abs path> from the URL:
+  //   - dataset: add it to the basket + load attrs; Viewer auto-plots defaults.
+  //   - folder:  root the Explorer there (same as the Explorer's path box).
+  // The params are stripped afterwards so a manual reload doesn't re-trigger.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const datasetParam = params.get("dataset");
+    const folderParam = params.get("folder");
+    if (!datasetParam && !folderParam) return;
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete("dataset");
+    url.searchParams.delete("folder");
+    window.history.replaceState({}, "", url.toString());
+
+    if (folderParam) {
+      setSidebarCollapsed(false);
+      updateExplorerState({ path: folderParam, submittedPath: folderParam });
+    }
+
+    if (datasetParam && isDatasetPath(datasetParam)) {
+      const name =
+        datasetParam.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop() || datasetParam;
+      addDatasetToBasket({
+        id: datasetParam,
+        name,
+        path: datasetParam,
+        type: "file",
+        tags: [detectDatasetKind(datasetParam)],
+      });
+    }
+    // Run once on mount; handlers are stable for this purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
-    <ToastProvider>
+    <>
       <ErrorBoundary>
         <BaseLayout
+          rail={
+            <SidebarRail
+              onOpenHelp={() => setIsHelpOpen(true)}
+              onOpenSettings={(section) => {
+                setSettingsSection(section);
+                setIsSettingsOpen(true);
+              }}
+            />
+          }
           sidebar={
             <ErrorBoundary>
               <Sidebar
@@ -233,7 +387,6 @@ const App: React.FC = () => {
                 notesSelectedItemId={notesSelectedItemId}
                 onNotesSelectedItemChange={handleNotesSelectedItemChange}
                 onCycleDataset={handleCycleDataset}
-                onOpenHelp={() => setIsHelpOpen(true)}
               />
             </ErrorBoundary>
           }
@@ -255,9 +408,36 @@ const App: React.FC = () => {
           }
         />
       </ErrorBoundary>
-      <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
-    </ToastProvider>
+      <HelpModal
+        isOpen={isHelpOpen}
+        onClose={() => setIsHelpOpen(false)}
+        walkthroughActive={walkthroughActive}
+        onStartWalkthrough={() => {
+          setIsHelpOpen(false);
+          // Resume an active walkthrough; start a new one otherwise.
+          if (!walkthroughActive) useWalkthroughStore.getState().start();
+        }}
+      />
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        initialSection={settingsSection}
+        onClose={() => {
+          setIsSettingsOpen(false);
+          setSettingsSection(undefined);
+        }}
+      />
+      <PinnedParameters basketItems={basketItems} />
+      <UpdateDialog />
+      <Walkthrough />
+    </>
   );
 };
+
+// The provider wraps the content so the basket can raise toasts too.
+const App: React.FC = () => (
+  <ToastProvider>
+    <AppContent />
+  </ToastProvider>
+);
 
 export default App;

@@ -1,10 +1,10 @@
 [project]
 name = "qimchi-api"
-version = "0.6.2"
+version = "0.7.0"
 description = "Plot your spicy quantum measurements with ease"
 authors = [
   { name = "Spandan Anupam", email = "s.anupam@fz-juelich.de" },
-  { name = "Jyotirmaya Shivottam", email = "jyotirmaya.shivottam@niser.ac.in" },
+  { name = "Jyotirmaya Shivottam", email = "shivottam@proton.me" },
   { name = "Lino Visser", email = "l.visser@fz-juelich.de" },
 ]
 license = "AGPL-3.0-or-later"
@@ -17,37 +17,54 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi[standard]~=0.135.0",
     "gunicorn~=25.3.0",
-    "kaleido~=1.2.0",
+    "kaleido~=1.4.0",
     "numpy~=2.4.0",
     "pip~=26.0.0",
-    "plotly~=6.6.0",
+    "plotly~=7.0.0",
+    # Embeds export metadata into PNG text chunks (api/export.py).
+    "pillow~=12.1",
     "pydantic~=2.12.0",
     "python-dotenv~=1.2.0",
-    "qcodes~=0.56.0",
+    "qcodes~=0.59.0",
     "rich~=14.3.0",
     "scikit-image~=0.26.0",
     "setuptools~=82.0.0",
     "scipy~=1.17.0",
     "watchdog~=6.0.0",
-    "websockets~=16.0.0",
+    # See qimchi-connect: 16.0 logs a timed-out live probe as an ERROR
+    # traceback in the producer's console.
+    "websockets~=17.1",
     "uvicorn~=0.42.0",
     "concurrent-log-handler~=0.9.29",
     "portalocker~=3.2.0",
     "xarray~=2026.2.0",
     "zarr>=3.1.6,<4",
-    # "qcutils",  # Handled via .bat installer
+    "qimchi-connect~=0.2.0",
+    # "qanary",  # the measurement side; installed separately, never a backend dep
+    "sqlmodel>=0.0.24",
+    "alembic>=1.14",
+    # Provide a CA bundle for HTTPS in frozen macOS builds.
+    "certifi>=2024.2",
+    # Resource sampling in the logs (api/diagnostics.py).
+    "psutil>=5.9",
 ]
 
 [project.optional-dependencies]
+# Backend development dependencies. Install with `uv sync --extra dev`.
 dev = [
     "wheel~=0.46.0",
-    "ruff>=0.15,<1",
+    "ruff==0.16.6",
     "pytest>=9.0,<10",
     "pytest-asyncio>=1.3,<2",
+    "pytest-cov>=5",
+    "pytest-timeout>=2,<3",
+    "pre-commit>=4",
 ]
 test = [
     "pytest>=9.0,<10",
     "pytest-asyncio>=1.3,<2",
+    "pytest-cov>=5",
+    "pytest-timeout>=2,<3",
 ]
 datasets = [
     "netcdf4~=1.7.4",
@@ -56,11 +73,16 @@ datasets = [
     "numcodecs~=0.16.5",
     "polars~=1.39.3",
 ]
+quantify-tests = [
+    "quantify-core",
+]
 
 [dependency-groups]
 test = [
     "pytest>=9.0,<10",
     "pytest-asyncio>=1.3,<2",
+    "pytest-cov>=5",
+    "pytest-timeout>=2,<3",
 ]
 datasets = [
     "netcdf4~=1.7.4",
@@ -72,13 +94,63 @@ datasets = [
 dev = [
     { include-group = "test" },
     { include-group = "datasets" },
-    "ruff>=0.15,<1",
+    "ruff==0.16.6",
 ]
 
 [tool.uv]
 package = true
 
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+# Exclude the non-package Alembic migrations directory from package discovery.
+[tool.setuptools.packages.find]
+include = ["api*"]
+namespaces = false
+
 [project.urls]
-homepage = "https://gitlab.com/squad-lab/qimchi"
-documentation = "https://qimchi.squad-lab.org"
+homepage = "https://qimchi.squad-lab.org/"
+documentation = "https://qimchi.squad-lab.org/"
 repository = "https://gitlab.com/squad-lab/qimchi"
+"SQUAD Lab" = "https://squad-lab.org/"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Individual slow tests can override this default with @pytest.mark.timeout.
+timeout = 300
+
+[tool.coverage.run]
+source = ["api"]
+branch = true
+# Alembic revisions are executed by `alembic upgrade`, not by the test suite.
+omit = ["migrations/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 75
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
+[tool.ruff]
+target-version = "py313"
+# Keep `ruff format .` consistent with the Python-only pre-commit hook.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+# E/F are ruff's defaults; I adds import sorting, which `ruff format` does not do.
+select = ["E", "F", "I"]
+# The formatter owns line length. E501 then only fires on what it deliberately
+# will not split -- long strings, URLs in comments -- so it is noise here.
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["api", "main"]
+
+# The repository stores LF. Without this, `ruff format` on Windows rewrites
+# every touched file to CRLF and git re-normalises it on the next commit.
+[tool.ruff.format]
+line-ending = "lf"

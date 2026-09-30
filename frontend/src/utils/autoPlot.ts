@@ -1,6 +1,8 @@
 import { BasketItem } from "../components/Basket";
 import type { PlotConfiguration, AppliedFilter } from "../components/interfaces";
 import { isDatasetPath, isMemoryPath } from "./datasetPaths";
+import { getFieldIndependents } from "./datasetFieldSelectors";
+import type { PlottingBehaviour } from "../settings/userSettings";
 
 interface AutoPlotResult {
   success: boolean;
@@ -10,20 +12,33 @@ interface AutoPlotResult {
 
 /**
  * Generates plot configurations for automatic plot creation when a measurement is added to the basket.
- * - HeatMap: if there are at least 2 independents and 1 dependent
- * - LinePlot: if there is at least 1 independent and 1 dependent
+ * - HeatMap: the first dependent that actually varies over 2+ independents, against those two
+ * - LinePlot: the first dependent, against the first independent it varies over
  *
- * Takes the first N independents/dependents in the order they appear in the dataset.
+ * Datasets routinely mix 1D and 2D variables over the same coordinates (two
+ * lock-in readings along a voltage sweep next to an S21 map over voltage and
+ * frequency). Picking dependents[0] and independents[:2] for the heatmap then
+ * forces a 1D variable onto a 2D grid. So the 2D-ness of a variable decides:
+ * the heatmap uses the first dependent that has two independents of its own,
+ * and when the dataset has none, no heatmap is generated at all.
+ *
+ * Datasets that do not report per-variable independents (flat tables, payloads
+ * cached before that field existed) keep the original first-N behaviour.
  * Returns plot configurations that can be added to the viewer using addPlot().
+ *
+ * With "heatmapOrLine" (the default) the LinePlot is made only when no HeatMap
+ * can be; "both" makes each one that can be made; "none" makes neither.
  *
  * @param item - The basket item to generate plots for
  * @param sourceHeatmapFilters - Optional filters from an existing heatmap to apply
  * @param sourceLineplotFilters - Optional filters from an existing lineplot to apply
+ * @param behaviour - Which plots to make, from the Plotting behaviour setting
  */
 export function generateAutoPlotConfigs(
   item: BasketItem,
   sourceHeatmapFilters?: AppliedFilter[],
-  sourceLineplotFilters?: AppliedFilter[]
+  sourceLineplotFilters?: AppliedFilter[],
+  behaviour: PlottingBehaviour = "heatmapOrLine",
 ): AutoPlotResult {
   try {
     // Only process supported dataset files (disk) or memory:// paths (live) with attributes
@@ -50,13 +65,27 @@ export function generateAutoPlotConfigs(
     // Use the path as-is for fpath
     const fpath = item.path;
     const plotConfigs: Omit<PlotConfiguration, "id">[] = [];
-    
+
     // Determine source based on path type
     const source = isMemoryPath(fpath) ? "memory" : "disk";
     const preferredSource = source;
 
-    // Attempt to create HeatMap config if we have at least 2 indeps and 1 dep
-    if (independents.length >= 2 && dependents.length >= 1) {
+    // Pick the heatmap's dependent by its own dimensionality, falling back to
+    // the plain lists when the dataset reports no per-variable independents.
+    const heatmapDep = dependents.find(
+      (dep) => (getFieldIndependents(dep, item.attributes) ?? []).length >= 2,
+    );
+    const heatmapIndeps = heatmapDep
+      ? (getFieldIndependents(heatmapDep, item.attributes) ?? []).slice(0, 2)
+      : independents.slice(0, 2);
+    const knowsVariableIndeps = dependents.some(
+      (dep) => getFieldIndependents(dep, item.attributes) !== null,
+    );
+    // Without dim info, the first two independents remain the best guess.
+    const heatmapZ = heatmapDep ?? (knowsVariableIndeps ? undefined : dependents[0]);
+
+    // Attempt to create HeatMap config if we have a dependent over 2 indeps
+    if (behaviour !== "none" && heatmapZ && heatmapIndeps.length >= 2) {
       const filters_order: string[] = [];
       const filters_opts: Record<string, unknown> = {};
 
@@ -68,9 +97,10 @@ export function generateAutoPlotConfigs(
       }
 
       plotConfigs.push({
+        origin: "auto" as const,
         fpath,
-        indeps: independents.slice(0, 2), // Take first 2 independents
-        deps: [dependents[0]], // Take first dependent
+        indeps: heatmapIndeps,
+        deps: [heatmapZ],
         plotType: "HeatMap" as const,
         filters_order,
         filters_opts,
@@ -80,8 +110,16 @@ export function generateAutoPlotConfigs(
       });
     }
 
+    // The line plot takes the first dependent against the first independent it
+    // actually varies over, which is not necessarily independents[0].
+    const lineDep = dependents[0];
+    const lineIndep = (getFieldIndependents(lineDep, item.attributes) ?? independents)[0];
+
+    const madeHeatmap = plotConfigs.length > 0;
+    const wantLinePlot = behaviour === "both" || (behaviour === "heatmapOrLine" && !madeHeatmap);
+
     // Attempt to create LinePlot config if we have at least 1 indep and 1 dep
-    if (independents.length >= 1 && dependents.length >= 1) {
+    if (wantLinePlot && lineIndep && lineDep) {
       const filters_order: string[] = [];
       const filters_opts: Record<string, unknown> = {};
 
@@ -93,9 +131,10 @@ export function generateAutoPlotConfigs(
       }
 
       plotConfigs.push({
+        origin: "auto" as const,
         fpath,
-        indeps: [independents[0]], // Take first independent
-        deps: [dependents[0]], // Take first dependent
+        indeps: [lineIndep],
+        deps: [lineDep],
         plotType: "LinePlot" as const,
         filters_order,
         filters_opts,
@@ -127,4 +166,114 @@ export function generateAutoPlotConfigs(
       plotConfigs: [],
     };
   }
+}
+
+/**
+ * Source plot to replicate onto another measurement: its configuration plus
+ * the filters currently applied to it (those live in plotStore, not the config).
+ */
+export interface ReplicationSource {
+  config: PlotConfiguration;
+  filters?: AppliedFilter[];
+  /** Preset linked to these filters. */
+  presetId?: number;
+}
+
+export interface ReplicationResult {
+  plotConfigs: Omit<PlotConfiguration, "id">[];
+  /** Human-readable reasons plots were skipped, for the toast. */
+  skipped: string[];
+}
+
+/** Select one replication source per plot shape. */
+export function selectReplicationSources(
+  configs: PlotConfiguration[],
+  filtersFor: (plotId: string) => AppliedFilter[] | undefined,
+  includeCustom: boolean,
+  presetFor: (plotId: string) => number | undefined = () => undefined,
+): ReplicationSource[] {
+  const seen = new Set<string>();
+  const sources: ReplicationSource[] = [];
+
+  for (const config of configs) {
+    if (!includeCustom && config.origin === "custom") continue;
+    const shape = [
+      config.plotType,
+      [...config.indeps].sort().join(","),
+      [...config.deps].sort().join(","),
+    ].join("|");
+    if (seen.has(shape)) continue;
+    seen.add(shape);
+    sources.push({ config, filters: filtersFor(config.id), presetId: presetFor(config.id) });
+  }
+
+  return sources;
+}
+
+/** Replicate compatible Viewer plots and filters onto a new measurement. */
+export function replicatePlots(
+  item: BasketItem,
+  sources: ReplicationSource[],
+  options: { includeCustom?: boolean } = {},
+): ReplicationResult {
+  const { includeCustom = true } = options;
+  const result: ReplicationResult = { plotConfigs: [], skipped: [] };
+
+  if (!isDatasetPath(item.path) || !item.attributes) return result;
+
+  const { independents = [], dependents = [] } = item.attributes;
+  const haveIndep = new Set(independents);
+  const haveDep = new Set(dependents);
+
+  const fpath = item.path;
+  const source = isMemoryPath(fpath) ? "memory" : "disk";
+
+  for (const { config, filters, presetId } of sources) {
+    // Composer plots and saved LineCuts are custom.
+    if (!includeCustom && config.origin === "custom") continue;
+
+    const missing = [
+      ...config.indeps.filter((name) => !haveIndep.has(name)),
+      ...config.deps.filter((name) => !haveDep.has(name)),
+    ];
+
+    if (missing.length > 0) {
+      result.skipped.push(
+        `${config.plotType} (${[...new Set(missing)].join(", ")} not in this measurement)`,
+      );
+      continue;
+    }
+
+    // Carry the applied filters across. plotStore keys state by plot id and the
+    // replica gets a fresh id, so the filters have to travel in the config.
+    let filters_order = config.filters_order;
+    let filters_opts = config.filters_opts;
+    let filter_preset_id: number | undefined;
+    if (filters?.length) {
+      filters_order = filters.map((f) => f.name);
+      filters_opts = filters.reduce<Record<string, unknown>>((acc, f) => {
+        acc[f.name] = f.options;
+        return acc;
+      }, {});
+      filter_preset_id = presetId;
+    }
+
+    result.plotConfigs.push({
+      fpath,
+      indeps: [...config.indeps],
+      deps: [...config.deps],
+      plotType: config.plotType,
+      cut: config.cut,
+      filters_order,
+      filters_opts,
+      ...(filter_preset_id === undefined ? {} : { filter_preset_id }),
+      slider: config.slider,
+      appearance_settings: config.appearance_settings,
+      source,
+      preferredSource: source,
+      origin: config.origin,
+    });
+  }
+
+  return result;
 }

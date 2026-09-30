@@ -5,21 +5,23 @@ FastAPI endpoint for many Explorer/DirTree related operations.
 
 import asyncio
 import hashlib
+import json
+import math
 import os
+import stat as stat_module
 import subprocess  # Windows compat
-import xarray as xr
-
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
-from datetime import datetime, timezone
+
+import xarray as xr
 from fastapi import APIRouter, HTTPException
+
+from . import live_measurements
 
 # Local tool execs
 from .config import FD_EXEC, MAX_DEPTH  #  DU_EXEC, XARGS_EXEC | Windows compat
-
-# Local imports
-from .models import PathData
-from .logger import logger
 from .data_loader import (
     MEMORY_PROTOCOL,
     extract_measurement_id,
@@ -32,9 +34,13 @@ from .data_loader import (
     resolve_live_dataset,
     resolve_to_disk_path,
 )
+from .diagnostics import register_gauge
 from .json_utils import sanitize_for_json
-from . import live_measurements
+from .logger import logger
 
+# Local imports
+from .models import PathData, PinnedParametersRequest
+from .units import format_quantity
 
 router = APIRouter()
 
@@ -63,25 +69,35 @@ def _extract_measurement_id(memory_path: str) -> str:
     return extract_measurement_id(memory_path)
 
 
-def _get_dataset_last_modified(path: Path) -> float:
+def _get_dataset_last_modified(path: Path, store_mtime: float | None = None) -> float:
     """
     Get the last modification time of a zarr dataset.
 
+    Reads the store directory's own mtime plus its metadata file, instead of
+    walking the store. A zarr store holds one file per chunk, so the previous
+    rglob cost thousands of stat calls *per dataset* -- on a tree of a few
+    thousand measurements that dominated the whole scan. Writing to a store
+    rewrites its metadata, so the metadata mtime tracks appends without the
+    walk.
+
     Args:
         path (Path): Path to the zarr dataset
+        store_mtime (float | None): Already-known mtime of the store directory,
+            to avoid re-stat-ing it.
 
     Returns:
         float: Unix timestamp of last modification
 
     """
     try:
-        latest_mtime = path.stat().st_mtime
+        latest_mtime = path.stat().st_mtime if store_mtime is None else store_mtime
 
-        # Check all files and subdirectories for the most recent modification
-        for item in path.rglob("*"):
-            if item.is_file():
-                item_mtime = item.stat().st_mtime
-                latest_mtime = max(latest_mtime, item_mtime)
+        # v3 writes zarr.json; v2 consolidated metadata writes .zmetadata.
+        for meta_name in ("zarr.json", ".zmetadata"):
+            try:
+                latest_mtime = max(latest_mtime, (path / meta_name).stat().st_mtime)
+            except OSError:
+                continue
 
         return latest_mtime
 
@@ -90,16 +106,7 @@ def _get_dataset_last_modified(path: Path) -> float:
 
 
 def _get_folder_size(path: Path) -> int:
-    """
-    Helper function to get approximate folder size in bytes.
-
-    Args:
-        path (Path): Path to the directory.
-
-    Returns:
-        int: Total size of files in the directory, limited to first 10 items.
-
-    """
+    """Estimate folder size from its first ten entries."""
     try:
         total_size = 0
 
@@ -114,20 +121,23 @@ def _get_folder_size(path: Path) -> int:
         return 0
 
 
+def _close_dataset(dataset) -> None:
+    """Close a dataset when supported; DataTree views cannot close independently."""
+    try:
+        dataset.close()
+    except Exception as exc:  # noqa: BLE001 - releasing must never fail a request
+        logger.debug(f"_close_dataset | could not close dataset: {exc}")
+
+
+def _iso_from_mtime(mtime: float) -> str:
+    """Format an already-read mtime as an ISO string, avoiding a second stat."""
+    import datetime
+
+    return datetime.datetime.fromtimestamp(mtime).isoformat()
+
+
 def _get_file_timestamp(path: Path) -> str:
-    """
-    Helper function to get file modification timestamp as ISO string.
-
-    Args:
-        path (Path): Path to the file or directory.
-
-    Returns:
-        str: ISO formatted timestamp of the last modification.
-
-    Raises:
-        OSError: If the path cannot be accessed.
-
-    """
+    """Return a path's modification time as an ISO string."""
     try:
         import datetime
 
@@ -139,16 +149,79 @@ def _get_file_timestamp(path: Path) -> str:
         raise OSError(f"Failed to stat path {path}")
 
 
+def _store_fingerprint(st: os.stat_result) -> str:
+    """Stat signature of a zarr store directory, matching library.py's form."""
+    return f"{st.st_mtime_ns}:{st.st_size}"
+
+
+def _read_scan_cache(paths: list[str]) -> Dict[str, tuple]:
+    """Return cached scan metadata; treat database errors as cache misses."""
+    if not paths:
+        return {}
+
+    try:
+        from sqlmodel import select
+
+        from .db_models import DatasetScanCache
+        from .shared.db import session_scope
+
+        found: Dict[str, tuple] = {}
+        with session_scope() as session:
+            # SQLite caps variables per statement; chunk well under the limit.
+            for start in range(0, len(paths), 500):
+                chunk = paths[start : start + 500]
+                rows = session.exec(
+                    select(DatasetScanCache).where(DatasetScanCache.abs_path.in_(chunk))
+                ).all()
+                for row in rows:
+                    found[row.abs_path] = (
+                        row.fingerprint,
+                        row.size_bytes,
+                        row.last_modified,
+                    )
+        return found
+    except Exception as exc:
+        logger.debug(f"_read_scan_cache | cache unavailable, computing instead: {exc}")
+        return {}
+
+
+def _write_scan_cache(entries: list[tuple]) -> None:
+    """Upsert (abs_path, fingerprint, size, last_modified) rows; best-effort."""
+    if not entries:
+        return
+
+    try:
+        from .db_models import DatasetScanCache
+        from .shared.db import session_scope
+
+        with session_scope() as session:
+            for abs_path, fingerprint, size_bytes, last_modified in entries:
+                row = session.get(DatasetScanCache, abs_path)
+                if row is None:
+                    session.add(
+                        DatasetScanCache(
+                            abs_path=abs_path,
+                            fingerprint=fingerprint,
+                            size_bytes=size_bytes,
+                            last_modified=last_modified,
+                        )
+                    )
+                else:
+                    row.fingerprint = fingerprint
+                    row.size_bytes = size_bytes
+                    row.last_modified = last_modified
+    except Exception as exc:
+        logger.debug(f"_write_scan_cache | could not persist scan cache: {exc}")
+
+
 # Simple TTL cache for zarr sizes
 _SIZE_CACHE: Dict[str, Dict] = {}
+register_gauge("size cache", lambda: len(_SIZE_CACHE))
 # cache entry: { 'value': int, 'expires_at': float }
 
 
 async def _run_subprocess(cmd, input_data: bytes = None):
-    """
-    Run subprocess asynchronously and return (returncode, stdout, stderr).
-
-    """
+    """Run a subprocess and return its code, stdout, and stderr."""
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -170,33 +243,12 @@ async def _run_subprocess(cmd, input_data: bytes = None):
 
 
 async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
-    """
-    Build a dataset directory tree using the `fd` utility for fast traversal.
+    """Build a dataset directory tree without blocking the event loop."""
+    return await asyncio.to_thread(_build_directory_tree_zarr, path, max_depth)
 
-    Supported dataset items:
-    - `.zarr` directories
-    - `.nc`, `.h5`, `.hdf5` files
-    - `.csv`, `.txt`, `.dat` files
-    - `.db` - QCoDeS SQLite databases with special handling to list runs as children
-    - `.sqlite` - Container SQLite databases with multiple measurements
 
-    If `fd` is not available (FD_EXEC is None), the function
-    returns an error dict so the caller can decide on fallback behavior.
-
-    Args:
-        path: str or Path-like root directory to scan.
-        max_depth: maximum recursion depth to request from fd.
-
-    Returns:
-        Dict: TreeNode-style dict describing the directory tree, or an
-        error dict when `fd` is unavailable or fails.
-
-    Raises:
-        FileNotFoundError: If the provided path does not exist.
-        NotADirectoryError: If the provided path is not a directory.
-        RuntimeError: If required system utilities are missing or if `fd` encounters an error.
-
-    """
+def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
+    """Build a dataset tree with ``fd``, including supported files and zarr stores."""
     path = Path(path)
 
     if not path.exists():
@@ -207,8 +259,6 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
         logger.error(f"get_directory_tree_zarr | Path is not a directory: {path}")
         raise NotADirectoryError("Path is not a folder")
 
-    # Check fd availability from config
-    # Require command-line utilities
     missing_tools = []
     if not FD_EXEC:
         missing_tools.append("fd")
@@ -226,7 +276,6 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
             f"Missing required system utilities: {', '.join(missing_tools)}"
         )
 
-    # Prepare root node
     root_id = f"folder-{hash(str(path)) % 100000}"
     root_node = {
         "id": root_id,
@@ -257,8 +306,6 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
         str(path),
     ]
 
-    # Windows compat - use subprocess.run instead of asyncio subprocess
-    # rc, out, err = await _run_subprocess(cmd)
     cmd_dataset_files = [
         FD_EXEC,
         "--hidden",
@@ -284,12 +331,18 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
         "txt",
         "-e",
         "dat",
+        "-e",
+        "mat",
         ".",
         str(path),
     ]
 
-    result_dirs = _run_fd_capture(cmd_zarr_dirs)
-    result_files = _run_fd_capture(cmd_dataset_files)
+    # Run the two independent, blocking fd scans in parallel.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        future_dirs = pool.submit(_run_fd_capture, cmd_zarr_dirs)
+        future_files = pool.submit(_run_fd_capture, cmd_dataset_files)
+        result_dirs = future_dirs.result()
+        result_files = future_files.result()
 
     if result_dirs.returncode != 0:
         err = result_dirs.stderr.decode("utf-8", errors="replace")
@@ -321,10 +374,10 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
     # If paths is empty, raise an error
     if not paths:
         logger.error(
-            f"get_directory_tree_zarr | No supported datasets (.zarr/.nc/.h5/.hdf5/.db/.sqlite/.csv/.txt/.dat) found at this level. MAX_DEPTH={MAX_DEPTH} may be too low."
+            f"get_directory_tree_zarr | No supported datasets (.zarr/.nc/.h5/.hdf5/.db/.sqlite/.csv/.txt/.dat/.mat) found at this level. MAX_DEPTH={MAX_DEPTH} may be too low."
         )
         raise RuntimeError(
-            f"No supported datasets (.zarr/.nc/.h5/.hdf5/.db/.sqlite/.csv/.txt/.dat) found at this level. MAX_DEPTH={MAX_DEPTH} may be too low."
+            f"No supported datasets (.zarr/.nc/.h5/.hdf5/.db/.sqlite/.csv/.txt/.dat/.mat) found at this level. MAX_DEPTH={MAX_DEPTH} may be too low."
         )
 
     # Build nodes map - start with root node only
@@ -343,9 +396,13 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
             item = Path(p)
             item.relative_to(path)  # Ensure path is under root
 
-            if item.is_dir() and item.name.endswith(".zarr"):
-                dataset_items.append(item)
-            elif item.is_file() and item.suffix.lower() in {
+            # Reuse one stat result for type, size, mtime, and timestamp.
+            st = item.stat()
+            is_directory = stat_module.S_ISDIR(st.st_mode)
+
+            if is_directory and item.name.endswith(".zarr"):
+                dataset_items.append((item, st))
+            elif not is_directory and item.suffix.lower() in {
                 ".nc",
                 ".h5",
                 ".hdf5",
@@ -354,8 +411,9 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
                 ".csv",
                 ".txt",
                 ".dat",
+                ".mat",
             }:
-                dataset_items.append(item)
+                dataset_items.append((item, st))
             else:
                 continue
 
@@ -383,13 +441,29 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
         except Exception:
             continue
 
+    # Zarr stores are the only entries whose size and mtime cost more than the
+    # stat we already have, so they are the only ones worth caching.
+    zarr_paths = [
+        str(item) for item, st in dataset_items if stat_module.S_ISDIR(st.st_mode)
+    ]
+    scan_cache = _read_scan_cache(zarr_paths)
+    cache_writes: list[tuple] = []
+
     # Create dataset nodes
-    for item in dataset_items:
+    for item, st in dataset_items:
         try:
-            if item.is_dir():
+            if stat_module.S_ISDIR(st.st_mode):
                 fmt = "zarr"
-                size = _get_folder_size(item)
-                last_modified = _get_dataset_last_modified(item)
+                # Size still ships because the Basket displays it.
+                item_str = str(item)
+                fingerprint = _store_fingerprint(st)
+                cached = scan_cache.get(item_str)
+                if cached is not None and cached[0] == fingerprint:
+                    size, last_modified = cached[1], cached[2]
+                else:
+                    size = _get_folder_size(item)
+                    last_modified = _get_dataset_last_modified(item, st.st_mtime)
+                    cache_writes.append((item_str, fingerprint, size, last_modified))
             else:
                 suffix = item.suffix.lower()
                 if suffix == ".nc":
@@ -400,10 +474,12 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
                     fmt = "sqlite"
                 elif suffix in {".csv", ".txt", ".dat"}:
                     fmt = "csv"  # CONCERN: Or, we could use "flat" ?
+                elif suffix == ".mat":
+                    fmt = "matlab"
                 else:
                     continue
-                size = item.stat().st_size
-                last_modified = item.stat().st_mtime
+                size = st.st_size
+                last_modified = st.st_mtime
 
             dataset_node = {
                 "id": f"file-{hash(str(item)) % 100000}",
@@ -411,7 +487,7 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
                 "path": str(item),
                 "type": "file",
                 "size": size,
-                "timestamp": _get_file_timestamp(item),
+                "timestamp": _iso_from_mtime(st.st_mtime),
                 "tags": [fmt],
                 "lastModified": last_modified,
             }
@@ -419,7 +495,11 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
         except Exception:
             continue
 
-    # Build parent-child relationships
+    _write_scan_cache(cache_writes)
+
+    # Use per-parent sets to build relationships in O(N).
+    seen_child_paths: Dict[str, set] = {}
+
     for p_str, node in list(nodes.items()):
         if p_str == str(path):  # Skip root
             continue
@@ -435,9 +515,12 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
                 if parent_node.get("children") is None:
                     parent_node["children"] = []
 
-                if not any(
-                    ch.get("path") == node.get("path") for ch in parent_node["children"]
-                ):
+                seen = seen_child_paths.setdefault(
+                    parent_str, {ch.get("path") for ch in parent_node["children"]}
+                )
+                node_path = node.get("path")
+                if node_path not in seen:
+                    seen.add(node_path)
                     parent_node["children"].append(node)
 
         except Exception:
@@ -452,61 +535,6 @@ async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
                 sort_children(c)
 
     sort_children(nodes[str(path)])
-
-    logger.debug(f"Directory tree built with these nodes:\n{nodes}")
-    # print(f"Directory tree built with these nodes:\n{nodes}")  # DEBUG:
-
-    # TODOLATER: Re-enable size computation using du/xargs if windows compat is ever resolved.
-    # --- Compute sizes for .zarr nodes using fast external tool (du) if available ---
-    # Collect zarr paths
-    # Compute sizes for zarr paths using du + xargs in parallel. We expect
-    # GNU du with -b to be available on the user's linux host. Use xargs to
-    # parallelize work. Any missing utility is an error which we already
-    # checked above.
-    # zarr_paths = [p for p, n in nodes.items() if n.get("tags") == ["zarr"]]
-
-    # sizes_from_du = {}
-
-    # if zarr_paths:
-    #     # Check cache first
-    #     now = time.time()
-    #     to_query = []
-    #     for p in zarr_paths:
-    #         ent = _SIZE_CACHE.get(p)
-    #         if ent and ent.get("expires_at", 0) > now:
-    #             sizes_from_du[p] = ent["value"]
-    #         else:
-    #             to_query.append(p)
-
-    #     if to_query:
-    #         # Build null-separated input and run: xargs -0 -n50 -P4 du -sb
-    #         input_data = "\0".join(to_query).encode("utf-8") + b"\0"
-    #         cmd = [XARGS_EXEC, "-0", "-n", "50", "-P", "4", DU_EXEC, "-sb"]
-    #         rc, out, err = await _run_subprocess(cmd, input_data=input_data)
-    #         if rc != 0:
-    #             raise RuntimeError(
-    #                 f"Error running du/xargs: {err.strip() or out.strip()}"
-    #             )
-
-    #         for line in out.splitlines():
-    #             parts = line.strip().split(None, 1)
-    #             if len(parts) == 2:
-    #                 size_str, pth = parts
-    #                 try:
-    #                     size = int(size_str)
-    #                     sizes_from_du[str(Path(pth))] = size
-    #                     # store in cache for 30s
-    #                     _SIZE_CACHE[str(Path(pth))] = {
-    #                         "value": size,
-    #                         "expires_at": now + 30,
-    #                     }
-    #                 except ValueError:
-    #                     continue
-
-    # # Attach computed sizes to nodes
-    # for pth, size in sizes_from_du.items():
-    #     if pth in nodes and nodes[pth].get("tags") == ["zarr"]:
-    #         nodes[pth]["size"] = size
 
     return nodes[str(path)]
 
@@ -526,34 +554,29 @@ def _memory_dataset_node(
         f"disk_path={disk_path}, ws_url={ws_url}, ended_at={ended_at}"
     )
 
-    if not disk_path:
-        logger.warning(
-            "Live dataset %s is registered without a disk path",
-            measurement_id,
-        )
-        return None
-
     timestamp_iso: Optional[str] = None
     last_modified: Optional[float] = None
 
     # Try to read metadata from disk path
-    try:
-        dataset = load_dataset_sync(str(disk_path))
-        raw_ts = dataset.attrs.get("Timestamp")
-        if isinstance(raw_ts, str):
-            try:
-                dt = datetime.fromisoformat(raw_ts)
-            except ValueError:
-                dt = datetime.utcnow()
-            timestamp_iso = dt.isoformat()
-            last_modified = dt.timestamp()
-        elif raw_ts is not None:
-            timestamp_iso = str(raw_ts)
-        dataset.close()
-    except Exception as exc:
-        logger.debug(
-            f"Could not read metadata for live dataset {measurement_id} from disk: {exc}"
-        )
+    if disk_path:
+        try:
+            dataset = load_dataset_sync(str(disk_path))
+            raw_ts = dataset.attrs.get("Timestamp")
+            if isinstance(raw_ts, str):
+                try:
+                    dt = datetime.fromisoformat(raw_ts)
+                except ValueError:
+                    dt = datetime.utcnow()
+                timestamp_iso = dt.isoformat()
+                last_modified = dt.timestamp()
+            elif raw_ts is not None:
+                timestamp_iso = str(raw_ts)
+            dataset.close()
+        except Exception as exc:
+            logger.debug(
+                f"Could not read metadata for live dataset {measurement_id} "
+                f"from disk: {exc}"
+            )
 
     # Fallback to started_at from database
     if timestamp_iso is None and started_at:
@@ -579,17 +602,19 @@ def _memory_dataset_node(
         f"(disk_path: {disk_path})"
     )
 
+    suffix = Path(str(disk_path)).suffix.lower() if disk_path else ""
+    display_name = f"{measurement_id}.zarr" if suffix == ".zarr" else measurement_id
+    tags = ["live" if ended_at is None else "ended"]
+    if suffix == ".zarr":
+        tags.insert(0, "zarr")
     node = {
         "id": f"file-memory-{measurement_id}",
-        "name": f"{measurement_id}.zarr",
+        "name": display_name,
         "path": path_value,
         "type": "file",
         "timestamp": timestamp_iso,
         "lastModified": last_modified,
-        "tags": [
-            "zarr",
-            "live" if ended_at is None else "ended",
-        ],
+        "tags": tags,
     }
 
     if disk_path:
@@ -661,24 +686,7 @@ def _build_memory_tree(path_str: str) -> Dict[str, object]:
 
 
 def _build_sqlite_tree(db_path: Path) -> Dict[str, object]:
-    """
-    Build a virtual tree for a QCoDeS sqlite file. Children are run references.
-
-    Each run reference has a path like "path/to/db.sqlite#run_id=123" which can be used
-    to load that run's dataset. This allows users to explore runs within a sqlite file
-    without needing to know the internal structure of the database. The frontend can use
-    the run_id and db_path to load the dataset when the user clicks on a run node.
-
-    Args:
-        db_path (Path): Path to the sqlite file.
-
-    Returns:
-        Dict[str, object]: TreeNode-style dict representing the sqlite file and its runs.
-
-    Raises:
-        FileNotFoundError: If the sqlite file does not exist.
-
-    """
+    """Build a virtual tree of QCoDeS runs grouped by date."""
     if not db_path.exists() or not db_path.is_file():
         raise FileNotFoundError(f"SQLite file does not exist: {db_path}")
 
@@ -704,7 +712,7 @@ def _build_sqlite_tree(db_path: Path) -> Dict[str, object]:
             day_key = "Unknown Date"
 
         run_ref = f"{db_path}#run_id={run_id}"
-        run_label = f"run_id={run_id} | {run_name}"
+        run_label = f"{run_id} | {run_name}"
         child: Dict[str, object] = {
             "id": _sqlite_node_id("file-sqlite-run", run_ref),
             "name": run_label,
@@ -754,23 +762,7 @@ def _build_sqlite_tree(db_path: Path) -> Dict[str, object]:
 
 
 def _build_datatree_tree(store_path: Path) -> Dict[str, object]:
-    """
-    Build a virtual tree for a DataTree-backed store/file.
-
-    Each leaf that has a dataset payload receives a dataset reference path:
-    "<store>#dt_path=/node/path"
-
-    Args:
-        store_path (Path): Path to the DataTree store (e.g. .zarr directory or .nc file)
-
-    Returns:
-        Dict[str, object]: TreeNode-style dict representing the DataTree structure.
-
-    Raises:
-        FileNotFoundError: If the store path does not exist.
-        ValueError: If the path is not a DataTree-capable format or if no nodes are found.
-
-    """
+    """Build a virtual tree whose dataset leaves use ``#dt_path=`` references."""
     if not store_path.exists():
         raise FileNotFoundError(f"DataTree path does not exist: {store_path}")
 
@@ -905,21 +897,7 @@ async def load_live_measurements() -> Dict:
 
 @router.post("/load/")
 async def load_directory(path: PathData) -> Dict:
-    """
-    Load the directory tree structure at the given path.
-    Returns up to 3 levels of directories and includes .zarr files.
-
-    Args:
-        path (PathData): Path to the directory.
-
-    Returns:
-        Dict: Directory tree structure in TreeNode format.
-
-    Raises:
-        HTTPException: If the path does not exist, is not a directory, or if there
-                    is an error loading the directory or its contents.
-
-    """
+    """Load a filesystem, live-memory, SQLite, or DataTree path as a tree."""
     raw_path = path.path
     logger.debug(f"load_directory | POST path={raw_path}")
 
@@ -950,6 +928,16 @@ async def load_directory(path: PathData) -> Dict:
             return _build_sqlite_tree(fs_path)
         except Exception as exc:
             logger.error("load_directory | Failed to build sqlite tree: %s", exc)
+            # Give disconnected shares and unreadable files an actionable error.
+            if "unable to open database file" in str(exc):
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        f"Could not open '{fs_path.name}'. If it is on a network "
+                        "drive, check that the drive is still connected and that "
+                        "you can read the file."
+                    ),
+                )
             raise HTTPException(
                 status_code=500, detail=f"Error loading sqlite file: {exc}"
             )
@@ -978,19 +966,7 @@ async def load_directory(path: PathData) -> Dict:
 
 
 async def _load_dataset_for_metadata(path_ref: str) -> xr.Dataset:
-    """
-    Resolve and load a dataset for metadata endpoints.
-
-    Args:
-        path_ref (str): The path reference which can be a memory:// URI or a filesystem path.
-
-    Returns:
-        xr.Dataset: The loaded dataset ready for metadata extraction.
-
-    Raises:
-        HTTPException: If the path reference is invalid, if the dataset cannot be loaded, or if the dataset is not found.
-
-    """
+    """Resolve a dataset reference for metadata endpoints."""
     normalized_ref = (path_ref or "").strip()
     if normalized_ref in {"", "/", "\\"}:
         raise HTTPException(
@@ -1008,72 +984,160 @@ async def _load_dataset_for_metadata(path_ref: str) -> xr.Dataset:
         raise HTTPException(status_code=400, detail=msg) from exc
 
 
+# Attrs the loader injects to record how Qimchi read the file.
+INTERNAL_META_KEYS: frozenset = frozenset(
+    {
+        "path",
+        "actual_path",
+        "loaded_from",
+        "grid_2d",
+        "qimchi_all_columns",
+        "qimchi_tabular",
+        "qimchi_tabular_row_dim",
+        "qimchi_quantify_gridded",
+        "qimchi_connect",
+        "qimchi_connect_rows",
+        "qimchi_connect_source",
+    }
+)
+
+# Preferred qanary metadata sections.
+PREFERRED_META_KEYS: list = [
+    "Sweeps",
+    "Parameters Snapshot",
+    "Extra Metadata",
+    "Instruments Snapshot",
+]
+
+# Expose stable QCoDeS metadata as one structured section.
+QCODES_META_SECTION: str = "QCoDeS Metadata"
+QCODES_META_KEYS: tuple[str, ...] = (
+    "ds_name",
+    "exp_name",
+    "guid",
+    "run_timestamp",
+    "sample_name",
+    "snapshot",
+)
+
+
+def _expand_json_string(text: str) -> object | None:
+    """Parse a JSON object or array stored as a string."""
+    stripped = text.lstrip()
+    if not stripped.startswith(("{", "[")):
+        return None
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    # Only containers: anything else would just be re-counted as a scalar.
+    return parsed if isinstance(parsed, (dict, list)) else None
+
+
+# The attrs surfaced by /load-attrs/ (the Explorer's metadata strip).
+ATTR_KEYS: list = [
+    "Timestamp",
+    "Cryostat",
+    "Wafer ID",
+    "Device Type",
+    "Sample Name",
+    "Experiment Name",
+    "Measurement ID",  # CONCERN: Already present in filename
+    # "Instruments Snapshot"
+]
+
+# Identity and context attrs written by the other acquisition tools.
+NON_QANARY_ATTR_KEYS: list = [
+    # QCoDeS
+    "run_id",
+    "guid",
+    "exp_name",
+    "sample_name",
+    "run_timestamp",
+    "completed_timestamp",
+    "qimchi_db_uuid",
+    # Quantify
+    "tuid",
+    "name",
+]
+
+
+def build_attrs_payload(data: xr.Dataset) -> Dict:
+    """Build the canonical ``/load-attrs/`` response for a dataset."""
+    metadata: dict = data.attrs
+    if not isinstance(metadata, dict):
+        metadata = dict(metadata)
+
+    indeps: list = list(data.coords.keys())  # Coordinates -> independents
+    deps: list = list(data.data_vars.keys())  # Data variables -> dependents
+
+    # Flat tables have no coord/var split: every column is both.
+    tabular_columns = metadata.get("qimchi_all_columns")
+    if isinstance(tabular_columns, list) and tabular_columns:
+        indeps = [str(col) for col in tabular_columns]
+        deps = [str(col) for col in tabular_columns]
+
+    attr_json: dict = {}
+    for key in ATTR_KEYS:
+        value = metadata.get(key, "N/A")
+        attr_json[key] = (
+            value
+            if isinstance(value, (str, int, float, bool, list, dict))
+            else str(value)
+        )
+
+    # Scalars only: this payload is rendered as a flat key/value strip, so a
+    # nested snapshot would either break the render or bury it.
+    for key in NON_QANARY_ATTR_KEYS:
+        if key in attr_json:
+            continue
+        value = metadata.get(key)
+        if isinstance(value, (str, int, float, bool)):
+            attr_json[key] = value
+
+    # Which independents each dependent actually varies over, in coordinate order.
+    var_indeps: dict = {}
+    if not (isinstance(tabular_columns, list) and tabular_columns):
+        coord_dims = {
+            str(name): tuple(str(dim) for dim in coord.dims)
+            for name, coord in data.coords.items()
+        }
+        for name, var in data.data_vars.items():
+            dims = {str(dim) for dim in var.dims}
+            var_indeps[str(name)] = [
+                coord_name
+                for coord_name, coord_dim_names in coord_dims.items()
+                if coord_dim_names and dims.issuperset(coord_dim_names)
+            ]
+
+    attr_json["independents"] = indeps
+    attr_json["dependents"] = deps
+    attr_json["variable_independents"] = var_indeps
+    return attr_json
+
+
 @router.post("/load-attrs/")
 async def get_meta_attrs(path: PathData) -> Dict:
-    """
-    Get metadata attrs for a .zarr dataset.
-
-    Args:
-        path (PathData): Path to the .zarr dataset directory.
-
-    Returns:
-        Dict: Metadata attrs from the zarr dataset
-
-    """
+    """Return a dataset's summary metadata and variables."""
     raw_path = path.path
     logger.debug(f"get_meta_attrs | POST path={raw_path}")
+
+    # Serve cached attrs while the dataset's stat fingerprint matches.
+    from .library import get_cached_attrs, store_cached_attrs
+
+    cached = await get_cached_attrs(raw_path)
+    if cached is not None:
+        logger.debug(f"get_meta_attrs | cache hit for {raw_path}")
+        return sanitize_for_json(cached)
 
     data: Optional[xr.Dataset] = None
 
     try:
         data = await _load_dataset_for_metadata(raw_path)
-        metadata: dict = data.attrs  # Metadata
-        coords: xr.core.coordinates.DatasetCoordinates = (
-            data.coords
-        )  # NOTE: Coordinates - Independents
-        data_vars: xr.core.dataset_variables.DataVariables = (
-            data.data_vars
-        )  # NOTE: Data variables - Dependents
-
-        indeps: list = list(coords.keys())
-        deps: list = list(data_vars.keys())
-        tabular_columns = metadata.get("qimchi_all_columns")
-        if isinstance(tabular_columns, list) and tabular_columns:
-            indeps = [str(col) for col in tabular_columns]
-            deps = [str(col) for col in tabular_columns]
-
-        logger.debug(f"get_meta_attrs | {indeps=}")
-        logger.debug(f"get_meta_attrs | {deps=}")
-
-        # Convert metadata to a dictionary if it's not already
-        if not isinstance(metadata, dict):
-            metadata = dict(metadata)
-
-        attr_keys: list = [
-            "Timestamp",
-            "Cryostat",
-            "Wafer ID",
-            "Device Type",
-            "Sample Name",
-            "Experiment Name",
-            "Measurement ID",  # CONCERN: Already present in filename
-            # "Instruments Snapshot"
-        ]
-
-        attr_dict: dict = {key: metadata.get(key, "N/A") for key in attr_keys}
-
-        # Ensure metadata is JSON serializable
-        attr_json = {}
-        for k, v in attr_dict.items():
-            if isinstance(v, (str, int, float, bool, list, dict)):
-                attr_json[k] = v
-            else:
-                attr_json[k] = str(v)
-
-        # Add indeps and deps to the metadata
-        attr_json["independents"] = indeps
-        attr_json["dependents"] = deps
-
+        attr_json = build_attrs_payload(data)
+        # Pass the open dataset so a content-signature UUID can be derived
+        # without re-reading the file.
+        await store_cached_attrs(raw_path, attr_json, data)
         return sanitize_for_json(attr_json)
 
     except HTTPException:
@@ -1086,21 +1150,12 @@ async def get_meta_attrs(path: PathData) -> Dict:
 
     finally:
         if data is not None:
-            data.close()
+            _close_dataset(data)
 
 
 @router.post("/load-meta/")
 async def get_metadata(path: PathData) -> Dict:
-    """
-    Get collapsible metadata key-vals for a .zarr dataset.
-
-    Args:
-        path (PathData): Path to the .zarr dataset directory.
-
-    Returns:
-        Dict: Collapsible metadata key-vals from the zarr dataset
-
-    """
+    """Return a dataset's collapsible metadata sections."""
     raw_path = path.path
 
     logger.debug(f"get_metadata | POST path={raw_path}")
@@ -1115,14 +1170,35 @@ async def get_metadata(path: PathData) -> Dict:
         if not isinstance(metadata, dict):
             metadata = dict(metadata)
 
-        meta_keys: list = [
-            "Sweeps",
-            "Parameters Snapshot",
-            "Extra Metadata",
-            "Instruments Snapshot",
-        ]
-
-        meta_dict: dict = {key: metadata.get(key, "N/A") for key in meta_keys}
+        is_qcodes = bool(metadata.get("guid")) and any(
+            key in metadata for key in ("run_id", "ds_name", "qcodes_db_path")
+        )
+        if is_qcodes:
+            qcodes_meta: dict = {}
+            for key in QCODES_META_KEYS:
+                if key not in metadata:
+                    continue
+                value = metadata[key]
+                if key == "snapshot" and isinstance(value, str):
+                    parsed_snapshot = _expand_json_string(value)
+                    if parsed_snapshot is not None:
+                        value = parsed_snapshot
+                qcodes_meta[key] = value
+            meta_dict: dict = {QCODES_META_SECTION: qcodes_meta}
+        else:
+            qanary_sections: list = [
+                key for key in PREFERRED_META_KEYS if key in metadata
+            ]
+            if qanary_sections:
+                # qanary reserves this pane for its four metadata sections.
+                meta_dict = {key: metadata[key] for key in qanary_sections}
+            else:
+                # Other formats expose their remaining attrs directly.
+                meta_dict = {
+                    key: metadata[key]
+                    for key in sorted(metadata)
+                    if key not in INTERNAL_META_KEYS
+                }
 
         # Ensure metadata is JSON serializable
         meta_json = {}
@@ -1142,21 +1218,61 @@ async def get_metadata(path: PathData) -> Dict:
         raise HTTPException(status_code=500, detail=f"Error loading metadata: {str(e)}")
     finally:
         if data is not None:
-            data.close()
+            _close_dataset(data)
+
+
+def _parameter_display(value: object, unit: object) -> str:
+    """Format a parameter to four significant digits with an SI prefix."""
+    unit_text = str(unit or "").strip()
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        number = float(value)
+        if math.isfinite(number):
+            return format_quantity(float(f"{number:.4g}"), unit_text)
+    text = "" if value is None else str(value)
+    return f"{text} {unit_text}".strip()
+
+
+@router.post("/load-meta/parameters/")
+async def get_pinned_parameters(request: PinnedParametersRequest) -> Dict:
+    """Return requested Parameters Snapshot entries in request order."""
+    data: Optional[xr.Dataset] = None
+    try:
+        data = await _load_dataset_for_metadata(request.path)
+        snapshot = data.attrs.get("Parameters Snapshot")
+        if isinstance(snapshot, str):
+            snapshot = _expand_json_string(snapshot)
+        if not isinstance(snapshot, dict):
+            snapshot = {}
+
+        parameters = []
+        for name in request.names:
+            entry = snapshot.get(name)
+            if not isinstance(entry, dict):
+                parameters.append({"name": name, "missing": True})
+                continue
+            parameters.append(
+                {
+                    "name": name,
+                    "label": str(entry.get("label") or name),
+                    "display": _parameter_display(
+                        entry.get("value"), entry.get("unit")
+                    ),
+                }
+            )
+        return sanitize_for_json({"parameters": parameters})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("get_pinned_parameters | Error loading parameters")
+        raise HTTPException(status_code=500, detail=f"Error loading parameters: {e}")
+    finally:
+        if data is not None:
+            _close_dataset(data)
 
 
 @router.post("/dataset-status/")
 async def get_dataset_status(data: PathData) -> Dict:
-    """
-    Get live status and metadata for a dataset.
-
-    Args:
-        data (PathData): Path to the zarr dataset directory.
-
-    Returns:
-        dict: Live status, last modification time, and other metadata.
-
-    """
+    """Return a dataset's live status and modification metadata."""
     try:
         disk_path = (
             resolve_to_disk_path(data.path)

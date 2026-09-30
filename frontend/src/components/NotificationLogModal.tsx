@@ -25,10 +25,10 @@ interface NotificationLogModalProps {
 
 // Simple global z-index manager so modals can stack above each other.
 const getNextGlobalModalZ = (): number => {
-  if (typeof window === "undefined") return 1000;
+  if (typeof window === "undefined") return 2000;
   const w = window as unknown as { __qimchi_modal_z?: number };
-  if (!w.__qimchi_modal_z) w.__qimchi_modal_z = 1000;
-  w.__qimchi_modal_z = (w.__qimchi_modal_z || 1000) + 1;
+  if (!w.__qimchi_modal_z) w.__qimchi_modal_z = 2000;
+  w.__qimchi_modal_z = (w.__qimchi_modal_z || 2000) + 1;
   return w.__qimchi_modal_z;
 };
 
@@ -75,16 +75,10 @@ const NotificationLogEntry: React.FC<{
         <div className="shrink-0">{getIcon(log.type)}</div>
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2">
-            <p className="text-sm font-medium wrap-break-word leading-tight">
-              {log.message}
-            </p>
+            <p className="min-w-0 text-sm font-medium wrap-anywhere leading-tight">{log.message}</p>
             {hasMetadata && (
               <div className="text-slate-400 mt-0.5">
-                {isExpanded ? (
-                  <ChevronUp size={14} />
-                ) : (
-                  <ChevronDown size={14} />
-                )}
+                {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </div>
             )}
           </div>
@@ -94,14 +88,10 @@ const NotificationLogEntry: React.FC<{
                 {log.source}
               </span>
             )}
-            <span className="text-[10px] uppercase tracking-wider font-semibold">
-              {log.type}
-            </span>
+            <span className="text-[10px] uppercase tracking-wider font-semibold">{log.type}</span>
             <span className="w-1 h-1 rounded-full bg-current opacity-40"></span>
             <span className="text-xs">{formatTime(log.timestamp)}</span>
-            <span className="text-[10px] ml-auto">
-              {formatDate(log.timestamp)}
-            </span>
+            <span className="text-[10px] ml-auto">{formatDate(log.timestamp)}</span>
           </div>
         </div>
       </div>
@@ -111,9 +101,7 @@ const NotificationLogEntry: React.FC<{
           className="mt-2 p-2 bg-white bg-opacity-50 rounded border border-black border-opacity-5 overflow-hidden text-xs"
           onClick={(e) => e.stopPropagation()}
         >
-          <p className="text-[10px] font-bold uppercase text-slate-500 mb-1">
-            Technical Details
-          </p>
+          <p className="text-[10px] font-bold uppercase text-slate-500 mb-1">Technical Details</p>
           {typeof log.metadata === "object" ? (
             <JsonView
               value={log.metadata}
@@ -127,12 +115,11 @@ const NotificationLogEntry: React.FC<{
                   backgroundColor: "transparent",
                   "--w-rjv-background-color": "transparent",
                   "--w-rjv-line-color": "rgba(0,0,0,0.05)",
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 } as any
               }
             />
           ) : (
-            <pre className="whitespace-pre-wrap font-mono text-[11px]">
+            <pre className="whitespace-pre-wrap wrap-anywhere font-mono text-[11px]">
               {String(log.metadata)}
             </pre>
           )}
@@ -172,8 +159,7 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
       const typeMatch = log.type.toLowerCase().includes(lowerQuery);
       const sourceMatch = log.source?.toLowerCase().includes(lowerQuery);
       const metaMatch =
-        log.metadata &&
-        JSON.stringify(log.metadata).toLowerCase().includes(lowerQuery);
+        log.metadata && JSON.stringify(log.metadata).toLowerCase().includes(lowerQuery);
       return msgMatch || typeMatch || sourceMatch || metaMatch;
     });
   }, [logs, searchQuery]);
@@ -198,8 +184,7 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
 
   // Desktop-only: the launcher exposes a way to tail ~/.qimchi/qimchi_debug.log
   // in a real terminal. Hidden in the browser/Docker build (no window.pywebview).
-  const canOpenLog =
-    typeof window !== "undefined" && !!window.pywebview?.api?.open_log_terminal;
+  const canOpenLog = typeof window !== "undefined" && !!window.pywebview?.api?.open_log_terminal;
 
   const openDebugLog = async () => {
     try {
@@ -240,10 +225,11 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
   };
 
   return (
-    <div ref={wrapperRef} className="fixed inset-0 pointer-events-none">
+    <div ref={wrapperRef} className="fixed inset-0 pointer-events-none" data-closes-on-escape>
       <Rnd
         default={{
-          x: window.innerWidth - 384 - 28,
+          // Bottom left, just clear of the sidebar rail.
+          x: 48,
           y: window.innerHeight - 550 - 28,
           width: 384,
           height: 550,
@@ -267,7 +253,7 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
               {canOpenLog && (
                 <button
                   onClick={openDebugLog}
-                  className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                  className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors qimchi-dark-hover-plain"
                   title="Open debug log (live) in a terminal"
                 >
                   <ScrollText size={16} />
@@ -276,7 +262,7 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
               {logs.length > 0 && (
                 <button
                   onClick={onClear}
-                  className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                  className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors qimchi-dark-hover-plain"
                   title="Clear Logs"
                 >
                   <Trash2 size={16} />
@@ -284,7 +270,7 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
               )}
               <button
                 onClick={onClose}
-                className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-200 rounded-md transition-colors"
+                className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-200 rounded-md transition-colors qimchi-dark-hover-plain"
                 title="Close"
               >
                 <X size={18} />
@@ -331,7 +317,7 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
           </div>
 
           {/* Body */}
-          <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-slate-50">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-2 bg-slate-50">
             {filteredLogs.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-slate-400">
                 <History size={32} className="mb-2 opacity-30" />

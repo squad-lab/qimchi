@@ -31,34 +31,28 @@ export const usePlots = (): UsePlotsReturn => {
             ...plot,
             id: plot.id ? plot.id : `plot_${Date.now()}_${index}`,
             // Add a client-side unique identifier as backup
-            clientId: `${Date.now()}_${Math.random()
-              .toString(36)
-              .substr(2, 9)}_${index}`,
+            clientId: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${index}`,
           }));
 
           setPlots((prev) => [...prev, ...plotsWithUniqueIds]);
           if (response.plots.length === 0) {
             showToast("No plots were created.", "info");
           } else {
-            showToast(
-              `Successfully created ${response.plots.length} plot(s)`,
-              "success"
-            );
+            showToast(`Successfully created ${response.plots.length} plot(s)`, "success");
           }
         } else {
           setError(response.message);
           showToast(`Failed to create plots: ${response.message}`, "error");
         }
       } catch (err) {
-        const errorMessage =
-          err instanceof Error ? err.message : "Unknown error occurred";
+        const errorMessage = err instanceof Error ? err.message : "Unknown error occurred";
         setError(errorMessage);
         showToast(`Error creating plots: ${errorMessage}`, "error");
       } finally {
         setIsLoading(false);
       }
     },
-    [showToast]
+    [showToast],
   );
 
   const clearPlots = useCallback(() => {

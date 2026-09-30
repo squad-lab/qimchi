@@ -17,13 +17,13 @@ interface PainterState {
   activateTheme: (
     sourcePlotId: string,
     sourcePlotType: string,
-    appearance: PlotAppearanceSettings
+    appearance: PlotAppearanceSettings,
   ) => void;
   activateFilter: (
     sourcePlotId: string,
     sourcePlotType: string,
     filters: AppliedFilter[],
-    sliders?: Record<string, unknown>
+    sliders?: Record<string, unknown>,
   ) => void;
   deactivate: () => void;
   setShiftHeld: (v: boolean) => void;

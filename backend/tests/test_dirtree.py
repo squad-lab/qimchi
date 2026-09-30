@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from api import dirtree
@@ -196,6 +198,30 @@ async def test_get_directory_tree_includes_flat_tables(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_directory_tree_includes_matlab_files(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    root.mkdir(parents=True)
+    mat_file = root / "sweep.mat"
+    mat_file.write_bytes(b"MATLAB 5.0 MAT-file")
+
+    monkeypatch.setattr(dirtree, "FD_EXEC", "fdfind")
+
+    def _mock_subprocess_run(cmd, **kwargs):
+        stdout = b""
+        if "-t" in cmd and "f" in cmd:
+            assert "mat" in cmd
+            stdout = f"{mat_file.resolve()}\n".encode("utf-8")
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr=b"")
+
+    monkeypatch.setattr(dirtree.subprocess, "run", _mock_subprocess_run)
+
+    tree = await dirtree.get_directory_tree_zarr(str(root), max_depth=2)
+
+    child_paths = {child.get("path"): child for child in tree.get("children", [])}
+    assert child_paths[str(mat_file.resolve())]["tags"] == ["matlab"]
+
+
+@pytest.mark.asyncio
 async def test_load_directory_sqlite_file_returns_virtual_run_tree(
     tmp_path, monkeypatch
 ):
@@ -234,6 +260,8 @@ async def test_load_directory_sqlite_file_returns_virtual_run_tree(
     run_children_1 = date_folders[1]["children"]
     assert run_children_0[0]["path"] == f"{db_file}#run_id=11"
     assert run_children_1[0]["path"] == f"{db_file}#run_id=9"
+    assert run_children_0[0]["name"] == "11 | r11"
+    assert "run_id=" not in run_children_0[0]["name"]
     assert run_children_0[0]["tags"] == ["qcodes", "qcodes-run", "sqlite"]
 
 

@@ -29,7 +29,9 @@
   border-radius: 50%;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
   cursor: pointer;
-  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  transition:
+    transform 0.1s ease,
+    box-shadow 0.1s ease;
 }
 
 .dual-thumb-slider-input::-webkit-slider-thumb:hover {
@@ -85,4 +87,13 @@
   background-color: #3b82f6; /* blue-500 */
   border-radius: 2px;
   z-index: 20;
+}
+
+/* Dark mode (Atom One Dark) */
+.dark .dual-thumb-slider-track {
+  background-color: #3e4451;
+}
+
+.dark .dual-thumb-slider-range {
+  background-color: #61afef;
 }

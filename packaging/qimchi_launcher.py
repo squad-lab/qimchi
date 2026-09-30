@@ -3,18 +3,19 @@ Qimchi desktop launcher (PyInstaller + pywebview).
 
 Responsibilities:
 1. Starts the FastAPI/uvicorn server on a background thread.
-2. Waits until the server actually answers GET /health before opening the window.
+2. Opens the window on a splash at once, and loads the app when GET /health answers.
 3. Surfaces server startup crashes in the window instead of a blank page.
 4. Guards multiprocessing so export workers (ProcessPoolExecutor) don't re-launch the whole app on Windows.
 5. Best-effort ensure a Chrome/Chromium is available for Kaleido image export on first run.
 
-This file is the source of truth. `build_local.ps1` copies it into the bundle.
+This file is the source of truth. `build_windows.ps1` copies it into the bundle.
 
 """
 
 import multiprocessing
 import os
 import sys
+from urllib.request import Request, urlopen
 
 
 # Paths / logging
@@ -22,16 +23,23 @@ def _bundle_dir() -> str:
     if getattr(sys, "frozen", False):
         # PyInstaller onefile (temp extraction dir) or onedir (_internal/ subdir)
         return sys._MEIPASS  # type: ignore[attr-defined]
-    return os.path.dirname(os.path.abspath(__file__))
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    repository_root = os.path.dirname(script_dir)
+    # The canonical launcher can also be exercised directly during development;
+    # the staged copy is frozen and continues to resolve through sys._MEIPASS.
+    if os.path.isdir(os.path.join(repository_root, "backend")):
+        return repository_root
+    return script_dir
 
 
 def _qimchi_home() -> str:
-    """
-    The desktop app's home dir (~/.qimchi): persistent WebView2 storage,
-    logs, and the downloaded Chrome all live here.
-    
-    """
-    home = os.path.join(os.path.expanduser("~"), ".qimchi")
+    """Return the shared desktop data directory, honoring ``QIMCHI_HOME``."""
+    override = os.environ.get("QIMCHI_HOME")
+    home = (
+        os.path.expanduser(override)
+        if override
+        else os.path.join(os.path.expanduser("~"), ".qimchi")
+    )
     try:
         os.makedirs(home, exist_ok=True)
     except OSError:
@@ -40,9 +48,20 @@ def _qimchi_home() -> str:
 
 
 def _log_path() -> str:
-    # Debug log lives in ~/.qimchi (falls back to the temp dir if not writable).
+    """Return the persistent launcher log path, falling back to the temp directory."""
     try:
-        candidate = os.path.join(_qimchi_home(), "qimchi_debug.log")
+        logs_dir = os.path.join(_qimchi_home(), "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        candidate = os.path.join(logs_dir, "qimchi_debug.log")
+
+        # Move a pre-consolidation log into logs/ so history isn't orphaned.
+        legacy = os.path.join(_qimchi_home(), "qimchi_debug.log")
+        if os.path.isfile(legacy) and not os.path.exists(candidate):
+            try:
+                os.replace(legacy, candidate)
+            except OSError:
+                pass
+
         open(candidate, "a").close()
         return candidate
     except OSError:
@@ -51,11 +70,383 @@ def _log_path() -> str:
         return os.path.join(tempfile.gettempdir(), "qimchi_debug.log")
 
 
-def _persistent_chrome_dir() -> str:
+# Roll the debug log at this size so appending forever can't fill the disk.
+_DEBUG_LOG_MAX_BYTES = 10 * 1024 * 1024
+_DEBUG_LOG_ROLLS = 3
+
+
+def _open_log_file(path: str):
+    """Open the debug log for append, rolling it when needed."""
+    try:
+        if os.path.isfile(path) and os.path.getsize(path) > _DEBUG_LOG_MAX_BYTES:
+            for index in range(_DEBUG_LOG_ROLLS - 1, 0, -1):
+                older = f"{path}.{index}"
+                if os.path.isfile(older):
+                    os.replace(older, f"{path}.{index + 1}")
+            os.replace(path, path + ".1")
+    except OSError:
+        pass
+
+    handle = open(path, "a", buffering=1, encoding="utf-8")
+    try:
+        import datetime
+
+        stamp = datetime.datetime.now().isoformat(timespec="seconds")
+        handle.write(f"\n===== Qimchi session started {stamp} =====\n")
+    except Exception:
+        pass
+    return handle
+
+
+class _TimestampedWriter:
+    """Prefix each output line with one timestamp, including partial writes."""
+
+    def __init__(self, stream) -> None:
+        import threading
+
+        self._stream = stream
+        self._lock = threading.Lock()
+        self._line_start = True
+
+    @staticmethod
+    def _stamp() -> str:
+        import datetime
+
+        now = datetime.datetime.now()
+        return now.strftime("%Y-%m-%d %H:%M:%S.") + f"{now.microsecond // 1000:03d} "
+
+    def write(self, text: str) -> int:
+        if not text:
+            return 0
+        with self._lock:
+            out = []
+            for piece in text.splitlines(keepends=True):
+                if self._line_start:
+                    out.append(self._stamp())
+                out.append(piece)
+                self._line_start = piece.endswith("\n")
+            self._stream.write("".join(out))
+        return len(text)
+
+    def flush(self) -> None:
+        with self._lock:
+            self._stream.flush()
+
+    def fileno(self) -> int:
+        return self._stream.fileno()
+
+    def isatty(self) -> bool:
+        return False
+
+    @property
+    def encoding(self) -> str:
+        return getattr(self._stream, "encoding", "utf-8")
+
+    def writable(self) -> bool:
+        return True
+
+
+def _uvicorn_log_config() -> dict:
+    """uvicorn's logging, without its own times: the debug log adds them."""
+    import copy
+
+    from uvicorn.config import LOGGING_CONFIG
+
+    config = copy.deepcopy(LOGGING_CONFIG)
+    config["formatters"]["default"]["fmt"] = "[%(levelname)s] %(name)s: %(message)s"
+    config["formatters"]["access"]["fmt"] = (
+        '[%(levelname)s] uvicorn.access: %(client_addr)s - "%(request_line)s" '
+        "%(status_code)s"
+    )
+    for formatter in config["formatters"].values():
+        formatter["use_colors"] = False
+    return config
+
+
+def _webview2_runtime_version() -> str | None:
+    """The installed WebView2 runtime's version (Windows), from the registry."""
+    if sys.platform != "win32":
+        return None
+    import winreg
+
+    client = r"Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+    for root, key in (
+        (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\WOW6432Node\{client}"),
+        (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\{client}"),
+        (winreg.HKEY_CURRENT_USER, rf"Software\{client}"),
+    ):
+        try:
+            with winreg.OpenKey(root, key) as handle:
+                version = winreg.QueryValueEx(handle, "pv")[0]
+                if version and version != "0.0.0.0":
+                    return str(version)
+        except OSError:
+            continue
+    return None
+
+
+def _log_session_details(log) -> None:
+    """What a bug report needs to know about this machine and this run."""
+    import platform
+
+    details = [
+        f"version {_app_version()}",
+        f"{platform.platform()} ({platform.machine()})",
+        f"Python {sys.version.split()[0]}",
+        "frozen" if getattr(sys, "frozen", False) else "from source",
+        f"home {_qimchi_home()}",
+        f"args {sys.argv[1:]}",
+    ]
+    try:
+        import psutil
+
+        memory = psutil.virtual_memory().total / (1024**3)
+        details.append(f"{psutil.cpu_count()} CPUs, {memory:.1f} GB RAM")
+    except Exception:
+        pass
+    try:
+        from importlib.metadata import version
+
+        details.append(f"pywebview {version('pywebview')}")
+    except Exception:
+        pass
+    try:
+        runtime = _webview2_runtime_version()
+        if runtime:
+            details.append(f"WebView2 {runtime}")
+    except Exception:
+        pass
+    log("[session] " + "; ".join(details))
+
+
+def _resource_snapshot(reason: str) -> None:
+    """Ask the backend to log a resource line now, off the calling thread."""
+    import threading
+
+    def run() -> None:
+        try:
+            from api.diagnostics import sampler
+
+            sampler.snapshot(reason)
+        except Exception:
+            pass
+
+    threading.Thread(target=run, name="resource-snapshot", daemon=True).start()
+
+
+def _app_version() -> str:
+    """Running version: the build's tag, else package metadata ('unknown' if neither)."""
+    try:
+        from api._build_version import BUILD_VERSION
+
+        if BUILD_VERSION:
+            return BUILD_VERSION
+    except Exception:
+        pass
+    try:
+        from importlib.metadata import version
+
+        return version("qimchi-api")
+    except Exception:
+        return "unknown"
+
+
+def _splash_html() -> str:
+    """The window's first page, shown while the backend starts."""
+    import base64
+
+    logo = ""
+    for candidate in (
+        os.path.join(_bundle_dir(), "frontend", "dist", "qimchi-logo.png"),
+        os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "frontend",
+            "public",
+            "qimchi-logo.png",
+        ),
+    ):
+        try:
+            with open(candidate, "rb") as handle:
+                data = base64.b64encode(handle.read()).decode("ascii")
+            logo = f'<img src="data:image/png;base64,{data}" alt="">'
+            break
+        except OSError:
+            continue
+
+    return f"""<!doctype html><html><head><meta charset="utf-8"><style>
+      html,body{{height:100%;margin:0}}
+      body{{display:flex;flex-direction:column;align-items:center;justify-content:center;
+        gap:18px;background:#f8fafc;color:#0f172a;
+        font-family:"Fira Sans",system-ui,-apple-system,"Segoe UI",sans-serif}}
+      img{{width:88px;height:88px;object-fit:contain;border-radius:16px;
+        animation:breathe 2.4s ease-in-out infinite}}
+      .name{{font-size:30px;font-weight:700;letter-spacing:.04em}}
+      .version{{font-size:13px;font-weight:500;color:#64748b;margin-top:-12px}}
+      .bar{{width:168px;height:3px;border-radius:999px;background:#e2e8f0;overflow:hidden}}
+      .bar span{{display:block;width:40%;height:100%;border-radius:999px;background:#16a34a;
+        animation:slide 1.1s ease-in-out infinite}}
+      .lab{{font-size:12px;color:#94a3b8;letter-spacing:.08em;text-transform:uppercase}}
+      @keyframes slide{{0%{{transform:translateX(-100%)}}100%{{transform:translateX(250%)}}}}
+      @keyframes breathe{{0%,100%{{transform:scale(1)}}50%{{transform:scale(1.06)}}}}
+      @media (prefers-color-scheme:dark){{
+        body{{background:#0f172a;color:#e2e8f0}}
+        .version{{color:#94a3b8}} .bar{{background:#1e293b}} .lab{{color:#64748b}}}}
+    </style></head><body>
+      {logo}
+      <div class="name">Qimchi</div>
+      <div class="version">v{_app_version().removeprefix("v")}</div>
+      <div class="bar"><span></span></div>
+      <div class="lab">SQUAD Lab &middot; FZ J&uuml;lich</div>
+    </body></html>"""
+
+
+def _purge_webview_cache_on_upgrade(storage_path: str, log) -> None:
     """
-    Persistent, writable dir for a downloaded Chrome (survives across runs).
+    Drop the WebView's HTTP cache when the app version has changed.
 
     """
+    import shutil
+
+    marker = os.path.join(_qimchi_home(), ".last_version")
+    current = _app_version()
+    previous = None
+    try:
+        if os.path.exists(marker):
+            with open(marker, "r", encoding="utf-8") as fh:
+                previous = fh.read().strip()
+    except OSError:
+        pass
+
+    if previous == current:
+        return
+
+    # WebView2 (Windows) layout; other platforms simply have no such dirs.
+    default_profile = os.path.join(storage_path, "EBWebView", "Default")
+    for name in ("Cache", "Code Cache"):
+        target = os.path.join(default_profile, name)
+        if os.path.isdir(target):
+            shutil.rmtree(target, ignore_errors=True)
+            log(f"[cache] purged WebView '{name}' (version {previous} -> {current})")
+
+    try:
+        with open(marker, "w", encoding="utf-8") as fh:
+            fh.write(current)
+    except OSError:
+        log("[cache] could not record app version marker (will retry next launch)")
+
+
+WEBVIEW2_ARGUMENTS_ENV = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"
+
+
+def _with_webview2_argument(existing: str | None, argument: str) -> str:
+    """Add a browser flag to a WebView2 arguments string, once."""
+    parts = (existing or "").split()
+    if argument not in parts:
+        parts.append(argument)
+    return " ".join(parts)
+
+
+class _ReloadBudget:
+    """Limit automatic crash recovery to a few reloads per time window."""
+
+    def __init__(self, limit: int = 3, window_seconds: float = 300.0, clock=None):
+        import time
+
+        self.limit = limit
+        self.window_seconds = window_seconds
+        self.clock = clock or time.monotonic
+        self.reloads: list[float] = []
+
+    def take(self) -> bool:
+        now = self.clock()
+        self.reloads = [t for t in self.reloads if now - t < self.window_seconds]
+        if len(self.reloads) >= self.limit:
+            return False
+        self.reloads.append(now)
+        return True
+
+
+def _handle_webview2_process_failed(sender, args, budget: _ReloadBudget, log) -> None:
+    """Log a WebView2 process failure and reload the page if its renderer died."""
+    kind = str(args.ProcessFailedKind)
+    details = ", ".join(
+        f"{name}={getattr(args, name, None)}"
+        for name in ("Reason", "ExitCode", "ProcessDescription")
+    )
+    log(f"[webview2] process failed: kind={kind}, {details}")
+    _resource_snapshot(f"after WebView2 {kind}")
+    # A dead main-frame renderer leaves only the crash page. The browser process
+    # dying takes the whole control with it, and GPU crashes recover by themselves.
+    if kind != "RenderProcessExited":
+        return
+    if budget.take():
+        log("[webview2] reloading the page after a renderer crash")
+        sender.Reload()
+    else:
+        log("[webview2] renderer keeps crashing; not reloading again")
+
+
+def _watch_webview2_crashes(window, log) -> None:
+    """Hook WebView2's ProcessFailed event once the window has loaded (Windows only)."""
+    if sys.platform != "win32":
+        return
+
+    import traceback
+
+    budget = _ReloadBudget()
+    state = {"hooked": False}
+
+    def on_loaded() -> None:
+        if state["hooked"]:
+            return
+        try:
+            from System import Action
+
+            form = window.native
+
+            def on_failed(sender, args) -> None:
+                try:
+                    _handle_webview2_process_failed(sender, args, budget, log)
+                except Exception:
+                    log("[webview2] crash handler failed:\n" + traceback.format_exc())
+
+            def attach() -> None:
+                form.browser.webview.CoreWebView2.ProcessFailed += on_failed
+
+            # WebView2 objects may only be touched on the UI thread.
+            form.Invoke(Action(attach))
+            state["hooked"] = True
+            log("[webview2] watching for renderer crashes")
+        except Exception:
+            state["hooked"] = True
+            log("[webview2] could not hook ProcessFailed:\n" + traceback.format_exc())
+
+    window.events.loaded += on_loaded
+
+
+def _use_bundled_certificates(log) -> None:
+    """Point HTTPS at certifi's CA bundle in frozen builds."""
+    if os.environ.get("SSL_CERT_FILE"):
+        return
+    try:
+        import certifi
+
+        bundle = certifi.where()
+    except Exception:
+        log("[ssl] certifi unavailable; HTTPS will use the system trust store")
+        return
+
+    if not os.path.isfile(bundle):
+        log(f"[ssl] certifi bundle missing at {bundle}")
+        return
+
+    os.environ["SSL_CERT_FILE"] = bundle
+    os.environ["REQUESTS_CA_BUNDLE"] = bundle
+    log(f"[ssl] using CA bundle {bundle}")
+
+
+def _persistent_chrome_dir() -> str:
+    """Return the persistent directory for downloaded Chrome builds."""
     return os.path.join(_qimchi_home(), "chrome")
 
 
@@ -64,10 +455,19 @@ def _find_installed_chrome() -> str | None:
     Locate a real Chrome/Chromium (NOT Edge -- Edge is unreliable with
     choreographer). Checks PATH and common Windows install locations, plus a
     Chrome we may have downloaded on a previous run.
-    
+
     """
     import glob
     import shutil
+
+    for pat in (
+        "chrome-*/chrome.exe",
+        "chrome-*/chrome",
+        "chrome-*/*.app/Contents/MacOS/Google Chrome for Testing",
+    ):
+        hits = glob.glob(os.path.join(_persistent_chrome_dir(), pat))
+        if hits:
+            return hits[0]
 
     for name in ("chrome", "google-chrome", "chromium", "chromium-browser"):
         p = shutil.which(name)
@@ -87,44 +487,158 @@ def _find_installed_chrome() -> str | None:
             if os.path.exists(cand):
                 return cand
 
-    # A Chrome-for-Testing we downloaded previously.
-    for pat in ("chrome-*/chrome.exe", "chrome-*/chrome"):
-        hits = glob.glob(os.path.join(_persistent_chrome_dir(), pat))
-        if hits:
-            return hits[0]
+    # macOS installs an .app bundle, which may not be on PATH.
+    if sys.platform == "darwin":
+        for cand in (
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            os.path.expanduser(
+                "~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            ),
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+        ):
+            if os.path.exists(cand):
+                return cand
+
+    if sys.platform.startswith("linux"):
+        for cand in (
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/snap/bin/chromium",
+        ):
+            if os.path.exists(cand):
+                return cand
+
     return None
 
 
+# Choreographer's Chrome wrapper on macOS and Linux.
+_CHROMIUM_WRAPPER = "_unix_pipe_chromium_wrapper.py"
+
+
+def _chromium_wrapper_command(argv: list[str]) -> list[str] | None:
+    """Return the wrapped Chrome command, if present."""
+    if len(argv) > 2 and argv[1].endswith(_CHROMIUM_WRAPPER):
+        return argv[2:]
+    return None
+
+
+def _run_chromium_wrapper(command: list[str]) -> int:
+    """Run Chrome with Choreographer's input and output on file descriptors 3 and 4."""
+    import signal
+    import subprocess
+
+    os.dup2(0, 3)
+    os.dup2(1, 4)
+    os.set_inheritable(3, True)
+    os.set_inheritable(4, True)
+    process = subprocess.Popen(command, pass_fds=(3, 4))
+
+    def stop(_signum, _frame) -> None:
+        process.terminate()
+        try:
+            process.wait(5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    return process.wait()
+
+
+# Choreographer defaults plus flags that suppress macOS keychain prompts.
+_CHROME_CHECK_FLAGS = (
+    "--headless=new",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--password-store=basic",
+    "--use-mock-keychain",
+    "--disable-breakpad",
+    "--disable-component-update",
+    "--disable-sync",
+)
+
+
+def _chrome_starts(executable: str, log) -> bool:
+    """
+    Check whether Chrome starts in Kaleido's headless mode.
+
+    Treat a timeout as usable because macOS may be waiting for permission.
+    """
+    import subprocess
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="qimchi-chrome-check-") as profile:
+        try:
+            result = subprocess.run(
+                [
+                    executable,
+                    *_CHROME_CHECK_FLAGS,
+                    f"--user-data-dir={profile}",
+                    "--dump-dom",
+                    "about:blank",
+                ],
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            log(f"[chrome] {executable} did not answer within 30s; using it anyway")
+            return True
+        except Exception as exc:
+            log(f"[chrome] {executable} did not run: {exc!r}")
+            return False
+
+    if result.returncode != 0:
+        detail = (result.stderr or b"").decode("utf-8", "replace").strip()[:300]
+        log(f"[chrome] {executable} exited {result.returncode}: {detail}")
+        return False
+
+    log(f"[chrome] verified {executable} can render headless")
+    return True
+
+
 def _ensure_chrome_for_kaleido(log) -> None:
-    """
-    Make sure Kaleido v1 has a working Chrome for PNG/SVG export.
-
-    Kaleido >=1.0 no longer bundles Chrome; it finds one at runtime. We point it
-    at a real Chrome via the BROWSER_PATH env var that choreographer honours,
-    and if none exists we download 'Chrome for Testing' once.
-
-    """
+    """Find or download Chrome for Kaleido and set ``BROWSER_PATH``."""
     import threading
+    import traceback
 
     found = _find_installed_chrome()
     if found:
         os.environ["BROWSER_PATH"] = found
         log(f"[chrome] using Chrome for Kaleido export: {found}")
-        return
 
-    def _download() -> None:
+    def _download(reason: str) -> str | None:
         try:
-            log("[chrome] no Chrome found; downloading Chrome for Testing (one-time)...")
+            log(f"[chrome] {reason}; downloading Chrome for Testing (one-time)...")
             import kaleido
 
-            exe = kaleido.get_chrome_sync(path=_persistent_chrome_dir())
+            target = _persistent_chrome_dir()
+            os.makedirs(target, exist_ok=True)
+            exe = kaleido.get_chrome_sync(path=target)
             os.environ["BROWSER_PATH"] = str(exe)
             log(f"[chrome] downloaded Chrome to: {exe}")
-        except Exception as exc:  # never fatal -- app still runs, export just fails
-            log(f"[chrome] download failed (image export may not work): {exc!r}")
+            return str(exe)
+        except Exception:  # Image export may fail, but the app can still start.
+            log(
+                "[chrome] download failed (image export may not work):\n"
+                + traceback.format_exc()
+            )
+            return None
 
-    threading.Thread(target=_download, daemon=True).start()
-    log("[chrome] fetching Chrome in background; app will open now.")
+    def _prepare() -> None:
+        # Fall back to a managed Chrome if the installed one cannot run headless.
+        if found and _chrome_starts(found, log):
+            return
+        if found and found.startswith(_persistent_chrome_dir()):
+            log("[chrome] the downloaded Chrome does not run; not downloading it again")
+            return
+        _download("no usable Chrome found" if found else "no Chrome found")
+
+    threading.Thread(target=_prepare, daemon=True).start()
+    log("[chrome] preparing Chrome for export in the background; app will open now.")
 
 
 class _Api:
@@ -135,6 +649,8 @@ class _Api:
 
     def __init__(self, log_fn) -> None:
         self._log = log_fn
+        # Underscored so pywebview does not expose the object itself to the page.
+        self._updates = _Updates(log_fn)
 
     def open_folder_dialog(self) -> str:
         """
@@ -143,104 +659,72 @@ class _Api:
         """
         import webview
 
-        result = webview.windows[0].create_file_dialog(webview.FOLDER_DIALOG)
+        # pywebview 5 replaced the FOLDER_DIALOG constant with the FileDialog
+        # enum and deprecated the old name; accept whichever this build has.
+        file_dialog = getattr(webview, "FileDialog", None)
+        dialog_type = (
+            file_dialog.FOLDER if file_dialog is not None else webview.FOLDER_DIALOG
+        )
+        result = webview.windows[0].create_file_dialog(dialog_type)
         if not result:
             return ""
         return result[0] if isinstance(result, (list, tuple)) else str(result)
 
-    def apply_update(
-        self,
-        asset_url: str,
-        asset_name: str = "",
-        platform: str = "",
-        install_mode: str = "",
-    ) -> None:
-        """
-        Download the platform update asset and hand it off to the OS.
+    def save_text_file(self, filename: str, content: str) -> str:
+        """Save SPA-generated text through a native dialog and return its path."""
+        import webview
 
-        Windows runs the Inno Setup installer silently, then closes the app.
-        macOS opens the downloaded DMG. Linux downloads the AppImage, marks it
-        executable, and opens the containing folder so the user can replace or
-        run it.
+        file_dialog = getattr(webview, "FileDialog", None)
+        dialog_type = (
+            file_dialog.SAVE if file_dialog is not None else webview.SAVE_DIALOG
+        )
+        result = webview.windows[0].create_file_dialog(
+            dialog_type, save_filename=filename
+        )
+        if not result:
+            return ""
+        path = result[0] if isinstance(result, (list, tuple)) else str(result)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        self._log(f"[settings] exported to {path}")
+        return path
 
-        Runs in a daemon thread so the UI stays responsive during download.
+    def update_status(self) -> dict:
+        """The update state the SPA shows: see _Updates.status."""
+        return self._updates.status()
 
-        """
-        import threading
+    def check_for_updates(self) -> dict:
+        """Look for a newer release now, whatever the startup-check setting says."""
+        return self._updates.check()
 
-        def _install() -> None:
-            import subprocess
-            import tempfile
+    def download_update(self) -> dict:
+        """Start downloading the offered update in the background."""
+        return self._updates.download()
 
-            self._log(f"[updater] downloading installer from {asset_url}")
-            try:
-                import requests
+    def install_update(self) -> dict:
+        """Install the downloaded update; the app closes to let it."""
+        return self._updates.install()
 
-                resp = requests.get(asset_url, stream=True, timeout=180)
-                resp.raise_for_status()
-                suffix = _update_asset_suffix(asset_name, asset_url, platform)
-                fd, tmp = tempfile.mkstemp(suffix=suffix)
-                with os.fdopen(fd, "wb") as f:
-                    for chunk in resp.iter_content(65536):
-                        if chunk:
-                            f.write(chunk)
-            except Exception as exc:
-                self._log(f"[updater] download failed: {exc!r}")
-                return
+    def remind_update_at_next_launch(self) -> dict:
+        """Keep the downloaded update and ask again when Qimchi next starts."""
+        return self._updates.remind_at_next_launch()
 
-            self._log(f"[updater] downloaded update asset: {tmp}")
-            try:
-                if platform == "windows" or os.name == "nt":
-                    # DETACHED_PROCESS + CREATE_NEW_PROCESS_GROUP so the installer
-                    # keeps running after this process exits.
-                    flags = (
-                        subprocess.DETACHED_PROCESS
-                        | subprocess.CREATE_NEW_PROCESS_GROUP
-                    )
-                    self._log(f"[updater] launching installer: {tmp}")
-                    subprocess.Popen(
-                        [tmp, "/VERYSILENT", "/SUPPRESSMSGBOXES"],
-                        creationflags=flags,
-                        close_fds=True,
-                    )
-                    self._log("[updater] closing app for update...")
-                    import webview
+    def dismiss_update_prompt(self) -> dict:
+        """Close the update dialog for this session."""
+        return self._updates.dismiss()
 
-                    if webview.windows:
-                        webview.windows[0].destroy()
-                    return
-                if platform == "macos" or sys.platform == "darwin":
-                    self._log(f"[updater] opening downloaded DMG: {tmp}")
-                    subprocess.Popen(["open", tmp], close_fds=True)
-                    return
-                if platform == "linux" or sys.platform.startswith("linux"):
-                    if _try_replace_running_appimage(tmp, self._log):
-                        import webview
-
-                        if webview.windows:
-                            webview.windows[0].destroy()
-                        return
-                    target = _linux_update_download_path(asset_name, tmp)
-                    self._log(f"[updater] downloaded AppImage to: {target}")
-                    _open_containing_folder(target, self._log)
-                    return
-            except Exception as exc:
-                self._log(f"[updater] failed to apply update: {exc!r}")
-                return
-
-            _open_containing_folder(tmp, self._log)
-
-        threading.Thread(target=_install, daemon=True).start()
+    def reveal_file(self, path: str) -> bool:
+        """Show a file the backend saved (a log bundle) in the file manager."""
+        if not path or not os.path.isfile(path):
+            return False
+        try:
+            _open_containing_folder(path, self._log)
+            return True
+        except Exception:
+            return False
 
     def open_log_terminal(self) -> bool:
-        """
-        Open the debug log in a terminal that follows it live (best-effort).
-
-        Spawns a SYSTEM terminal (powershell / tail / Terminal.app), never the
-        frozen exe, so there is no re-launch/fork-bomb risk. Returns False if no
-        terminal could be launched.
-
-        """
+        """Follow the debug log in a system terminal when available."""
         import shutil
         import subprocess
 
@@ -252,17 +736,19 @@ class _Api:
                         "powershell",
                         "-NoExit",
                         "-Command",
-                        f"Get-Content -LiteralPath '{log}' -Wait",
+                        _windows_log_follow_command(log),
                     ],
                     creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
                 )
                 return True
+            follow = _unix_log_follow_command(log)
             if sys.platform == "darwin":
+                script = follow.replace("\\", "\\\\").replace('"', '\\"')
                 subprocess.Popen(
                     [
                         "osascript",
                         "-e",
-                        f'tell application "Terminal" to do script "tail -f \\"{log}\\""',
+                        f'tell application "Terminal" to do script "{script}"',
                         "-e",
                         'tell application "Terminal" to activate',
                     ]
@@ -278,28 +764,87 @@ class _Api:
             ):
                 if shutil.which(term):
                     if term in ("gnome-terminal", "xfce4-terminal"):
-                        subprocess.Popen(
-                            [term, "--", "bash", "-c", f"tail -f '{log}'"]
-                        )
-                    elif term == "konsole":
-                        subprocess.Popen([term, "-e", "bash", "-c", f"tail -f '{log}'"])
+                        subprocess.Popen([term, "--", "sh", "-c", follow])
                     else:
-                        subprocess.Popen([term, "-e", f"tail -f '{log}'"])
+                        subprocess.Popen([term, "-e", "sh", "-c", follow])
                     return True
             return False
         except Exception:
             return False
 
 
-def _update_asset_suffix(asset_name: str, asset_url: str, platform: str) -> str:
-    lower = f"{asset_name} {asset_url}".lower()
-    if platform == "windows" or "setup.exe" in lower:
-        return "-qimchi-setup.exe"
-    if platform == "macos" or ".dmg" in lower:
-        return "-qimchi.dmg"
-    if platform == "linux" or ".appimage" in lower:
-        return "-qimchi.AppImage"
-    return "-qimchi-update"
+# Enough recent history for context without dumping a log that can run to
+# many megabytes.
+LOG_FOLLOW_TAIL_LINES = 200
+
+
+def _windows_log_follow_command(log: str) -> str:
+    """PowerShell that shows the end of the log and keeps printing new lines."""
+    quoted = "'" + log.replace("'", "''") + "'"
+    return f"Get-Content -LiteralPath {quoted} -Tail {LOG_FOLLOW_TAIL_LINES} -Wait"
+
+
+def _unix_log_follow_command(log: str) -> str:
+    """Build a ``less +F`` command with a ``tail -f`` fallback."""
+    import shlex
+
+    quoted = shlex.quote(log)
+    return (
+        f"if command -v less >/dev/null 2>&1; then less +F {quoted}; "
+        f"else tail -n {LOG_FOLLOW_TAIL_LINES} -f {quoted}; fi"
+    )
+
+
+def _close_windows(log) -> None:
+    import webview
+
+    if not webview.windows:
+        log("[updater] no open window to close")
+        return
+    for window in list(webview.windows):
+        window.destroy()
+
+
+def _download_update_asset(asset_url: str, destination: str, log, progress=None) -> str:
+    """Download atomically with modules available in the frozen bundle."""
+    partial = destination + ".part"
+    request = Request(asset_url, headers={"User-Agent": "Qimchi-Updater"})
+    try:
+        from api.updater import https_context
+
+        context = https_context()
+    except Exception:
+        context = None
+    try:
+        with (
+            urlopen(request, timeout=180, context=context) as response,
+            open(partial, "wb") as target,
+        ):
+            headers = getattr(response, "headers", None) or {}
+            total = int(headers.get("Content-Length") or 0)
+            final_url = getattr(response, "url", None) or asset_url
+            log(
+                f"[updater] HTTP {getattr(response, 'status', '?')} from {final_url}; "
+                f"{total or 'unknown'} bytes"
+            )
+            received, next_report = 0, 0.25
+            while chunk := response.read(65536):
+                target.write(chunk)
+                received += len(chunk)
+                if total:
+                    if progress is not None:
+                        progress(received / total)
+                    if received / total >= next_report:
+                        log(f"[updater] downloaded {received * 100 // total}%")
+                        next_report += 0.25
+        os.replace(partial, destination)
+    except Exception:
+        try:
+            os.unlink(partial)
+        except OSError:
+            pass
+        raise
+    return destination
 
 
 def _linux_update_download_path(asset_name: str, tmp: str) -> str:
@@ -310,7 +855,7 @@ def _linux_update_download_path(asset_name: str, tmp: str) -> str:
     name = asset_name if asset_name.lower().endswith(".appimage") else "qimchi.AppImage"
     safe_name = "".join(c for c in name if c.isalnum() or c in "._- ()").strip()
     target = os.path.join(downloads, safe_name or "qimchi.AppImage")
-    shutil.move(tmp, target)
+    shutil.copy2(tmp, target)
     os.chmod(target, 0o755)
     return target
 
@@ -366,151 +911,732 @@ def _open_containing_folder(path: str, log) -> None:
         log(f"[updater] failed to open update location: {exc!r}")
 
 
-def _update_dialog_js(
-    tag: str,
-    current: str,
-    notes: str,
-    asset_url: str,
-    asset_name: str,
-    platform: str,
-    install_mode: str,
-) -> str:
-    """
-    Return a self-contained JS snippet that injects an update-available overlay
-    into the running SPA.  All dynamic strings are JSON-encoded to prevent XSS /
-    injection issues regardless of what the GitLab release notes contain.
+def _asset_file_name(asset_url: str, platform: str) -> str:
+    """A safe local file name for a release asset, keeping its extension."""
+    from urllib.parse import unquote, urlparse
 
-    """
+    name = os.path.basename(unquote(urlparse(asset_url).path))
+    name = "".join(c for c in name if c.isalnum() or c in "._-")
+    if name:
+        return name
+    return {
+        "windows": "qimchi-setup.exe",
+        "macos": "qimchi.dmg",
+        "linux": "qimchi.AppImage",
+    }.get(platform, "qimchi-update")
+
+
+def _windows_install_after_exit_command(installer: str) -> list[str]:
+    """Build a detached command that waits for Qimchi before running Setup."""
+    quoted = installer.replace("'", "''")
+    setup_log = os.path.join(os.path.dirname(installer), "setup.log").replace("'", "''")
+    # -Wait also waits for Qimchi if Setup relaunches it.
+    script = (
+        "$ErrorActionPreference='SilentlyContinue';"
+        f"Wait-Process -Id {os.getpid()} -Timeout 120;"
+        "Get-Process qimchi | Wait-Process -Timeout 60;"
+        "Get-Process qimchi | Stop-Process -Force;"
+        "Start-Sleep -Seconds 1;"
+        f"$setup=Start-Process -FilePath '{quoted}' -PassThru -ArgumentList "
+        f"'/NORESTART','/LOG=\"{setup_log}\"';"
+        "$setup.WaitForExit()"
+    )
+    return [
+        "powershell",
+        "-NoProfile",
+        "-NonInteractive",
+        "-WindowStyle",
+        "Hidden",
+        "-Command",
+        script,
+    ]
+
+
+# Replace the app after exit. Restore it on failure, then offer manual install.
+_MACOS_INSTALL_SCRIPT = r"""
+pid="$1"; dmg="$2"; target="$3"; log="$4"
+exec >>"$log" 2>&1
+echo "$(date) installing $dmg over $target"
+while kill -0 "$pid" 2>/dev/null; do sleep 0.5; done
+mount="$(mktemp -d /tmp/qimchi-update.XXXXXX)"
+staged="$(dirname "$target")/.qimchi-update.app"
+old="$(dirname "$target")/.qimchi-previous.app"
+installed=0
+if hdiutil attach -nobrowse -noautoopen -quiet -mountpoint "$mount" "$dmg"; then
+  source_app="$(ls -d "$mount"/[Qq]imchi.app 2>/dev/null | head -n 1)"
+  rm -rf "$staged" "$old"
+  if [ -n "$source_app" ] && ditto "$source_app" "$staged"; then
+    if mv "$target" "$old"; then
+      if mv "$staged" "$target"; then
+        installed=1
+        rm -rf "$old"
+      else
+        mv "$old" "$target"
+      fi
+    fi
+  fi
+  rm -rf "$staged"
+  hdiutil detach -quiet "$mount" || hdiutil detach -force -quiet "$mount"
+fi
+rmdir "$mount" 2>/dev/null
+if [ "$installed" = 1 ]; then
+  echo "$(date) installed; opening $target"
+  xattr -dr com.apple.quarantine "$target" 2>/dev/null
+  open "$target"
+else
+  echo "$(date) could not replace $target; opening the disk image"
+  open "$dmg"
+  open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AppBundles"
+fi
+"""
+
+
+def _running_app_bundle() -> str | None:
+    """Return the current macOS app bundle, if any."""
+    bundle = os.path.dirname(os.path.dirname(os.path.dirname(sys.executable)))
+    return bundle if bundle.endswith(".app") else None
+
+
+def _macos_install_after_exit_command(dmg: str, app_bundle: str, log: str) -> list[str]:
+    """Build the detached macOS update command."""
+    return [
+        "/bin/sh",
+        "-c",
+        _MACOS_INSTALL_SCRIPT,
+        "qimchi-update",
+        str(os.getpid()),
+        dmg,
+        app_bundle,
+        log,
+    ]
+
+
+def _install_marker_path(home: str | None = None) -> str:
+    return os.path.join(home or _qimchi_home(), "updates", "installing.json")
+
+
+def _mark_install_started(pid: int, tag: str, home: str | None = None) -> None:
+    """Record the running installer, so a launch during the install can wait."""
     import json
+    import time
 
-    return f"""(function() {{
-    if (document.getElementById('qimchi-updater-overlay')) return;
-
-    var tag       = {json.dumps(tag)};
-    var current   = {json.dumps(current)};
-    var notes     = {json.dumps(notes)};
-    var assetUrl  = {json.dumps(asset_url)};
-    var assetName = {json.dumps(asset_name)};
-    var platform  = {json.dumps(platform)};
-    var installMode = {json.dumps(install_mode)};
-    var actionText = platform === 'windows' ? 'Update now' : 'Download update';
-
-    var overlay = document.createElement('div');
-    overlay.id  = 'qimchi-updater-overlay';
-    overlay.style.cssText = [
-        'position:fixed;inset:0;z-index:99999',
-        'background:rgba(0,0,0,.65)',
-        'display:flex;align-items:center;justify-content:center',
-        'font-family:system-ui,sans-serif'
-    ].join(';');
-
-    var card = document.createElement('div');
-    card.style.cssText = [
-        'background:#1c1c1e;color:#e5e5e7',
-        'border:1px solid #3a3a3c;border-radius:10px',
-        'padding:24px 28px;max-width:520px;width:90%',
-        'box-shadow:0 24px 64px rgba(0,0,0,.6)',
-        'display:flex;flex-direction:column;gap:14px'
-    ].join(';');
-
-    var title = document.createElement('div');
-    title.style.cssText = 'font-size:1.05rem;font-weight:600;color:#f5f5f7';
-    title.textContent = 'Qimchi ' + tag + ' is available';
-
-    var sub = document.createElement('div');
-    sub.style.cssText = 'font-size:.8rem;color:#8e8e93';
-    sub.textContent = 'You are running ' + current + '.';
-
-    var notesBox = document.createElement('pre');
-    notesBox.style.cssText = [
-        'margin:0;padding:12px 14px',
-        'background:#111113;border:1px solid #2c2c2e;border-radius:6px',
-        'font-size:.78rem;line-height:1.5;color:#c7c7cc',
-        'max-height:220px;overflow-y:auto',
-        'white-space:pre-wrap;word-break:break-word'
-    ].join(';');
-    notesBox.textContent = notes || '(No release notes.)';
-
-    var btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display:flex;gap:10px;justify-content:flex-end;margin-top:4px';
-
-    var btnSkip = document.createElement('button');
-    btnSkip.textContent = 'Skip';
-    btnSkip.style.cssText = [
-        'padding:7px 18px;border-radius:6px;border:1px solid #3a3a3c',
-        'background:transparent;color:#aeaeb2;cursor:pointer;font-size:.875rem'
-    ].join(';');
-
-    var btnUpdate = document.createElement('button');
-    btnUpdate.id = 'qimchi-updater-btn';
-    btnUpdate.textContent = actionText;
-    btnUpdate.style.cssText = [
-        'padding:7px 18px;border-radius:6px;border:none',
-        'background:#0a84ff;color:#fff;cursor:pointer',
-        'font-size:.875rem;font-weight:500'
-    ].join(';');
-
-    btnSkip.onclick   = function() {{ overlay.remove(); }};
-    btnUpdate.onclick = function() {{
-        btnUpdate.disabled    = true;
-        btnUpdate.textContent = 'Downloading...';
-        btnUpdate.style.opacity = '.6';
-        if (window.pywebview && window.pywebview.api) {{
-            window.pywebview.api.apply_update(assetUrl, assetName, platform, installMode);
-        }}
-    }};
-
-    btnRow.appendChild(btnSkip);
-    btnRow.appendChild(btnUpdate);
-    card.appendChild(title);
-    card.appendChild(sub);
-    card.appendChild(notesBox);
-    card.appendChild(btnRow);
-    overlay.appendChild(card);
-    document.body.appendChild(overlay);
-}})();"""
+    path = _install_marker_path(home)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({"pid": pid, "tag": tag, "started": time.time()}, fh)
 
 
-def _run_update_check(window, log) -> None:
+def _process_is_running(pid: int) -> bool:
+    if os.name == "nt":
+        import ctypes
+
+        process_query_limited_information = 0x1000
+        still_active = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            return bool(
+                kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+                and code.value == still_active
+            )
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _update_being_installed(home: str | None = None, is_running=None) -> str | None:
+    """Return the active install tag and remove stale install markers."""
+    import json
+    import time
+
+    path = _install_marker_path(home)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            marker = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    running = (is_running or _process_is_running)(int(marker.get("pid", 0)))
+    if running and time.time() - float(marker.get("started", 0)) < 30 * 60:
+        return str(marker.get("tag") or "a new version")
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+    return None
+
+
+def _tell_user_update_in_progress(tag: str) -> None:
+    message = (
+        f"Qimchi is being updated to {tag}.\n\n"
+        "Finish the installer, then open Qimchi again."
+    )
+    if os.name == "nt":
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(None, message, "Qimchi", 0x40)
+
+
+def _evaluate_js_detached(window, script: str, log) -> None:
+    """Run page script on a daemon thread so shutdown cannot wait on it."""
+    import threading
+
+    def run() -> None:
+        try:
+            window.evaluate_js(script)
+        except Exception as exc:
+            log(f"[webview] page script failed: {exc!r}")
+
+    threading.Thread(target=run, name="qimchi-evaluate-js", daemon=True).start()
+
+
+def _exit_soon_after_close(window, log, grace_seconds: float = 10.0) -> None:
+    """Force process exit after a grace period when the window closes."""
+    import threading
+
+    def on_closed() -> None:
+        log(f"Window closed; the process will end within {grace_seconds:.0f}s.")
+        timer = threading.Timer(grace_seconds, _shut_down, args=(0,))
+        timer.daemon = True
+        timer.start()
+
+    window.events.closed += on_closed
+
+
+class _Updates:
+    """Manage desktop updates and publish state through ``qimchi-update`` events."""
+
+    def __init__(self, log, home: str | None = None) -> None:
+        import threading
+
+        self._log = log
+        self._home = home
+        self._lock = threading.Lock()
+        self._window = None
+        self._offer: dict | None = None
+        self._state: dict = {
+            "status": "idle",  # idle | checking | none | available | downloading | downloaded | installing | error
+            "current": None,
+            "tag": None,
+            "notes": "",
+            "platform": None,
+            "progress": 0.0,
+            "error": None,
+            "prompt": None,  # "available" | "ready" | None: what the dialog should show
+            "checkedAt": None,
+        }
+        self._last_emitted_progress = -1.0
+
+    # Plumbing
+    def attach(self, window) -> None:
+        self._window = window
+
+    def _updates_dir(self) -> str:
+        folder = os.path.join(self._home or _qimchi_home(), "updates")
+        os.makedirs(folder, exist_ok=True)
+        return folder
+
+    def _pending_path(self) -> str:
+        return os.path.join(self._updates_dir(), "pending.json")
+
+    def _current_version(self) -> str:
+        try:
+            from api.updater import current_version
+
+            return current_version()
+        except Exception:
+            return _app_version()
+
+    def status(self) -> dict:
+        with self._lock:
+            state = dict(self._state)
+        state["current"] = state["current"] or self._current_version()
+        return state
+
+    def _set(self, **changes) -> dict:
+        with self._lock:
+            self._state.update(changes)
+            state = dict(self._state)
+        state["current"] = state["current"] or self._current_version()
+        self._emit(state)
+        return state
+
+    def _emit(self, state: dict) -> None:
+        if self._window is None:
+            return
+        import json
+
+        _evaluate_js_detached(
+            self._window,
+            "window.dispatchEvent(new CustomEvent('qimchi-update', "
+            f"{{ detail: {json.dumps(state)} }}))",
+            self._log,
+        )
+
+    # Steps
+    def restore_pending(self) -> None:
+        """Offer an update downloaded in an earlier session, or clear a stale one."""
+        import json
+
+        path = self._pending_path()
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path, encoding="utf-8") as fh:
+                pending = json.load(fh)
+        except Exception as exc:
+            self._log(f"[updater] ignoring unreadable {path}: {exc!r}")
+            self._clear_pending()
+            return
+
+        from api.updater import _parse_ver
+
+        running = self._current_version()
+        installer = pending.get("path") or ""
+        if _parse_ver(pending.get("tag", "")) <= _parse_ver(running):
+            self._log(
+                f"[updater] {pending.get('tag')} is installed (running {running}); "
+                "removing the downloaded installer"
+            )
+            self._clear_pending()
+            return
+        if not os.path.isfile(installer):
+            self._log(
+                f"[updater] downloaded update is gone ({installer}); forgetting it"
+            )
+            self._clear_pending()
+            return
+        self._log(f"[updater] {pending['tag']} was downloaded earlier: {installer}")
+        self._offer = pending
+        self._set(
+            status="downloaded",
+            tag=pending["tag"],
+            notes=pending.get("notes", ""),
+            platform=pending.get("platform"),
+            progress=1.0,
+            error=None,
+            prompt="ready",
+        )
+
+    def _clear_pending(self) -> None:
+        import json
+
+        path = self._pending_path()
+        try:
+            with open(path, encoding="utf-8") as fh:
+                installer = json.load(fh).get("path") or ""
+            if installer and os.path.dirname(installer) == self._updates_dir():
+                os.unlink(installer)
+        except Exception:
+            pass
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+    def check(
+        self, startup: bool = False, include_previews: bool | None = None
+    ) -> dict:
+        import datetime
+
+        state = self.status()
+        if state["status"] in ("checking", "downloading", "installing"):
+            self._log(f"[updater] check skipped: already {state['status']}")
+            return state
+        if include_previews is None:
+            try:
+                from api.settings import desktop_settings
+
+                include_previews = desktop_settings().previewReleases
+            except Exception as exc:
+                self._log(f"[updater] could not read the update settings: {exc!r}")
+                include_previews = False
+
+        self._log(
+            f"[updater] checking for updates ({'startup' if startup else 'manual'})"
+        )
+        self._set(status="checking", error=None)
+        try:
+            from api.updater import check_for_update, last_check_error
+
+            result = check_for_update(include_previews=include_previews, log=self._log)
+        except Exception as exc:
+            result, error = None, f"{type(exc).__name__}: {exc}"
+        else:
+            error = last_check_error()
+        checked_at = datetime.datetime.now().isoformat(timespec="seconds")
+
+        pending = self._offer if state["status"] == "downloaded" else None
+        if result is None:
+            if pending is not None:
+                return self._set(status="downloaded", checkedAt=checked_at)
+            if error:
+                self._log(f"[updater] update check failed: {error}")
+                return self._set(status="error", error=error, checkedAt=checked_at)
+            self._log("[updater] no update available")
+            return self._set(status="none", tag=None, prompt=None, checkedAt=checked_at)
+
+        if pending is not None and pending.get("tag") == result["tag"]:
+            self._log(f"[updater] {result['tag']} is already downloaded")
+            return self._set(status="downloaded", checkedAt=checked_at)
+
+        self._offer = result
+        self._log(f"[updater] offering {result['tag']}")
+        return self._set(
+            status="available",
+            tag=result["tag"],
+            notes=result.get("notes", ""),
+            platform=result.get("platform"),
+            progress=0.0,
+            error=None,
+            prompt="available" if startup else None,
+            checkedAt=checked_at,
+        )
+
+    def download(self) -> dict:
+        import threading
+
+        state = self.status()
+        offer = self._offer
+        if state["status"] != "available" or not offer:
+            self._log(f"[updater] nothing to download (status {state['status']})")
+            return state
+
+        destination = os.path.join(
+            self._updates_dir(), _asset_file_name(offer["asset_url"], offer["platform"])
+        )
+        self._log(
+            f"[updater] downloading {offer['tag']} in the background: "
+            f"{offer['asset_url']} -> {destination}"
+        )
+
+        def report(fraction: float) -> None:
+            if fraction - self._last_emitted_progress >= 0.02 or fraction >= 1:
+                self._last_emitted_progress = fraction
+                self._set(progress=round(fraction, 3))
+
+        def run() -> None:
+            import json
+
+            self._last_emitted_progress = -1.0
+            try:
+                _download_update_asset(
+                    offer["asset_url"], destination, self._log, report
+                )
+            except Exception as exc:
+                self._log(f"[updater] download failed: {exc!r}")
+                self._set(status="error", error=f"Download failed: {exc}", prompt=None)
+                return
+            pending = {
+                "tag": offer["tag"],
+                "notes": offer.get("notes", ""),
+                "platform": offer["platform"],
+                "install_mode": offer.get("install_mode", ""),
+                "asset_name": offer.get("asset_name", ""),
+                "path": destination,
+            }
+            try:
+                with open(self._pending_path(), "w", encoding="utf-8") as fh:
+                    json.dump(pending, fh)
+            except OSError as exc:
+                self._log(f"[updater] could not remember the download: {exc!r}")
+            self._offer = pending
+            self._log(
+                f"[updater] {offer['tag']} downloaded ({os.path.getsize(destination)} "
+                "bytes); asking to install"
+            )
+            self._set(status="downloaded", progress=1.0, prompt="ready")
+
+        self._set(status="downloading", progress=0.0, error=None, prompt=None)
+        threading.Thread(target=run, name="qimchi-update-download", daemon=True).start()
+        return self.status()
+
+    def remind_at_next_launch(self) -> dict:
+        self._log(
+            f"[updater] install of {self._state.get('tag')} postponed to next launch"
+        )
+        return self._set(prompt=None)
+
+    def dismiss(self) -> dict:
+        self._log(f"[updater] update dialog dismissed ({self._state.get('status')})")
+        return self._set(prompt=None)
+
+    def install(self) -> dict:
+        import subprocess
+
+        state = self.status()
+        pending = self._offer
+        if state["status"] != "downloaded" or not pending or not pending.get("path"):
+            self._log(f"[updater] nothing to install (status {state['status']})")
+            return state
+        installer = pending["path"]
+        platform = pending.get("platform") or ""
+        self._log(
+            f"[updater] installing {pending['tag']} from {installer} "
+            f"(platform {platform!r}, running on {sys.platform})"
+        )
+        self._set(status="installing", prompt=None)
+        try:
+            if platform == "windows" or os.name == "nt":
+                # DETACHED_PROCESS makes PowerShell exit before running this script.
+                flags = (
+                    subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+                )
+                process = subprocess.Popen(
+                    _windows_install_after_exit_command(installer),
+                    creationflags=flags,
+                    close_fds=True,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                _mark_install_started(process.pid, pending["tag"], self._home)
+                self._log(
+                    f"[updater] installer will start once this app has closed "
+                    f"(helper pid {process.pid})"
+                )
+                _close_windows(self._log)
+            elif platform == "macos" or sys.platform == "darwin":
+                bundle = _running_app_bundle()
+                if bundle:
+                    log = os.path.join(os.path.dirname(installer), "install.log")
+                    subprocess.Popen(
+                        _macos_install_after_exit_command(installer, bundle, log),
+                        close_fds=True,
+                        start_new_session=True,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    self._log(
+                        f"[updater] {bundle} will be replaced once this app has "
+                        f"closed (log: {log})"
+                    )
+                else:
+                    subprocess.Popen(["open", installer], close_fds=True)
+                    self._log(
+                        "[updater] not running from an .app; opened the disk image"
+                    )
+                _close_windows(self._log)
+            elif _try_replace_running_appimage(installer, self._log):
+                _close_windows(self._log)
+            else:
+                target = _linux_update_download_path(
+                    pending.get("asset_name", ""), installer
+                )
+                self._log(f"[updater] AppImage saved to {target}; showing it")
+                _open_containing_folder(target, self._log)
+                self._clear_pending()
+                return self._set(status="none", prompt=None)
+        except Exception as exc:
+            self._log(f"[updater] failed to install: {exc!r}")
+            return self._set(status="downloaded", error=f"Install failed: {exc}")
+        return self.status()
+
+
+def _run_update_check(updates: _Updates, log) -> None:
     """
-    Background thread: fetch the latest GitLab release and show an update
-    dialog if a newer version is available.  Never raises.
-
+    Startup: offer an update downloaded earlier, then look for a newer one.
+    Never raises.
     """
     import time
 
-    # Give the SPA a moment to render before injecting the overlay.
+    # Give the SPA a moment to start listening before announcing anything.
     time.sleep(3)
     try:
-        from api.updater import check_for_update, current_version
+        updates.restore_pending()
+        from api.settings import desktop_settings
 
-        result = check_for_update()
-        if result is None:
-            log("[updater] no update available")
-            return
-        js = _update_dialog_js(
-            tag=result["tag"],
-            current=current_version(),
-            notes=result["notes"],
-            asset_url=result["asset_url"],
-            asset_name=result.get("asset_name", ""),
-            platform=result.get("platform", ""),
-            install_mode=result.get("install_mode", ""),
+        preferences = desktop_settings()
+        log(
+            f"[updater] settings: check for updates {preferences.checkForUpdates}, "
+            f"preview releases {preferences.previewReleases}"
         )
-        window.evaluate_js(js)
+        if not preferences.checkForUpdates:
+            log("[updater] update checks at startup are turned off in Settings")
+            return
+        updates.check(startup=True, include_previews=preferences.previewReleases)
     except Exception as exc:
         log(f"[updater] unexpected error: {exc!r}")
 
 
-def main() -> None:
-    # Re-entry guard (against fork bombs). If a dependency or a
-    # stray call ever re-launches the frozen exe, the child inherits this env
-    # var and exits immediately instead of starting a second server + window.
-    # Note: multiprocessing export workers never reach here -- freeze_support()
-    # intercepts them earlier -- so this does not affect the export pool.
+def _prepare_smoke_fixture() -> tuple[str, str]:
+    """Create the isolated dataset and download directory used by CI smoke tests."""
+    smoke_root = os.path.join(_qimchi_home(), "desktop-smoke")
+    download_dir = os.environ.get(
+        "QIMCHI_DOWNLOAD_DIR", os.path.join(smoke_root, "downloads")
+    )
+    dataset_path = os.environ.get(
+        "QIMCHI_SMOKE_DATASET", os.path.join(smoke_root, "smoke-measurement.nc")
+    )
+    os.makedirs(download_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(dataset_path), exist_ok=True)
+    with open(dataset_path, "wb") as dataset:
+        dataset.write(b"qimchi packaged desktop smoke fixture")
+    os.environ["QIMCHI_DOWNLOAD_DIR"] = download_dir
+    return dataset_path, download_dir
+
+
+def _validate_smoke_archive(archive_path: str, dataset_path: str) -> None:
+    """Assert that the desktop download is a readable ZIP containing the fixture."""
+    import zipfile
+
+    if not os.path.isfile(archive_path):
+        raise RuntimeError(f"Desktop download was not created: {archive_path}")
+    with zipfile.ZipFile(archive_path) as archive:
+        if os.path.basename(dataset_path) not in archive.namelist():
+            raise RuntimeError(
+                f"Desktop archive does not contain {os.path.basename(dataset_path)}"
+            )
+
+
+def _run_headless_smoke(base_url: str, log) -> bool:
+    """Exercise the packaged backend, bundled SPA, and desktop download path."""
+    import io
+    import json
+    import traceback
+    import urllib.parse
+    import urllib.request
+    import zipfile
+
+    try:
+        dataset_path, download_dir = _prepare_smoke_fixture()
+
+        with urllib.request.urlopen(f"{base_url}/", timeout=15) as response:
+            index_html = response.read().decode("utf-8")
+            if response.status != 200 or 'id="root"' not in index_html:
+                raise RuntimeError("Bundled frontend index did not load")
+
+        with urllib.request.urlopen(f"{base_url}/health", timeout=15) as response:
+            health = json.loads(response.read())
+            if response.status != 200 or health.get("ok") is not True:
+                raise RuntimeError(f"Backend health check failed: {health}")
+
+        request = urllib.request.Request(
+            f"{base_url}/download/",
+            data=json.dumps({"path": dataset_path}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            archive_bytes = response.read()
+            saved_header = response.headers.get("X-Qimchi-Saved-To")
+            if response.status != 200 or not saved_header:
+                raise RuntimeError(
+                    "Desktop download response did not report a saved path"
+                )
+
+        saved_path = urllib.parse.unquote(saved_header)
+        if os.path.commonpath(
+            (os.path.abspath(saved_path), os.path.abspath(download_dir))
+        ) != os.path.abspath(download_dir):
+            raise RuntimeError(
+                f"Desktop download escaped its test directory: {saved_path}"
+            )
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            if os.path.basename(dataset_path) not in archive.namelist():
+                raise RuntimeError("HTTP download response is not the expected archive")
+        _validate_smoke_archive(saved_path, dataset_path)
+        log(f"[smoke] PASS headless packaged-app smoke; archive={saved_path}")
+        return True
+    except Exception:
+        log("[smoke] FAIL headless packaged-app smoke:\n" + traceback.format_exc())
+        return False
+
+
+def _run_native_smoke(window, dataset_path: str, download_dir: str, log) -> bool:
+    """Drive one real pywebview workflow and close the native window."""
+    import glob
+    import time
+    import traceback
+
+    try:
+        deadline = time.time() + 60
+        ready = False
+        while time.time() < deadline:
+            try:
+                state = window.evaluate_js(
+                    """
+                    (() => ({
+                      root: Boolean(document.querySelector('#root')),
+                      bridge: Boolean(window.pywebview && window.pywebview.api),
+                      download: Boolean(document.querySelector(
+                        'button[aria-label="Download smoke-measurement.nc"]'
+                      )),
+                    }))()
+                    """
+                )
+                if (
+                    state
+                    and state.get("root")
+                    and state.get("bridge")
+                    and state.get("download")
+                ):
+                    ready = True
+                    break
+            except Exception:
+                pass
+            time.sleep(0.25)
+
+        if not ready:
+            raise RuntimeError("SPA or pywebview bridge did not become ready")
+
+        clicked = window.evaluate_js(
+            """
+            (() => {
+              const button = document.querySelector(
+                'button[aria-label="Download smoke-measurement.nc"]'
+              );
+              if (!button) return false;
+              button.click();
+              return true;
+            })()
+            """
+        )
+        if not clicked:
+            raise RuntimeError("Could not click the desktop download action")
+
+        archive_path = None
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            # The fresh download directory contains only this smoke run's archive.
+            matches = glob.glob(os.path.join(download_dir, "*.zip"))
+            if matches:
+                archive_path = matches[0]
+                break
+            time.sleep(0.25)
+        if archive_path is None:
+            raise RuntimeError("Native frontend did not create a desktop download")
+
+        _validate_smoke_archive(archive_path, dataset_path)
+        log(f"[smoke] PASS native pywebview smoke; archive={archive_path}")
+        return True
+    except Exception:
+        log("[smoke] FAIL native pywebview smoke:\n" + traceback.format_exc())
+        return False
+    finally:
+        try:
+            window.destroy()
+        except Exception:
+            pass
+
+
+def main() -> int:
+    # Stop a re-launched frozen child before it creates another server/window.
     if os.environ.get("QIMCHI_LAUNCHER_ACTIVE") == "1":
-        return
+        return 0
     os.environ["QIMCHI_LAUNCHER_ACTIVE"] = "1"
+
+    headless_smoke = os.environ.get("QIMCHI_HEADLESS_SMOKE") == "1"
+    native_smoke = os.environ.get("QIMCHI_NATIVE_SMOKE") == "1"
+    if headless_smoke or native_smoke:
+        os.environ["ENABLE_KALEIDO_WARMUP"] = "0"
 
     import socket
     import threading
@@ -519,16 +1645,41 @@ def main() -> None:
     import urllib.request
 
     import uvicorn
-    import webview
 
-    log_file = open(_log_path(), "w", buffering=1, encoding="utf-8")
+    if not headless_smoke:
+        import webview
+
+    raw_log = _open_log_file(_log_path())
+    log_file = _TimestampedWriter(raw_log)
 
     def log(msg: str) -> None:
         print(msg, file=log_file)
 
     sys.stdout = log_file
     sys.stderr = log_file
+    try:
+        import faulthandler
+
+        # Native crashes (WebView2, pythonnet, Chrome pipes) leave a stack here.
+        faulthandler.enable(file=raw_log, all_threads=True)
+    except Exception:
+        pass
     log("Starting Qimchi launcher...")
+    _log_session_details(log)
+
+    # The installer starts Qimchi with --after-update just before it exits.
+    after_update = "--after-update" in sys.argv
+    if after_update:
+        try:
+            os.unlink(_install_marker_path())
+        except OSError:
+            pass
+    installing = None if after_update else _update_being_installed()
+    if installing:
+        log(f"An installer is updating Qimchi to {installing}; not starting now.")
+        log_file.flush()
+        _tell_user_update_in_progress(installing)
+        return 0
 
     bundle_dir = _bundle_dir()
     sys.path.insert(0, os.path.join(bundle_dir, "backend"))
@@ -549,9 +1700,14 @@ def main() -> None:
             port = s.getsockname()[1]
         log(f"Default port busy; using free port {port}")
 
-    _ensure_chrome_for_kaleido(log)
+    # Configure HTTPS before the backend and its workers start.
+    _use_bundled_certificates(log)
+
+    if not (headless_smoke or native_smoke):
+        _ensure_chrome_for_kaleido(log)
 
     server_error: dict[str, str] = {}
+    server_ref: dict[str, uvicorn.Server] = {}
 
     def start_server() -> None:
         try:
@@ -559,7 +1715,16 @@ def main() -> None:
             from main import app
 
             log(f"Running uvicorn on 127.0.0.1:{port}...")
-            uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+            config = uvicorn.Config(
+                app,
+                host="127.0.0.1",
+                port=port,
+                log_level="info",
+                log_config=_uvicorn_log_config(),
+            )
+            server = uvicorn.Server(config)
+            server_ref["server"] = server
+            server.run()
         except BaseException:  # noqa: BLE001 - we want EVERYTHING logged
             tb = traceback.format_exc()
             server_error["tb"] = tb
@@ -568,39 +1733,26 @@ def main() -> None:
     t = threading.Thread(target=start_server, daemon=True)
     t.start()
 
-    # Poll /health until the server answers, or the thread dies, or we time out.
     health_url = f"http://127.0.0.1:{port}/health"
-    deadline = time.time() + 60.0
-    ready = False
-    log("Waiting for server /health ...")
-    while time.time() < deadline:
-        if server_error:
-            break
-        try:
-            with urllib.request.urlopen(health_url, timeout=1.0) as resp:
-                if resp.status == 200:
-                    ready = True
-                    log("Server is ready.")
-                    break
-        except Exception:
-            time.sleep(0.25)
+    base_url = health_url.removesuffix("/health")
 
-    # The _Api instance is shared between the folder-picker and the updater so
-    # both have access to the log function.
-    api = _Api(log)
+    def wait_for_health(timeout: float = 60.0) -> bool:
+        """Poll /health until the server answers, the thread dies, or we time out."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if server_error:
+                return False
+            try:
+                with urllib.request.urlopen(health_url, timeout=1.0) as resp:
+                    if resp.status == 200:
+                        return True
+            except Exception:
+                time.sleep(0.25)
+        return False
 
-    if ready:
-        window = webview.create_window(
-            "Qimchi",
-            health_url.replace("/health", "/"),
-            js_api=api,
-            maximized=True,
-        )
-    else:
-        window = None
+    def startup_error_html() -> str:
         detail = server_error.get("tb", "Server did not respond within 60s.")
-        log("Server never became ready. Showing error window.")
-        html = (
+        return (
             "<html><body style='font-family:sans-serif;padding:2rem'>"
             "<h2>Qimchi failed to start</h2>"
             "<p>The backend server did not come up. Details have been written to "
@@ -608,32 +1760,138 @@ def main() -> None:
             "background:#f4f4f4;padding:1rem;border-radius:6px'>"
             f"{detail}</pre></body></html>"
         )
-        webview.create_window("Qimchi - startup error", html=html)
 
-    # private_mode=False + a persistent storage_path so the SPA's localStorage
-    # (zustand-persisted basket/plot/sidebar state) survives across launches.
-    # pywebview defaults to private_mode=True, which wipes it every time.
+    ready = False
+    if headless_smoke or native_smoke:
+        log("Waiting for server /health ...")
+        ready = wait_for_health()
+        if ready:
+            log("Server is ready.")
+
+    if headless_smoke:
+        passed = ready and _run_headless_smoke(base_url, log)
+        server = server_ref.get("server")
+        if server is not None:
+            server.should_exit = True
+        t.join(timeout=30)
+        if t.is_alive():
+            log("[smoke] FAIL backend did not stop cleanly")
+            passed = False
+        log_file.flush()
+        return 0 if passed else 1
+
+    if native_smoke and not ready:
+        log_file.flush()
+        return 1
+
+    # The _Api instance is shared between the folder-picker and the updater so
+    # both have access to the log function.
+    api = _Api(log)
+
+    smoke_fixture = _prepare_smoke_fixture() if native_smoke else None
+    if native_smoke:
+        window_url = base_url + "/"
+        if smoke_fixture is not None:
+            import urllib.parse
+
+            window_url += "?dataset=" + urllib.parse.quote(smoke_fixture[0])
+        window = webview.create_window("Qimchi", window_url, js_api=api, maximized=True)
+    else:
+        # Show the splash while the backend starts.
+        window = webview.create_window(
+            "Qimchi",
+            html=_splash_html(),
+            js_api=api,
+            maximized=True,
+        )
+
+    api._updates.attach(window)
+    _watch_webview2_crashes(window, log)
+    if not native_smoke:
+        _exit_soon_after_close(window, log)
+    # Live plots poll on a timer, which Chromium throttles while the window is
+    # minimized or hidden. The variable is appended to pywebview's own flags.
+    os.environ[WEBVIEW2_ARGUMENTS_ENV] = _with_webview2_argument(
+        os.environ.get(WEBVIEW2_ARGUMENTS_ENV), "--disable-background-timer-throttling"
+    )
+
+    # Persist the SPA's localStorage across launches.
     storage_path = os.path.join(_qimchi_home(), "webview")
     os.makedirs(storage_path, exist_ok=True)
+    _purge_webview_cache_on_upgrade(storage_path, log)
 
-    # Run the update check in the background after the window is ready.
-    # Only run when the app started successfully and we're in a frozen build.
-    if window is not None and getattr(sys, "frozen", False):
-        def _on_loaded() -> None:
-            _run_update_check(window, log)
+    native_smoke_result = {"passed": False}
 
-        webview.start(
-            func=_on_loaded,
-            private_mode=False,
-            storage_path=storage_path,
-        )
-    else:
-        webview.start(private_mode=False, storage_path=storage_path)
+    def _open_app() -> None:
+        log("Waiting for server /health ...")
+        if wait_for_health():
+            log("Server is ready.")
+            window.load_url(base_url + "/")
+            # The update check only makes sense for an installed build.
+            if getattr(sys, "frozen", False):
+                _run_update_check(api._updates, log)
+        else:
+            log("Server never became ready. Showing the error page.")
+            window.load_html(startup_error_html())
+
+    def _on_loaded() -> None:
+        if native_smoke:
+            if smoke_fixture is not None:
+                native_smoke_result["passed"] = _run_native_smoke(
+                    window, smoke_fixture[0], smoke_fixture[1], log
+                )
+            return
+        # A daemon thread cannot keep the process open after the window closes.
+        threading.Thread(target=_open_app, name="qimchi-open-app", daemon=True).start()
+
+    webview.start(func=_on_loaded, private_mode=False, storage_path=storage_path)
+    log("Window closed.")
+
+    if native_smoke:
+        server = server_ref.get("server")
+        if server is not None:
+            server.should_exit = True
+        t.join(timeout=30)
+        if t.is_alive():
+            log("[smoke] FAIL backend did not stop cleanly")
+            native_smoke_result["passed"] = False
+        log_file.flush()
+        return 0 if native_smoke_result["passed"] else 1
+
+    server = server_ref.get("server")
+    if server is not None:
+        server.should_exit = True
+        t.join(timeout=5)
+        if t.is_alive():
+            log("Backend did not stop within 5s; exiting anyway.")
+    log("Qimchi closed.")
+    log_file.flush()
+    return 0
+
+
+def _shut_down(code: int) -> None:
+    """Terminate child workers, then exit without waiting for interpreter cleanup."""
+    for handle in (sys.stdout, sys.stderr):
+        try:
+            print(f"Qimchi process exiting (code {code}).", file=handle)
+            handle.flush()
+        except Exception:
+            pass
+    try:
+        for child in multiprocessing.active_children():
+            child.kill()
+    except Exception:
+        pass
+    os._exit(code)
 
 
 if __name__ == "__main__":
-    # MUST be first: on Windows, ProcessPoolExecutor export workers re-execute
-    # this frozen exe. freeze_support() makes those children run the worker and
-    # exit instead of re-launching uvicorn + a new window.
+    chromium_command = _chromium_wrapper_command(sys.argv)
+    if chromium_command is not None:
+        os._exit(_run_chromium_wrapper(chromium_command))
+    # Handle Windows export workers before launcher startup.
     multiprocessing.freeze_support()
-    main()
+    exit_code = main()
+    if getattr(sys, "frozen", False):
+        _shut_down(exit_code)
+    raise SystemExit(exit_code)

@@ -1,0 +1,857 @@
+"""Tests for export rendering helpers and asynchronous task endpoints."""
+
+from __future__ import annotations
+
+import json
+import zipfile
+from contextlib import contextmanager
+from datetime import datetime, timedelta
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from PIL import Image
+from starlette.responses import FileResponse
+
+from api import db_models, export, notes
+from api.shared import db
+
+
+class FakeRequest:
+    def __init__(self, payload, export_pool=None):
+        self._payload = payload
+        self.app = SimpleNamespace(state=SimpleNamespace())
+        if export_pool is not None:
+            self.app.state.export_pool = export_pool
+
+    async def json(self):
+        return self._payload
+
+
+def _json(response):
+    return json.loads(response.body)
+
+
+@pytest.fixture(autouse=True)
+def _clear_tasks():
+    export._export_tasks.clear()
+    yield
+    export._export_tasks.clear()
+
+
+def test_cleanup_old_tasks_removes_file_and_keeps_recent(tmp_path):
+    old_zip = tmp_path / "old.zip"
+    old_zip.write_bytes(b"zip")
+    export._export_tasks.update(
+        {
+            "old": {
+                "created_at": datetime.now() - timedelta(minutes=6),
+                "zip_path": str(old_zip),
+            },
+            "new": {"created_at": datetime.now(), "zip_path": None},
+        }
+    )
+
+    export._cleanup_old_tasks()
+
+    assert set(export._export_tasks) == {"new"}
+    assert not old_zip.exists()
+
+
+def test_desktop_export_dir_modes_and_failure(tmp_path, monkeypatch):
+    monkeypatch.delenv("QIMCHI_DESKTOP", raising=False)
+    assert export._desktop_export_dir() is None
+
+    target = tmp_path / "exports"
+    monkeypatch.setenv("QIMCHI_DESKTOP", "yes")
+    monkeypatch.setenv("QIMCHI_EXPORT_DIR", str(target))
+    assert export._desktop_export_dir() == target
+    assert target.is_dir()
+
+    monkeypatch.setattr(
+        Path, "mkdir", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError())
+    )
+    assert export._desktop_export_dir() is None
+
+
+def test_resolve_fpath_wraps_loader_errors(monkeypatch):
+    monkeypatch.setattr(export, "resolve_to_disk_path", lambda path: f"disk:{path}")
+    assert export._resolve_fpath_to_disk("memory://one") == "disk:memory://one"
+
+    monkeypatch.setattr(
+        export,
+        "resolve_to_disk_path",
+        lambda _path: (_ for _ in ()).throw(RuntimeError("not finished")),
+    )
+    with pytest.raises(ValueError, match="not finished"):
+        export._resolve_fpath_to_disk("memory://one")
+
+
+def test_embed_png_metadata_round_trip(tmp_path):
+    path = tmp_path / "plot.png"
+    Image.new("RGB", (2, 2), "white").save(path)
+    meta = {"dataset_uuid": "run", "tags": ["good", "cold"]}
+
+    export._embed_png_metadata(str(path), meta)
+
+    with Image.open(path) as image:
+        assert image.text["Software"] == "Qimchi"
+        assert "good, cold" in image.text["ImageDescription"]
+        assert json.loads(image.text["Qimchi"]) == meta
+
+
+def test_export_page_bundles_and_waits_for_fira_sans(tmp_path, monkeypatch):
+    fonts = {}
+    for weight in export._FIRA_SANS_WEIGHTS:
+        path = tmp_path / f"fira-sans-latin-{weight}-normal.woff2"
+        path.write_bytes(b"font")
+        fonts[weight] = path
+    monkeypatch.setattr(export, "_find_fira_sans_fonts", lambda: fonts)
+
+    page = export.export_page_generator().generate_index()
+
+    assert page.count("font-family:'Fira Sans'") == len(fonts)
+    assert page.count("data:font/woff2;base64,Zm9udA==") == len(fonts)
+    assert "Fira Sans did not load" in page
+    assert "document.fonts.ready" in page
+    assert export._MATHJAX_FIRA_SVG_URL in page
+    assert "window.MathJax?.startup?.promise" in page
+    assert "Plotly.toImage = (...args) => qimchiExportReady" in page
+
+
+def test_svg_export_embeds_fira_sans_for_portable_rendering(tmp_path, monkeypatch):
+    fonts = {}
+    for weight in export._FIRA_SANS_WEIGHTS:
+        path = tmp_path / f"fira-sans-latin-{weight}-normal.woff2"
+        path.write_bytes(b"font")
+        fonts[weight] = path
+    monkeypatch.setattr(export, "_find_fira_sans_fonts", lambda: fonts)
+    svg_path = tmp_path / "plot.svg"
+    svg_path.write_text('<svg xmlns="http://www.w3.org/2000/svg"></svg>')
+
+    export._embed_fira_sans_in_svg(svg_path)
+    export._embed_fira_sans_in_svg(svg_path)
+
+    svg = svg_path.read_text(encoding="utf-8")
+    assert svg.count('id="qimchi-export-fonts"') == 1
+    assert svg.count("data:font/woff2;base64,Zm9udA==") == len(fonts)
+
+
+@pytest.mark.parametrize("server_running", [True, False])
+def test_image_writer_only_supplies_page_options_without_server(
+    tmp_path, monkeypatch, server_running
+):
+    import kaleido
+
+    calls = []
+    page = object()
+
+    monkeypatch.setattr(kaleido._global_server, "is_running", lambda: server_running)
+    monkeypatch.setattr(export, "export_page_generator", lambda: page)
+
+    def fake_calc(figure, **kwargs):
+        calls.append((figure, kwargs))
+        return b"image"
+
+    monkeypatch.setattr(kaleido, "calc_fig_sync", fake_calc)
+    monkeypatch.setattr(
+        export,
+        "_calc_fig_on_sync_server",
+        lambda _server, figure, **kwargs: fake_calc(figure, **kwargs),
+    )
+    output = tmp_path / "plot.png"
+    figure = export.go.Figure(layout={"width": 321, "height": 123})
+
+    export._write_plotly_image(figure, output, scale=2)
+
+    assert output.read_bytes() == b"image"
+    assert calls[0][1]["opts"] == {
+        "format": "png",
+        "width": 321,
+        "height": 123,
+        "scale": 2,
+    }
+    if server_running:
+        assert "kopts" not in calls[0][1]
+    else:
+        assert calls[0][1]["kopts"] == {"page_generator": page}
+
+
+def _fake_sync_server(thread_alive: bool, results: list):
+    import queue
+
+    closed = []
+    server = SimpleNamespace(
+        _task_queue=queue.Queue(),
+        _return_queue=queue.Queue(),
+        _thread=SimpleNamespace(is_alive=lambda: thread_alive),
+        close=lambda **_kwargs: closed.append(True),
+    )
+    for result in results:
+        server._return_queue.put(result)
+    return server, closed
+
+
+def test_sync_server_render_returns_the_result():
+    server, closed = _fake_sync_server(True, [b"image"])
+
+    assert export._calc_fig_on_sync_server(server, "fig", opts={}) == b"image"
+    task = server._task_queue.get_nowait()
+    assert (task.fn, task.args, task.kwargs) == ("calc_fig", ("fig",), {"opts": {}})
+    assert closed == []
+
+
+def test_sync_server_render_fails_instead_of_hanging_when_chrome_died():
+    server, closed = _fake_sync_server(False, [])
+
+    with pytest.raises(RuntimeError, match="Chrome closed while starting"):
+        export._calc_fig_on_sync_server(server, "fig", opts={})
+    assert closed == [True]
+
+
+def test_library_metadata_accepts_scalar_tag_query_results(tmp_path, monkeypatch):
+    dataset = tmp_path / "run.zarr"
+    measurement = SimpleNamespace(uuid="run", uuid_origin="qanary")
+    state = SimpleNamespace(hearted=True, trashed=True)
+
+    class FakeSession:
+        def get(self, model, key):
+            if model is db_models.Measurement and key == "run":
+                return measurement
+            if model is db_models.MeasurementState:
+                return state
+            return None
+
+        def exec(self, _statement):
+            return SimpleNamespace(all=lambda: ["low-range2", "reviewed"])
+
+    @contextmanager
+    def fake_session_scope():
+        yield FakeSession()
+
+    monkeypatch.setattr(db, "session_scope", fake_session_scope)
+
+    meta = export._library_metadata(dataset, dataset.stem)
+
+    assert meta["measurement_uuid"] == "run"
+    assert meta["tags"] == ["low-range2", "reviewed"]
+
+
+def test_export_footer_includes_basket_info_and_ordered_filters_without_size():
+    figure = export.go.Figure(
+        {"data": [{"x": [0, 1], "y": [1, 2]}], "layout": {"margin": {"b": 60}}}
+    )
+    original_plot_bottom = export._PLOTLY_DEFAULT_HEIGHT - 60
+
+    export._add_export_info_footer(
+        figure,
+        [
+            {"name": "savgol", "options": {"window": 5}},
+            {"name": "normalize", "options": {"axis": "y"}},
+        ],
+        {
+            "Timestamp": "2025-04-09T19:25:34.311282",
+            "Cryostat": "017",
+            "Wafer ID": "IHPCVD6",
+            "Device Type": "Quantum Dot",
+            "Sample Name": "00602_A3",
+            "Experiment Name": "Single gate sweep",
+            "Measurement ID": "1-40d7d11d-cbd9-48f4-9921-1ae6ac3a67fa",
+            "Size": "12 MB",
+        },
+        ["interesting", "cold & stable"],
+    )
+
+    annotation = figure.layout.annotations[-1]
+    assert annotation.name == "qimchi-export-info"
+    assert "<b>Timestamp:</b> 2025-04-09T19:25:34.311282" in annotation.text
+    assert "<b>Measurement ID:</b> 1-40d7d11d-cbd9-48f4-9921-1ae6ac3a67fa" in (
+        annotation.text
+    )
+    assert "<b>Applied Filters:</b> Savitzky-Golay -> Normalize" in annotation.text
+    assert "<b>Custom Tags:</b> cold &amp; stable, interesting" in annotation.text
+    assert annotation.text.index("<b>Custom Tags:</b>") < annotation.text.index(
+        "<b>Applied Filters:</b>"
+    )
+    assert "Heart" not in annotation.text
+    assert "Trash" not in annotation.text
+    assert "Size" not in annotation.text
+    assert annotation.font.size == 15
+    assert annotation.font.family == export._EXPORT_INFO_FONT_FAMILY
+    assert figure.layout.width == export._PLOTLY_DEFAULT_WIDTH
+    assert figure.layout.margin.b > 60
+    assert figure.layout.height > export._PLOTLY_DEFAULT_HEIGHT
+    assert figure.layout.height - figure.layout.margin.b == original_plot_bottom
+
+
+def test_export_footer_preserves_explicit_plot_dimensions():
+    figure = export.go.Figure(
+        {
+            "data": [{"x": [0, 1], "y": [1, 2]}],
+            "layout": {"width": 960, "height": 540, "margin": {"b": 45}},
+        }
+    )
+
+    export._add_export_info_footer(
+        figure,
+        [],
+        {"Measurement ID": "full-id"},
+    )
+
+    assert figure.layout.width == 960
+    assert figure.layout.height - figure.layout.margin.b == 540 - 45
+
+
+def test_export_plot_images_sync_writes_variants_and_archive(tmp_path, monkeypatch):
+    monkeypatch.delenv("EXPORT_TIMING_LOG", raising=False)
+    dataset = tmp_path / "run.zarr"
+    dataset.mkdir()
+    footer_texts = []
+
+    def fake_write(figure, path, **_kwargs):
+        footer_texts.append(figure.layout.annotations[-1].text)
+        target = Path(path)
+        if target.suffix == ".png":
+            Image.new("RGB", (2, 2), "white").save(target)
+        else:
+            target.write_text("<svg/>", encoding="utf-8")
+
+    monkeypatch.setattr(export, "_write_plotly_image", fake_write)
+    monkeypatch.setattr(
+        export,
+        "_library_metadata",
+        lambda path, uuid: {
+            "dataset_uuid": uuid,
+            "dataset_path": str(path),
+            "hearted": True,
+            "trashed": True,
+            "tags": ["reviewed", "cold"],
+        },
+    )
+    plot = {
+        "data": [{"type": "scatter", "x": [0, 1], "y": [2, 3]}],
+        "layout": {"xaxis": {}, "yaxis": {}},
+    }
+
+    result = export._export_plot_images_sync(
+        plot,
+        str(dataset),
+        relayout_data={"xaxis.range[0]": 0, "xaxis.range[1]": 1},
+    )
+
+    assert set(result["saved_paths"]) == {
+        "png_light",
+        "png_dark",
+        "svg_light",
+        "svg_dark",
+    }
+    assert len(footer_texts) == 4
+    assert all("<b>Custom Tags:</b> cold, reviewed" in text for text in footer_texts)
+    assert all("Heart" not in text and "Trash" not in text for text in footer_texts)
+    with zipfile.ZipFile(result["zip_path"]) as archive:
+        names = set(archive.namelist())
+        assert "metadata.json" in names
+        assert "timings.json" not in names
+        assert json.loads(archive.read("metadata.json"))["dataset_uuid"] == "run"
+    Path(result["zip_path"]).unlink()
+
+
+def test_export_writes_only_the_chosen_formats_variants_and_scale(
+    tmp_path, monkeypatch
+):
+    dataset = tmp_path / "run.zarr"
+    dataset.mkdir()
+    scales = []
+
+    def fake_write(figure, path, **kwargs):
+        scales.append(kwargs.get("scale"))
+        Image.new("RGB", (2, 2), "white").save(path)
+
+    monkeypatch.setattr(export, "_write_plotly_image", fake_write)
+    monkeypatch.setattr(export, "_library_metadata", lambda path, uuid: {"tags": []})
+    plot = {"data": [{"type": "scatter", "x": [0], "y": [0]}], "layout": {}}
+    options = export.ExportSettings(formats=["png"], variants=["dark"], scale=2)
+
+    result = export._export_plot_images_sync(plot, str(dataset), options=options)
+
+    assert set(result["saved_paths"]) == {"png_dark"}
+    assert scales == [2]
+    Path(result["zip_path"]).unlink()
+
+
+def test_desktop_export_folder_setting_wins_over_the_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("QIMCHI_DESKTOP", "1")
+    monkeypatch.setenv("QIMCHI_EXPORT_DIR", str(tmp_path / "from-env"))
+
+    assert export._desktop_export_dir(str(tmp_path / "chosen")) == tmp_path / "chosen"
+    assert export._desktop_export_dir() == tmp_path / "from-env"
+
+
+def test_export_fails_rather_than_zipping_an_archive_with_no_images(
+    tmp_path, monkeypatch
+):
+    """Fail the export when every image writer fails."""
+    dataset = tmp_path / "run.zarr"
+    dataset.mkdir()
+
+    def always_fails(_figure, _path, **_kwargs):
+        raise RuntimeError("module 'orjson' has no attribute 'dumps'")
+
+    monkeypatch.setattr(export, "_write_plotly_image", always_fails)
+    plot = {
+        "data": [{"type": "scatter", "x": [0, 1], "y": [2, 3]}],
+        "layout": {"xaxis": {}, "yaxis": {}},
+    }
+
+    with pytest.raises(RuntimeError) as excinfo:
+        export._export_plot_images_sync(plot, str(dataset))
+
+    # The per-variant reason travels with the error, so the task's recorded
+    # message says what actually broke.
+    assert "produced no images" in str(excinfo.value)
+    assert "orjson" in str(excinfo.value)
+
+
+def test_export_survives_a_partially_failed_write(tmp_path, monkeypatch):
+    """One failed variant is reported in timings but still yields an archive."""
+    dataset = tmp_path / "run.zarr"
+    dataset.mkdir()
+
+    def fail_svg_only(_figure, path, **_kwargs):
+        target = Path(path)
+        if target.suffix == ".svg":
+            raise RuntimeError("svg writer unavailable")
+        Image.new("RGB", (2, 2), "white").save(target)
+
+    monkeypatch.setattr(export, "_write_plotly_image", fail_svg_only)
+
+    plot = {
+        "data": [{"type": "scatter", "x": [0, 1], "y": [2, 3]}],
+        "layout": {"xaxis": {}, "yaxis": {}},
+    }
+
+    # Enable the optional timings file.
+    result = export._export_plot_images_sync(
+        plot, str(dataset), options=export.ExportSettings(timings=True)
+    )
+
+    assert set(result["saved_paths"]) == {"png_light", "png_dark"}
+    assert result["timings"]["svg_light"] is None
+    assert result["timings"]["svg_dark"] is None
+    with zipfile.ZipFile(result["zip_path"]) as archive:
+        names = set(archive.namelist())
+        assert {"metadata.json", "timings.json"} <= names
+        assert any(name.endswith(".png") for name in names)
+    Path(result["zip_path"]).unlink()
+
+
+def test_save_light_dark_pngs_supports_one_or_both_variants(tmp_path, monkeypatch):
+    dataset = tmp_path / "run.zarr"
+    footer_texts = []
+
+    def fake_write(figure, path, **_kwargs):
+        footer_texts.append(figure.layout.annotations[-1].text)
+        Path(path).write_bytes(b"png")
+
+    monkeypatch.setattr(export, "_resolve_fpath_to_disk", lambda _path: str(dataset))
+    monkeypatch.setattr(
+        export,
+        "_library_metadata",
+        lambda _path, _uuid: {"tags": ["notes-tag"]},
+    )
+    monkeypatch.setattr(export, "_write_plotly_image", fake_write)
+    plot = {"data": [{"x": [0, 1], "y": [1, 2]}], "layout": {}}
+
+    light = export._save_light_dark_pngs(
+        plot, "memory://run", ts="one", only_light=True
+    )
+    both = export._save_light_dark_pngs(
+        plot,
+        "memory://run",
+        ts="two",
+        relayout_data={"xaxis.range[0]": 0, "xaxis.range[1]": 1},
+    )
+
+    assert set(light) == {"png_light"}
+    assert set(both) == {"png_light", "png_dark"}
+    assert all(Path(path).exists() for path in [*light.values(), *both.values()])
+    assert len(footer_texts) == 3
+    assert all("<b>Custom Tags:</b> notes-tag" in text for text in footer_texts)
+
+
+def test_save_light_dark_pngs_writes_beside_the_dataset(tmp_path, monkeypatch):
+    """Write PNGs to the dataset extras folder used by notes and downloads."""
+    dataset = tmp_path / "run.zarr"
+
+    monkeypatch.setattr(export, "_resolve_fpath_to_disk", lambda _path: str(dataset))
+    monkeypatch.setattr(export, "_library_metadata", lambda _path, _uuid: {"tags": []})
+    monkeypatch.setattr(
+        export,
+        "_write_plotly_image",
+        lambda _fig, path, **_k: Path(path).write_bytes(b"png"),
+    )
+
+    saved = export._save_light_dark_pngs(
+        {"data": [{"x": [0], "y": [0]}], "layout": {}}, str(dataset), ts="stamp"
+    )
+
+    light = Path(saved["png_light"])
+    assert light.parent == tmp_path / "run"
+    assert light.name == "run__stamp__plot_light.png"
+    assert Path(saved["png_dark"]).name == "run__stamp__plot_dark.png"
+
+
+def test_save_light_dark_pngs_stamps_a_timestamp_when_none_is_given(
+    tmp_path, monkeypatch
+):
+    dataset = tmp_path / "run.zarr"
+    monkeypatch.setattr(export, "_resolve_fpath_to_disk", lambda _path: str(dataset))
+    monkeypatch.setattr(export, "_library_metadata", lambda _path, _uuid: {"tags": []})
+    monkeypatch.setattr(
+        export,
+        "_write_plotly_image",
+        lambda _fig, path, **_k: Path(path).write_bytes(b"png"),
+    )
+
+    saved = export._save_light_dark_pngs(
+        {"data": [{"x": [0], "y": [0]}], "layout": {}}, str(dataset)
+    )
+
+    # Two exports of one dataset must not overwrite each other.
+    assert "__plot_light.png" in saved["png_light"]
+    assert Path(saved["png_light"]).name.count("__") == 2
+
+
+def test_find_fira_sans_fonts_prefers_the_built_assets(tmp_path, monkeypatch):
+    """Use a font root only when it contains every required weight."""
+    assets = tmp_path / "frontend" / "dist" / "assets"
+    assets.mkdir(parents=True)
+    for weight in export._FIRA_SANS_WEIGHTS:
+        (assets / f"fira-sans-latin-{weight}-normal-hash.woff2").write_bytes(b"font")
+
+    monkeypatch.setattr(
+        export, "__file__", str(tmp_path / "backend" / "api" / "export.py")
+    )
+    found = export._find_fira_sans_fonts()
+
+    assert set(found) == set(export._FIRA_SANS_WEIGHTS)
+
+
+def test_find_fira_sans_fonts_rejects_an_incomplete_set(tmp_path, monkeypatch):
+    assets = tmp_path / "frontend" / "dist" / "assets"
+    assets.mkdir(parents=True)
+    # One weight short: mixing weights is worse than embedding none.
+    for weight in export._FIRA_SANS_WEIGHTS[:-1]:
+        (assets / f"fira-sans-latin-{weight}-normal-hash.woff2").write_bytes(b"font")
+
+    monkeypatch.setattr(
+        export, "__file__", str(tmp_path / "backend" / "api" / "export.py")
+    )
+    found = export._find_fira_sans_fonts()
+
+    assert found == {} or set(found) != set(export._FIRA_SANS_WEIGHTS)
+
+
+@pytest.mark.asyncio
+async def test_run_export_task_completes_and_copies_for_desktop(tmp_path, monkeypatch):
+    archive = tmp_path / "result.zip"
+    archive.write_bytes(b"zip")
+    destination = tmp_path / "downloads"
+    destination.mkdir()
+    export._export_tasks["task"] = {"status": "pending"}
+    monkeypatch.setattr(
+        export,
+        "_export_plot_images_sync",
+        lambda *_args: {
+            "zip_path": str(archive),
+            "zip_filename": "plot.zip",
+            "saved_paths": {},
+            "timings": {},
+        },
+    )
+    monkeypatch.setattr(export, "_desktop_export_dir", lambda _folder=None: destination)
+
+    await export._run_export_task("task", {}, "/data/run.zarr")
+
+    task = export._export_tasks["task"]
+    assert task["status"] == "completed"
+    assert Path(task["saved_to"]).read_bytes() == b"zip"
+
+
+@pytest.mark.asyncio
+async def test_run_export_task_records_failure(monkeypatch):
+    export._export_tasks["task"] = {"status": "pending"}
+    monkeypatch.setattr(
+        export,
+        "_export_plot_images_sync",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("render failed")),
+    )
+
+    await export._run_export_task("task", {}, "/data/run.zarr")
+
+    assert export._export_tasks["task"]["status"] == "failed"
+    assert export._export_tasks["task"]["error"] == "render failed"
+
+
+@pytest.mark.asyncio
+async def test_start_export_validates_and_creates_task(monkeypatch):
+    missing = await export.export_plot_images(FakeRequest({}))
+    assert missing.status_code == 400
+
+    monkeypatch.setattr(export, "_resolve_fpath_to_disk", lambda path: path)
+
+    def discard(coroutine):
+        coroutine.close()
+        return SimpleNamespace()
+
+    monkeypatch.setattr(export.asyncio, "create_task", discard)
+    started = await export.export_plot_images(
+        FakeRequest({"plot_json": {"data": [{}]}, "fpath": "/data/run.zarr"})
+    )
+    payload = _json(started)
+    assert started.status_code == 202
+    assert export._export_tasks[payload["task_id"]]["status"] == "pending"
+
+    monkeypatch.setattr(
+        export,
+        "_resolve_fpath_to_disk",
+        lambda _path: (_ for _ in ()).throw(ValueError("unknown live run")),
+    )
+    rejected = await export.export_plot_images(
+        FakeRequest({"plot_json": {"data": [{}]}, "fpath": "memory://missing"})
+    )
+    assert rejected.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_status_and_download_endpoints_cover_all_states(tmp_path):
+    assert (await export.get_export_status("missing")).status_code == 404
+    assert (await export.download_export("missing")).status_code == 404
+
+    export._export_tasks["pending"] = {"status": "pending"}
+    assert _json(await export.get_export_status("pending"))["status"] == "pending"
+    assert (await export.download_export("pending")).status_code == 400
+
+    export._export_tasks["failed"] = {"status": "failed", "error": "bad"}
+    assert _json(await export.get_export_status("failed"))["error"] == "bad"
+
+    export._export_tasks["gone"] = {
+        "status": "completed",
+        "zip_path": str(tmp_path / "missing.zip"),
+    }
+    assert (await export.download_export("gone")).status_code == 404
+
+    archive = tmp_path / "ready.zip"
+    archive.write_bytes(b"zip")
+    export._export_tasks["ready"] = {
+        "status": "completed",
+        "zip_path": str(archive),
+        "zip_filename": "named.zip",
+        "result": {"zip_filename": "named.zip"},
+        "saved_to": "/downloads/named.zip",
+    }
+    status = _json(await export.get_export_status("ready"))
+    response = await export.download_export("ready")
+    assert status["saved_to"] == "/downloads/named.zip"
+    assert isinstance(response, FileResponse)
+    assert response.filename == "named.zip"
+
+
+@pytest.fixture
+def notes_db(tmp_path, monkeypatch):
+    """Send-to-notes now writes through the notes DB: give it a scratch one."""
+    monkeypatch.setenv("QIMCHI_HOME", str(tmp_path / "home"))
+    db._engine = None
+    db.run_migrations()
+    db.seed_local_user()
+    yield
+    if db._engine is not None:
+        db._engine.dispose()
+    db._engine = None
+
+
+@pytest.mark.asyncio
+async def test_send_to_notes_rejects_a_qcodes_run_without_its_uuid(
+    tmp_path, monkeypatch
+):
+    """Refused before rendering, so no orphaned PNGs are written."""
+    rendered = []
+    monkeypatch.setattr(
+        export, "_save_light_dark_pngs", lambda *a, **k: rendered.append(1)
+    )
+
+    response = await export.export_and_send_to_notes(
+        FakeRequest({"plot_json": {"data": [{}]}, "fpath": "/data/runs.db#run_id=3"})
+    )
+
+    assert response.status_code == 400
+    assert rendered == []
+
+
+@pytest.mark.usefixtures("notes_db")
+@pytest.mark.asyncio
+async def test_send_to_notes_appends_image_and_lists_exports(tmp_path, monkeypatch):
+    dataset = tmp_path / "sample" / "experiment" / "run.zarr"
+    dataset.mkdir(parents=True)
+    extras = dataset.parent / "run"
+    light = extras / "run__stamp__plot_light.png"
+    dark = extras / "run__stamp__plot_dark.png"
+
+    def fake_save(*_args, **_kwargs):
+        extras.mkdir(exist_ok=True)
+        light.write_bytes(b"light")
+        dark.write_bytes(b"dark")
+        return {"png_light": str(light), "png_dark": str(dark)}
+
+    monkeypatch.setattr(export, "_save_light_dark_pngs", fake_save)
+    monkeypatch.setattr(export, "_resolve_fpath_to_disk", lambda _path: str(dataset))
+    monkeypatch.setattr(
+        notes,
+        "append_sample_rollup",
+        lambda *_args, **_kwargs: {"sample_notes_path": "pool.md"},
+    )
+
+    response = await export.export_and_send_to_notes(
+        FakeRequest({"plot_json": {"data": [{}]}, "fpath": "memory://run"})
+    )
+    listed = await export.export_send_to_notes_get("memory://run")
+
+    assert response.status_code == 200
+    assert "![plot](run/run__stamp__plot_light.png)" in (extras / "run.md").read_text(
+        encoding="utf-8"
+    )
+    assert set(_json(listed)["paths"]) == {"png_light", "png_dark"}
+
+
+@pytest.mark.asyncio
+async def test_send_to_notes_and_listing_error_responses(tmp_path, monkeypatch):
+    assert (await export.export_and_send_to_notes(FakeRequest({}))).status_code == 400
+
+    monkeypatch.setattr(
+        export,
+        "_save_light_dark_pngs",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("render failed")),
+    )
+    failed = await export.export_and_send_to_notes(
+        FakeRequest({"plot_json": {"data": [{}]}, "fpath": "/data/run.zarr"})
+    )
+    assert failed.status_code == 500
+
+    monkeypatch.setattr(
+        export, "_resolve_fpath_to_disk", lambda _path: str(tmp_path / "run.zarr")
+    )
+    empty = await export.export_send_to_notes_get("/data/run.zarr")
+    assert _json(empty)["paths"] == {}
+
+    monkeypatch.setattr(
+        export,
+        "_resolve_fpath_to_disk",
+        lambda _path: (_ for _ in ()).throw(RuntimeError("bad path")),
+    )
+    assert (await export.export_send_to_notes_get("bad")).status_code == 500
+
+
+def test_batch_export_zips_each_plot_with_its_own_view_and_filters(
+    tmp_path, monkeypatch
+):
+    datasets = [tmp_path / "a.zarr", tmp_path / "b.zarr"]
+    for dataset in datasets:
+        dataset.mkdir()
+    ranges = []
+
+    def fake_write(figure, path, **kwargs):
+        ranges.append(tuple(figure.layout.xaxis.range or ()))
+        Image.new("RGB", (2, 2), "white").save(path)
+
+    monkeypatch.setattr(export, "_write_plotly_image", fake_write)
+    monkeypatch.setattr(export, "_library_metadata", lambda path, uuid: {"tags": []})
+    monkeypatch.setattr(export, "_resolve_fpath_to_disk", lambda fpath: fpath)
+    plot = {"data": [{"type": "scatter", "x": [0, 1], "y": [0, 1]}], "layout": {}}
+    plots = [
+        {
+            "plot_json": plot,
+            "fpath": str(datasets[0]),
+            "relayout_data": {"xaxis.range[0]": 0.2, "xaxis.range[1]": 0.4},
+            "applied_filters": [{"name": "flip"}],
+        },
+        # Two plots of one dataset must not overwrite each other's files.
+        {"plot_json": plot, "fpath": str(datasets[1])},
+        {"plot_json": plot, "fpath": str(datasets[1])},
+    ]
+    options = export.ExportSettings(formats=["png"], variants=["light"], scale=3)
+
+    result = export._export_many_plot_images_sync(plots, options=options)
+
+    assert result["exported"] == 3 and result["failures"] == []
+    assert (0.2, 0.4) in ranges
+    with zipfile.ZipFile(result["zip_path"]) as outer:
+        names = sorted(outer.namelist())
+        assert [name[:3] for name in names] == ["01_", "02_", "03_"]
+        with zipfile.ZipFile(outer.open(names[0])) as first:
+            meta = json.loads(first.read("metadata.json"))
+            assert meta["applied_filters"] == [{"name": "flip"}]
+            assert any(name.endswith(".png") for name in first.namelist())
+    Path(result["zip_path"]).unlink()
+
+
+def test_batch_export_lists_a_failed_plot_and_keeps_the_rest(tmp_path, monkeypatch):
+    dataset = tmp_path / "a.zarr"
+    dataset.mkdir()
+
+    def fake_write(figure, path, **kwargs):
+        Image.new("RGB", (2, 2), "white").save(path)
+
+    def resolve(fpath):
+        if fpath == "memory://gone":
+            raise ValueError("measurement is gone")
+        return fpath
+
+    monkeypatch.setattr(export, "_write_plotly_image", fake_write)
+    monkeypatch.setattr(export, "_library_metadata", lambda path, uuid: {"tags": []})
+    monkeypatch.setattr(export, "_resolve_fpath_to_disk", resolve)
+    plot = {"data": [{"type": "scatter", "x": [0], "y": [0]}], "layout": {}}
+    options = export.ExportSettings(formats=["png"], variants=["light"])
+
+    result = export._export_many_plot_images_sync(
+        [
+            {"plot_json": plot, "fpath": str(dataset)},
+            {"plot_json": plot, "fpath": "memory://gone", "title": "live"},
+        ],
+        options=options,
+    )
+
+    assert result["exported"] == 1
+    assert result["failures"] == ["plot 2 (live): measurement is gone"]
+    with zipfile.ZipFile(result["zip_path"]) as outer:
+        assert "failed.txt" in outer.namelist()
+    Path(result["zip_path"]).unlink()
+
+
+@pytest.mark.asyncio
+async def test_batch_export_endpoint_rejects_an_empty_request():
+    response = await export.export_many_plot_images(FakeRequest({"plots": []}))
+    assert response.status_code == 400
+
+
+def test_a_long_filter_chain_wraps_inside_the_image():
+    figure = export.go.Figure({"data": [{"x": [0, 1], "y": [1, 2]}], "layout": {}})
+    filters = ["gamma_corr", "normalize", "log_scale", "diff_x", "savgol", "sma"]
+
+    export._add_export_info_footer(figure, [{"name": name} for name in filters])
+
+    lines = figure.layout.annotations[-1].text.split("<br>")
+    filter_lines = lines[
+        lines.index(next(line for line in lines if "Applied Filters" in line)) :
+    ]
+    assert len(filter_lines) > 1
+    left = figure.layout.margin.l or 80
+    max_chars = (figure.layout.width - left) / export._EXPORT_INFO_CHAR_PX
+    for line in filter_lines:
+        plain = line.replace("<b>", "").replace("</b>", "").replace("&nbsp;", " ")
+        assert len(plain) <= max_chars
+    # Verify that names remain intact and ordered after wrapping.
+    joined = " ".join(filter_lines)
+    names = ["Gamma Correction", "Normalize", "Log Scale", "Diff along Y"]
+    assert [joined.index(name) for name in names] == sorted(
+        joined.index(name) for name in names
+    )

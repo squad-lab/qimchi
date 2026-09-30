@@ -1,0 +1,661 @@
+"""Regression tests for DB-backed measurement notes."""
+
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from threading import Barrier
+from types import SimpleNamespace
+
+import pytest
+from fastapi import HTTPException
+from sqlmodel import Session
+
+from api import notes
+from api.db_models import LOCAL_USER_ID, Note
+from api.models import NotesData, PathData
+
+
+@pytest.fixture(autouse=True)
+def _isolated_db(tmp_path, monkeypatch):
+    """Point the DB at a scratch file and migrate it, per test."""
+    monkeypatch.setenv("QIMCHI_HOME", str(tmp_path / "home"))
+    from api.shared import db as db_mod
+
+    db_mod._engine = None
+    db_mod.run_migrations()
+    db_mod.seed_local_user()
+    yield
+    if db_mod._engine is not None:
+        db_mod._engine.dispose()
+    db_mod._engine = None
+
+
+def test_concurrent_first_writes_upsert_instead_of_colliding(monkeypatch):
+    """Two requests that both observe no note must not race on INSERT."""
+    from api.shared import db as db_mod
+
+    readers = Barrier(2)
+
+    @contextmanager
+    def synchronized_session_scope():
+        session = Session(db_mod.get_engine())
+
+        class SynchronizedSession:
+            def get(self, *args, **kwargs):
+                result = session.get(*args, **kwargs)
+                readers.wait(timeout=5)
+                return result
+
+            def __getattr__(self, name):
+                return getattr(session, name)
+
+        try:
+            yield SynchronizedSession()
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    monkeypatch.setattr(notes, "session_scope", synchronized_session_scope)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(notes._db_upsert_note, "same-uuid", f"body-{index}")
+            for index in range(2)
+        ]
+        for future in futures:
+            future.result(timeout=10)
+
+    with Session(db_mod.get_engine()) as session:
+        stored = session.get(Note, ("same-uuid", LOCAL_USER_ID, 0))
+
+    assert stored is not None
+    assert stored.body in {"body-0", "body-1"}
+
+
+def test_frontmatter_and_timestamp_helpers():
+    when = datetime(2026, 1, 2, 3, 4, tzinfo=timezone.utc)
+    rendered = notes._make_frontmatter("run", when) + "body\n"
+
+    assert notes._parse_frontmatter(rendered) == (
+        "body\n",
+        "2026-01-02T03:04:00+00:00",
+        "run",
+    )
+    assert notes._parse_frontmatter("") == ("", None, None)
+    assert notes._parse_frontmatter("plain text") == ("plain text", None, None)
+    assert notes._parse_iso("2026-01-02T03:04:00+00:00") == when
+    assert notes._parse_iso("not-a-date").tzinfo is not None
+
+
+def test_note_path_helpers_and_dataset_metadata(tmp_path, monkeypatch):
+    measurement = tmp_path / "sample" / "experiment" / "run.zarr"
+    uuid, note_dir, note_path = notes._measurement_notes_paths(measurement)
+    assert (uuid, note_dir.name, note_path.name) == ("run", "run", "run.md")
+    assert notes._infer_sample_dir_from_measurement_path(measurement).name == "sample"
+
+    closed = []
+    dataset = SimpleNamespace(
+        attrs={"Sample Name": " chip ", "Cryostat": " fridge "},
+        close=lambda: closed.append(True),
+    )
+    monkeypatch.setattr(notes, "_detect_filesystem_format", lambda _path: "zarr")
+    monkeypatch.setattr(notes, "load_xarray_dataset", lambda *_args: dataset)
+
+    assert notes._read_dataset_names(measurement) == ("chip", "fridge")
+    filename, sample_dir, sample_path = notes._sample_notes_path(measurement)
+    assert filename == "fridge_chip.md"
+    assert sample_dir.name == "sample"
+    assert sample_path == sample_dir / filename
+    assert closed == [True, True]
+
+    monkeypatch.setattr(
+        notes, "load_xarray_dataset", lambda *_args: (_ for _ in ()).throw(OSError())
+    )
+    assert notes._read_dataset_names(measurement) == (None, None)
+
+
+def test_ensure_file_and_rollup_text_helpers(tmp_path):
+    note_path = tmp_path / "run" / "run.md"
+    notes._ensure_notes_file(note_path, "run")
+    original = note_path.read_text(encoding="utf-8")
+    notes._ensure_notes_file(note_path, "run")
+    assert note_path.read_text(encoding="utf-8") == original
+
+    when = datetime(2026, 1, 2, 3, 4, tzinfo=timezone.utc)
+    measurement = tmp_path / "run.zarr"
+    entry = notes._format_sample_rollup_entry(when, measurement, note_path, "hello\n")
+    assert entry.startswith("[2026-01-02T03:04] [Measurement]")
+    assert entry.endswith("hello")
+    assert notes._format_sample_rollup_entry(when, measurement, note_path, "").endswith(
+        f"[Notes]({note_path})"
+    )
+    assert notes._find_last_synced_measurement_body(entry, measurement) == "hello"
+    assert notes._find_last_synced_measurement_body("", measurement) is None
+    assert notes._normalize_link_path(r"C:\\DATA\\RUN") == "c://data//run"
+
+
+@pytest.mark.parametrize(
+    ("previous", "current", "expected"),
+    [
+        (None, "new", "new"),
+        ("same", "same\n", ""),
+        ("old", "old\nadded", "added"),
+        ("old", "replacement", "replacement"),
+        ("old", "", ""),
+    ],
+)
+def test_compute_incremental_body(previous, current, expected):
+    assert notes._compute_incremental_body(previous, current) == expected
+
+
+def test_build_initial_pool_and_incremental_rollup(tmp_path, monkeypatch):
+    sample = tmp_path / "sample"
+    experiment = sample / "experiment"
+    measurement = experiment / "run.zarr"
+    measurement.mkdir(parents=True)
+    _, note_dir, note_path = notes._measurement_notes_paths(measurement)
+    note_dir.mkdir()
+    when = datetime(2026, 1, 2, 3, 4, tzinfo=timezone.utc)
+    note_path.write_text(
+        notes._make_frontmatter("run", when) + "first", encoding="utf-8"
+    )
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+
+    initial = notes._build_initial_sample_pool_body(sample, when)
+    assert "first" in initial
+
+    first = notes.append_sample_rollup(
+        measurement,
+        "first",
+        when,
+        sample_path=str(sample),
+        sample_name="chip",
+        cryostat_name="cryo",
+    )
+    unchanged = notes.append_sample_rollup(
+        measurement,
+        "first",
+        when,
+        sample_path=str(sample),
+        sample_name="chip",
+        cryostat_name="cryo",
+    )
+    added = notes.append_sample_rollup(
+        measurement,
+        "first\nsecond",
+        when,
+        sample_path=str(sample),
+        sample_name="chip",
+        cryostat_name="cryo",
+    )
+
+    assert first["appended"] == "true"
+    assert unchanged["appended"] == "false"
+    assert added["appended"] == "true"
+    pooled = Path(added["sample_notes_path"]).read_text(encoding="utf-8")
+    assert pooled.count("first") == 1
+    assert pooled.count("second") == 1
+
+
+@pytest.mark.asyncio
+async def test_measurement_note_load_save_and_sidecar_import(tmp_path, monkeypatch):
+    measurement = tmp_path / "sample" / "experiment" / "run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+
+    blank = await notes.load_notes(PathData(path=str(measurement)))
+    assert blank["notes"] == ""
+
+    saved = await notes.save_notes(NotesData(path=str(measurement), notes="saved text"))
+    loaded = await notes.load_notes(PathData(path=str(measurement)))
+    assert saved["message"] == "Notes saved successfully."
+    assert loaded["notes"] == "saved text"
+    assert notes._db_get_note("run")[0] == "saved text"
+
+    imported_measurement = measurement.with_name("legacy.zarr")
+    imported_measurement.mkdir()
+    _, legacy_dir, legacy_path = notes._measurement_notes_paths(imported_measurement)
+    legacy_dir.mkdir()
+    when = datetime(2025, 4, 14, tzinfo=timezone.utc)
+    legacy_path.write_text(
+        notes._make_frontmatter("legacy", when) + "legacy body", encoding="utf-8"
+    )
+
+    imported = await notes.load_notes(PathData(path=str(imported_measurement)))
+    assert imported["notes"] == "legacy body"
+    assert notes._db_get_note("legacy")[0] == "legacy body"
+
+
+@pytest.mark.asyncio
+async def test_live_measurement_notes_use_the_resolved_disk_path(tmp_path, monkeypatch):
+    measurement = tmp_path / "sample" / "experiment" / "live-run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    monkeypatch.setattr(
+        notes,
+        "resolve_to_disk_path",
+        lambda ref: str(measurement) if ref == "memory://live-run" else ref,
+    )
+
+    blank = await notes.load_notes(PathData(path="memory://live-run"))
+    saved = await notes.save_notes(
+        NotesData(path="memory://live-run", notes="live note")
+    )
+    loaded = await notes.load_notes(PathData(path="memory://live-run"))
+
+    assert blank["notes"] == ""
+    assert saved["filename"] == "live-run"
+    assert loaded["notes"] == "live note"
+    assert notes._db_get_note("live-run")[0] == "live note"
+    assert (measurement.parent / "live-run" / "live-run.md").is_file()
+
+
+@pytest.mark.asyncio
+async def test_live_measurement_notes_work_without_a_disk_path(monkeypatch):
+    def no_disk_path(_ref):
+        raise RuntimeError("not persisted yet")
+
+    monkeypatch.setattr(notes, "resolve_to_disk_path", no_disk_path)
+
+    blank = await notes.load_notes(PathData(path="memory://stream-only"))
+    saved = await notes.save_notes(
+        NotesData(path="memory://stream-only", notes="in-memory note")
+    )
+    loaded = await notes.load_notes(PathData(path="memory://stream-only"))
+
+    assert blank["notes"] == ""
+    assert blank["notes_path"] is None
+    assert saved["path"] is None
+    assert loaded["notes"] == "in-memory note"
+    assert notes._db_get_note("stream-only")[0] == "in-memory note"
+
+
+@pytest.mark.asyncio
+async def test_live_pooled_notes_with_memory_sample_path(tmp_path, monkeypatch):
+    sample = tmp_path / "sample"
+    measurement = sample / "experiment" / "live-run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    monkeypatch.setattr(
+        notes,
+        "resolve_to_disk_path",
+        lambda ref: (
+            str(measurement)
+            if ref == "memory://live-run"
+            else (_ for _ in ()).throw(RuntimeError("not persisted"))
+        ),
+    )
+
+    blank = await notes.load_notes(
+        PathData(
+            path="memory://live-run",
+            note_scope="sample",
+            sample_path="memory:",
+            sample_name="test_sample",
+            cryostat_name="fridge",
+        )
+    )
+    assert blank["notes"] == ""
+    assert blank.get("error") is None
+    expected_pooled_file = sample / "fridge_test_sample.md"
+    assert expected_pooled_file.is_file()
+
+    saved = await notes.save_notes(
+        NotesData(
+            path="memory://live-run",
+            notes="pooled live note content",
+            note_scope="sample",
+            sample_path="memory:",
+            sample_name="test_sample",
+            cryostat_name="fridge",
+        )
+    )
+    assert saved["path"] == str(expected_pooled_file)
+    assert "pooled live note content" in expected_pooled_file.read_text(
+        encoding="utf-8"
+    )
+
+    loaded = await notes.load_notes(
+        PathData(
+            path="memory://live-run",
+            note_scope="sample",
+            sample_path="memory:",
+            sample_name="test_sample",
+            cryostat_name="fridge",
+        )
+    )
+    assert loaded["notes"] == "pooled live note content"
+
+    saved_measurement = await notes.save_notes(
+        NotesData(
+            path="memory://live-run",
+            notes="individual live measurement note",
+            note_scope="measurement",
+            sample_path="memory:",
+            sample_name="test_sample",
+            cryostat_name="fridge",
+        )
+    )
+    assert saved_measurement["sample_rollup"] is not None
+    assert saved_measurement["sample_rollup"]["appended"] == "true"
+    pooled_text = expected_pooled_file.read_text(encoding="utf-8")
+    assert "individual live measurement note" in pooled_text
+
+
+@pytest.mark.asyncio
+async def test_live_pooled_notes_with_memory_scheme_ref(tmp_path, monkeypatch):
+    sample = tmp_path / "sample"
+    measurement = sample / "experiment" / "live-run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    monkeypatch.setattr(
+        notes,
+        "resolve_to_disk_path",
+        lambda ref: (
+            str(measurement)
+            if ref == "memory://live-run"
+            else (_ for _ in ()).throw(RuntimeError("not persisted"))
+        ),
+    )
+
+    loaded = await notes.load_notes(
+        PathData(
+            path="memory://live-run",
+            note_scope="sample",
+            sample_path="memory://live-run",
+            sample_name="test_sample",
+            cryostat_name="fridge",
+        )
+    )
+    assert loaded.get("error") is None
+    expected_pooled_file = sample / "fridge_test_sample.md"
+    assert expected_pooled_file.is_file()
+
+
+@pytest.mark.asyncio
+async def test_live_pooled_notes_without_disk_path_raises_404(monkeypatch):
+    def no_disk_path(_ref):
+        raise RuntimeError("not persisted yet")
+
+    monkeypatch.setattr(notes, "resolve_to_disk_path", no_disk_path)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await notes.load_notes(
+            PathData(
+                path="memory://stream-only",
+                note_scope="sample",
+                sample_path="memory:",
+            )
+        )
+    assert exc_info.value.status_code == 404
+
+    with pytest.raises(HTTPException) as exc_info:
+        await notes.save_notes(
+            NotesData(
+                path="memory://stream-only",
+                notes="cannot save pooled without disk",
+                note_scope="sample",
+                sample_path="memory:",
+            )
+        )
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_opening_a_measurement_creates_no_sidecar(tmp_path, monkeypatch):
+    """Loading notes for a measurement with none must not touch the disk."""
+    measurement = tmp_path / "sample" / "experiment" / "run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    _, notes_dir, _ = notes._measurement_notes_paths(measurement)
+
+    loaded = await notes.load_notes(PathData(path=str(measurement)))
+
+    assert loaded["notes"] == ""
+    assert not notes_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_empty_save_with_no_note_writes_nothing(tmp_path, monkeypatch):
+    """No sidecar folder, no pooled sample file, and no DB row."""
+    measurement = tmp_path / "sample" / "experiment" / "run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    _, notes_dir, _ = notes._measurement_notes_paths(measurement)
+    sample_dir = tmp_path / "sample"
+
+    saved = await notes.save_notes(NotesData(path=str(measurement), notes="  \n "))
+
+    assert saved["last_saved"] is None
+    assert not notes_dir.exists()
+    assert list(sample_dir.glob("*.md")) == []
+    assert notes._db_get_note("run") is None
+
+
+@pytest.mark.asyncio
+async def test_first_non_empty_save_creates_the_sidecar(tmp_path, monkeypatch):
+    measurement = tmp_path / "sample" / "experiment" / "run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    _, notes_dir, notes_path = notes._measurement_notes_paths(measurement)
+
+    await notes.save_notes(NotesData(path=str(measurement), notes="first note"))
+
+    assert notes_path.read_text(encoding="utf-8").endswith("first note")
+    assert list((tmp_path / "sample").glob("*.md"))  # pooled rollup written
+    assert notes._db_get_note("run")[0] == "first note"
+    assert notes_dir.is_dir()
+
+
+def test_sidecar_appears_only_with_the_first_non_empty_note(tmp_path, monkeypatch):
+    """The whole lifecycle through the HTTP routes the Notes pane calls."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api.shared import db as db_mod
+
+    monkeypatch.setattr(db_mod, "_db_ready", True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    measurement = tmp_path / "sample" / "experiment" / "run.zarr"
+    measurement.mkdir(parents=True)
+    _, notes_dir, notes_path = notes._measurement_notes_paths(measurement)
+    app = FastAPI()
+    app.include_router(notes.router)
+    client = TestClient(app)
+    ref = {"path": str(measurement)}
+
+    assert client.post("/load-notes/", json=ref).json()["notes"] == ""
+    assert client.post("/save-notes/", json={**ref, "notes": ""}).status_code == 200
+    assert client.post("/save-notes/", json={**ref, "notes": " \n"}).status_code == 200
+    assert not notes_dir.exists()
+    assert notes._db_get_note("run") is None
+
+    saved = client.post("/save-notes/", json={**ref, "notes": "first note"})
+
+    assert saved.status_code == 200
+    assert notes_dir.is_dir()
+    assert notes_path.read_text(encoding="utf-8").endswith("first note")
+    assert notes._db_get_note("run")[0] == "first note"
+    assert client.post("/load-notes/", json=ref).json()["notes"] == "first note"
+
+
+@pytest.mark.asyncio
+async def test_md_export_off_stores_the_note_without_a_sidecar(tmp_path, monkeypatch):
+    measurement = tmp_path / "sample" / "experiment" / "run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_MD_EXPORT_ENABLED", False)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    _, notes_dir, _ = notes._measurement_notes_paths(measurement)
+
+    await notes.save_notes(NotesData(path=str(measurement), notes="db only"))
+
+    assert notes._db_get_note("run")[0] == "db only"
+    assert not notes_dir.exists()
+    assert list((tmp_path / "sample").glob("*.md")) == []
+
+
+@pytest.mark.asyncio
+async def test_clearing_a_note_keeps_its_sidecar_and_stays_cleared(
+    tmp_path, monkeypatch
+):
+    """
+    Clearing must not delete the .md (the folder holds linked plot images), and
+    must not delete the DB row either -- load_notes would then re-import the
+    surviving .md and bring the cleared text back.
+    """
+    measurement = tmp_path / "sample" / "experiment" / "run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    _, notes_dir, notes_path = notes._measurement_notes_paths(measurement)
+    image = notes_dir / "run__stamp__plot_light.png"
+
+    await notes.save_notes(NotesData(path=str(measurement), notes="to be cleared"))
+    image.write_bytes(b"png")
+    await notes.save_notes(NotesData(path=str(measurement), notes=""))
+    reloaded = await notes.load_notes(PathData(path=str(measurement)))
+
+    assert reloaded["notes"] == ""
+    assert notes_path.is_file()
+    assert "to be cleared" not in notes_path.read_text(encoding="utf-8")
+    assert image.exists()
+
+
+def test_append_measurement_note_goes_through_the_db(tmp_path, monkeypatch):
+    """An appended image link must be visible to load_notes, which reads the DB."""
+    measurement = tmp_path / "sample" / "experiment" / "run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    when = datetime(2026, 9, 13, tzinfo=timezone.utc)
+    notes._db_upsert_note("run", "existing text", when)
+
+    notes.append_measurement_note(
+        measurement, str(measurement), "![plot](run/img.png)", when
+    )
+
+    assert notes._db_get_note("run")[0] == "existing text\n\n![plot](run/img.png)\n"
+
+
+@pytest.mark.asyncio
+async def test_measurement_note_db_errors_are_reported(tmp_path, monkeypatch):
+    path = str(tmp_path / "run.zarr")
+    monkeypatch.setattr(
+        notes,
+        "_db_get_note",
+        lambda _uuid, _run_id=0: (_ for _ in ()).throw(OSError("db down")),
+    )
+    result = await notes.load_notes(PathData(path=path))
+    assert "db down" in result["error"]
+
+    with pytest.raises(HTTPException) as exc:
+        await notes.save_notes(NotesData(path=path, notes="text"))
+    assert exc.value.status_code == 500
+
+
+@pytest.mark.asyncio
+async def test_qcodes_notes_are_keyed_by_qimchi_uuid_and_run(tmp_path, monkeypatch):
+    """Runs share a measurement UID without overwriting each other's notes."""
+    monkeypatch.setattr(notes, "_MD_EXPORT_ENABLED", True)
+    db_path = tmp_path / "measurements.db"
+    db_path.write_bytes(b"qcodes")
+
+    overall = NotesData(path=str(db_path), uuid="qimchi-uid", notes="database note")
+    run_7 = NotesData(
+        path=f"{db_path}#run_id=7",
+        uuid="qimchi-uid",
+        run_id=7,
+        notes="run seven",
+    )
+    run_8 = NotesData(
+        path=f"{db_path}#run_id=8",
+        uuid="qimchi-uid",
+        run_id=8,
+        notes="run eight",
+    )
+
+    await notes.save_notes(overall)
+    await notes.save_notes(run_7)
+    await notes.save_notes(run_8)
+
+    assert notes._db_get_note("qimchi-uid", 0)[0] == "database note"
+    assert notes._db_get_note("qimchi-uid", 7)[0] == "run seven"
+    assert notes._db_get_note("qimchi-uid", 8)[0] == "run eight"
+    assert (
+        await notes.load_notes(
+            PathData(path=f"{db_path}#run_id=7", uuid="qimchi-uid", run_id=7)
+        )
+    )["notes"] == "run seven"
+    pooled = await notes.load_notes(PathData(path=str(db_path), uuid="qimchi-uid"))
+    assert "## Run 7" in pooled["notes"]
+    assert "run seven" in pooled["notes"]
+    assert "## Run 8" in pooled["notes"]
+    assert "run eight" in pooled["notes"]
+    assert "database note" not in pooled["notes"]
+    assert pooled["last_saved"] is not None
+    # QCoDeS notes stay in Qimchi's DB even when markdown export is enabled.
+    assert list(tmp_path.rglob("*.md")) == []
+
+
+@pytest.mark.asyncio
+async def test_qcodes_notes_reject_missing_or_mismatched_identity(tmp_path):
+    db_path = tmp_path / "measurements.db"
+    db_path.write_bytes(b"qcodes")
+
+    with pytest.raises(HTTPException, match="require the measurement UUID"):
+        await notes.load_notes(PathData(path=f"{db_path}#run_id=7"))
+
+    with pytest.raises(HTTPException, match="does not match"):
+        await notes.save_notes(
+            NotesData(
+                path=f"{db_path}#run_id=7",
+                uuid="qimchi-uid",
+                run_id=8,
+                notes="wrong run",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_sample_note_round_trip_and_initial_pool(tmp_path, monkeypatch):
+    sample = tmp_path / "sample"
+    measurement = sample / "experiment" / "run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+
+    initial = await notes.load_notes(
+        PathData(
+            path=str(measurement),
+            note_scope="sample",
+            sample_path=str(sample),
+            sample_name="chip",
+            cryostat_name="cryo",
+        )
+    )
+    assert initial["filename"] == "cryo_chip.md"
+
+    saved = await notes.save_notes(
+        NotesData(
+            path=str(measurement),
+            notes="sample note",
+            note_scope="sample",
+            sample_path=str(sample),
+            sample_name="chip",
+            cryostat_name="cryo",
+        )
+    )
+    loaded = await notes.load_notes(
+        PathData(
+            path=str(measurement),
+            note_scope="sample",
+            sample_path=str(sample),
+            sample_name="chip",
+            cryostat_name="cryo",
+        )
+    )
+    assert saved["note_scope"] == "sample"
+    assert loaded["notes"] == "sample note"

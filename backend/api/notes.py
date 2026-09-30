@@ -3,19 +3,213 @@ FastAPI endpoints for loading and saving notes associated with .zarr datasets.
 
 """
 
+import asyncio
+import os
 import re
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, Tuple
-from fastapi import APIRouter, HTTPException
-import xarray as xr
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlmodel import select
 
 # Local imports
-from .models import PathData, NotesData
+from .data_loader import (
+    _detect_filesystem_format,
+    extract_measurement_id,
+    is_memory_reference,
+    load_xarray_dataset,
+    resolve_to_disk_path,
+)
+from .db_models import LOCAL_USER_ID, Note, _utcnow
 from .logger import logger
-from .data_loader import load_xarray_dataset, _detect_filesystem_format
+from .models import NotesData, PathData
+from .shared.db import require_db, session_scope
 
-router = APIRouter()
+# Notes are DB-backed, so both endpoints are guarded. Loading must 503 rather
+# than return empty on a DB failure: an empty editor reads as "my notes are
+# gone", inviting the user to retype them into a save that will also fail.
+router = APIRouter(dependencies=[Depends(require_db)])
+
+# Measurement notes are DB-backed (source of truth). When enabled (default), a
+# ``.md`` sidecar mirror is also written and the pooled sample rollup is kept in
+# sync -- this preserves the existing file-based workflow. Disable to run
+# DB-only (e.g. for datasets with no writable sidecar location).
+_MD_EXPORT_ENABLED = os.getenv("QIMCHI_NOTES_MD_EXPORT", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+
+def _parse_iso(ts: str | None) -> datetime:
+    """Best-effort parse of an ISO timestamp string, defaulting to now (UTC)."""
+    if ts:
+        try:
+            return datetime.fromisoformat(ts)
+        except ValueError:
+            pass
+    return _utcnow()
+
+
+def _db_get_note(uuid: str, run_id: int = 0) -> Tuple[str, datetime] | None:
+    """Return (body, updated_at) for a measurement note, or None if absent."""
+    with session_scope() as session:
+        note = session.get(Note, (uuid, LOCAL_USER_ID, run_id))
+        if note is None:
+            return None
+        return note.body, note.updated_at
+
+
+def _db_get_qcodes_rollup(uuid: str) -> Tuple[str, datetime | None]:
+    """Build the overall QCoDeS view from the current notes for every run."""
+    with session_scope() as session:
+        run_notes = session.exec(
+            select(Note.run_id, Note.body, Note.updated_at)
+            .where(
+                Note.uuid == uuid,
+                Note.user_id == LOCAL_USER_ID,
+                Note.run_id > 0,
+            )
+            .order_by(Note.run_id)
+        ).all()
+
+    entries: list[str] = []
+    latest: datetime | None = None
+    for run_id, note_body, updated_at in run_notes:
+        body = (note_body or "").rstrip()
+        if not body:
+            continue
+        timestamp = updated_at
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        stamp = timestamp.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M")
+        entries.append(f"## Run {run_id}\n_Last saved: {stamp} UTC_\n\n{body}")
+        if latest is None or updated_at > latest:
+            latest = updated_at
+
+    return "\n\n---\n\n".join(entries), latest
+
+
+def _db_upsert_note(
+    uuid: str, body: str, when: datetime | None = None, run_id: int = 0
+) -> datetime:
+    """Insert or update a measurement note; returns the stored timestamp."""
+    ts = when or _utcnow()
+    statement = sqlite_insert(Note).values(
+        uuid=uuid,
+        user_id=LOCAL_USER_ID,
+        run_id=run_id,
+        body=body,
+        updated_at=ts,
+    )
+    statement = statement.on_conflict_do_update(
+        index_elements=["uuid", "user_id", "run_id"],
+        set_={"body": body, "updated_at": ts},
+    )
+    with session_scope() as session:
+        session.exec(statement)
+    return ts
+
+
+def _note_db_identity(
+    path_ref: str, uuid: str | None = None, run_id: int | None = None
+) -> tuple[str, int]:
+    """Resolve the Qimchi UUID and optional QCoDeS run key for a note."""
+    clean_uuid = (uuid or "").strip()
+    if is_memory_reference(path_ref):
+        return clean_uuid or extract_measurement_id(path_ref), run_id or 0
+    if _is_qcodes_reference(path_ref):
+        match = re.search(r"(?:^|&)run_id=(\d+)(?:&|$)", path_ref.partition("#")[2])
+        path_run_id = int(match.group(1)) if match else None
+        if run_id is not None and path_run_id is not None and run_id != path_run_id:
+            raise HTTPException(
+                status_code=400,
+                detail="QCoDeS note run_id does not match the dataset path",
+            )
+        if not clean_uuid:
+            raise HTTPException(
+                status_code=400,
+                detail="QCoDeS notes require the measurement UUID registered in Qimchi",
+            )
+        return clean_uuid, run_id or path_run_id or 0
+    return clean_uuid or Path(path_ref).stem, run_id or 0
+
+
+def _resolve_note_path(
+    path_ref: str | Path | None, *, required: bool = True
+) -> Path | None:
+    """Resolve a live reference when notes need its on-disk path."""
+    if not path_ref:
+        if required:
+            raise HTTPException(
+                status_code=400,
+                detail="Dataset path is required",
+            )
+        return None
+
+    ref_str = str(path_ref).strip()
+    if is_memory_reference(ref_str):
+        measurement_id = extract_measurement_id(ref_str)
+        if not measurement_id:
+            if required:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Memory path must include a measurement id",
+                )
+            return None
+        try:
+            resolved_disk = resolve_to_disk_path(ref_str)
+            if not resolved_disk or is_memory_reference(str(resolved_disk)):
+                if required:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Live dataset path is unavailable for {ref_str}",
+                    )
+                return None
+        except Exception as exc:
+            if required:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Live dataset path is unavailable: {exc}",
+                ) from exc
+            logger.debug("No disk path for %s: %s", ref_str, exc)
+            return None
+        return Path(resolved_disk)
+    return Path(path_ref)
+
+
+def _resolve_sample_dir(
+    path: Path | None,
+    sample_path: str | None = None,
+) -> Path | None:
+    """Resolve the sample directory from an explicit sample path or measurement path."""
+    if sample_path:
+        clean_sample_path = sample_path.strip()
+        if is_memory_reference(clean_sample_path):
+            if extract_measurement_id(clean_sample_path):
+                resolved = _resolve_note_path(clean_sample_path, required=False)
+                if resolved is not None and not is_memory_reference(str(resolved)):
+                    return _infer_sample_dir_from_measurement_path(resolved)
+        else:
+            return Path(clean_sample_path)
+
+    if path is not None:
+        if is_memory_reference(str(path)):
+            resolved = _resolve_note_path(str(path), required=False)
+            if resolved is not None and not is_memory_reference(str(resolved)):
+                return _infer_sample_dir_from_measurement_path(resolved)
+        else:
+            return _infer_sample_dir_from_measurement_path(path)
+
+    return None
+
+
+def _is_qcodes_reference(path: str) -> bool:
+    """Return whether a note target is a QCoDeS database or one of its runs."""
+    disk_path = path.split("#", 1)[0]
+    return Path(disk_path).suffix.lower() in {".db", ".sqlite"}
 
 
 FRONTMATTER_TEMPLATE = '---\nLast Saved: "{timestamp}"\nFilename: "{filename}"\n\n---\n'
@@ -132,6 +326,7 @@ def _sample_notes_path(
     sample_path: str | None = None,
     sample_name: str | None = None,
     cryostat_name: str | None = None,
+    sample_dir: Path | None = None,
 ) -> Tuple[str, Path, Path]:
     """
     Build pooled sample notes path from either a sample folder path or measurement path.
@@ -139,18 +334,24 @@ def _sample_notes_path(
     Args:
         path (Path): Measurement path or sample path fallback.
         sample_path (str | None): Optional explicit sample folder path.
+        sample_name (str | None): Optional sample name override.
+        cryostat_name (str | None): Optional cryostat name override.
+        sample_dir (Path | None): Optional pre-resolved sample directory.
 
     Returns:
         Tuple[str, Path, Path]: (filename, sample_dir, sample_notes_path)
 
     """
-    sample_dir = (
-        Path(sample_path)
-        if sample_path
-        else _infer_sample_dir_from_measurement_path(path)
-    )
+    if sample_dir is None:
+        sample_dir = _resolve_sample_dir(path, sample_path)
+    if sample_dir is None:
+        sample_dir = _infer_sample_dir_from_measurement_path(path)
 
-    meta_sample_name, meta_cryostat_name = _read_dataset_names(path)
+    meta_sample_name, meta_cryostat_name = (
+        _read_dataset_names(path)
+        if not is_memory_reference(str(path))
+        else (None, None)
+    )
     resolved_sample_name = (
         (sample_name or "").strip()
         or (meta_sample_name or "").strip()
@@ -293,7 +494,16 @@ def _build_initial_sample_pool_body(sample_dir: Path, when: datetime) -> str:
 
     try:
         measurement_paths = []
-        for ext in ["*.zarr", "*.nc", "*.h5", "*.hdf5", "*.csv", "*.txt", "*.dat"]:
+        for ext in [
+            "*.zarr",
+            "*.nc",
+            "*.h5",
+            "*.hdf5",
+            "*.csv",
+            "*.txt",
+            "*.dat",
+            "*.mat",
+        ]:
             for p in sample_dir.rglob(ext):
                 if ext == "*.zarr" and not p.is_dir():
                     continue
@@ -358,7 +568,19 @@ def append_sample_rollup(
 
     """
     now = when or datetime.now(timezone.utc)
-    path = Path(measurement_path)
+    if is_memory_reference(str(measurement_path)):
+        resolved_m = _resolve_note_path(str(measurement_path), required=False)
+        if resolved_m is None:
+            return {
+                "measurement_path": str(measurement_path),
+                "measurement_notes_path": "",
+                "sample_notes_path": "",
+                "dataset_uuid": extract_measurement_id(str(measurement_path)),
+                "appended": "false",
+            }
+        path = resolved_m
+    else:
+        path = Path(measurement_path)
 
     dataset_uuid, _, measurement_notes_path = _measurement_notes_paths(path)
     sample_filename, _, sample_notes_path = _sample_notes_path(
@@ -368,12 +590,15 @@ def append_sample_rollup(
         cryostat_name=cryostat_name,
     )
 
-    _ensure_notes_file(sample_notes_path, sample_filename)
+    # Read without creating: an empty or unchanged note appends nothing, and must
+    # not leave an empty pooled file behind. The file is created below, only
+    # once there is an entry to write into it.
+    existing_body = ""
+    if sample_notes_path.is_file():
+        with open(sample_notes_path, "r", encoding="utf-8") as f:
+            existing_body, _, _ = _parse_frontmatter(f.read())
+        existing_body = existing_body or ""
 
-    with open(sample_notes_path, "r", encoding="utf-8") as f:
-        sample_text = f.read()
-
-    existing_body, _, _ = _parse_frontmatter(sample_text)
     if previous_measurement_notes_body is not None:
         incremental_body = _compute_incremental_body(
             previous_measurement_notes_body,
@@ -410,6 +635,7 @@ def append_sample_rollup(
         merged_body = f"{new_entry}\n"
 
     sample_frontmatter = _make_frontmatter(sample_filename, now)
+    sample_notes_path.parent.mkdir(parents=True, exist_ok=True)
     with open(sample_notes_path, "w", encoding="utf-8") as f:
         f.write(sample_frontmatter + merged_body)
 
@@ -420,6 +646,74 @@ def append_sample_rollup(
         "dataset_uuid": dataset_uuid,
         "appended": "true",
     }
+
+
+def append_measurement_note(
+    measurement_path: Path,
+    path_ref: str,
+    text: str,
+    when: datetime,
+    uuid: str | None = None,
+    run_id: int | None = None,
+) -> Dict:
+    """
+    Append a block of text to a measurement's note, in the DB and its mirror.
+
+    The DB is the source of truth -- load_notes serves it before any sidecar --
+    so appending to the .md alone is invisible once a note exists in the DB.
+
+    Args:
+        measurement_path (Path): Measurement path on disk (sidecar location).
+        path_ref (str): The dataset reference used for the note's DB identity.
+        text (str): Markdown to append.
+        when (datetime): Timestamp for the note and its frontmatter.
+        uuid (str | None): Registered measurement UUID (required for QCoDeS).
+        run_id (int | None): QCoDeS run, when the path does not carry it.
+
+    Returns:
+        Dict: ``notes_path`` and the ``sample_rollup`` result (None if not run).
+
+    Raises:
+        HTTPException: 400 when the note identity cannot be resolved.
+
+    """
+    note_uuid, note_run_id = _note_db_identity(path_ref, uuid, run_id)
+    dataset_uuid, notes_dir, notes_path = _measurement_notes_paths(measurement_path)
+
+    prev = _db_get_note(note_uuid, note_run_id)
+    if prev is not None:
+        previous_body = prev[0].rstrip()
+    elif notes_path.is_file():
+        # A sidecar the Notes pane has not imported yet: carry it in rather
+        # than overwrite it with just the new text.
+        with open(notes_path, "r", encoding="utf-8") as f:
+            previous_body = (_parse_frontmatter(f.read())[0] or "").rstrip()
+    else:
+        previous_body = ""
+
+    addition = text.strip()
+    body = f"{previous_body}\n\n{addition}\n" if previous_body else f"{addition}\n"
+    _db_upsert_note(note_uuid, body, when, note_run_id)
+
+    sample_rollup = None
+    if _MD_EXPORT_ENABLED and not _is_qcodes_reference(path_ref):
+        try:
+            notes_dir.mkdir(parents=True, exist_ok=True)
+            with open(notes_path, "w", encoding="utf-8") as f:
+                f.write(_make_frontmatter(dataset_uuid, when) + body)
+            sample_rollup = append_sample_rollup(
+                measurement_path,
+                body,
+                when,
+                previous_measurement_notes_body=previous_body,
+            )
+        except Exception:
+            logger.warning(
+                "append_measurement_note | .md mirror/rollup failed (DB save succeeded)",
+                exc_info=True,
+            )
+
+    return {"notes_path": str(notes_path), "sample_rollup": sample_rollup}
 
 
 @router.post("/load-notes/")
@@ -436,24 +730,89 @@ async def load_notes(path: PathData) -> Dict:
     """
     # NOTE: Measurement notes are stored in: /.../{dataset_uuid}.zarr/../{dataset_uuid}/{dataset_uuid}.md
     # NOTE: Sample notes are stored in sample folder: /.../{sample}/{cryostat}_{sample}.md
-    resolved_path = Path(path.path)
+    resolved_path = _resolve_note_path(path.path, required=False)
 
     if path.note_scope == "sample":
+        sample_dir = _resolve_sample_dir(resolved_path, path.sample_path)
+        if sample_dir is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Live dataset path is unavailable for sample notes",
+            )
         filename, sample_dir, notes_path = _sample_notes_path(
-            resolved_path,
-            path.sample_path,
-            path.sample_name,
-            path.cryostat_name,
+            resolved_path or sample_dir,
+            sample_dir=sample_dir,
+            sample_name=path.sample_name,
+            cryostat_name=path.cryostat_name,
         )
         frontmatter_filename = filename
     else:
         sample_dir = None
-        dataset_uuid, _, notes_path = _measurement_notes_paths(resolved_path)
+        if resolved_path is None:
+            dataset_uuid = extract_measurement_id(path.path)
+            notes_path = None
+        else:
+            dataset_uuid, _, notes_path = _measurement_notes_paths(resolved_path)
         frontmatter_filename = dataset_uuid
+        note_uuid, note_run_id = _note_db_identity(path.path, path.uuid, path.run_id)
 
     logger.debug(
         f"load_notes | POST scope={path.note_scope} path={resolved_path}, notes_path={notes_path}"
     )
+
+    # Measurement notes are DB-backed, with a one-time read-through import from
+    # the legacy .md sidecar (then served from the DB).
+    if path.note_scope != "sample":
+        try:
+            if _is_qcodes_reference(path.path) and note_run_id == 0:
+                body, updated = await asyncio.to_thread(
+                    _db_get_qcodes_rollup, note_uuid
+                )
+                return {
+                    "notes": body,
+                    "last_saved": updated.isoformat() if updated else None,
+                    "filename": frontmatter_filename,
+                    "note_scope": "measurement",
+                }
+            db = await asyncio.to_thread(_db_get_note, note_uuid, note_run_id)
+            if db is not None:
+                body, updated = db
+                return {
+                    "notes": body,
+                    "last_saved": updated.isoformat(),
+                    "filename": frontmatter_filename,
+                }
+            # Import an existing sidecar once, if present.
+            if notes_path is not None and notes_path.is_file():
+                with open(notes_path, "r", encoding="utf-8") as f:
+                    file_text = f.read()
+                body, last_saved, filename = _parse_frontmatter(file_text)
+                await asyncio.to_thread(
+                    _db_upsert_note,
+                    note_uuid,
+                    body or "",
+                    _parse_iso(last_saved),
+                    note_run_id,
+                )
+                logger.debug(f"load_notes | imported sidecar into DB for {note_uuid}")
+                return {
+                    "notes": body,
+                    "last_saved": last_saved,
+                    "filename": filename or frontmatter_filename,
+                }
+            # No note yet. Nothing is written: opening a measurement must not
+            # leave an empty sidecar folder next to it. save_notes creates the
+            # sidecar once there is something to put in it.
+            return {
+                "notes": "",
+                "last_saved": None,
+                "filename": frontmatter_filename,
+                "note_scope": "measurement",
+                "notes_path": str(notes_path) if notes_path is not None else None,
+            }
+        except Exception as e:
+            logger.error(f"load_notes | DB error: {str(e)}", exc_info=True)
+            return {"notes": "", "error": f"Error loading notes: {str(e)}"}
 
     try:
         if notes_path.exists() and notes_path.is_file():
@@ -505,23 +864,115 @@ async def save_notes(data: NotesData) -> Dict:
         Dict: Confirmation message
 
     """
-    resolved_path = Path(data.path)
+    resolved_path = _resolve_note_path(data.path, required=False)
 
     if data.note_scope == "sample":
+        sample_dir = _resolve_sample_dir(resolved_path, data.sample_path)
+        if sample_dir is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Live dataset path is unavailable for sample notes",
+            )
         filename, notes_dir, notes_path = _sample_notes_path(
-            resolved_path,
-            data.sample_path,
-            data.sample_name,
-            data.cryostat_name,
+            resolved_path or sample_dir,
+            sample_dir=sample_dir,
+            sample_name=data.sample_name,
+            cryostat_name=data.cryostat_name,
         )
         frontmatter_filename = filename
     else:
-        dataset_uuid, notes_dir, notes_path = _measurement_notes_paths(resolved_path)
+        if resolved_path is None:
+            dataset_uuid = extract_measurement_id(data.path)
+            notes_dir = notes_path = None
+        else:
+            dataset_uuid, notes_dir, notes_path = _measurement_notes_paths(
+                resolved_path
+            )
         frontmatter_filename = dataset_uuid
+        note_uuid, note_run_id = _note_db_identity(data.path, data.uuid, data.run_id)
 
     logger.debug(
         f"save_notes | POST scope={data.note_scope} path={resolved_path}, notes_path={notes_path}"
     )
+
+    # Measurement notes: DB is the source of truth. The .md mirror + pooled
+    # sample rollup are best-effort and only when QIMCHI_NOTES_MD_EXPORT is on.
+    if data.note_scope != "sample":
+        now = datetime.now(timezone.utc)
+        body = data.notes or ""
+        has_content = bool(body.strip())
+        mirror = (
+            _MD_EXPORT_ENABLED
+            and resolved_path is not None
+            and not _is_qcodes_reference(data.path)
+        )
+        try:
+            prev = await asyncio.to_thread(_db_get_note, note_uuid, note_run_id)
+            previous_measurement_body = prev[0].rstrip() if prev else None
+            # An empty save only matters when it clears an existing note. With
+            # nothing stored, it is a no-op: no row, no sidecar folder.
+            if (
+                not has_content
+                and prev is None
+                and (notes_path is None or not notes_path.is_file())
+            ):
+                return {
+                    "message": "Nothing to save.",
+                    "path": str(notes_path) if notes_path is not None else None,
+                    "last_saved": None,
+                    "filename": frontmatter_filename,
+                    "note_scope": "measurement",
+                    "frontmatter": None,
+                    "sample_rollup": None,
+                }
+            # Clearing writes the empty body rather than deleting the row: with
+            # the row gone, load_notes would re-import a surviving .md and bring
+            # the cleared note back.
+            await asyncio.to_thread(_db_upsert_note, note_uuid, body, now, note_run_id)
+        except Exception as e:
+            logger.error(f"save_notes | DB error: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Error saving notes: {str(e)}")
+
+        frontmatter = _make_frontmatter(dataset_uuid, now)
+        sample_rollup = None
+        # The sidecar folder is created only for a note with content. Clearing
+        # an existing note rewrites its .md in place and never deletes it: the
+        # folder also holds exported plot images that the note links to.
+        if mirror and (has_content or notes_path.is_file()):
+            assert notes_dir is not None
+            assert notes_path is not None
+            assert resolved_path is not None
+            try:
+                notes_dir.mkdir(parents=True, exist_ok=True)
+                with open(notes_path, "w", encoding="utf-8") as f:
+                    f.write(frontmatter + body)
+                sample_rollup = append_sample_rollup(
+                    resolved_path,
+                    body,
+                    now,
+                    sample_path=data.sample_path,
+                    sample_name=data.sample_name,
+                    cryostat_name=data.cryostat_name,
+                    previous_measurement_notes_body=previous_measurement_body,
+                )
+            except Exception:
+                logger.warning(
+                    "save_notes | .md mirror/rollup failed (DB save succeeded)",
+                    exc_info=True,
+                )
+
+        logger.debug(
+            f"save_notes | Saved notes to DB for {note_uuid}, run {note_run_id}"
+        )
+        return {
+            "message": "Notes saved successfully.",
+            "path": str(notes_path) if notes_path is not None else None,
+            "last_saved": now.isoformat(),
+            "filename": frontmatter_filename,
+            "note_scope": "measurement",
+            "frontmatter": frontmatter,
+            "sample_rollup": sample_rollup,
+        }
 
     try:
         # Create the directory if it doesn't exist

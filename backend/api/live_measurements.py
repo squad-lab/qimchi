@@ -5,11 +5,13 @@ API endpoints for querying live measurement database.
 
 import logging
 from typing import List, Optional
+
 from fastapi import APIRouter
 from pydantic import BaseModel
+from qimchi_connect import registry as live_db
 
 # Local imports
-from .shared import live_db
+from .data_loader import maintain_live_registry
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +48,10 @@ def get_live_measurements() -> List[LiveMeasurementInfo]:
         return []
 
     try:
-        # Ensure database is initialized
-        live_db.init_database()
+        maintain_live_registry(live_db)
 
         measurements = live_db.get_live_measurements()
-        logger.info(f"Found {len(measurements)} live measurements in database")
+        logger.debug("Found %d live measurements in database", len(measurements))
 
         return [
             LiveMeasurementInfo(

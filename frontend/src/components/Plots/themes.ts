@@ -19,11 +19,15 @@ export const lightTheme: PlotTheme = {
     background: "rgba(0,0,0,0)",
     paper: "rgba(0,0,0,0)",
     text: "#374151",
-    grid: "#f3f4f6",
+    titleText: "#111827",
+    grid: "#d1d5db",
+    gridMinor: "#f3f4f6",
+    tick: "#6b7280",
+    tickMinor: "#c7cbd1",
     zeroline: "#e5e7eb",
   },
   font: {
-    family: '"Inter", "Segoe UI", "Roboto", sans-serif',
+    family: '"Fira Sans", Arial, sans-serif',
     size: 12,
   },
 };
@@ -31,42 +35,60 @@ export const lightTheme: PlotTheme = {
 export const darkTheme: PlotTheme = {
   name: "dark",
   colors: {
+    // Atom One Dark syntax accents, used as the categorical line/marker palette.
     primary: [
-      "#60A5FA", // blue-400
-      "#F87171", // red-400
-      "#34D399", // emerald-400
-      "#FBBF24", // amber-400
-      "#A78BFA", // violet-400
-      "#22D3EE", // cyan-400
-      "#FB923C", // orange-400
-      "#A3E635", // lime-400
+      "#61AFEF", // blue
+      "#E06C75", // red
+      "#98C379", // green
+      "#E5C07B", // yellow
+      "#C678DD", // purple
+      "#56B6C2", // cyan
+      "#D19A66", // orange
+      "#ABB2BF", // mono (muted foreground, for an 8th series)
     ],
-    background: "#1F2937",
-    paper: "#1F2937",
-    text: "#F3F4F6",
-    grid: "#374151",
-    zeroline: "#4B5563",
+    background: "rgba(0,0,0,0)",
+    paper: "rgba(0,0,0,0)",
+    text: "#ABB2BF",
+    titleText: "#F0F6FC",
+    grid: "#5C6370",
+    gridMinor: "#3E4451",
+    tick: "#9DA5B4",
+    tickMinor: "#5C6370",
+    zeroline: "#5C6370",
   },
   font: {
-    family: '"Inter", "Segoe UI", "Roboto", sans-serif',
+    family: '"Fira Sans", Arial, sans-serif',
     size: 12,
   },
 };
 
-export const applyThemeToLayout = (
-  layout: Partial<Layout>,
-  theme: PlotTheme
-): Partial<Layout> => {
+export const applyThemeToLayout = (layout: Partial<Layout>, theme: PlotTheme): Partial<Layout> => {
+  const titleSize = layout.font?.size ?? 16;
+  const tickSize = 14;
+
   return {
     ...layout,
     paper_bgcolor: theme.colors.paper,
     plot_bgcolor: theme.colors.background,
     font: {
-      family: theme.font.family,
-      size: theme.font.size,
-      color: theme.colors.text,
       ...layout.font,
+      family: theme.font.family,
+      size: layout.font?.size ?? theme.font.size,
+      color: theme.colors.text,
     },
+    ...(layout.title
+      ? {
+          title: {
+            ...layout.title,
+            font: {
+              ...layout.title.font,
+              family: theme.font.family,
+              size: layout.title.font?.size ?? titleSize,
+              color: theme.colors.titleText,
+            },
+          },
+        }
+      : {}),
     colorway: theme.colors.primary,
     margin: {
       l: 60,
@@ -78,15 +100,25 @@ export const applyThemeToLayout = (
     xaxis: {
       ...layout.xaxis,
       gridcolor: theme.colors.grid,
+      tickcolor: theme.colors.tick,
+      // Keep minor divisions dimmer than major ones.
+      minor: {
+        ...layout.xaxis?.minor,
+        gridcolor: theme.colors.gridMinor,
+        tickcolor: theme.colors.tickMinor,
+      },
       zerolinecolor: theme.colors.zeroline,
       tickfont: {
-        size: theme.font.size - 1,
+        size: tickSize,
         color: theme.colors.text,
         family: theme.font.family,
       },
       title: {
+        ...(typeof layout.xaxis?.title === "object" ? layout.xaxis.title : {}),
         font: {
-          size: theme.font.size,
+          ...(typeof layout.xaxis?.title === "object" ? layout.xaxis.title.font : {}),
+          size:
+            (typeof layout.xaxis?.title === "object" && layout.xaxis.title.font?.size) || titleSize,
           color: theme.colors.text,
           family: theme.font.family,
         },
@@ -95,19 +127,42 @@ export const applyThemeToLayout = (
     yaxis: {
       ...layout.yaxis,
       gridcolor: theme.colors.grid,
+      tickcolor: theme.colors.tick,
+      minor: {
+        ...layout.yaxis?.minor,
+        gridcolor: theme.colors.gridMinor,
+        tickcolor: theme.colors.tickMinor,
+      },
       zerolinecolor: theme.colors.zeroline,
       tickfont: {
-        size: theme.font.size - 1,
+        size: tickSize,
         color: theme.colors.text,
         family: theme.font.family,
       },
       title: {
+        ...(typeof layout.yaxis?.title === "object" ? layout.yaxis.title : {}),
         font: {
-          size: theme.font.size,
+          ...(typeof layout.yaxis?.title === "object" ? layout.yaxis.title.font : {}),
+          size:
+            (typeof layout.yaxis?.title === "object" && layout.yaxis.title.font?.size) || titleSize,
           color: theme.colors.text,
           family: theme.font.family,
         },
       },
     },
+    coloraxis: layout.coloraxis
+      ? {
+          ...layout.coloraxis,
+          colorbar: {
+            ...layout.coloraxis.colorbar,
+            tickfont: {
+              ...layout.coloraxis.colorbar?.tickfont,
+              size: tickSize,
+              color: theme.colors.text,
+              family: theme.font.family,
+            },
+          },
+        }
+      : layout.coloraxis,
   };
 };

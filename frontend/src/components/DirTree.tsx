@@ -2,12 +2,14 @@ import {
   useState,
   useMemo,
   useEffect,
+  useLayoutEffect,
   useRef,
   useCallback,
   forwardRef,
   useImperativeHandle,
 } from "react";
 import axios from "axios";
+import { createPortal } from "react-dom";
 import { PROD_BACKEND_URL } from "../config";
 import { useVirtualizer, Virtualizer } from "@tanstack/react-virtual";
 import { useTree } from "@headless-tree/react";
@@ -25,9 +27,9 @@ import {
   Search,
   SortAsc,
   SortDesc,
+  ArrowUpDown,
   Filter,
   Plus,
-  Minus,
   GripVertical,
   ChevronDown,
   ChevronRight,
@@ -43,15 +45,21 @@ import {
   FileText,
   HardDrive,
   Table,
+  Radio,
   SearchXIcon,
-  Lightbulb,
   X,
   NotebookPen,
   LoaderCircle,
   Download,
   MoveUp,
   MoveDown,
-  Radio,
+  Eye,
+  EyeOff,
+  Heart,
+  HeartCrack,
+  Trash2,
+  Tag as TagIcon,
+  Grid3x3,
 } from "lucide-react";
 
 // Local imports
@@ -59,17 +67,28 @@ import { TreeNode, convertApiNode } from "./treeUtils";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useToast } from "../hooks/useToast";
 import { useSidebarStore } from "../stores/sidebarStore";
+import {
+  effectiveState,
+  inheritedState,
+  isPathTrashed,
+  useLibraryStore,
+  normalizePath,
+} from "../stores/libraryStore";
+import TagPopover from "./TagPopover";
+import TagFilterMenu from "./TagFilterMenu";
 import Tooltip from "./Tooltip";
+import RibbonFlyout from "./Plots/RibbonFlyout";
 import { BasketItem } from "./Basket";
-import type { AttrData } from "./interfaces";
 import { useShortcut } from "../hooks/useGlobalShortcuts";
+import { useSettingsStore } from "../stores/settingsStore";
 import {
   detectDatasetKind,
-  hasDatasetTag,
   isDatasetNode,
   isDatasetPath,
   isSqliteContainerPath,
 } from "../utils/datasetPaths";
+import { finishArchiveDownload } from "../utils/download";
+import { formatQanaryDatasetName } from "../utils/measurementDisplay";
 
 // Global cache to persist data across component mounts/unmounts
 const globalDirTreeCache = new Map<
@@ -81,6 +100,23 @@ const globalDirTreeCache = new Map<
 >();
 
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+// Browsing a tree touches many folders, and each entry holds that folder's
+// whole listing, so the cache keeps only the most recent ones.
+const CACHE_MAX_FOLDERS = 25;
+
+const rememberFolder = (path: string, data: TreeNode[]) => {
+  const now = Date.now();
+  for (const [key, entry] of globalDirTreeCache) {
+    if (now - entry.timestamp >= CACHE_DURATION) globalDirTreeCache.delete(key);
+  }
+  globalDirTreeCache.delete(path);
+  globalDirTreeCache.set(path, { data, timestamp: now });
+  while (globalDirTreeCache.size > CACHE_MAX_FOLDERS) {
+    const oldest = globalDirTreeCache.keys().next().value;
+    if (oldest === undefined) break;
+    globalDirTreeCache.delete(oldest);
+  }
+};
 
 interface DirTreeProps {
   path?: string; // Path to load directory from
@@ -93,9 +129,6 @@ interface DirTreeProps {
   onOpenSampleNotes?: (node: TreeNode) => void; // For opening pooled sample notes
   onDownload?: (node: TreeNode) => void; // For downloading datasets
   onCycleDataset?: (direction: "prev" | "next") => void; // For cycling through datasets
-  onStartLoadingAttributes?: (itemId: string) => void;
-  onUpdateBasketItemAttributes?: (itemId: string, attributes: AttrData) => void;
-  onOpenHelp?: () => void; // For opening the Help modal
 }
 
 /**
@@ -112,6 +145,26 @@ interface DirTreeProps {
  * - Maintains smooth scrolling and interactions
  * - Reduces memory footprint for large tree structures
  */
+// Explorer layout mode. Rows gain a date column once the tree actually has
+// room for them -- reached either by dragging the sidebar wider or by the
+// full-window Explorer view. The switch is a class on the DirTree root plus a
+// CSS rule (see .qimchi-row-meta in index.css) rather than a context, so the
+// row component stays untouched by the width state.
+const WIDE_LAYOUT_MIN_WIDTH = 640;
+
+// Fixed-width, locale-independent stamp: the column is a scan-and-compare aid,
+// so a stable "2026-03-14 08:32" beats a localised string that changes length
+// with the month name and gets truncated mid-word.
+const pad = (value: number) => String(value).padStart(2, "0");
+
+const formatRowTimestamp = (timestamp?: Date) => {
+  if (!timestamp || Number.isNaN(timestamp.getTime())) return "";
+  const date = `${timestamp.getFullYear()}-${pad(timestamp.getMonth() + 1)}-${pad(
+    timestamp.getDate(),
+  )}`;
+  return `${date} ${pad(timestamp.getHours())}:${pad(timestamp.getMinutes())}`;
+};
+
 const DirTree = ({
   path,
   onSelectNode,
@@ -123,40 +176,230 @@ const DirTree = ({
   onOpenSampleNotes,
   onDownload,
   onCycleDataset,
-  onStartLoadingAttributes,
-  onUpdateBasketItemAttributes,
-  onOpenHelp,
 }: DirTreeProps) => {
   const { showToast } = useToast();
 
+  // Width-driven layout mode. A callback ref (rather than useRef) because the
+  // component returns early while loading/erroring, so the node identity has to
+  // re-trigger the observer when the real tree finally mounts.
+  const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
+  const [isWide, setIsWide] = useState(false);
+
+  useEffect(() => {
+    if (!rootEl) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setIsWide(entry.contentRect.width >= WIDE_LAYOUT_MIN_WIDTH);
+    });
+    observer.observe(rootEl);
+    return () => observer.disconnect();
+  }, [rootEl]);
+
   // Use Zustand store for persistent state
   const { componentStates, updateDirTreeState } = useSidebarStore();
+  // The sort field is a saved setting; its direction stays per-browser.
+  const sortBy = useSettingsStore((state) => state.settings.explorer.sortBy);
+  const autoAddLiveToBasket = useSettingsStore((state) => state.settings.live.autoAddToBasket);
+  const autoAddLiveToBasketRef = useRef(autoAddLiveToBasket);
+  autoAddLiveToBasketRef.current = autoAddLiveToBasket;
   const {
     searchInput,
     searchTerm,
-    sortBy,
     sortDirection,
-    filterBy,
     showFilters,
-    isExpanded,
+    lastPath,
     showLiveOnly,
+    hiddenLiveMeasurementIds = [],
+    expandedNodeIds = [],
     // lastPath, // TODO: Use this to track the last loaded path
   } = componentStates.dirTree;
+
+  // Library (heart/trash/tag) state + DirTree filters (see stores/libraryStore).
+  const libStatesByPath = useLibraryStore((s) => s.statesByPath);
+  const filterHeartedOnly = useLibraryStore((s) => s.filterHeartedOnly);
+  const showTrashed = useLibraryStore((s) => s.showTrashed);
+  const selectedTagIds = useLibraryStore((s) => s.selectedTagIds);
+  const libraryTags = useLibraryStore((s) => s.tags);
+  const setFilterHeartedOnly = useLibraryStore((s) => s.setFilterHeartedOnly);
+  const setShowTrashed = useLibraryStore((s) => s.setShowTrashed);
+  const toggleSelectedTag = useLibraryStore((s) => s.toggleSelectedTag);
+  const applyHeartMany = useLibraryStore((s) => s.applyHeartMany);
+  const applyTrashMany = useLibraryStore((s) => s.applyTrashMany);
+  const applyTagMany = useLibraryStore((s) => s.applyTagMany);
+  const createLibraryTag = useLibraryStore((s) => s.createTag);
+  const renameLibraryTag = useLibraryStore((s) => s.renameTag);
+  const deleteLibraryTag = useLibraryStore((s) => s.deleteTag);
+  const [bulkTagAnchor, setBulkTagAnchor] = useState<HTMLElement | null>(null);
+  const clearSelectedTags = useLibraryStore((s) => s.clearSelectedTags);
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
+  const tagFilterBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [filterButtonEl, setFilterButtonEl] = useState<HTMLButtonElement | null>(null);
+  const filterMenuRef = useRef<HTMLDivElement | null>(null);
+  const fetchLibraryStates = useLibraryStore((s) => s.fetchStates);
+  const checkDbStatus = useLibraryStore((s) => s.checkDbStatus);
+  const dbAvailable = useLibraryStore((s) => s.dbAvailable);
+  const dbError = useLibraryStore((s) => s.dbError);
+
+  // Confirm the library DB is up before loading persisted hearts/trash: if it
+  // isn't, the controls are disabled rather than failing on click.
+  useEffect(() => {
+    void checkDbStatus().then(() => fetchLibraryStates());
+  }, [checkDbStatus, fetchLibraryStates]);
+
+  useEffect(() => {
+    if (!showFilters) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (
+        filterMenuRef.current?.contains(target) ||
+        filterButtonEl?.contains(target) ||
+        target.closest("[data-explorer-tag-filter]")
+      ) {
+        return;
+      }
+      updateDirTreeState({ showFilters: false });
+      setTagMenuOpen(false);
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
+  }, [filterButtonEl, showFilters, updateDirTreeState]);
+
+  // Split the search box into "#tag" tokens and plain text, so tags can be
+  // filtered by typing as well as from the Tags dropdown.
+  // "#cooldown sweep" = tag AND name-contains.
+  const { searchTags, searchText, unknownSearchTags } = useMemo(() => {
+    const raw = searchTerm ?? "";
+    const wanted: string[] = [];
+    // Tag names may contain spaces (e.g. "Custom tag")
+    const tagPattern = /#"([^"]+)"|#(\S+)/g;
+    let match: RegExpExecArray | null;
+    while ((match = tagPattern.exec(raw)) !== null) {
+      wanted.push((match[1] ?? match[2]).toLowerCase());
+    }
+    const rest = raw.replace(tagPattern, " ").split(/\s+/).filter(Boolean);
+    const byName = new Map(libraryTags.map((t) => [t.name.toLowerCase(), t.id]));
+    const ids: number[] = [];
+    const unknown: string[] = [];
+    for (const name of wanted) {
+      const id = byName.get(name);
+      if (id === undefined) unknown.push(name);
+      else ids.push(id);
+    }
+    return {
+      searchTags: ids,
+      searchText: rest.join(" "),
+      unknownSearchTags: unknown,
+    };
+  }, [searchTerm, libraryTags]);
+
+  // Tags from the dropdown and from the search box combine (match ANY, as
+  // before).
+  const effectiveTagIds = useMemo(
+    () => Array.from(new Set([...selectedTagIds, ...searchTags])),
+    [selectedTagIds, searchTags],
+  );
 
   // Local state that doesn't need persistence
   const [draggedItem, setDraggedItem] = useState<string | null>(null);
   const [treeError, setTreeError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [apiData, setApiData] = useState<TreeNode[]>([]);
+  const hiddenLiveIdsRef = useRef<Set<string>>(new Set(hiddenLiveMeasurementIds));
+  const latestLiveMeasurementsRef = useRef<TreeNode[]>([]);
+  const activeDataSourceRef = useRef(showLiveOnly);
+  const loadRequestIdRef = useRef(0);
+  const previousShowLiveOnlyRef = useRef(showLiveOnly);
   const autoAddedMeasurements = useRef<Set<string>>(new Set());
   const basketItemsRef = useRef<BasketItem[]>(basketItems);
   const onAddToBasketRef = useRef<typeof onAddToBasket>(onAddToBasket);
-  const onStartLoadingAttributesRef = useRef<typeof onStartLoadingAttributes>(
-    onStartLoadingAttributes,
+
+  useEffect(() => {
+    hiddenLiveIdsRef.current = new Set(hiddenLiveMeasurementIds);
+  }, [hiddenLiveMeasurementIds]);
+
+  const setHiddenLiveIds = useCallback(
+    (ids: Set<string>) => {
+      hiddenLiveIdsRef.current = ids;
+      updateDirTreeState({ hiddenLiveMeasurementIds: Array.from(ids) });
+    },
+    [updateDirTreeState],
   );
-  const onUpdateBasketItemAttributesRef = useRef<
-    typeof onUpdateBasketItemAttributes
-  >(onUpdateBasketItemAttributes);
+
+  const restoreHiddenLiveMeasurement = useCallback(
+    (measurementId?: string) => {
+      const nextHidden = new Set(hiddenLiveIdsRef.current);
+      if (measurementId) {
+        nextHidden.delete(measurementId);
+      } else {
+        nextHidden.clear();
+      }
+      setHiddenLiveIds(nextHidden);
+      setApiData(latestLiveMeasurementsRef.current.filter((node) => !nextHidden.has(node.id)));
+    },
+    [setHiddenLiveIds],
+  );
+
+  const hideLiveMeasurement = useCallback(
+    (node: TreeNode) => {
+      const nextHidden = new Set(hiddenLiveIdsRef.current);
+      nextHidden.add(node.id);
+      setHiddenLiveIds(nextHidden);
+      setApiData((current) => current.filter((item) => item.id !== node.id));
+
+      // This also closes the small race between dismissing a row and the next
+      // one-second poll deciding it is a newly discovered measurement.
+      autoAddedMeasurements.current.add(node.id);
+      showToast(`${node.name} hidden from Live Measurements`, "info", 6000, "Explorer", undefined, {
+        label: "Undo",
+        onClick: () => restoreHiddenLiveMeasurement(node.id),
+      });
+    },
+    [restoreHiddenLiveMeasurement, setHiddenLiveIds, showToast],
+  );
+
+  const filterHiddenLiveMeasurements = useCallback(
+    (measurements: TreeNode[]): TreeNode[] => {
+      latestLiveMeasurementsRef.current = measurements;
+      const activeIds = new Set(measurements.map((node) => node.id));
+      const retainedHidden = new Set(
+        Array.from(hiddenLiveIdsRef.current).filter((id) => activeIds.has(id)),
+      );
+
+      // Once a measurement actually ends, forget its dismissal. A future run
+      // should never inherit UI state from an old registry entry.
+      if (retainedHidden.size !== hiddenLiveIdsRef.current.size) {
+        for (const id of hiddenLiveIdsRef.current) {
+          if (!activeIds.has(id)) {
+            autoAddedMeasurements.current.delete(id);
+          }
+        }
+        setHiddenLiveIds(retainedHidden);
+      }
+
+      return measurements.filter((node) => !retainedHidden.has(node.id));
+    },
+    [setHiddenLiveIds],
+  );
+
+  // Clear stale Explorer rows before the newly selected pane is painted.
+  useLayoutEffect(() => {
+    activeDataSourceRef.current = showLiveOnly;
+
+    if (previousShowLiveOnlyRef.current === showLiveOnly) return;
+    previousShowLiveOnlyRef.current = showLiveOnly;
+    loadRequestIdRef.current += 1;
+    setTreeError(null);
+    setIsLoading(true);
+
+    if (showLiveOnly) {
+      setApiData(
+        latestLiveMeasurementsRef.current.filter((node) => !hiddenLiveIdsRef.current.has(node.id)),
+      );
+      return;
+    }
+
+    const cached = path ? globalDirTreeCache.get(path) : undefined;
+    setApiData(cached?.data ?? []);
+  }, [path, showLiveOnly]);
 
   useEffect(() => {
     basketItemsRef.current = basketItems;
@@ -165,14 +408,6 @@ const DirTree = ({
   useEffect(() => {
     onAddToBasketRef.current = onAddToBasket;
   }, [onAddToBasket]);
-
-  useEffect(() => {
-    onStartLoadingAttributesRef.current = onStartLoadingAttributes;
-  }, [onStartLoadingAttributes]);
-
-  useEffect(() => {
-    onUpdateBasketItemAttributesRef.current = onUpdateBasketItemAttributes;
-  }, [onUpdateBasketItemAttributes]);
 
   // Debounce search input
   useEffect(() => {
@@ -186,11 +421,14 @@ const DirTree = ({
   // Reset error when dependencies change
   useEffect(() => {
     setTreeError(null);
-  }, [searchTerm, sortBy, sortDirection, filterBy]);
+  }, [searchTerm, sortBy, sortDirection]);
 
   // Load data from API
   const loadDirectoryData = useCallback(
     (path: string, forceReload: boolean = false) => {
+      const requestId = ++loadRequestIdRef.current;
+      const isCurrentRequest = () => loadRequestIdRef.current === requestId;
+
       // If showLiveOnly is true, load from /load-live/ endpoint instead
       if (showLiveOnly) {
         setIsLoading(true);
@@ -200,8 +438,11 @@ const DirTree = ({
         axios
           .post(`${PROD_BACKEND_URL}/load-live/`)
           .then((response) => {
+            if (!isCurrentRequest() || !activeDataSourceRef.current) return;
             if (response.data.success && response.data.children) {
-              const children = response.data.children.map(convertApiNode);
+              const children = filterHiddenLiveMeasurements(
+                response.data.children.map(convertApiNode),
+              );
               setApiData(children);
               console.log(`Loaded ${children.length} live measurements`);
             } else {
@@ -210,6 +451,7 @@ const DirTree = ({
             }
           })
           .catch((error) => {
+            if (!isCurrentRequest() || !activeDataSourceRef.current) return;
             console.error("Error loading live measurements:", error);
             let errorMessage = "Failed to load live measurements";
             if (error.response) {
@@ -222,7 +464,9 @@ const DirTree = ({
             setTreeError(errorMessage);
           })
           .finally(() => {
-            setIsLoading(false);
+            if (isCurrentRequest() && activeDataSourceRef.current) {
+              setIsLoading(false);
+            }
           });
         return;
       }
@@ -247,6 +491,7 @@ const DirTree = ({
           path,
         })
         .then((response) => {
+          if (!isCurrentRequest() || activeDataSourceRef.current) return;
           console.log("API Response status:", response.status);
           // console.log("API Response data:", response.data);
 
@@ -256,15 +501,12 @@ const DirTree = ({
             : [convertApiNode(response.data)];
           // console.log("Converted tree data:", treeData);
 
-          // Store in global cache
-          globalDirTreeCache.set(path, {
-            data: treeData,
-            timestamp: Date.now(),
-          });
+          rememberFolder(path, treeData);
 
           setApiData(treeData);
         })
         .catch((error) => {
+          if (!isCurrentRequest() || activeDataSourceRef.current) return;
           console.error("Error loading directory data:", error);
           showToast("Failed to load directory data", "error");
 
@@ -283,10 +525,12 @@ const DirTree = ({
           setTreeError(`Failed to load directory: ${errorMessage}`);
         })
         .finally(() => {
-          setIsLoading(false);
+          if (isCurrentRequest() && !activeDataSourceRef.current) {
+            setIsLoading(false);
+          }
         });
     },
-    [showLiveOnly, showToast],
+    [filterHiddenLiveMeasurements, showLiveOnly, showToast],
   );
 
   // Load data when path or showLiveOnly changes
@@ -315,31 +559,26 @@ const DirTree = ({
       axios
         .post(`${PROD_BACKEND_URL}/load-live/`)
         .then((response) => {
+          if (!activeDataSourceRef.current) return;
           if (response.data.success && response.data.children) {
-            const newMeasurements = response.data.children.map(convertApiNode);
+            const newMeasurements = filterHiddenLiveMeasurements(
+              response.data.children.map(convertApiNode),
+            );
 
             // Incrementally update apiData without full rebuild
             setApiData((prevData) => {
               // Create a map of existing measurements by ID for quick lookup
-              const existingMap = new Map(
-                prevData.map((node) => [node.id, node]),
-              );
+              const existingMap = new Map(prevData.map((node) => [node.id, node]));
 
               // Create a map of new measurements by ID
-              const newMap = new Map(
-                newMeasurements.map((node: TreeNode) => [node.id, node]),
-              );
+              const newMap = new Map(newMeasurements.map((node: TreeNode) => [node.id, node]));
 
               // Find measurements to add (in new but not in existing)
-              const toAdd = newMeasurements.filter(
-                (node: TreeNode) => !existingMap.has(node.id),
-              );
+              const toAdd = newMeasurements.filter((node: TreeNode) => !existingMap.has(node.id));
 
               // Find measurements to remove (in existing but not in new)
               const toRemove = new Set(
-                prevData
-                  .filter((node) => !newMap.has(node.id))
-                  .map((node) => node.id),
+                prevData.filter((node) => !newMap.has(node.id)).map((node) => node.id),
               );
 
               // Update existing nodes and add new ones
@@ -361,57 +600,19 @@ const DirTree = ({
                 // Auto-add new live measurements to basket
                 toAdd.forEach((node: TreeNode) => {
                   // Check if already in basket or already auto-added
-                  const inBasket = basketItemsRef.current?.some(
-                    (item) => item.id === node.id,
-                  );
-                  const alreadyAutoAdded = autoAddedMeasurements.current.has(
-                    node.id,
-                  );
+                  const inBasket = basketItemsRef.current?.some((item) => item.id === node.id);
+                  const alreadyAutoAdded = autoAddedMeasurements.current.has(node.id);
 
                   if (
+                    autoAddLiveToBasketRef.current &&
                     !inBasket &&
                     !alreadyAutoAdded &&
                     onAddToBasketRef.current
                   ) {
-                    console.log(
-                      `Auto-adding live measurement to basket: ${node.name}`,
-                    );
+                    console.log(`Auto-adding live measurement to basket: ${node.name}`);
+                    // onAddToBasket also loads the measurement's attributes.
                     onAddToBasketRef.current(node);
                     autoAddedMeasurements.current.add(node.id);
-
-                    // Load attributes for the new live measurement
-                    if (
-                      node.type === "file" &&
-                      onStartLoadingAttributesRef.current &&
-                      onUpdateBasketItemAttributesRef.current
-                    ) {
-                      onStartLoadingAttributesRef.current(node.id);
-                      axios
-                        .post(`${PROD_BACKEND_URL}/load-attrs/`, {
-                          path: node.path,
-                        })
-                        .then((response) => {
-                          console.log(
-                            "Attributes loaded for auto-added live measurement:",
-                            node.id,
-                            // response.data,
-                          );
-                          onUpdateBasketItemAttributesRef.current?.(
-                            node.id,
-                            response.data,
-                          );
-                        })
-                        .catch((error) => {
-                          console.error(
-                            "Error loading attributes for auto-added live measurement:",
-                            error,
-                          );
-                          onUpdateBasketItemAttributesRef.current?.(
-                            node.id,
-                            {},
-                          );
-                        });
-                    }
                   }
                 });
               }
@@ -438,177 +639,237 @@ const DirTree = ({
       console.log("Stopping live measurement polling");
       clearInterval(pollInterval);
     };
-  }, [showLiveOnly]); // Only re-run when showLiveOnly changes
+  }, [filterHiddenLiveMeasurements, showLiveOnly]);
 
-  // Process and filter data for headless-tree with sorting
-  const processedData = useMemo(() => {
-    const allNodes = new Map<string, TreeNode>();
+  // Held in a ref so the toolbar handlers can read the current set without
+  // making every expansion a dependency of the effects below.
+  const expandedNodeIdsRef = useRef<Set<string>>(new Set(expandedNodeIds));
+  useEffect(() => {
+    expandedNodeIdsRef.current = new Set(expandedNodeIds);
+  }, [expandedNodeIds]);
 
-    // Helper function to collect all leaf nodes (files) from the tree
-    const collectLeafNodes = (nodes: TreeNode[]): TreeNode[] => {
-      const leaves: TreeNode[] = [];
+  // Seeded once, when the tree is created: initialState is not re-read, and
+  // DirTree remounts per path anyway (Explorer keys it on the folder).
+  //
+  // Only replayed for the folder it was recorded in. Navigating elsewhere --
+  // double-clicking into a subfolder, or Back/Forward -- builds a different
+  // tree, where those ids mean nothing and would only make the toolbar think
+  // something was expanded.
+  const initialExpandedItems = useRef<string[]>(
+    lastPath === path ? ["root", ...expandedNodeIds] : ["root"],
+  );
 
-      const traverse = (node: TreeNode) => {
-        if (node.type === "file") {
-          leaves.push(node);
-        }
-        if (node.children) {
-          node.children.forEach(traverse);
-        }
-      };
+  useEffect(() => {
+    if (lastPath !== path) {
+      expandedNodeIdsRef.current = new Set();
+      updateDirTreeState({ lastPath: path, expandedNodeIds: [] });
+    }
+    // Once per mount; DirTree is remounted whenever the path changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-      nodes.forEach(traverse);
-      return leaves;
-    };
+  // Signature that changes only when a library filter is active AND the
+  // relevant heart/trash state changes.
+  const libFilterSignature = useMemo(() => {
+    if (!filterHeartedOnly && !showTrashed && effectiveTagIds.length === 0) return "";
+    return Object.entries(libStatesByPath)
+      .filter(([, v]) => v.hearted || v.trashed || v.tags.length > 0)
+      .map(([k, v]) => `${k}:${v.hearted ? 1 : 0}${v.trashed ? 1 : 0}:${v.tags.join(",")}`)
+      .sort()
+      .join("|");
+  }, [libStatesByPath, filterHeartedOnly, showTrashed, effectiveTagIds]);
 
-    // Helper function to sort nodes
-    const sortNodes = (nodes: TreeNode[]): TreeNode[] => {
-      return [...nodes].sort((a, b) => {
-        let comparison = 0;
-
-        switch (sortBy) {
-          case "name": {
-            // Use natural sort for names to handle numeric sequences properly
-            comparison = a.name.localeCompare(b.name, undefined, {
-              numeric: true,
-              sensitivity: "base",
-            });
-            break;
-          }
-          case "timestamp": {
-            const aTime = a.timestamp?.getTime() || 0;
-            const bTime = b.timestamp?.getTime() || 0;
-            comparison = aTime - bTime;
-            break;
-          }
-          case "size": {
-            const aSize = a.size || 0;
-            const bSize = b.size || 0;
-            comparison = aSize - bSize;
-            break;
-          }
-          case "chrono": {
-            // Chronological sorting by timestamp for dataset files only
-            const aTime = a.timestamp?.getTime() || 0;
-            const bTime = b.timestamp?.getTime() || 0;
-            comparison = aTime - bTime;
-            break;
-          }
-        }
-
-        // Chrono sort is always descending (newest first)
-        const finalDirection = sortBy === "chrono" ? "desc" : sortDirection;
-        return finalDirection === "desc" ? -comparison : comparison;
+  // id -> node over the RAW tree, rebuilt only when the API data changes.
+  // Filtering and sorting read through this instead of allocating a parallel
+  // copy of every node on each pass.
+  const nodeIndex = useMemo(() => {
+    const index = new Map<string, TreeNode>();
+    const walk = (nodes: TreeNode[]) => {
+      nodes.forEach((node) => {
+        index.set(node.id, node);
+        if (node.children) walk(node.children);
       });
     };
+    walk(apiData);
+    return index;
+  }, [apiData]);
 
-    // Helper function to check if a node matches search
+  // Which nodes survive the current filters. Kept separate from ordering so
+  // changing the sort or its direction does not re-run every predicate over
+  // the whole tree, and so a keystroke sorts only the survivors.
+  const matchedIds = useMemo(() => {
     const matchesSearch = (node: TreeNode): boolean => {
-      if (!searchTerm) return true;
-      return (
-        node.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        node.path.toLowerCase().includes(searchTerm.toLowerCase())
-      );
+      if (!searchText) return true;
+      const needle = searchText.toLowerCase();
+      return node.name.toLowerCase().includes(needle) || node.path.toLowerCase().includes(needle);
     };
 
-    // Helper function to check if a node should be included based on filter
-    const shouldIncludeNode = (node: TreeNode): boolean => {
-      if (filterBy === "all") return true;
-      if (filterBy === "dataset" || filterBy === "zarr") {
-        return isDatasetPath(node.path) || hasDatasetTag(node.tags);
-      }
-      if (filterBy === "folder") {
-        return node.type === "folder";
-      }
+    const libraryFilterActive =
+      filterHeartedOnly ||
+      showTrashed ||
+      effectiveTagIds.length > 0 ||
+      unknownSearchTags.length > 0;
+
+    type Marks = { hearted: boolean; trashed: boolean; tags: number[] };
+    const noMarks: Marks = { hearted: false, trashed: false, tags: [] };
+    // A node carries its own marks plus those of every folder it sits in.
+    const marksOf = (node: TreeNode, inherited: Marks): Marks => {
+      const own = libStatesByPath[normalizePath(node.path)];
+      if (!own) return inherited;
+      const trashed = inherited.trashed || own.trashed;
+      return {
+        hearted: !trashed && (inherited.hearted || own.hearted),
+        trashed,
+        tags: [...inherited.tags, ...own.tags],
+      };
+    };
+
+    const shouldIncludeNode = (node: TreeNode, marks: Marks): boolean => {
+      // A folder is kept by the library filters when it is marked itself;
+      // otherwise only when it contains matching descendants.
+      if (node.type === "folder" && libraryFilterActive && marks === noMarks) return false;
+      // A "#name" that matches no known tag can never match a measurement.
+      if (unknownSearchTags.length > 0) return false;
+      if (showTrashed && !marks.trashed) return false;
+      if (filterHeartedOnly && !marks.hearted) return false;
+      if (effectiveTagIds.length > 0 && !effectiveTagIds.some((id) => marks.tags.includes(id)))
+        return false;
       return true;
     };
 
-    // Helper function to check if a folder has any matching children (recursively)
-    const hasMatchingChildren = (node: TreeNode): boolean => {
-      if (!node.children) return false;
-
-      return node.children.some((child) => {
-        const childMatches = shouldIncludeNode(child) && matchesSearch(child);
-        if (childMatches) return true;
-        if (child.type === "folder") return hasMatchingChildren(child);
-        return false;
-      });
+    // Post-order: a folder is kept when it matches itself or any descendant
+    // survived. The previous code answered that with a second recursive walk
+    // of each subtree (hasMatchingChildren) on top of this one.
+    const matched = new Set<string>();
+    const visit = (node: TreeNode, inherited: Marks): boolean => {
+      const marks = marksOf(node, inherited);
+      let anyChildMatched = false;
+      if (node.children) {
+        node.children.forEach((child) => {
+          if (visit(child, marks)) anyChildMatched = true;
+        });
+      }
+      const keep =
+        (shouldIncludeNode(node, marks) && matchesSearch(node)) ||
+        (node.type === "folder" && anyChildMatched);
+      if (keep) matched.add(node.id);
+      return keep;
     };
+    apiData.forEach((node) => visit(node, noMarks));
+    return matched;
+    // libStatesByPath is read inside but intentionally gated by libFilterSignature
+    // so hearts don't re-derive the tree when no filter is active.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    apiData,
+    searchText,
+    filterHeartedOnly,
+    showTrashed,
+    effectiveTagIds,
+    unknownSearchTags,
+    libFilterSignature,
+  ]);
 
-    const processNodes = (nodes: TreeNode[]): TreeNode[] => {
-      // For chronological sorting, flatten to show only leaf nodes (dataset files)
-      if (sortBy === "chrono") {
-        const allLeaves = collectLeafNodes(nodes);
-        const filteredLeaves = allLeaves.filter((node) => {
-          const shouldInclude = shouldIncludeNode(node);
-          const nodeMatchesSearch = matchesSearch(node);
-          return shouldInclude && nodeMatchesSearch;
-        });
-        const sortedLeaves = sortNodes(filteredLeaves);
+  // Structure and ordering, as id lists. Nothing here allocates a node.
+  const { rootIds, childrenById, visibleNodes, parentById } = useMemo(() => {
+    const compare = (a: TreeNode, b: TreeNode) => {
+      let comparison = 0;
 
-        // Add all leaf nodes to the allNodes map, ensuring they have no children
-        sortedLeaves.forEach((leaf) => {
-          const leafWithoutChildren = { ...leaf, children: undefined };
-          allNodes.set(leaf.id, leafWithoutChildren);
-        });
-
-        return sortedLeaves.map((leaf) => ({ ...leaf, children: undefined }));
+      switch (sortBy) {
+        case "name": {
+          // Natural sort so numeric sequences order the way they read.
+          comparison = a.name.localeCompare(b.name, undefined, {
+            numeric: true,
+            sensitivity: "base",
+          });
+          break;
+        }
+        case "timestamp":
+        case "chrono": {
+          comparison = (a.timestamp?.getTime() || 0) - (b.timestamp?.getTime() || 0);
+          break;
+        }
+        case "size": {
+          comparison = (a.size || 0) - (b.size || 0);
+          break;
+        }
       }
 
-      // Regular hierarchical processing for other sort types
-      const sortedNodes = sortNodes(nodes);
-      const processedNodes: TreeNode[] = [];
-
-      sortedNodes.forEach((node) => {
-        const shouldInclude = shouldIncludeNode(node);
-        const nodeMatchesSearch = matchesSearch(node);
-        const isFolder = node.type === "folder";
-        const folderHasMatches = isFolder ? hasMatchingChildren(node) : false;
-
-        // Include node if:
-        // 1. It matches both the filter criteria AND search term, OR
-        // 2. It's a folder that contains matching children (to maintain hierarchy)
-        if (
-          (shouldInclude && nodeMatchesSearch) ||
-          (isFolder && folderHasMatches)
-        ) {
-          let processedNode = { ...node };
-
-          // Process children if they exist
-          if (node.children) {
-            const processedChildren = processNodes(node.children);
-            processedNode = {
-              ...processedNode,
-              children: processedChildren,
-            };
-          }
-
-          allNodes.set(processedNode.id, processedNode);
-          processedNodes.push(processedNode);
-        }
-      });
-
-      return processedNodes;
+      // Chrono sort is always descending (newest first)
+      const finalDirection = sortBy === "chrono" ? "desc" : sortDirection;
+      return finalDirection === "desc" ? -comparison : comparison;
     };
 
-    const processedRootNodes = processNodes(apiData);
-    return { allNodes, rootNodes: processedRootNodes };
-  }, [apiData, filterBy, sortBy, sortDirection, searchTerm]);
+    const children = new Map<string, string[]>();
+    const visible = new Map<string, TreeNode>();
+    // id -> parent id, so a node can be revealed by expanding its ancestors.
+    const parents = new Map<string, string>();
 
-  // Get root level nodes for tree (now comes from processedData)
-  const rootNodes = useMemo(() => {
-    return processedData.rootNodes;
-  }, [processedData]);
+    // Chrono flattens to dataset leaves, so there is no hierarchy to build.
+    if (sortBy === "chrono") {
+      const leaves: TreeNode[] = [];
+      const collect = (nodes: TreeNode[]) => {
+        nodes.forEach((node) => {
+          if (node.type === "file" && matchedIds.has(node.id)) leaves.push(node);
+          if (node.children) collect(node.children);
+        });
+      };
+      collect(apiData);
+      leaves.sort(compare);
+      leaves.forEach((leaf) => visible.set(leaf.id, leaf));
+      return {
+        rootIds: leaves.map((leaf) => leaf.id),
+        childrenById: children,
+        visibleNodes: visible,
+        parentById: parents,
+      };
+    }
+
+    const buildLevel = (nodes: TreeNode[]): string[] => {
+      // filter() copies, so sorting here never mutates the source children.
+      const kept = nodes.filter((node) => matchedIds.has(node.id));
+      kept.sort(compare);
+      kept.forEach((node) => {
+        visible.set(node.id, node);
+        if (node.children) {
+          const childIds = buildLevel(node.children);
+          childIds.forEach((childId) => parents.set(childId, node.id));
+          children.set(node.id, childIds);
+        }
+      });
+      return kept.map((node) => node.id);
+    };
+
+    return {
+      rootIds: buildLevel(apiData),
+      childrenById: children,
+      visibleNodes: visible,
+      parentById: parents,
+    };
+  }, [apiData, matchedIds, sortBy, sortDirection]);
+
+  // Root level nodes for the tree.
+  const rootNodes = useMemo(
+    () => rootIds.map((id) => nodeIndex.get(id)).filter((node): node is TreeNode => !!node),
+    [rootIds, nodeIndex],
+  );
 
   // Initialize headless-tree with search feature
   // Use a key that changes when switching between chrono and non-chrono modes
   // This forces the tree to completely re-initialize
-  const treeKey = `${sortBy}-${filterBy}-${searchTerm}`;
+  // Only the chrono/hierarchical switch changes the shape of an item (chrono
+  // flattens to leaves, so isItemFolder flips). Filters and search only change
+  // which ids getChildren returns, which the virtualiser already re-renders --
+  // keying on them remounted the whole container, and its scroll position, on
+  // every keystroke.
+  const treeKey = sortBy === "chrono" ? "flat" : "tree";
 
   const tree = useTree<TreeNode>({
     rootItemId: "root",
     initialState: {
-      expandedItems: ["root"], // NOTE: Always start with root expanded
+      // Root, plus whatever the user had open last time. Everything else loads
+      // collapsed, so only expanded subtrees are ever materialised.
+      expandedItems: initialExpandedItems.current,
     },
     // Use proxy instances for better performance with large datasets
     instanceBuilder: buildProxiedInstance,
@@ -632,7 +893,7 @@ const DirTree = ({
             type: "folder",
           } as TreeNode;
         }
-        const node = processedData.allNodes.get(itemId);
+        const node = visibleNodes.get(itemId);
         if (!node) {
           console.warn(`Node not found for id: ${itemId}, sortBy: ${sortBy}`);
           return {
@@ -646,15 +907,16 @@ const DirTree = ({
       },
       getChildren: (itemId: string) => {
         if (itemId === "root") {
-          return rootNodes.map((node: TreeNode) => node.id);
+          return rootIds;
         }
         // In chrono mode, all items are leaf nodes (files) with no children
         if (sortBy === "chrono") {
           return [];
         }
 
-        const node = processedData.allNodes.get(itemId);
-        return node?.children?.map((child: TreeNode) => child.id) || [];
+        // childrenById, not node.children: visibleNodes holds the raw nodes,
+        // whose children include the ones the current filter dropped.
+        return childrenById.get(itemId) ?? [];
       },
     },
     indent: 12,
@@ -666,99 +928,130 @@ const DirTree = ({
       propMemoizationFeature, // For better memoization of props
     ],
   });
-  // Force tree refresh when switching to/from chrono mode
+
   useEffect(() => {
-    console.log("Sort mode changed to:", sortBy);
-    // Only force refresh when switching to/from chrono mode specifically
-    // For regular sorting, let the processedData memo handle the re-sorting
-    const timeoutId = setTimeout(() => {
-      if (sortBy === "chrono") {
-        // Switching to chrono mode - collapse everything since we show flat list
-        tree.collapseAll();
-        updateDirTreeState({ isExpanded: false });
-      }
-      // For other modes, don't interfere - let normal expansion logic handle it
-    }, 10);
+    tree.rebuildTree();
+  }, [tree, rootIds, childrenById]);
 
-    return () => clearTimeout(timeoutId);
-  }, [sortBy, tree, updateDirTreeState]);
+  // Scroll handle for the virtualised list, so cycling datasets can bring the
+  // new one into view.
+  const virtualizerRef = useRef<Virtualizer<HTMLDivElement, Element> | null>(null);
 
-  // Auto-expand tree when new data is loaded
-  useEffect(() => {
-    if (rootNodes.length > 0) {
-      // Small delay to ensure tree is fully initialized
-      const timeoutId = setTimeout(() => {
-        // Don't expand in chrono mode since we only have leaf nodes
-        if (sortBy !== "chrono") {
-          // Force a collapse/expand cycle to ensure tree shows items
-          tree.collapseAll();
-          setTimeout(() => {
-            tree.expandAll();
-            updateDirTreeState({ isExpanded: true });
-          }, 50);
-        } else {
-          // In chrono mode, we don't need expansion since all items are files
-          updateDirTreeState({ isExpanded: false });
-        }
-      }, 100); // Increase delay to 100ms to ensure tree is ready
+  // Set by revealNode; consumed one render later, once the expansions it made
+  // have been rendered and the virtualiser knows about the new rows.
+  const [revealNodeId, setRevealNodeId] = useState<string | null>(null);
 
-      return () => clearTimeout(timeoutId);
-    }
-  }, [rootNodes, tree, sortBy, updateDirTreeState]);
+  // Derived from the tree rather than stored: after navigating into a folder
+  // the new tree is collapsed, but a remembered flag still read "expanded" and
+  // left the button offering Collapse all. getItems() only returns what is
+  // materialised, so this is bounded by what is on screen.
+  const anyFolderExpanded = tree.getItems().some((item) => item.isFolder() && item.isExpanded());
+
+  // Persist which folders are open so a refresh restores them.
   const updateExpandedNodeState = useCallback(
     (nodeId: string, nextExpanded: boolean) => {
-      void nodeId;
-      void nextExpanded;
+      const next = new Set(expandedNodeIdsRef.current);
+      if (nextExpanded) {
+        next.add(nodeId);
+      } else {
+        next.delete(nodeId);
+      }
+      expandedNodeIdsRef.current = next;
+      updateDirTreeState({ expandedNodeIds: [...next] });
     },
-    [],
+    [updateDirTreeState],
   );
 
-  const handleSort = (newSortBy: typeof sortBy) => {
-    if (sortBy === newSortBy) {
-      // Don't toggle direction for chrono sort - it's always newest first
-      if (newSortBy === "chrono") return;
+  // Select a node and scroll it into view, opening whatever folders it sits
+  // in. Ancestors are expanded top-down because headless-tree only
+  // materialises the children of an expanded item -- expand() rebuilds the
+  // tree synchronously, so the next level down exists by the time we reach it.
+  const revealNode = useCallback(
+    (nodeId: string) => {
+      const ancestors: string[] = [];
+      let parentId = parentById.get(nodeId);
+      while (parentId) {
+        ancestors.unshift(parentId);
+        parentId = parentById.get(parentId);
+      }
 
-      updateDirTreeState({
-        sortDirection: sortDirection === "asc" ? "desc" : "asc",
+      ancestors.forEach((ancestorId) => {
+        const item = tree.getItemInstance(ancestorId);
+        if (item && !item.isExpanded()) {
+          item.expand();
+          updateExpandedNodeState(ancestorId, true);
+        }
       });
-    } else {
-      updateDirTreeState({
-        sortBy: newSortBy,
-        // For chronological view, default to descending (newest first)
-        // For others, default to ascending
-        sortDirection: newSortBy === "chrono" ? "desc" : "asc",
-      });
-    }
+
+      setRevealNodeId(nodeId);
+    },
+    [parentById, tree, updateExpandedNodeState],
+  );
+
+  useEffect(() => {
+    if (!revealNodeId) return;
+    setRevealNodeId(null);
+
+    const index = tree.getItems().findIndex((item) => item.getId() === revealNodeId);
+    if (index === -1) return;
+
+    tree.setSelectedItems([revealNodeId]);
+    tree.getItemInstance(revealNodeId)?.setFocused();
+
+    // "auto" moves the list as little as it can, and not at all while the row
+    // is already on screen -- stepping to the next dataset should not throw
+    // the tree around. The scroll padding configured on the virtualiser keeps
+    // a couple of rows of context when it does have to scroll.
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    virtualizerRef.current?.scrollToIndex(index, {
+      align: "auto",
+      behavior: prefersReducedMotion ? "auto" : "smooth",
+    });
+  }, [revealNodeId, tree]);
+
+  const selectSort = (newSortBy: typeof sortBy) => {
+    useSettingsStore.getState().update(["explorer", "sortBy"], newSortBy);
+    if (newSortBy === "chrono") updateDirTreeState({ sortDirection: "desc" });
+  };
+
+  const toggleSortDirection = () => {
+    if (sortBy === "chrono") return;
+    updateDirTreeState({ sortDirection: sortDirection === "asc" ? "desc" : "asc" });
   };
 
   const handleDragStart = (e: React.DragEvent, node: TreeNode) => {
     try {
       e.stopPropagation();
 
+      const libraryStates = useLibraryStore.getState().statesByPath;
+      if (isPathTrashed(libraryStates, node.path)) {
+        e.preventDefault();
+        showToast("Restore this item or its parent folder before dragging it.", "warning");
+        return;
+      }
+
       // Check if the dragged item is selected
       const selectedNodes = getSelectedNodes();
-      const isNodeSelected = selectedNodes.some(
-        (selectedNode) => selectedNode.id === node.id,
-      );
+      const isNodeSelected = selectedNodes.some((selectedNode) => selectedNode.id === node.id);
 
       // If the dragged item is selected and there are multiple selected items, drag all selected
       // Otherwise, just drag the single item
-      const itemsToDrag =
-        isNodeSelected && selectedNodes.length > 1 ? selectedNodes : [node];
+      const itemsToDrag = isNodeSelected && selectedNodes.length > 1 ? selectedNodes : [node];
 
       // Process each item to collect all valid items to drag
       const validItemsToDrag: TreeNode[] = [];
 
       // Process each item to drag
       itemsToDrag.forEach((item) => {
+        if (isPathTrashed(libraryStates, item.path)) return;
         if (item.type === "file") {
           // For files, add them directly
           validItemsToDrag.push(item);
         } else if (item.type === "folder") {
           // For folders, add all direct children that are dataset files.
           const folderChildren = item.children || [];
-          const datasetChildren = folderChildren.filter((child) =>
-            isDatasetNode(child),
+          const datasetChildren = folderChildren.filter(
+            (child) => isDatasetNode(child) && !isPathTrashed(libraryStates, child.path),
           );
           validItemsToDrag.push(...datasetChildren);
         }
@@ -766,9 +1059,7 @@ const DirTree = ({
 
       if (validItemsToDrag.length === 0) {
         const message =
-          node.type === "folder"
-            ? "No datasets found in folder"
-            : "No valid files to drag";
+          node.type === "folder" ? "No datasets found in folder" : "No valid files to drag";
         console.error(message);
         showToast(message, "warning");
         e.preventDefault();
@@ -805,8 +1096,7 @@ const DirTree = ({
 
     if (node.type === "folder") {
       const isQcodesDateFolder =
-        node.tags?.includes("qcodes-date") === true ||
-        node.path.includes("#date=");
+        node.tags?.includes("qcodes-date") === true || node.path.includes("#date=");
       if (isQcodesDateFolder) {
         // Virtual date folders inside sqlite/qcodes trees are only for visual grouping.
         // They should not mutate the explorer path.
@@ -829,6 +1119,10 @@ const DirTree = ({
       // If already in basket, remove it
       onRemoveBasketItem?.(node.id);
     } else {
+      if (isPathTrashed(useLibraryStore.getState().statesByPath, node.path)) {
+        showToast("Restore this measurement or its parent folder before adding it.", "warning");
+        return;
+      }
       // Else, add to basket only if file, not folder
       // console.log("Adding to basket:", node);
       onAddToBasket?.(node);
@@ -843,20 +1137,94 @@ const DirTree = ({
   const getSelectedNodes = (): TreeNode[] => {
     const selectedItemIds = tree.getSelectedItems();
     return selectedItemIds
-      .map((item) => processedData.allNodes.get(item.getId()))
+      .map((item) => visibleNodes.get(item.getId()))
       .filter((node): node is TreeNode => node !== undefined);
   };
 
   // Add all selected files to basket (only files, not folders)
   const handleAddAllSelectedToBasket = () => {
     const selectedNodes = getSelectedNodes();
+    const libraryStates = useLibraryStore.getState().statesByPath;
     // Filter to only files for basket functionality
-    const selectedFiles = selectedNodes.filter((node) => node.type === "file");
+    const selectedFiles = selectedNodes.filter(
+      (node) => node.type === "file" && !isPathTrashed(libraryStates, node.path),
+    );
     selectedFiles.forEach((node) => {
       if (!basketItems.some((item) => item.id === node.id)) {
         onAddToBasket?.(node);
       }
     });
+  };
+
+  // Bulk library actions over the current multi-selection, datasets and
+  // folders alike. The target state is computed from the selection so a mixed
+  // set resolves one way (heart all if any is unhearted, otherwise unheart all)
+  // rather than flipping each item.
+  const getSelectedLibraryPaths = (): string[] =>
+    getSelectedNodes()
+      .filter((node) => node.type === "file" || node.type === "folder")
+      .map((node) => node.path);
+
+  const getSelectedFolderPaths = (): string[] =>
+    getSelectedNodes()
+      .filter((node) => node.type === "folder")
+      .map((node) => node.path);
+
+  const handleBulkHeart = async () => {
+    const paths = getSelectedLibraryPaths();
+    if (paths.length === 0) return;
+    const target = !paths.every((p) => libStatesByPath[normalizePath(p)]?.hearted);
+    await applyHeartMany(paths, target, getSelectedFolderPaths());
+  };
+
+  const handleBulkTrash = async () => {
+    const paths = getSelectedLibraryPaths();
+    if (paths.length === 0) return;
+    const target = !paths.every((p) => libStatesByPath[normalizePath(p)]?.trashed);
+    await applyTrashMany(paths, target, getSelectedFolderPaths());
+  };
+
+  // Keyboard shortcuts for the two bulk actions, so a multi-selection can be
+  // hearted or trashed without reaching for the toolbar. Alt+Shift, matching
+  // the app's other multi-key shortcuts -- every bare letter is already taken
+  // (H is HeatMap, and so on). Ignored while typing, and they set rather than
+  // toggle, exactly like the toolbar buttons above.
+  useEffect(() => {
+    if (!dbAvailable) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!e.altKey || !e.shiftKey || e.ctrlKey || e.metaKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
+      ) {
+        return;
+      }
+      // Alt can rewrite e.key on some layouts, so match the physical key.
+      const code = e.code;
+      if (code !== "KeyH" && code !== "KeyT") return;
+      if (getSelectedLibraryPaths().length === 0) return;
+      e.preventDefault();
+      void (code === "KeyH" ? handleBulkHeart() : handleBulkTrash());
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
+  const handleBulkTag = async (tagId: number) => {
+    const paths = getSelectedLibraryPaths();
+    if (paths.length === 0) return;
+    const add = !paths.every((p) => libStatesByPath[normalizePath(p)]?.tags?.includes(tagId));
+    await applyTagMany(paths, tagId, add, getSelectedFolderPaths());
+  };
+
+  // Tags carried by every selected dataset (drives the popover's checkmarks).
+  const commonSelectedTagIds = (): number[] => {
+    const paths = getSelectedLibraryPaths();
+    if (paths.length === 0) return [];
+    return (libraryTags ?? [])
+      .map((t) => t.id)
+      .filter((id) => paths.every((p) => libStatesByPath[normalizePath(p)]?.tags?.includes(id)));
   };
 
   // Download all selected files/folders as ZIP
@@ -877,21 +1245,16 @@ const DirTree = ({
         { responseType: "blob" },
       );
 
-      // Create a download link
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement("a");
-      link.href = url;
       const filename =
         selectedNodes.length === 1
           ? `${selectedNodes[0].name}.zip`
           : `selected_items_${new Date().toISOString().split("T")[0]}.zip`;
-      link.setAttribute("download", filename);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      const result = finishArchiveDownload(response, filename);
       console.log("Download initiated successfully");
-      showToast("Download started successfully", "success");
+      showToast(
+        result.savedTo ? `Saved to ${result.savedTo}` : "Download started successfully",
+        "success",
+      );
     } catch (error) {
       console.error("Error downloading selected items:", error);
       showToast("Failed to download selected items", "error");
@@ -910,18 +1273,13 @@ const DirTree = ({
         { responseType: "blob" },
       );
 
-      // Create a download link
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement("a");
-      link.href = url;
       const filename = `${node.name}.zip`;
-      link.setAttribute("download", filename);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      const result = finishArchiveDownload(response, filename);
       console.log("Folder download initiated successfully");
-      showToast("Folder download started successfully", "success");
+      showToast(
+        result.savedTo ? `Saved to ${result.savedTo}` : "Folder download started successfully",
+        "success",
+      );
     } catch (error) {
       console.error("Error downloading folder:", error);
       showToast("Failed to download folder", "error");
@@ -934,9 +1292,7 @@ const DirTree = ({
     const selectedFiles = selectedNodes.filter((node) => node.type === "file");
     return (
       selectedFiles.length > 0 &&
-      selectedFiles.every((node) =>
-        basketItems.some((item) => item.id === node.id),
-      )
+      selectedFiles.every((node) => basketItems.some((item) => item.id === node.id))
     );
   };
 
@@ -958,7 +1314,7 @@ const DirTree = ({
     );
     if (!datasetItem) return -1;
 
-    const datasetNodes = Array.from(processedData.allNodes.values()).filter(
+    const datasetNodes = Array.from(visibleNodes.values()).filter(
       (node) => node.type === "file" && isDatasetPath(node.path),
     );
 
@@ -967,7 +1323,7 @@ const DirTree = ({
 
   // Get total number of datasets
   const getTotalDatasets = (): number => {
-    const datasetNodes = Array.from(processedData.allNodes.values()).filter(
+    const datasetNodes = Array.from(visibleNodes.values()).filter(
       (node) => node.type === "file" && isDatasetPath(node.path),
     );
     return datasetNodes.length;
@@ -977,7 +1333,7 @@ const DirTree = ({
   const handleCycleDataset = (direction: "prev" | "next") => {
     if (!isCyclingEnabled() || !onCycleDataset) return;
 
-    const datasetNodes = Array.from(processedData.allNodes.values()).filter(
+    const datasetNodes = Array.from(visibleNodes.values()).filter(
       (node) => node.type === "file" && isDatasetPath(node.path),
     );
 
@@ -990,8 +1346,7 @@ const DirTree = ({
     if (direction === "next") {
       nextIndex = (currentIndex + 1) % datasetNodes.length;
     } else {
-      nextIndex =
-        currentIndex === 0 ? datasetNodes.length - 1 : currentIndex - 1;
+      nextIndex = currentIndex === 0 ? datasetNodes.length - 1 : currentIndex - 1;
     }
 
     const nextNode = datasetNodes[nextIndex];
@@ -1007,6 +1362,10 @@ const DirTree = ({
       // Add new dataset to basket
       onAddToBasket?.(nextNode);
 
+      // Keep the Explorer on the dataset being viewed: select it, open any
+      // folders it is nested in, and scroll it into view.
+      revealNode(nextNode.id);
+
       // Call the cycle callback with direction info
       onCycleDataset(direction);
     }
@@ -1016,12 +1375,12 @@ const DirTree = ({
   useEffect(() => {
     const selectedItems = tree.getSelectedItems();
     if (selectedItems.length === 1) {
-      const selectedNode = processedData.allNodes.get(selectedItems[0].getId());
+      const selectedNode = visibleNodes.get(selectedItems[0].getId());
       if (selectedNode) {
         onSelectNode?.(selectedNode);
       }
     }
-  }, [tree, processedData.allNodes, onSelectNode]);
+  }, [tree, visibleNodes, onSelectNode]);
 
   // Global R keybind mapped to refresh-dir in useGlobalShortcuts
   useShortcut("refresh-dir", () => {
@@ -1051,8 +1410,11 @@ const DirTree = ({
     );
   }
 
-  // Show loading state
-  if (isLoading) {
+  // Show loading state, but only on a first load: once there is a tree on
+  // screen a refresh keeps it, and the spinning Refresh icon in the toolbar
+  // is the busy signal. Blanking the pane on every refresh cost the scroll
+  // position and a lot more space than a scan costs time.
+  if (isLoading && apiData.length === 0) {
     return (
       <div className="p-4 text-center text-gray-500">
         <div className="mb-2">
@@ -1067,7 +1429,10 @@ const DirTree = ({
   }
 
   return (
-    <div className="flex flex-col h-full w-full">
+    <div
+      ref={setRootEl}
+      className={`flex flex-col h-full w-full ${isWide ? "qimchi-dirtree-wide" : ""}`}
+    >
       {/* Fixed Toolbar Section */}
       <div className="shrink-0 space-y-2 mb-2 w-full">
         {/* Search Bar */}
@@ -1080,325 +1445,483 @@ const DirTree = ({
             type="text"
             placeholder="Search files and folders..."
             value={searchInput}
-            onChange={(e) =>
-              updateDirTreeState({ searchInput: e.target.value })
-            }
-            className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+            onChange={(e) => updateDirTreeState({ searchInput: e.target.value })}
+            className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 text-sm"
           />
           {searchInput && (
-            <button
-              type="button"
-              onClick={() => {
-                updateDirTreeState({ searchInput: "", searchTerm: "" });
-              }}
-              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              title="Clear search"
-            >
-              <X size={16} />
-            </button>
+            <Tooltip content="Clear search" position="top">
+              <button
+                type="button"
+                onClick={() => {
+                  updateDirTreeState({ searchInput: "", searchTerm: "" });
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 transform text-gray-400 hover:text-gray-600"
+                aria-label="Clear search"
+              >
+                <X size={16} />
+              </button>
+            </Tooltip>
           )}
         </div>
 
-        {/* Sort and Filter Controls */}
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex flex-col items-center w-full gap-1">
-            {/* Row 1: Sort buttons */}
-            <div className="flex items-center justify-center w-full mb-1">
-              <div className="flex space-x-1">
-                {(["name", "timestamp", "size", "chrono"] as const).map(
-                  (sort) => (
-                    <button
-                      type="button"
-                      key={sort}
-                      onClick={() => handleSort(sort)}
-                      title={
-                        sort === "chrono"
-                          ? "Chronological (Newest)"
-                          : `Sort by ${sort}`
-                      }
-                      className={`px-2 py-1 text-xs rounded flex items-center space-x-1 ${
-                        sortBy === sort
-                          ? "bg-blue-100 text-blue-800"
-                          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                      }`}
-                    >
-                      <span className="capitalize">
-                        {sort === "timestamp"
-                          ? "date"
-                          : sort === "chrono"
-                            ? "Chrono"
-                            : sort}
-                      </span>
-                      {sortBy === sort &&
-                        (sort === "chrono" || sortDirection === "desc" ? (
-                          <SortDesc size={10} />
-                        ) : (
-                          <SortAsc size={10} />
-                        ))}
-                    </button>
-                  ),
-                )}
-              </div>
-            </div>
+        <div className="flex w-full flex-wrap items-center gap-1">
+          <div className="contents">
+            <Tooltip content="Refresh directory" position="top">
+              <button
+                type="button"
+                onClick={() => {
+                  if (path && path.trim()) {
+                    // Bypass the cached directory listing.
+                    loadDirectoryData(path, true);
+                  }
+                }}
+                disabled={isLoading || !path || !path.trim()}
+                className="qimchi-dark-hover-plain qimchi-dark-hover-accent px-1.5 py-1 text-[#6ea030] bg-[var(--qimchi-accent-light-bg)] hover:bg-[var(--qimchi-accent-header-bg)] rounded disabled:opacity-50 transition-colors"
+                aria-label="Refresh directory"
+              >
+                <RefreshCw size={15} className={isLoading ? "animate-spin" : ""} />
+              </button>
+            </Tooltip>
 
-            {/* Row 2: Toolbar buttons */}
-            <div className="flex items-center justify-center w-full gap-1">
-              {/* LIVE Toggle Button */}
+            {/* Expand/Collapse All Toggle */}
+            <Tooltip
+              content={
+                sortBy === "chrono"
+                  ? "Unavailable in chronological view"
+                  : anyFolderExpanded
+                    ? "Collapse all"
+                    : "Expand all"
+              }
+              position="top"
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  if (anyFolderExpanded) {
+                    tree.collapseAll();
+                    expandedNodeIdsRef.current = new Set();
+                    updateDirTreeState({ expandedNodeIds: [] });
+                  } else {
+                    tree.expandAll();
+                    // Read the final set after `expandAll` finishes resolving child nodes.
+                    setTimeout(() => {
+                      const opened = tree
+                        .getItems()
+                        .filter((item) => item.isFolder() && item.isExpanded())
+                        .map((item) => item.getId());
+                      expandedNodeIdsRef.current = new Set(opened);
+                      updateDirTreeState({ expandedNodeIds: opened });
+                    }, 50);
+                  }
+                }}
+                disabled={sortBy === "chrono"}
+                className="qimchi-dark-hover-plain px-1.5 py-1 text-gray-600 hover:bg-blue-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label={anyFolderExpanded ? "Collapse all" : "Expand all"}
+              >
+                {anyFolderExpanded ? <Minimize size={15} /> : <Expand size={15} />}
+              </button>
+            </Tooltip>
+
+            {showLiveOnly && hiddenLiveMeasurementIds.length > 0 && (
               <Tooltip
-                content={
-                  showLiveOnly
-                    ? "Showing only live measurements (refreshes every second)"
-                    : "Show only live measurements (refreshes every second)"
-                }
-                position="right"
+                content={`Restore ${hiddenLiveMeasurementIds.length} hidden live measurement${
+                  hiddenLiveMeasurementIds.length === 1 ? "" : "s"
+                }`}
+                position="top"
               >
                 <button
                   type="button"
                   onClick={() => {
-                    updateDirTreeState({ showLiveOnly: !showLiveOnly });
+                    const count = hiddenLiveIdsRef.current.size;
+                    restoreHiddenLiveMeasurement();
+                    showToast(
+                      `Restored ${count} live measurement${count === 1 ? "" : "s"}`,
+                      "success",
+                    );
                   }}
-                  className={`px-2 py-1 rounded-md transition-all duration-200 ${
-                    showLiveOnly
-                      ? "bg-linear-to-r from-green-500 to-emerald-500 text-white shadow-md hover:shadow-lg hover:from-green-600 hover:to-emerald-600"
-                      : "bg-blue-50 text-gray-600 hover:bg-blue-100 border border-blue-200"
-                  }`}
-                  title={
-                    showLiveOnly
-                      ? "Show all files"
-                      : "Show only live measurements (refreshes every second)"
-                  }
+                  className="qimchi-dark-hover-plain inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-1.5 py-1 text-xs text-blue-700 hover:bg-blue-100"
+                  aria-label="Restore hidden live measurements"
                 >
-                  <Radio
-                    size={16}
-                    className={showLiveOnly ? "animate-pulse" : ""}
-                  />
+                  <Eye size={15} />
+                  <span>{hiddenLiveMeasurementIds.length}</span>
                 </button>
               </Tooltip>
+            )}
+          </div>
 
-              {/* Help Modal Button */}
-              <Tooltip content="Help & Tips (Shift+H)" position="right">
-                <button
-                  type="button"
-                  onClick={() => onOpenHelp?.()}
-                  className="px-2 py-1 flex items-center justify-center text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-md shadow-sm transition-all duration-200 group active:scale-95"
-                  title="Help & Tips"
-                >
-                  <Lightbulb
-                    size={16}
-                    className="group-hover:fill-amber-200 transition-colors"
-                  />
-                </button>
-              </Tooltip>
+          <div className="flex-1" />
 
-              {/* Refresh Button */}
-              <Tooltip content="Refresh directory" position="top">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (path && path.trim()) {
-                      // Force reload bypassing cache
-                      loadDirectoryData(path, true);
-                    }
-                  }}
-                  disabled={isLoading || !path || !path.trim()}
-                  className="px-2 py-1 text-[#6ea030] bg-[#f4fae8] hover:bg-[#dff1bd] rounded disabled:opacity-50 transition-colors"
-                  title="Refresh directory"
-                >
-                  <RefreshCw
-                    size={16}
-                    className={isLoading ? "animate-spin" : ""}
-                  />
-                </button>
-              </Tooltip>
+          <div className="contents">
+            <Tooltip content="Toggle filters" position="top">
+              <button
+                ref={setFilterButtonEl}
+                type="button"
+                onClick={() => {
+                  const next = !showFilters;
+                  updateDirTreeState({ showFilters: next });
+                  if (!next) setTagMenuOpen(false);
+                }}
+                className={`px-1.5 py-1 rounded ${
+                  showFilters
+                    ? "bg-blue-100 text-blue-800"
+                    : "qimchi-dark-hover-plain text-gray-600 hover:bg-blue-200 rounded transition-colors"
+                }`}
+                aria-label="Toggle filters"
+              >
+                <Filter size={15} />
+              </button>
+            </Tooltip>
 
-              {/* Expand/Collapse All Toggle */}
+            <div className="flex items-stretch" role="group" aria-label="Sort directory">
+              <RibbonFlyout
+                label="Choose sort"
+                placement="bottom"
+                orientation="vertical"
+                buttonClassName="flex items-center gap-1 rounded-r-none border border-gray-300 px-1.5 py-1 text-xs text-gray-700"
+                icon={
+                  <>
+                    <ArrowUpDown size={13} />
+                    <span className="capitalize">{sortBy === "timestamp" ? "Date" : sortBy}</span>
+                  </>
+                }
+              >
+                {(close) =>
+                  (["name", "timestamp", "size", "chrono"] as const).map((sort) => (
+                    <button
+                      key={sort}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={sortBy === sort}
+                      onClick={() => {
+                        selectSort(sort);
+                        close();
+                      }}
+                      className={`flex min-w-24 items-center rounded px-1.5 py-1 text-left text-xs capitalize ${
+                        sortBy === sort
+                          ? "bg-blue-100 text-blue-800"
+                          : "qimchi-dark-hover-plain text-gray-700 hover:bg-gray-100"
+                      }`}
+                    >
+                      {sort === "timestamp" ? "Date" : sort}
+                    </button>
+                  ))
+                }
+              </RibbonFlyout>
               <Tooltip
                 content={
                   sortBy === "chrono"
-                    ? "Unavailable in chronological view"
-                    : isExpanded
-                      ? "Collapse all"
-                      : "Expand all"
+                    ? "Chronological order is always newest first"
+                    : sortDirection === "asc"
+                      ? "Ascending"
+                      : "Descending"
                 }
                 position="top"
               >
                 <button
                   type="button"
-                  onClick={() => {
-                    if (isExpanded) {
-                      tree.collapseAll();
-                      updateDirTreeState({ isExpanded: false });
-                    } else {
-                      tree.expandAll();
-                      updateDirTreeState({ isExpanded: true });
-                    }
-                  }}
+                  onClick={toggleSortDirection}
                   disabled={sortBy === "chrono"}
-                  className="px-2 py-1 text-gray-600 hover:bg-blue-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  title={
-                    sortBy === "chrono"
-                      ? "Unavailable in chronological view"
-                      : isExpanded
-                        ? "Collapse all"
-                        : "Expand all"
-                  }
+                  className="qimchi-dark-hover-plain flex h-full items-center rounded-r border border-l-0 border-gray-300 px-2 text-gray-600 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label={sortDirection === "asc" ? "Ascending" : "Descending"}
                 >
-                  {isExpanded ? <Minimize size={16} /> : <Expand size={16} />}
-                </button>
-              </Tooltip>
-
-              {/* Explorer Filters */}
-              <Tooltip content="Toggle filters" position="top">
-                <button
-                  type="button"
-                  onClick={() =>
-                    updateDirTreeState({ showFilters: !showFilters })
-                  }
-                  className={`px-2 py-1 rounded ${
-                    showFilters
-                      ? "bg-blue-100 text-blue-800"
-                      : "text-gray-600 hover:bg-blue-200 rounded transition-colors"
-                  }`}
-                  title="Toggle filters"
-                >
-                  <Filter size={16} />
-                </button>
-              </Tooltip>
-
-              {/* Add all selected to basket button */}
-              <Tooltip
-                content={
-                  getSelectedNodes().filter((n) => n.type === "file").length ===
-                  0
-                    ? "Select files first"
-                    : selectedInBasket()
-                      ? "All selected files already in basket"
-                      : `Add ${
-                          getSelectedNodes().filter((n) => n.type === "file")
-                            .length
-                        } selected file${
-                          getSelectedNodes().filter((n) => n.type === "file")
-                            .length > 1
-                            ? "s"
-                            : ""
-                        } to basket`
-                }
-                position="top"
-              >
-                <button
-                  type="button"
-                  onClick={handleAddAllSelectedToBasket}
-                  disabled={
-                    getSelectedNodes().filter((n) => n.type === "file")
-                      .length === 0 || selectedInBasket()
-                  }
-                  className="px-2 py-1 text-gray-600 hover:bg-green-200 rounded disabled:opacity-50 transition-colors"
-                  title="Add all selected files to basket"
-                >
-                  <Plus size={16} />
-                </button>
-              </Tooltip>
-
-              {/* Download all selected button */}
-              <Tooltip
-                content={
-                  getSelectedNodes().length === 0
-                    ? "Select items first"
-                    : `Download ${getSelectedNodes().length} selected item${
-                        getSelectedNodes().length > 1 ? "s" : ""
-                      } as ZIP`
-                }
-                position="top"
-              >
-                <button
-                  type="button"
-                  onClick={handleDownloadAllSelected}
-                  disabled={getSelectedNodes().length === 0}
-                  className="px-2 py-1 text-gray-600 hover:bg-blue-200 rounded disabled:opacity-50 transition-colors"
-                  title="Download all selected items as ZIP"
-                >
-                  <Download size={16} />
-                </button>
-              </Tooltip>
-
-              {/* Dataset cycling buttons */}
-              <Tooltip
-                content={
-                  isCyclingEnabled()
-                    ? `Previous dataset (${
-                        getCurrentDatasetIndex() + 1
-                      }/${getTotalDatasets()})`
-                    : "Add exactly one dataset to basket to enable cycling"
-                }
-                position="top"
-              >
-                <button
-                  type="button"
-                  onClick={() => handleCycleDataset("prev")}
-                  disabled={!isCyclingEnabled()}
-                  className="px-2 py-1 text-gray-600 hover:bg-purple-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                  title="Previous dataset"
-                >
-                  <MoveUp size={16} />
-                </button>
-              </Tooltip>
-
-              <Tooltip
-                content={
-                  isCyclingEnabled()
-                    ? `Next dataset (${
-                        getCurrentDatasetIndex() + 1
-                      }/${getTotalDatasets()})`
-                    : "Add exactly one dataset to basket to enable cycling"
-                }
-                position="top"
-              >
-                <button
-                  type="button"
-                  onClick={() => handleCycleDataset("next")}
-                  disabled={!isCyclingEnabled()}
-                  className="px-2 py-1 text-gray-600 hover:bg-purple-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                  title="Next dataset"
-                >
-                  <MoveDown size={16} />
+                  {sortDirection === "asc" ? <SortAsc size={13} /> : <SortDesc size={13} />}
                 </button>
               </Tooltip>
             </div>
+
+            {/* Add all selected to basket button */}
+            <Tooltip
+              content={
+                getSelectedNodes().filter((n) => n.type === "file").length === 0
+                  ? "Select files first"
+                  : selectedInBasket()
+                    ? "All selected files already in basket"
+                    : `Add ${
+                        getSelectedNodes().filter((n) => n.type === "file").length
+                      } selected file${
+                        getSelectedNodes().filter((n) => n.type === "file").length > 1 ? "s" : ""
+                      } to basket`
+              }
+              position="top"
+            >
+              <button
+                type="button"
+                onClick={handleAddAllSelectedToBasket}
+                disabled={
+                  getSelectedNodes().filter((n) => n.type === "file").length === 0 ||
+                  selectedInBasket()
+                }
+                className="qimchi-dark-hover-plain px-1.5 py-1 text-gray-600 hover:bg-green-200 rounded disabled:opacity-50 transition-colors"
+                aria-label="Add all selected files to basket"
+              >
+                <Plus size={15} />
+              </button>
+            </Tooltip>
+
+            {/* Dataset cycling buttons */}
+            <Tooltip
+              content={
+                isCyclingEnabled()
+                  ? `Previous dataset (${getCurrentDatasetIndex() + 1}/${getTotalDatasets()})`
+                  : "Add exactly one dataset to basket to enable cycling"
+              }
+              position="top"
+            >
+              <button
+                type="button"
+                onClick={() => handleCycleDataset("prev")}
+                disabled={!isCyclingEnabled()}
+                className="qimchi-dark-hover-plain px-1.5 py-1 text-gray-600 hover:bg-purple-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                aria-label="Previous dataset"
+              >
+                <MoveUp size={15} />
+              </button>
+            </Tooltip>
+
+            <Tooltip
+              content={
+                isCyclingEnabled()
+                  ? `Next dataset (${getCurrentDatasetIndex() + 1}/${getTotalDatasets()})`
+                  : "Add exactly one dataset to basket to enable cycling"
+              }
+              position="top"
+            >
+              <button
+                type="button"
+                onClick={() => handleCycleDataset("next")}
+                disabled={!isCyclingEnabled()}
+                className="qimchi-dark-hover-plain px-1.5 py-1 text-gray-600 hover:bg-purple-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                aria-label="Next dataset"
+              >
+                <MoveDown size={15} />
+              </button>
+            </Tooltip>
+
+            <div className="w-1" />
+
+            {/* Bulk library actions over the selected datasets and folders */}
+            {(() => {
+              const n = getSelectedLibraryPaths().length;
+              const disabled = n === 0 || !dbAvailable;
+              const noun = getSelectedFolderPaths().length > 0 ? "item" : "dataset";
+              const suffix = `${n} ${noun}${n === 1 ? "" : "s"}`;
+              const reason = !dbAvailable
+                ? "Library unavailable"
+                : n === 0
+                  ? "Select datasets or folders first"
+                  : null;
+              return (
+                <>
+                  <Tooltip content={reason ?? `Tag ${suffix}`} position="top">
+                    <button
+                      type="button"
+                      onClick={(e) => setBulkTagAnchor(bulkTagAnchor ? null : e.currentTarget)}
+                      disabled={disabled}
+                      className="qimchi-dark-hover-plain px-1.5 py-1 text-gray-600 hover:bg-indigo-200 rounded disabled:opacity-50 transition-colors"
+                      aria-label={reason ?? `Tag ${suffix}`}
+                    >
+                      <TagIcon size={15} />
+                    </button>
+                  </Tooltip>
+                  <Tooltip content={reason ?? `Trash / restore ${suffix}`} position="top">
+                    <button
+                      type="button"
+                      onClick={handleBulkTrash}
+                      disabled={disabled}
+                      className="qimchi-dark-hover-plain px-1.5 py-1 text-gray-600 hover:bg-amber-200 rounded disabled:opacity-50 transition-colors"
+                      aria-label={reason ?? `Trash / restore ${suffix}`}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </Tooltip>
+                  <Tooltip content={reason ?? `Heart / unheart ${suffix}`} position="top">
+                    <button
+                      type="button"
+                      onClick={handleBulkHeart}
+                      disabled={disabled}
+                      className="qimchi-dark-hover-plain px-1.5 py-1 text-gray-600 hover:bg-red-200 rounded disabled:opacity-50 transition-colors"
+                      aria-label={reason ?? `Heart / unheart ${suffix}`}
+                    >
+                      <Heart size={15} />
+                    </button>
+                  </Tooltip>
+                </>
+              );
+            })()}
+
+            <Tooltip
+              content={
+                getSelectedNodes().length === 0
+                  ? "Select items first"
+                  : `Download ${getSelectedNodes().length} selected item${
+                      getSelectedNodes().length > 1 ? "s" : ""
+                    } as ZIP`
+              }
+              position="top"
+            >
+              <button
+                type="button"
+                onClick={handleDownloadAllSelected}
+                disabled={getSelectedNodes().length === 0}
+                className="qimchi-dark-hover-plain px-1.5 py-1 text-gray-600 hover:bg-blue-200 rounded disabled:opacity-50 transition-colors"
+                aria-label="Download all selected items as ZIP"
+              >
+                <Download size={15} />
+              </button>
+            </Tooltip>
           </div>
         </div>
 
-        {/* Filter Controls */}
-        {showFilters && (
-          <div className="p-1 bg-gray-50 rounded-md">
-            <div className="flex items-center space-x-2">
-              <div className="flex space-x-1 w-full justify-center items-center">
-                {(["all", "folder", "dataset"] as const).map((filter) => (
+        {/* Searchable tag-filter dropdown (see TagFilterMenu). */}
+        {tagMenuOpen && tagFilterBtnRef.current && (
+          <TagFilterMenu
+            anchorEl={tagFilterBtnRef.current}
+            tags={libraryTags}
+            selectedTagIds={selectedTagIds}
+            onToggle={toggleSelectedTag}
+            onClear={clearSelectedTags}
+            onClose={() => setTagMenuOpen(false)}
+          />
+        )}
+
+        {/* Bulk tag picker for the current multi-selection. Checkmarks show the
+            tags common to ALL selected datasets; toggling applies to all. */}
+        {bulkTagAnchor && (
+          <TagPopover
+            anchorEl={bulkTagAnchor}
+            tags={libraryTags}
+            currentTagIds={commonSelectedTagIds()}
+            onToggle={(tagId) => void handleBulkTag(tagId)}
+            onCreate={createLibraryTag}
+            onRename={renameLibraryTag}
+            onDelete={deleteLibraryTag}
+            onClose={() => setBulkTagAnchor(null)}
+          />
+        )}
+
+        {/* If Library DB is unavailable */}
+        {!dbAvailable && (
+          <div
+            className="mt-1 px-2 py-1.5 rounded-md border border-amber-300 bg-amber-50 text-amber-900 text-[11px] leading-snug"
+            role="status"
+            title={dbError ?? undefined}
+          >
+            <span className="font-semibold">Library unavailable.</span> Hearts, tags and notes
+            can&apos;t be saved this session. Plotting still works.
+            {dbError && (
+              <span className="block mt-0.5 font-mono opacity-80 wrap-break-word">{dbError}</span>
+            )}
+          </div>
+        )}
+
+        {showFilters &&
+          filterButtonEl &&
+          createPortal(
+            <div
+              ref={filterMenuRef}
+              className="fixed z-[1500] w-56 rounded-md border border-gray-200 bg-gray-50 p-1 shadow-lg dark:border-gray-700"
+              style={(() => {
+                const rect = filterButtonEl.getBoundingClientRect();
+                return {
+                  top: Math.min(rect.bottom + 4, window.innerHeight - 220),
+                  left: Math.min(rect.left, window.innerWidth - 232),
+                };
+              })()}
+              role="menu"
+              aria-label="Explorer filters"
+            >
+              <div className="flex flex-col gap-1">
+                <Tooltip content="Show only hearted measurements" position="right">
                   <button
                     type="button"
-                    key={filter}
-                    onClick={() => updateDirTreeState({ filterBy: filter })}
-                    className={`px-2 py-1 text-xs rounded ${
-                      filterBy === filter
+                    onClick={() => setFilterHeartedOnly(!filterHeartedOnly)}
+                    disabled={!dbAvailable}
+                    className={`flex w-full items-center gap-2 rounded px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${
+                      filterHeartedOnly
+                        ? "bg-red-100 text-red-700"
+                        : "bg-white text-gray-600 hover:bg-gray-100"
+                    }`}
+                  >
+                    <Heart
+                      size={14}
+                      className={filterHeartedOnly ? "fill-red-500 text-red-500" : ""}
+                    />
+                    <span>Hearted</span>
+                  </button>
+                </Tooltip>
+                <Tooltip content="Show only trashed measurements" position="right">
+                  <button
+                    type="button"
+                    onClick={() => setShowTrashed(!showTrashed)}
+                    disabled={!dbAvailable}
+                    className={`flex w-full items-center gap-2 rounded px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${
+                      showTrashed
                         ? "bg-blue-100 text-blue-800"
                         : "bg-white text-gray-600 hover:bg-gray-100"
                     }`}
                   >
-                    {filter === "all"
-                      ? "All"
-                      : filter === "dataset"
-                        ? "DATASET"
-                        : filter.toUpperCase()}
+                    <Trash2 size={14} />
+                    <span>Trashed</span>
                   </button>
-                ))}
+                </Tooltip>
+                {libraryTags.length > 0 && (
+                  <Tooltip content="Filter by tags" position="right">
+                    <button
+                      ref={tagFilterBtnRef}
+                      type="button"
+                      onClick={() => setTagMenuOpen((open) => !open)}
+                      disabled={!dbAvailable}
+                      className={`flex w-full items-center gap-2 rounded border px-2 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                        selectedTagIds.length > 0
+                          ? "border-indigo-300 bg-indigo-100 text-indigo-800"
+                          : "border-gray-200 bg-white text-gray-600 hover:bg-gray-100"
+                      }`}
+                    >
+                      <TagIcon size={14} />
+                      <span>Tagged</span>
+                      {selectedTagIds.length > 0 && ` (${selectedTagIds.length})`}
+                      <ChevronDown size={12} className="ml-auto" />
+                    </button>
+                  </Tooltip>
+                )}
               </div>
-            </div>
-          </div>
-        )}
+
+              {/* Selected tags stay visible as removable chips so an active
+                filter is never hidden inside a closed menu. */}
+              {libraryTags.length > 0 && (
+                <div className="mt-1 flex flex-col items-center gap-1">
+                  {selectedTagIds.length > 0 && (
+                    <div className="flex flex-wrap gap-1 justify-center">
+                      {libraryTags
+                        .filter((tag) => selectedTagIds.includes(tag.id))
+                        .map((tag) => (
+                          <Tooltip
+                            key={tag.id}
+                            content={`Remove filter: ${tag.name}`}
+                            position="top"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => toggleSelectedTag(tag.id)}
+                              className="rounded-full border border-indigo-300 bg-indigo-100 px-2 py-0.5 text-[11px] text-indigo-800 hover:bg-indigo-200"
+                            >
+                              #{tag.name} &times;
+                            </button>
+                          </Tooltip>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>,
+            document.body,
+          )}
       </div>
 
       {/* Scrollable Tree View - Always Virtualized */}
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0" aria-busy={isLoading}>
         <VirtualizedTreeView
+          ref={virtualizerRef}
           tree={tree}
           treeKey={treeKey}
           rootNodes={rootNodes}
@@ -1414,9 +1937,13 @@ const DirTree = ({
           onDoubleClick={onDoubleClick}
           onOpenSqliteNode={(node) => onPathChange?.(node.path)}
           onToggleFolderExpand={updateExpandedNodeState}
-          searchTerm={searchTerm}
+          // Only the plain-text part highlights; "#tag" tokens are a filter
+          searchTerm={searchText}
           basketItems={basketItems}
           path={path}
+          showLiveOnly={showLiveOnly}
+          hiddenLiveMeasurementCount={hiddenLiveMeasurementIds.length}
+          onHideLiveMeasurement={hideLiveMeasurement}
         />
       </div>
     </div>
@@ -1443,6 +1970,9 @@ interface VirtualizedTreeViewProps {
   searchTerm?: string;
   basketItems?: BasketItem[];
   path?: string;
+  showLiveOnly: boolean;
+  hiddenLiveMeasurementCount: number;
+  onHideLiveMeasurement: (node: TreeNode) => void;
 }
 
 const VirtualizedTreeView = forwardRef<
@@ -1469,6 +1999,9 @@ const VirtualizedTreeView = forwardRef<
       searchTerm,
       basketItems,
       path,
+      showLiveOnly,
+      hiddenLiveMeasurementCount,
+      onHideLiveMeasurement,
     },
     ref,
   ) => {
@@ -1483,9 +2016,10 @@ const VirtualizedTreeView = forwardRef<
       estimateSize: () => 35, // Estimated height per item - adjust based on your actual item height
       // Add overscan for smoother scrolling - renders extra items above/below viewport
       overscan: 10,
-      // Enable smooth scrolling for better UX
-      scrollPaddingStart: 0,
-      scrollPaddingEnd: 0,
+      // Keep about two rows of context above/below when something is scrolled
+      // into view, so a revealed row never lands flush against an edge.
+      scrollPaddingStart: 70,
+      scrollPaddingEnd: 70,
     });
 
     useImperativeHandle(ref, () => virtualizer);
@@ -1546,22 +2080,37 @@ const VirtualizedTreeView = forwardRef<
                     onToggleFolderExpand={onToggleFolderExpand}
                     searchTerm={searchTerm}
                     basketItems={basketItems}
+                    showLiveOnly={showLiveOnly}
+                    onHideLiveMeasurement={onHideLiveMeasurement}
                   />
                 </div>
               );
             })}
           </div>
         ) : (
-          <div className="p-4 text-center text-gray-500 text-sm">
-            <div className="flex items-center justify-center gap-2 mb-2">
-              <SearchXIcon className="text-red-400" size={16} />
-              <span>No items to display</span>
-            </div>
-            <div className="text-xs mt-1">
-              {path
-                ? "Try a different path or check your filters"
-                : "Enter a path to load directory structure"}
-            </div>
+          // Match the other sidebar empty states.
+          <div className="h-full flex flex-col items-center justify-center text-gray-500 p-4 text-center">
+            {showLiveOnly ? (
+              <Radio size={48} className="mb-2 text-gray-400" />
+            ) : (
+              <SearchXIcon size={48} className="mb-2 text-gray-400" />
+            )}
+            <p>
+              {showLiveOnly
+                ? hiddenLiveMeasurementCount > 0
+                  ? "All live measurements are hidden"
+                  : "No live measurements"
+                : "No items to display"}
+            </p>
+            <p className="text-sm mt-1">
+              {showLiveOnly
+                ? hiddenLiveMeasurementCount > 0
+                  ? "Unhide one to follow it here"
+                  : "They appear here as soon as one starts running"
+                : path
+                  ? "Try a different path or check your filters"
+                  : "Enter a path to load directory structure"}
+            </p>
           </div>
         )}
       </div>
@@ -1589,13 +2138,12 @@ interface TreeItemComponentProps {
   onToggleFolderExpand: (nodeId: string, expanded: boolean) => void;
   searchTerm?: string;
   basketItems?: BasketItem[]; // Items already in the basket
-  // liveStatusMap removed
+  showLiveOnly: boolean;
+  onHideLiveMeasurement: (node: TreeNode) => void;
 }
 
 const TreeItemComponent = ({
   item,
-  onAddToBasket,
-  onRemoveBasketItem,
   onOpenNotes,
   onOpenSampleNotes,
   onDownload,
@@ -1608,11 +2156,11 @@ const TreeItemComponent = ({
   onToggleFolderExpand,
   searchTerm = "",
   basketItems = [],
+  showLiveOnly,
+  onHideLiveMeasurement,
 }: TreeItemComponentProps) => {
-  const { copyToClipboard: copyFNameToClipboard, isCopied: isFNameCopied } =
-    useCopyToClipboard();
-  const { copyToClipboard: copyPathToClipboard, isCopied: isPathCopied } =
-    useCopyToClipboard();
+  const { copyToClipboard: copyFNameToClipboard, isCopied: isFNameCopied } = useCopyToClipboard();
+  const { copyToClipboard: copyPathToClipboard, isCopied: isPathCopied } = useCopyToClipboard();
   const nodeData = item.getItemData() as TreeNode;
   const isExpanded = item.isExpanded();
   const isFocused = item.isFocused();
@@ -1622,16 +2170,40 @@ const TreeItemComponent = ({
     isSqliteContainerPath(nodeData.path) && !nodeData.path.includes("#");
   const isDatasetLeafNode = isDatasetNode(nodeData) && !isSqliteContainerNode;
   const datasetKind = detectDatasetKind(nodeData.path, nodeData.tags);
+  const displayName = isDatasetLeafNode ? formatQanaryDatasetName(nodeData.name) : nodeData.name;
+  // Library (heart/trash) state for this node, keyed by normalized path.
+  const libState = useLibraryStore((s) => s.statesByPath[normalizePath(nodeData.path)]);
+  // Inside a trashed folder: shown as trashed, but only the folder can restore it.
+  const inTrashedFolder = useLibraryStore(
+    (s) => !libState?.trashed && inheritedState(s.statesByPath, nodeData.path).trashed,
+  );
+  const inHeartedFolder = useLibraryStore(
+    (s) =>
+      !libState?.hearted &&
+      inheritedState(s.statesByPath, nodeData.path).hearted &&
+      !effectiveState(s.statesByPath, nodeData.path).trashed,
+  );
+  const isEffectivelyTrashed = Boolean(libState?.trashed || inTrashedFolder);
+  const isEffectivelyHearted = useLibraryStore(
+    (s) => effectiveState(s.statesByPath, nodeData.path).hearted,
+  );
+  const hasMarks = Boolean(
+    libState?.hearted || libState?.trashed || (libState?.tags?.length ?? 0) > 0,
+  );
+  const toggleHeart = useLibraryStore((s) => s.toggleHeart);
+  const toggleTrash = useLibraryStore((s) => s.toggleTrash);
+  const allTags = useLibraryStore((s) => s.tags);
+  const toggleTag = useLibraryStore((s) => s.toggleTag);
+  const createTag = useLibraryStore((s) => s.createTag);
+  const renameTag = useLibraryStore((s) => s.renameTag);
+  const deleteTag = useLibraryStore((s) => s.deleteTag);
+  const [tagAnchor, setTagAnchor] = useState<HTMLElement | null>(null);
   const isSampleFolder =
     isFolder &&
-    (nodeData.children || []).some(
-      (child) => child.type === "file" && isDatasetPath(child.path),
-    );
+    (nodeData.children || []).some((child) => child.type === "file" && isDatasetPath(child.path));
 
   // Check if this item is in the basket
-  const isInBasket = basketItems.some(
-    (basketItem) => basketItem.id === nodeData.id,
-  );
+  const isInBasket = basketItems.some((basketItem) => basketItem.id === nodeData.id);
 
   // Skip rendering the root item
   if (nodeData.id === "root") {
@@ -1657,24 +2229,189 @@ const TreeItemComponent = ({
     );
   };
 
+  const renderExplorerDisplayName = () => {
+    if (displayName === nodeData.name) return highlightSearchTerm(displayName, searchTerm);
+
+    const shortenedMarkerIndex = displayName.indexOf("*");
+    if (shortenedMarkerIndex < 0) return highlightSearchTerm(displayName, searchTerm);
+
+    return (
+      <>
+        {highlightSearchTerm(displayName.slice(0, shortenedMarkerIndex), searchTerm)}
+        <span className="qimchi-tree-shortened-marker">*</span>
+        {highlightSearchTerm(displayName.slice(shortenedMarkerIndex + 1), searchTerm)}
+      </>
+    );
+  };
+
+  // One colour per dataset kind, the same in both themes (see the
+  // --qimchi-icon-* tokens): the icon is how a kind is recognised, so it
+  // should not change identity when the theme flips.
   const renderDatasetIcon = () => {
     switch (datasetKind) {
       case "zarr":
-        return <FileArchive size={16} className="text-violet-600" />;
+        return <FileArchive size={16} className="text-[var(--qimchi-icon-zarr)]" />;
       case "netcdf":
-        return <FileText size={16} className="text-sky-600" />;
+        return <FileText size={16} className="text-[var(--qimchi-icon-netcdf)]" />;
       case "hdf5":
-        return <HardDrive size={16} className="text-indigo-600" />;
+        return <HardDrive size={16} className="text-[var(--qimchi-icon-hdf5)]" />;
       case "qcodes":
-        return <DatabaseIcon size={16} className="text-teal-600" />;
+        return <DatabaseIcon size={16} className="text-[var(--qimchi-icon-qcodes)]" />;
       case "sqlite":
-        return <DatabaseIcon size={16} className="text-emerald-600" />;
+        return <DatabaseIcon size={16} className="text-[var(--qimchi-icon-sqlite)]" />;
       case "csv":
-        return <Table size={16} className="text-orange-600" />;
+        return <Table size={16} className="text-[var(--qimchi-icon-csv)]" />;
+      case "matlab":
+        return <Grid3x3 size={16} className="text-[var(--qimchi-icon-matlab)]" />;
       default:
-        return <DatabaseIcon size={16} className="text-green-500" />;
+        return <DatabaseIcon size={16} className="text-[var(--qimchi-icon-generic)]" />;
     }
   };
+
+  const copyMenu = (kind: "filename" | "folder name") => (
+    <RibbonFlyout
+      label="Copy"
+      icon={
+        isFNameCopied || isPathCopied ? (
+          <Check size={14} className="text-green-600" />
+        ) : (
+          <Copy size={14} className="text-gray-400" />
+        )
+      }
+      buttonClassName="p-1 hover:bg-blue-50"
+    >
+      {(close) => (
+        <>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={async (event) => {
+              event.stopPropagation();
+              await copyFNameToClipboard(nodeData.name);
+              close();
+            }}
+            className="qimchi-dark-hover-plain rounded px-2 py-1 text-xs text-gray-700 hover:bg-gray-100"
+          >
+            {kind === "filename" ? "Filename" : "Folder name"}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={async (event) => {
+              event.stopPropagation();
+              await copyPathToClipboard(nodeData.path);
+              close();
+            }}
+            className="qimchi-dark-hover-plain rounded px-2 py-1 text-xs text-gray-700 hover:bg-gray-100"
+          >
+            Path
+          </button>
+        </>
+      )}
+    </RibbonFlyout>
+  );
+
+  const libraryButtons = (
+    <>
+      <Tooltip
+        content={
+          isEffectivelyTrashed
+            ? "Restore before hearting"
+            : inHeartedFolder
+              ? "Hearted by parent folder"
+              : libState?.hearted
+                ? "Unheart"
+                : "Heart"
+        }
+        position="top"
+        className="order-4"
+      >
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleHeart(nodeData.path, isFolder);
+          }}
+          disabled={inHeartedFolder || isEffectivelyTrashed}
+          className={`qimchi-dark-hover-plain group/heart p-1 rounded transition-colors shrink-0 ${
+            isEffectivelyHearted
+              ? "text-red-500 hover:bg-red-50"
+              : "text-gray-400 hover:text-red-500 hover:bg-red-50"
+          }`}
+          aria-label={
+            isEffectivelyTrashed
+              ? "Restore before hearting"
+              : inHeartedFolder
+                ? "Heart inherited from parent folder"
+                : libState?.hearted
+                  ? "Remove heart"
+                  : "Heart"
+          }
+        >
+          {isEffectivelyHearted ? (
+            <>
+              <Heart size={14} className="fill-red-500 text-red-500 group-hover/heart:hidden" />
+              <HeartCrack size={14} className="hidden text-red-500 group-hover/heart:block" />
+            </>
+          ) : (
+            <Heart size={14} />
+          )}
+        </button>
+      </Tooltip>
+
+      <Tooltip content={libState?.trashed ? "Restore" : "Trash"} position="top" className="order-3">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleTrash(nodeData.path, isFolder);
+          }}
+          className={`qimchi-dark-hover-plain p-1 rounded transition-colors shrink-0 ${
+            libState?.trashed
+              ? // Restore is the one thing left to do on a trashed row:
+                // re-enabled against the row's pointer-events:none, and
+                // muted rather than red, since nothing is being deleted.
+                "qimchi-trashed-interactive text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+              : "text-gray-400 hover:text-red-600 hover:bg-red-50"
+          }`}
+          aria-label={libState?.trashed ? "Restore from trash" : "Trash"}
+        >
+          <Trash2 size={14} />
+        </button>
+      </Tooltip>
+
+      <Tooltip content="Tags" position="top" className="order-2">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            const el = e.currentTarget as HTMLElement;
+            setTagAnchor((a) => (a ? null : el));
+          }}
+          className={`qimchi-dark-hover-plain p-1 rounded transition-colors shrink-0 ${
+            (libState?.tags?.length ?? 0) > 0
+              ? "text-indigo-600 hover:bg-indigo-50"
+              : "text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"
+          }`}
+          aria-label="Edit tags"
+        >
+          <TagIcon size={14} />
+        </button>
+      </Tooltip>
+      {tagAnchor && (
+        <TagPopover
+          anchorEl={tagAnchor}
+          tags={allTags}
+          currentTagIds={libState?.tags ?? []}
+          onToggle={(tagId) => toggleTag(nodeData.path, tagId, isFolder)}
+          onCreate={createTag}
+          onRename={renameTag}
+          onDelete={deleteTag}
+          onClose={() => setTagAnchor(null)}
+        />
+      )}
+    </>
+  );
 
   return (
     <div
@@ -1686,9 +2423,15 @@ const TreeItemComponent = ({
             : isSelected
               ? "border-l-blue-500 bg-blue-100"
               : "border-transparent"
-      } ${draggedItem === nodeData.id ? "dragging opacity-50" : ""}`}
+      } ${draggedItem === nodeData.id ? "dragging opacity-50" : ""} ${
+        isEffectivelyTrashed && !isFolder
+          ? "qimchi-trashed pointer-events-none"
+          : isEffectivelyTrashed
+            ? "qimchi-trashed"
+            : ""
+      }`}
       data-level={item.getItemMeta().level}
-      draggable={true} // Allow both files and folders to be draggable
+      draggable={!isEffectivelyTrashed}
       onDragStart={(e) => onDragStart(e, nodeData)}
       onDragEnd={onDragEnd}
       onDoubleClick={(e) => onDoubleClick(e, nodeData)}
@@ -1724,11 +2467,7 @@ const TreeItemComponent = ({
             }}
             className="mr-1 shrink-0 p-1 hover:bg-gray-200 rounded transition-colors"
             aria-label={
-              isFolder
-                ? isExpanded
-                  ? "Collapse folder"
-                  : "Expand folder"
-                : "Open sqlite runs"
+              isFolder ? (isExpanded ? "Collapse folder" : "Expand folder") : "Open sqlite runs"
             }
           >
             {isFolder && isExpanded ? (
@@ -1760,11 +2499,11 @@ const TreeItemComponent = ({
             <span
               className={`text-sm truncate block ${
                 isDatasetPath(nodeData.path)
-                  ? "text-purple-700 font-medium"
-                  : "text-gray-800"
-              }`}
+                  ? "qimchi-tree-dataset font-medium"
+                  : "qimchi-tree-folder"
+              } ${isEffectivelyTrashed ? "qimchi-trashed" : ""}`}
             >
-              {highlightSearchTerm(nodeData.name, searchTerm)}
+              {renderExplorerDisplayName()}
             </span>
             {isSqliteContainerNode && (
               <span className="text-[10px] uppercase tracking-wide text-teal-700 bg-teal-100 border border-teal-200 rounded px-1 py-0.5 shrink-0">
@@ -1776,47 +2515,38 @@ const TreeItemComponent = ({
         </div>
       </div>
 
+      {/* Wide layout only: the modified date gets its own column instead of
+          being hidden behind the Metadata panel. Shown by CSS when the DirTree
+          root carries .qimchi-dirtree-wide. */}
+      <div className="qimchi-row-meta shrink-0 items-center pr-3 text-xs text-gray-500 tabular-nums">
+        <span className="w-40 whitespace-nowrap text-right">
+          {formatRowTimestamp(nodeData.timestamp)}
+        </span>
+      </div>
+
       {/* For Datasets */}
       {!isFolder && (
-        <div className="flex items-center px-1 py-0.5 rounded-md">
+        <div className="qimchi-row-actions flex items-center px-1 py-0.5 rounded-md">
           {/* className="flex items-center space-x-1 opacity-0 group-hover:backdrop-blur-md group-hover:bg-white/90 group-hover:opacity-100 transition-opacity px-1 py-0.5 rounded-md"> */}
-          {/* Copy filename button */}
-          <Tooltip content="Copy filename" position="top">
-            <button
-              type="button"
-              onClick={async (e) => {
-                e.stopPropagation();
-                await copyFNameToClipboard(nodeData.name);
-              }}
-              className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors shrink-0"
-              aria-label={`Copy filename: ${nodeData.name}`}
-            >
-              {isFNameCopied ? (
-                <Check size={14} className="text-green-600" />
-              ) : (
-                <Copy size={14} />
-              )}
-            </button>
-          </Tooltip>
+          {showLiveOnly && nodeData.path.startsWith("memory://") && (
+            <Tooltip content="Hide from Live Measurements" position="top">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onHideLiveMeasurement(nodeData);
+                }}
+                className={`qimchi-dark-hover-plain p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 rounded transition-colors shrink-0 ${
+                  libState?.trashed ? "qimchi-trashed-interactive" : ""
+                }`}
+                aria-label={`Hide ${nodeData.name} from Live Measurements`}
+              >
+                <EyeOff size={14} />
+              </button>
+            </Tooltip>
+          )}
 
-          {/* Copy full path button */}
-          <Tooltip content="Copy full path" position="top">
-            <button
-              type="button"
-              onClick={async (e) => {
-                e.stopPropagation();
-                await copyPathToClipboard(nodeData.path);
-              }}
-              className="p-1 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors shrink-0"
-              aria-label={`Copy full path: ${nodeData.path}`}
-            >
-              {isPathCopied ? (
-                <Check size={14} className="text-green-600" />
-              ) : (
-                <Copy size={14} />
-              )}
-            </button>
-          </Tooltip>
+          {copyMenu("filename")}
 
           {/* Download Button - for dataset files */}
           {isDatasetPath(nodeData.path) && (
@@ -1827,7 +2557,7 @@ const TreeItemComponent = ({
                   e.stopPropagation();
                   onDownload?.(nodeData);
                 }}
-                className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors shrink-0"
+                className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors shrink-0"
                 aria-label="Download dataset"
               >
                 <Download size={14} />
@@ -1835,16 +2565,19 @@ const TreeItemComponent = ({
             </Tooltip>
           )}
 
+          {/* Heart / Trash / Tag buttons - dataset leaves (qanary measurements) */}
+          {isDatasetLeafNode && libraryButtons}
+
           {/* Open Notes Button - any dataset leaf except sqlite container nodes */}
           {isDatasetLeafNode && (
-            <Tooltip content="Open notes" position="top">
+            <Tooltip content="Open notes" position="top" className="order-1">
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   onOpenNotes?.(nodeData);
                 }}
-                className="p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors shrink-0"
+                className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors shrink-0"
                 aria-label="Open notes"
               >
                 <NotebookPen size={14} />
@@ -1860,82 +2593,25 @@ const TreeItemComponent = ({
                   e.stopPropagation();
                   onOpenSqliteNode(nodeData);
                 }}
-                className="p-1 rounded transition-colors shrink-0 text-gray-400 hover:text-blue-600 hover:bg-blue-100"
+                className="qimchi-dark-hover-plain p-1 rounded transition-colors shrink-0 text-gray-400 hover:text-blue-600 hover:bg-blue-100"
                 aria-label="Open runs"
               >
                 <FolderOpenIcon size={14} />
               </button>
             </Tooltip>
-          ) : (
-            /* Add/Remove Basket Button - only for non-container files */
-            <Tooltip
-              content={isInBasket ? "Remove from basket" : "Add to basket"}
-              position="top"
-            >
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (isInBasket) {
-                    onRemoveBasketItem?.(nodeData.id);
-                  } else {
-                    onAddToBasket?.(nodeData);
-                  }
-                }}
-                className={`p-1 rounded transition-colors shrink-0 ${
-                  isInBasket
-                    ? "text-red-500 hover:text-red-700 hover:bg-red-50"
-                    : "text-gray-400 hover:text-blue-600 hover:bg-blue-100"
-                }`}
-                aria-label={isInBasket ? "Remove from basket" : "Add to basket"}
-              >
-                {isInBasket ? <Minus size={14} /> : <Plus size={14} />}
-              </button>
-            </Tooltip>
-          )}
+          ) : null}
         </div>
       )}
 
       {/* For Folders */}
       {isFolder && (
-        <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity mr-1">
-          {/* Copy folder name button */}
-          <Tooltip content="Copy folder name" position="top">
-            <button
-              type="button"
-              onClick={async (e) => {
-                e.stopPropagation();
-                await copyFNameToClipboard(nodeData.name);
-              }}
-              className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors shrink-0"
-              aria-label={`Copy folder name: ${nodeData.name}`}
-            >
-              {isFNameCopied ? (
-                <Check size={14} className="text-green-600" />
-              ) : (
-                <Copy size={14} />
-              )}
-            </button>
-          </Tooltip>
-
-          {/* Copy full path button */}
-          <Tooltip content="Copy folder path" position="top">
-            <button
-              type="button"
-              onClick={async (e) => {
-                e.stopPropagation();
-                await copyPathToClipboard(nodeData.path);
-              }}
-              className="p-1 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors shrink-0"
-              aria-label={`Copy folder path: ${nodeData.path}`}
-            >
-              {isPathCopied ? (
-                <Check size={14} className="text-green-600" />
-              ) : (
-                <Copy size={14} />
-              )}
-            </button>
-          </Tooltip>
+        <div
+          className={`qimchi-row-actions flex items-center transition-opacity mr-1 ${
+            // A marked folder keeps its marks in view, like a dataset row.
+            hasMarks ? "" : "opacity-0 group-hover:opacity-100"
+          }`}
+        >
+          {copyMenu("folder name")}
 
           {/* Download folder button */}
           <Tooltip content="Download folder as ZIP" position="top">
@@ -1945,7 +2621,7 @@ const TreeItemComponent = ({
                 e.stopPropagation();
                 onDownloadFolder?.(nodeData);
               }}
-              className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors shrink-0"
+              className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors shrink-0"
               aria-label={`Download folder: ${nodeData.name}`}
             >
               <Download size={14} />
@@ -1961,13 +2637,15 @@ const TreeItemComponent = ({
                   e.stopPropagation();
                   onOpenSampleNotes?.(nodeData);
                 }}
-                className="p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors shrink-0"
+                className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors shrink-0"
                 aria-label="Open pooled sample notes"
               >
                 <NotebookPen size={14} />
               </button>
             </Tooltip>
           )}
+
+          {libraryButtons}
         </div>
       )}
     </div>

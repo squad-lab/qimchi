@@ -1,20 +1,150 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/qimchi-logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Fira+Sans:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&family=Martian+Mono:wght@100..800&family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap"
-      rel="stylesheet"
-    />
+    <title>Qimchi v%QIMCHI_VERSION%</title>
 
-    <title>Qimchi v0.6.2</title>
+    <!-- Paint the splash before the app bundle loads. -->
+    <style>
+      #qimchi-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background: #f8fafc;
+        color: #0f172a;
+        font-family:
+          "Fira Sans",
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+        transition: opacity 220ms ease-out;
+      }
+      #qimchi-splash[data-done="1"] {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #qimchi-splash .qs-logo {
+        width: 88px;
+        height: 88px;
+        object-fit: contain;
+        border-radius: 16px;
+        animation: qs-breathe 2.4s ease-in-out infinite;
+      }
+      #qimchi-splash .qs-name {
+        font-size: 30px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+      #qimchi-splash .qs-version {
+        font-size: 13px;
+        font-weight: 500;
+        color: #64748b;
+        margin-top: -12px;
+      }
+      #qimchi-splash .qs-bar {
+        width: 168px;
+        height: 3px;
+        border-radius: 999px;
+        background: #e2e8f0;
+        overflow: hidden;
+      }
+      #qimchi-splash .qs-bar span {
+        display: block;
+        width: 40%;
+        height: 100%;
+        border-radius: 999px;
+        background: #16a34a;
+        animation: qs-slide 1.1s ease-in-out infinite;
+      }
+      #qimchi-splash .qs-lab {
+        font-size: 12px;
+        color: #94a3b8;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      @keyframes qs-slide {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(250%);
+        }
+      }
+      @keyframes qs-breathe {
+        0%,
+        100% {
+          transform: scale(1);
+        }
+        50% {
+          transform: scale(1.06);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #qimchi-splash .qs-logo,
+        #qimchi-splash .qs-bar span {
+          animation: none;
+        }
+      }
+      @media (prefers-color-scheme: dark) {
+        #qimchi-splash:not([data-theme="light"]) {
+          background: #0f172a;
+          color: #e2e8f0;
+        }
+        #qimchi-splash:not([data-theme="light"]) .qs-version {
+          color: #94a3b8;
+        }
+        #qimchi-splash:not([data-theme="light"]) .qs-bar {
+          background: #1e293b;
+        }
+        #qimchi-splash:not([data-theme="light"]) .qs-lab {
+          color: #64748b;
+        }
+      }
+      #qimchi-splash[data-theme="dark"] {
+        background: #0f172a;
+        color: #e2e8f0;
+      }
+      #qimchi-splash[data-theme="dark"] .qs-version {
+        color: #94a3b8;
+      }
+      #qimchi-splash[data-theme="dark"] .qs-bar {
+        background: #1e293b;
+      }
+      #qimchi-splash[data-theme="dark"] .qs-lab {
+        color: #64748b;
+      }
+    </style>
   </head>
   <body>
+    <div id="qimchi-splash" role="status" aria-label="Qimchi is starting">
+      <img class="qs-logo" src="/qimchi-logo.png" alt="" />
+      <div class="qs-name">Qimchi</div>
+      <div class="qs-version">v%QIMCHI_VERSION%</div>
+      <div class="qs-bar"><span></span></div>
+      <div class="qs-lab">SQUAD Lab &middot; FZ J&uuml;lich</div>
+    </div>
+    <script>
+      // Apply the saved theme before React loads.
+      try {
+        var saved = JSON.parse(localStorage.getItem("user-settings") || "{}");
+        var general = saved && saved.state && saved.state.stored && saved.state.stored.general;
+        var theme = general && general.theme;
+        if (theme === "light" || theme === "dark") {
+          document.getElementById("qimchi-splash").setAttribute("data-theme", theme);
+        }
+      } catch (e) {
+        /* Use the system theme. */
+      }
+    </script>
     <div id="root"></div>
     <!-- MathJax config + loader so Plotly's typesetMath can find a typesetter
         Load before the React bundle so plots that render on mount get typeset. -->
@@ -29,13 +159,32 @@
         },
         options: {
           skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"],
+          // NathJax: No context menu, expression explorer or speech
+          enableMenu: false,
+          enableExplorer: false,
+          enableEnrichment: false,
+          enableSpeech: false,
+          enableBraille: false,
+          enableComplexity: false,
+          menuOptions: {
+            settings: {
+              enrich: false,
+              speech: false,
+              braille: false,
+              inTabOrder: false,
+              help: false,
+            },
+          },
         },
       };
     </script>
-    <!-- Use the MathJax v3 SVG build so Plotly can typeset math inside SVG elements.
-      Pin to a known v3 release for stability (Plotly expects MathJax v3 API).
-      Loading via unpkg as requested. -->
-    <script src="https://unpkg.com/mathjax@3.2.2/es5/tex-svg.js"></script>
+    <!-- Plotly renders its math into SVG. MathJax's Fira-specific combined
+      component matches the application's sans-serif typography without first
+      downloading the default New Computer Modern font. It is served from the
+      app (see the mathjax plugin in vite.config.ts) so equations still render
+      with no internet, and deferred so it holds up neither the first paint nor
+      the app bundle. -->
+    <script defer src="/mathjax/tex-mml-svg-mathjax-fira.js"></script>
 
     <script type="module" src="/src/main.tsx"></script>
   </body>

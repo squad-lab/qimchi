@@ -3,10 +3,13 @@ Centralized dataset loading with provider-based dispatch.
 
 This module is the single loader entrypoint for API modules in Qimchi.
 It defines a provider protocol and implements built-in providers for
-common dataset types (e.g., live datasets, NetCDF/HDF5 files). It also
-provides utility functions for detecting dataset formats, loading
+common dataset types (e.g., live datasets, NetCDF/HDF5 files).
+
+It also provides utility functions for detecting dataset formats, loading
 datasets through xarray, and annotating loaded datasets with source
-metadata. This design allows for extensible support of various dataset
+metadata.
+
+This design allows for extensible support of various dataset
 formats and sources while maintaining a consistent loading interface
 for the rest of the application.
 
@@ -14,18 +17,24 @@ for the rest of the application.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import asyncio
+import json
+import os
+import re
+import sqlite3
+import threading
+import time
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional, Protocol
 
-import sqlite3
 import numpy as np
 import xarray as xr
-
+from qimchi_connect import client as live_client
+from qimchi_connect import registry as live_db
 
 # Local imports
-from . import live_client
-from .shared import live_db
+from .diagnostics import register_gauge
 from .logger import logger
 
 MEMORY_PROTOCOL = "memory://"
@@ -78,57 +87,98 @@ class LoadedData:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-def is_memory_reference(ref: str) -> bool:
-    """
-    Check if a reference is a memory reference.
-
-    Args:
-        ref (str): The reference string to check.
-
-    Returns:
-        bool: True if the reference is a memory reference, False otherwise.
-
-    """
-
-    return ref.startswith(MEMORY_PROTOCOL)
+def is_memory_reference(ref: str | None) -> bool:
+    """Return whether ``ref`` uses the memory protocol."""
+    if not ref or not isinstance(ref, str):
+        return False
+    return ref.startswith(MEMORY_PROTOCOL) or ref.startswith("memory:")
 
 
 def normalize_memory_reference(ref: str) -> Optional[str]:
-    """
-    Normalize a memory reference by ensuring it starts with the MEMORY_PROTOCOL
-    and has a measurement ID.
-
-    Args:
-        ref (str): The input reference string to normalize.
-
-    Returns:
-        Optional[str]: The normalized memory reference if valid, otherwise None.
-
-    """
+    """Return a normalized memory reference, or None if invalid."""
+    if not ref or not isinstance(ref, str):
+        return None
 
     if ref.startswith(MEMORY_PROTOCOL):
         return ref
 
     stripped = ref.rstrip("/")
-    if stripped == MEMORY_PROTOCOL.rstrip("/"):
+    if stripped == MEMORY_PROTOCOL.rstrip("/") or stripped == "memory:":
         return MEMORY_PROTOCOL
 
     return None
 
 
 def extract_measurement_id(ref: str) -> str:
-    """
-    Extract the measurement ID from a memory reference.
+    """Extract the measurement ID from a memory reference."""
+    if not ref:
+        return ""
+    if ref.startswith(MEMORY_PROTOCOL):
+        return ref[len(MEMORY_PROTOCOL) :].strip("/")
+    if ref.startswith("memory:"):
+        return ref[len("memory:") :].lstrip("/").strip()
+    return ref.strip("/")
 
-    Args:
-        ref (str): The memory reference string, expected to be in the form "memory://<measurement_id>".
 
-    Returns:
-        str: The extracted measurement ID, or an empty string if the reference is not valid.
+def _maintenance_interval() -> float:
+    """Seconds between registry maintenance passes (0 disables the throttle)."""
+    try:
+        return float(os.environ.get("QIMCHI_LIVE_MAINTENANCE_INTERVAL", "30"))
+    except ValueError:
+        return 30.0
 
-    """
 
-    return ref[len(MEMORY_PROTOCOL) :].strip("/")
+_last_maintenance = 0.0
+_maintenance_lock = threading.Lock()
+
+# Live fetches are shared per measurement and only touched by the event loop.
+_live_polls: Dict[str, "asyncio.Task[LoadedData]"] = {}
+_live_poll_results: Dict[str, tuple] = {}
+register_gauge("live polls", lambda: len(_live_polls))
+
+
+def _live_poll_window() -> float:
+    """How long one live fetch may be reused for, in seconds."""
+    try:
+        return float(os.environ.get("QIMCHI_LIVE_POLL_WINDOW", "0.5"))
+    except ValueError:
+        return 0.5
+
+
+def _with_own_attrs(loaded: "LoadedData") -> "LoadedData":
+    """Return a shallow dataset copy with independent attributes."""
+    if loaded.kind != "dataset":
+        return loaded
+    return replace(loaded, obj=loaded.obj.copy(deep=False))
+
+
+def maintain_live_registry(registry=None) -> None:
+    """Run throttled live-registry maintenance."""
+    global _last_maintenance
+
+    registry = registry if registry is not None else live_db
+    now = time.monotonic()
+    interval = _maintenance_interval()
+    with _maintenance_lock:
+        if interval > 0 and _last_maintenance and now - _last_maintenance < interval:
+            return
+        _last_maintenance = now
+
+    maintenance = registry.maintain_registry(
+        retention_days=7,
+        # A refused localhost connection can take about two seconds on Windows.
+        timeout=2.0,
+        retries=2,
+    )
+    stale = getattr(maintenance, "stale_measurement_ids", ()) or ()
+    deleted = getattr(maintenance, "deleted_count", 0) or 0
+    if stale or deleted:
+        logger.info(
+            "Live registry maintenance marked %d stale and deleted %d old "
+            "dataset record(s)",
+            len(stale),
+            deleted,
+        )
 
 
 def get_live_dataset_entries() -> Dict[str, Dict[str, Any]]:
@@ -153,6 +203,7 @@ def get_live_dataset_entries() -> Dict[str, Dict[str, Any]]:
         return {}
 
     try:
+        maintain_live_registry()
         live_db.init_database()
         measurements = live_db.get_live_measurements()
         entries: Dict[str, Dict[str, Any]] = {}
@@ -281,6 +332,82 @@ def _annotate_dataset(
     if measurement_ended_at is not None:
         dataset.attrs["measurement_ended_at"] = measurement_ended_at
 
+    _normalize_cf_label_attrs(dataset)
+
+
+def _normalize_cf_label_attrs(dataset: xr.Dataset) -> None:
+    """Fill missing Qimchi labels and units from CF attributes in place."""
+    for var in (*dataset.coords.values(), *dataset.data_vars.values()):
+        if "long_name" in var.attrs:
+            var.attrs.setdefault("label", var.attrs["long_name"])
+        if "units" in var.attrs:
+            var.attrs.setdefault("unit", var.attrs["units"])
+
+
+def _unwrap_finite(values: np.ndarray) -> np.ndarray:
+    # Skip NaNs, which would otherwise propagate through np.unwrap.
+    finite = np.isfinite(values)
+    if finite.sum() < 2:
+        return values
+    values = values.copy()
+    values[finite] = np.unwrap(values[finite])
+    return values
+
+
+def unwrapped_phase(values: Any) -> np.ndarray:
+    """Return phase in radians, unwrapped from the innermost axis outward."""
+    phase = np.angle(np.asarray(values))
+    if phase.size == 0:
+        return phase
+    for axis in reversed(range(phase.ndim)):
+        phase = np.apply_along_axis(_unwrap_finite, axis, phase)
+    return phase
+
+
+_COMPLEX_PARTS = (
+    ("amplitude", np.abs, None),
+    ("phase", unwrapped_phase, "rad"),
+    ("real", np.real, None),
+    ("imag", np.imag, None),
+)
+
+
+def split_complex_variables(dataset: xr.Dataset) -> xr.Dataset:
+    """Replace complex variables with amplitude, phase, real, and imaginary parts."""
+    if not any(var.dtype.kind == "c" for var in dataset.data_vars.values()):
+        return dataset
+
+    data_vars: Dict[Any, xr.DataArray] = {}
+    for name, var in dataset.data_vars.items():
+        if var.dtype.kind != "c":
+            data_vars[name] = var
+            continue
+        label = var.attrs.get("label") or str(name)
+        for suffix, func, part_unit in _COMPLEX_PARTS:
+            part_name = f"{name}_{suffix}"
+            if part_name in dataset.variables:
+                continue
+            part = xr.apply_ufunc(func, var, dask="allowed", keep_attrs=True)
+            part.attrs.pop("long_name", None)
+            part.attrs["label"] = f"{label} ({suffix})"
+            if part_unit is not None:
+                part.attrs["unit"] = part_unit
+                part.attrs.pop("units", None)
+            part.attrs["complex_source"] = str(name)
+            part.attrs["complex_dtype"] = str(var.dtype)
+            data_vars[part_name] = part
+
+    split = xr.Dataset(data_vars, coords=dataset.coords, attrs=dataset.attrs)
+    split.encoding = dict(dataset.encoding)
+    return split
+
+
+def _with_real_parts(loaded: LoadedData) -> LoadedData:
+    if loaded.kind != "dataset":
+        return loaded
+    split = split_complex_variables(loaded.obj)
+    return loaded if split is loaded.obj else replace(loaded, obj=split)
+
 
 def _load_xarray_dataset(path: Path, fmt: str) -> xr.Dataset:
     """
@@ -350,33 +477,100 @@ def _load_xarray_dataset(path: Path, fmt: str) -> xr.Dataset:
 
 def load_xarray_dataset(path: str | Path, fmt: str) -> xr.Dataset:
     """
-    Public helper for custom providers to use Qimchi's normalized xarray loading.
-
-    Args:
-        path (str | Path): The filesystem path to the dataset.
-        fmt (str): The detected format of the dataset (e.g., "zarr", "netcdf", "hdf5").
-
-    Returns:
-        xr.Dataset: The loaded dataset.
-
-    Raises:
-        DatasetResolutionError: If the dataset cannot be loaded.
+    Public helper - kept for backward compatibility
+    See `_load_xarray_dataset()` for details.
 
     """
     return _load_xarray_dataset(Path(path), fmt)
 
 
-def _detect_filesystem_format(path: Path) -> str:
+_QUANTIFY_SETTABLE_COORD_RE = re.compile(r"x(\d+)$")
+
+
+def _grid_quantify_settables(dataset: xr.Dataset) -> xr.Dataset:
     """
-    Detect dataset format based on filesystem path characteristics.
+    Reshape a Quantify sparse dataset's flat settables into real dimensions.
+
+    Quantify (quantify-core and its successor `quantify` package) stores
+    multi-settable sweeps as flat `x0`, `x1`, ... coordinate arrays along a
+    single `dim_0`, and tags a genuinely rectangular sweep with the dataset
+    attr `grid_2d=True` -- reshaping is only ever applied when that attr is
+    set, matching Quantify's own `to_gridded_dataset()` (which uses the same
+    signal and is likewise never set for more than two settables). A single
+    settable is already directly plottable via its `dim_0` coordinate and is
+    left untouched.
+
+    This mirrors `to_gridded_dataset()`'s pandas-MultiIndex-based reshape
+    without depending on the `quantify`/`quantify-core` package.
 
     Args:
-        path (Path): The filesystem path to analyze.
+        dataset (xr.Dataset): The dataset to reshape.
 
     Returns:
-        str: Detected format string (e.g., "zarr", "netcdf",
+        xr.Dataset: The gridded dataset, or the original dataset unchanged
+            if it is not a rectangular multi-settable Quantify sweep.
 
     """
+    if not dataset.attrs.get("grid_2d"):
+        return dataset
+
+    settable_coords = sorted(
+        (
+            name
+            for name in dataset.coords
+            if _QUANTIFY_SETTABLE_COORD_RE.fullmatch(name)
+        ),
+        key=lambda name: int(_QUANTIFY_SETTABLE_COORD_RE.fullmatch(name).group(1)),
+    )
+    if len(settable_coords) < 2:
+        return dataset
+
+    flat_dims = {dataset[name].dims for name in settable_coords}
+    if len(flat_dims) != 1:
+        return dataset
+    (only_dims,) = flat_dims
+    if len(only_dims) != 1:
+        return dataset
+    (flat_dim,) = only_dims
+
+    try:
+        gridded = dataset.set_index({flat_dim: settable_coords}).unstack(flat_dim)
+    except Exception as exc:
+        logger.warning(
+            "Failed to grid Quantify dataset '%s': %s",
+            dataset.attrs.get("tuid", "<unknown>"),
+            exc,
+        )
+        return dataset
+
+    gridded.attrs["grid_2d"] = False
+    gridded.attrs["qimchi_quantify_gridded"] = True
+    return gridded
+
+
+def _prepare_quantify_dataset(dataset: xr.Dataset, fmt: str) -> tuple[xr.Dataset, str]:
+    """
+    Grid and tag a dataset if it is a Quantify dataset, otherwise pass through.
+
+    Detection relies on Quantify's `tuid` attribute, which every Quantify
+    dataset carries and which no other format in Qimchi's loader sets.
+
+    Args:
+        dataset (xr.Dataset): The loaded dataset to inspect.
+        fmt (str): The format detected so far (e.g. "hdf5", "netcdf", "live").
+
+    Returns:
+        tuple[xr.Dataset, str]: The (possibly gridded) dataset, and "quantify"
+            in place of `fmt` if it was a Quantify dataset.
+
+    """
+    if not dataset.attrs.get("tuid"):
+        return dataset, fmt
+    return _grid_quantify_settables(dataset), "quantify"
+
+
+def _detect_filesystem_format(path: Path) -> str:
+    """Detect a dataset format from its path and marker files."""
 
     if path.is_dir():
         zarr_markers = {
@@ -403,24 +597,13 @@ def _detect_filesystem_format(path: Path) -> str:
         return "dat"
     if suffix in {".sqlite", ".db"}:
         return "sqlite"
+    if suffix == ".mat":
+        return "matlab"
     return "unknown"
 
 
 def _load_flat_table_dataset(path: Path) -> xr.Dataset:
-    """
-    Load a flat tabular file through polars and expose each column as a coordinate.
-
-    Args:
-        path (Path): Path to the flat tabular file.
-
-    Returns:
-        xr.Dataset: The loaded dataset.
-
-    Raises:
-        MissingBackendDependencyError: If polars is not available.
-        DatasetResolutionError: If the flat table cannot be loaded.
-
-    """
+    """Load a flat table through Polars with each column as a coordinate."""
     try:
         import polars as pl
     except Exception as exc:
@@ -450,6 +633,228 @@ def _load_flat_table_dataset(path: Path) -> xr.Dataset:
     dataset.attrs["qimchi_tabular_row_dim"] = row_dim
     dataset.attrs["qimchi_all_columns"] = columns
 
+    return dataset
+
+
+def _trim_nan_padding(array: np.ndarray) -> np.ndarray:
+    """Remove trailing all-NaN slices from oversized preallocated MATLAB arrays."""
+    if array.dtype.kind not in "fc" or array.ndim < 2:
+        return array
+    for axis in range(array.ndim):
+        other = tuple(i for i in range(array.ndim) if i != axis)
+        filled = np.flatnonzero(~np.all(np.isnan(array), axis=other))
+        if filled.size and filled[-1] + 1 < array.shape[axis]:
+            array = np.take(array, np.arange(filled[-1] + 1), axis=axis)
+    return np.squeeze(array)
+
+
+def _is_axis_like(array: np.ndarray) -> bool:
+    if array.ndim != 1 or array.size < 2 or array.dtype.kind not in "fiu":
+        return False
+    steps = np.diff(array.astype(float))
+    return bool(np.all(steps > 0) or np.all(steps < 0))
+
+
+def _flatten_mat_values(
+    values: Dict[str, Any],
+    prefix: str,
+    arrays: Dict[str, np.ndarray],
+    attrs: Dict[str, Any],
+) -> None:
+    """Split loadmat output into numeric arrays and scalar/text metadata."""
+    for key, value in values.items():
+        name = f"{prefix}{key}"
+        if isinstance(value, dict):
+            _flatten_mat_values(value, f"{name}.", arrays, attrs)
+        elif isinstance(value, str):
+            attrs[name] = value
+        elif isinstance(value, (bool, int, float, np.number, np.bool_)):
+            attrs[name] = value.item() if isinstance(value, np.generic) else value
+        elif isinstance(value, np.ndarray) and value.dtype.kind in "biufc":
+            if value.size == 1:
+                attrs[name] = value.item()
+            elif value.size > 1:
+                arrays[name] = value
+        elif isinstance(value, (list, np.ndarray)) and all(
+            isinstance(item, str) for item in value
+        ):
+            attrs[name] = [str(item) for item in value]
+        else:
+            logger.debug(f"_load_matlab_dataset | skipping '{name}' ({type(value)})")
+
+
+_MAT73_SKIPPED_CLASSES = {"function_handle", "sparse", "opaque"}
+
+
+def _is_mat73(path: Path) -> bool:
+    """Detect MATLAB v7.3 files by their text header or HDF5 signature."""
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(512 + 8)
+    except OSError:
+        return False
+    return head.startswith(b"MATLAB 7.3") or head[512:520] == b"\x89HDF\r\n\x1a\n"
+
+
+def _mat73_value(file: Any, node: Any, name: str) -> Any:
+    """
+    Decode a v7.3 HDF5 node into the value produced by ``scipy.io.loadmat``
+    with ``squeeze_me`` and ``simplify_cells`` enabled.
+
+    Transpose MATLAB arrays, decode UTF-16 text, map groups to structs, and
+    dereference cells. Return None for unsupported or empty values.
+
+    """
+    import h5py
+
+    matlab_class = node.attrs.get("MATLAB_class", b"")
+    if isinstance(matlab_class, bytes):
+        matlab_class = matlab_class.decode("ascii", errors="replace")
+
+    if isinstance(node, h5py.Group):
+        if "MATLAB_sparse" in node.attrs or matlab_class != "struct":
+            logger.debug(f"_load_matlab_dataset | skipping '{name}' ({matlab_class})")
+            return None
+        fields = {}
+        for key, child in node.items():
+            value = _mat73_value(file, child, f"{name}.{key}")
+            if value is not None:
+                fields[key] = value
+        return fields
+
+    if (
+        node.attrs.get("MATLAB_empty", 0)
+        or matlab_class in _MAT73_SKIPPED_CLASSES
+        or "MATLAB_object_decode" in node.attrs
+    ):
+        logger.debug(f"_load_matlab_dataset | skipping '{name}' ({matlab_class})")
+        return None
+
+    data = node[()]
+    if node.dtype == h5py.ref_dtype or matlab_class == "cell":
+        items = [
+            _mat73_value(file, file[ref], f"{name}{{{index}}}")
+            for index, ref in enumerate(np.asarray(data).T.ravel())
+        ]
+        return [item for item in items if item is not None]
+
+    array = np.asarray(data).T
+    if array.dtype.names and {"real", "imag"} <= set(array.dtype.names):
+        array = array["real"] + 1j * array["imag"]
+    if matlab_class == "char":
+        rows = np.atleast_2d(array)
+        text = ["".join(map(chr, row)).rstrip("\x00") for row in rows]
+        return text[0] if len(text) == 1 else text
+    if matlab_class == "logical":
+        array = array.astype(bool)
+    array = np.squeeze(array)
+    return array[()] if array.ndim == 0 else array
+
+
+def _read_mat73(path: Path) -> tuple[Dict[str, Any], str]:
+    """Return decoded variables and the text header from a v7.3 MAT-file."""
+    try:
+        import h5py
+    except ImportError as exc:
+        raise UnsupportedDatasetFormatError(
+            f"Reading MATLAB v7.3 files needs h5py; re-save '{path.name}' "
+            "with save(..., '-v7') or install Qimchi's dataset extras"
+        ) from exc
+
+    with path.open("rb") as handle:
+        header = handle.read(116).decode("latin-1", errors="replace").strip()
+    values: Dict[str, Any] = {}
+    try:
+        with h5py.File(path, "r") as file:
+            for name, node in file.items():
+                # Internal MATLAB objects and cell payloads use reserved #...# names.
+                if name.startswith("#"):
+                    continue
+                value = _mat73_value(file, node, name)
+                if value is not None:
+                    values[name] = value
+    except Exception as exc:
+        raise DatasetResolutionError(
+            f"Failed to read MATLAB v7.3 file '{path}': {exc}"
+        ) from exc
+    return values, header
+
+
+def _load_matlab_dataset(path: Path) -> xr.Dataset:
+    """
+    Load a MATLAB .mat file (v4 to v7.3) into an xarray Dataset.
+
+    Infer the layout because MAT files do not define a dataset schema:
+
+    - Strictly monotonic 1-D arrays with a length no other such array shares
+      become dimension coordinates.
+    - Every other numeric array becomes a data variable, its axes matched to
+      those coordinates by length. Arrays that cannot be matched unambiguously
+      get their own `<name>_dim_<i>` dimensions.
+    - Scalars, strings and struct fields become attributes; numeric arrays in
+      structs become variables named `struct.field`.
+
+    Args:
+        path (Path): Path to the .mat file.
+
+    Returns:
+        xr.Dataset: The loaded dataset.
+
+    Raises:
+        UnsupportedDatasetFormatError: For a v7.3 file when h5py is missing.
+        DatasetResolutionError: If the file cannot be read or holds no arrays.
+
+    """
+    if _is_mat73(path):
+        raw, header = _read_mat73(path)
+    else:
+        import scipy.io
+
+        try:
+            raw = scipy.io.loadmat(str(path), squeeze_me=True, simplify_cells=True)
+        except NotImplementedError:
+            # Fall back when the producer uses a nonstandard v7.3 header.
+            raw, header = _read_mat73(path)
+        except Exception as exc:
+            raise DatasetResolutionError(
+                f"Failed to read MATLAB file '{path}': {exc}"
+            ) from exc
+        else:
+            header = raw.pop("__header__", b"")
+            raw.pop("__version__", None)
+            raw.pop("__globals__", None)
+
+    arrays: Dict[str, np.ndarray] = {}
+    attrs: Dict[str, Any] = {}
+    _flatten_mat_values(raw, "", arrays, attrs)
+    if not arrays:
+        raise DatasetResolutionError(f"MATLAB file holds no numeric arrays: {path}")
+    arrays = {name: _trim_nan_padding(array) for name, array in arrays.items()}
+
+    axes = {name: array for name, array in arrays.items() if _is_axis_like(array)}
+    axis_lengths = [array.size for array in axes.values()]
+    dim_for_length = {
+        array.size: name
+        for name, array in axes.items()
+        if axis_lengths.count(array.size) == 1
+    }
+
+    dataset = xr.Dataset(
+        coords={name: (name, arrays[name]) for name in dim_for_length.values()}
+    )
+    for name, array in arrays.items():
+        if name in dataset.coords:
+            continue
+        dims = [dim_for_length.get(length) for length in array.shape]
+        if None in dims or len(set(dims)) != len(dims):
+            dims = [f"{name}_dim_{i}" for i in range(array.ndim)]
+        dataset[name] = (dims, array)
+
+    if isinstance(header, bytes):
+        header = header.decode("latin-1", errors="replace")
+    if header:
+        attrs["mat_header"] = header.strip()
+    dataset.attrs.update(attrs)
     return dataset
 
 
@@ -626,21 +1031,7 @@ def _open_xarray_datatree(path: Path, fmt: str) -> xr.DataTree:
 
 
 def _extract_dataset_from_datatree(dtree: Any, node_path: Optional[str]) -> xr.Dataset:
-    """
-    Extract xr.Dataset from a DataTree node path.
-
-    Args:
-        dtree (Any): The loaded DataTree object.
-        node_path (Optional[str]): The path to the node within the DataTree to extract the dataset from. If None, the root node is used.
-
-    Returns:
-        xr.Dataset: The extracted dataset from the specified DataTree node.
-
-    Raises:
-        DatasetResolutionError: If the specified node path does not exist in the DataTree.
-        DatasetKindMismatchError: If the specified node does not contain a dataset payload.
-
-    """
+    """Return the Dataset at a DataTree node path."""
     selected_path = node_path or "/"
     try:
         node = dtree[selected_path] if selected_path != "/" else dtree
@@ -659,23 +1050,7 @@ def _extract_dataset_from_datatree(dtree: Any, node_path: Optional[str]) -> xr.D
 
 
 def list_datatree_nodes(ref: str | Path) -> list[dict[str, Any]]:
-    """
-    List nodes from a DataTree-backed store for discovery/tree views.
-
-    Args:
-        ref (str | Path): The reference to the DataTree store, which may include an optional node path fragment.
-
-    Returns:
-        list[dict[str, Any]]: A list of dictionaries containing metadata about each node in
-            the DataTree. Each dictionary includes:
-            - "path": The path of the node within the DataTree.
-            - "name": The name of the node (derived from the path).
-            - "has_dataset": A boolean indicating whether the node contains a dataset payload.
-
-    Raises:
-        DatasetResolutionError: If the DataTree path does not exist or cannot be loaded.
-
-    """
+    """List DataTree nodes for discovery views."""
     raw = str(ref)
     path, _ = _parse_datatree_reference(raw if "#" in raw else str(ref))
     if not path.exists():
@@ -708,32 +1083,39 @@ def list_datatree_nodes(ref: str | Path) -> list[dict[str, Any]]:
             close_fn()
 
 
-def _get_latest_qcodes_run_id(db_path: Path) -> int:
-    """
-    Return the latest run_id from a QCoDeS sqlite DB.
+def _read_qcodes_sqlite(path: Path, query: str) -> list[tuple]:
+    """Query a QCoDeS database, falling back to lock-free access."""
+    uri = path.as_uri()
+    attempts = (f"{uri}?mode=ro", None, f"{uri}?immutable=1")
+    last: Exception | None = None
 
-    Args:
-        db_path (Path): Path to the QCoDeS sqlite database file.
-
-    Returns:
-        int: The latest run_id in the database.
-
-    Raises:
-        DatasetResolutionError: If the QCoDeS DB cannot be queried.
-
-    """
-    try:
-        conn = sqlite3.connect(str(db_path))
+    for attempt in attempts:
         try:
-            row = conn.execute("SELECT MAX(run_id) FROM runs").fetchone()
-        finally:
-            conn.close()
+            connection = (
+                sqlite3.connect(str(path))
+                if attempt is None
+                else sqlite3.connect(attempt, uri=True)
+            )
+            try:
+                return connection.execute(query).fetchall()
+            finally:
+                connection.close()
+        except Exception as exc:
+            last = exc
+
+    raise last if last else RuntimeError(f"Could not read {path}")
+
+
+def _get_latest_qcodes_run_id(db_path: Path) -> int:
+    """Return the latest run ID in a QCoDeS SQLite database."""
+    try:
+        rows = _read_qcodes_sqlite(db_path, "SELECT MAX(run_id) FROM runs")
     except Exception as exc:
         raise DatasetResolutionError(
             f"Failed to query runs from QCoDeS DB '{db_path}': {exc}"
         ) from exc
 
-    run_id = row[0] if row else None
+    run_id = rows[0][0] if rows else None
     if run_id is None:
         raise DatasetResolutionError(f"No runs found in QCoDeS DB: {db_path}")
 
@@ -741,35 +1123,20 @@ def _get_latest_qcodes_run_id(db_path: Path) -> int:
 
 
 def list_qcodes_runs(db_path: str | Path) -> list[dict[str, Any]]:
-    """
-    List QCoDeS runs from a sqlite DB for tree/discovery use.
-
-    Args:
-        db_path (str | Path): Path to the QCoDeS sqlite database file.
-
-    Returns:
-        list[dict[str, Any]]: List of run metadata.
-
-    Raises:
-        DatasetResolutionError: If the QCoDeS DB cannot be read.
-
-    """
+    """List runs in a QCoDeS SQLite database."""
     path = Path(db_path)
     if not path.exists() or not path.is_file():
         raise DatasetResolutionError(f"QCoDeS database file not found: {path}")
 
     try:
-        conn = sqlite3.connect(str(path))
-        try:
-            rows = conn.execute(
-                """
-                SELECT run_id, name, result_table_name, run_timestamp
-                FROM runs
-                ORDER BY run_id DESC
-                """
-            ).fetchall()
-        finally:
-            conn.close()
+        rows = _read_qcodes_sqlite(
+            path,
+            """
+            SELECT run_id, name, result_table_name, run_timestamp
+            FROM runs
+            ORDER BY run_id DESC
+            """,
+        )
     except Exception as exc:
         raise DatasetResolutionError(
             f"Failed to read runs from QCoDeS DB '{path}': {exc}"
@@ -790,21 +1157,7 @@ def list_qcodes_runs(db_path: str | Path) -> list[dict[str, Any]]:
 
 
 def _load_qcodes_xarray_dataset(db_path: Path, run_id: int) -> xr.Dataset:
-    """
-    Load a QCoDeS run and convert to xarray Dataset.
-
-    Args:
-        db_path (Path): Path to the QCoDeS sqlite database file.
-        run_id (int): The run_id of the QCoDeS run to load.
-
-    Returns:
-        xr.Dataset: The loaded QCoDeS run as an xarray Dataset.
-
-    Raises:
-        DatasetResolutionError: If the QCoDeS run cannot be loaded.
-        MissingBackendDependencyError: If QCoDeS or its dependencies are not available.
-
-    """
+    """Load a QCoDeS run as an xarray dataset."""
     try:
         from qcodes.dataset import initialised_database_at, load_by_id
     except Exception as exc:
@@ -824,7 +1177,126 @@ def _load_qcodes_xarray_dataset(db_path: Path, run_id: int) -> xr.Dataset:
     dataset.attrs.setdefault("run_id", run_id)
     dataset.attrs.setdefault("qcodes_db_path", str(db_path))
 
+    # Decode QCoDeS station snapshots for Metadata. Preserve malformed legacy
+    # values instead of rejecting the run.
+    snapshot = dataset.attrs.get("snapshot")
+    if isinstance(snapshot, str):
+        try:
+            dataset.attrs["snapshot"] = json.loads(snapshot)
+        except (TypeError, ValueError):
+            logger.warning(
+                "QCoDeS run_id=%s has an invalid JSON snapshot; keeping raw text",
+                run_id,
+            )
+
     return dataset
+
+
+# Live measurements rejected by their registered server, keyed by started_at.
+# A new registration clears the effective rejection.
+_WS_DISOWNED: Dict[str, Any] = {}
+register_gauge("disowned live producers", lambda: len(_WS_DISOWNED))
+
+
+def _ws_worth_trying(measurement_id: str, info: Dict[str, Any]) -> bool:
+    """Return whether to request a live snapshot over WebSocket."""
+    if not info.get("ws_url"):
+        return False
+    if measurement_id in _WS_DISOWNED and _WS_DISOWNED[measurement_id] == info.get(
+        "started_at"
+    ):
+        return False
+    return not (info.get("ended_at") and info.get("disk_path"))
+
+
+def _note_ws_failure(measurement_id: str, info: Dict[str, Any], exc: Exception) -> None:
+    """Cache definitive "not found" responses for this registration."""
+    if isinstance(exc, RuntimeError) and "not found" in str(exc):
+        _WS_DISOWNED[measurement_id] = info.get("started_at")
+
+
+# Per-measurement snapshots used to fetch only newly completed rows.
+# Keep at most two because each entry contains the full measurement.
+_LIVE_ACCUM: Dict[str, Dict[str, Any]] = {}
+_LIVE_ACCUM_MAX = 2
+register_gauge("live buffers", lambda: len(_LIVE_ACCUM))
+
+
+def forget_live_rows(measurement_id: str) -> None:
+    """Drop a measurement's accumulated rows."""
+    _LIVE_ACCUM.pop(measurement_id, None)
+
+
+def _remember_live_rows(
+    measurement_id: str, info: Dict[str, Any], dataset: xr.Dataset
+) -> xr.Dataset:
+    """Cache a full snapshot when its producer supports row requests."""
+    rows = dataset.encoding.get("qimchi_connect_rows") or {}
+    if not rows.get("append_dim"):
+        forget_live_rows(measurement_id)
+        return dataset
+
+    while len(_LIVE_ACCUM) >= _LIVE_ACCUM_MAX and measurement_id not in _LIVE_ACCUM:
+        _LIVE_ACCUM.pop(next(iter(_LIVE_ACCUM)))
+    _LIVE_ACCUM[measurement_id] = {
+        "dataset": dataset,
+        "dim": rows["append_dim"],
+        "rows": int(rows.get("rows_written", 0)),
+        "started_at": info.get("started_at"),
+    }
+    return dataset
+
+
+def _merge_live_rows(
+    measurement_id: str,
+    info: Dict[str, Any],
+    dataset: xr.Dataset,
+    cached: Optional[Dict[str, Any]],
+) -> Optional[xr.Dataset]:
+    """
+    Merge new rows into a cached snapshot.
+
+    Return None if registration, shape, or variables no longer match.
+    """
+    rows = dataset.encoding.get("qimchi_connect_rows") or {}
+    start = int(rows.get("rows_from", 0))
+    if not start or cached is None:
+        return None
+    if cached.get("started_at") != info.get("started_at"):
+        return None
+
+    dim = rows.get("append_dim")
+    base = cached["dataset"]
+    if dim != cached.get("dim") or dim not in base.sizes:
+        return None
+    if int(rows.get("rows_total", -1)) != int(base.sizes[dim]):
+        return None
+
+    stop = int(rows.get("rows_written", start))
+    for name, var in dataset.data_vars.items():
+        if name not in base.data_vars:
+            return None
+        if stop > start:
+            base[name].values[start:stop] = var.transpose(*base[name].dims).values
+
+    cached["rows"] = stop
+    base.encoding["qimchi_connect_rows"] = rows
+    logger.debug(
+        "[live] %s: folded rows %d:%d of %s",
+        measurement_id,
+        start,
+        stop,
+        rows.get("rows_total"),
+    )
+    return base
+
+
+def _live_since_rows(measurement_id: str, info: Dict[str, Any]) -> Optional[int]:
+    """Return the first uncached row for this registration."""
+    cached = _LIVE_ACCUM.get(measurement_id)
+    if cached is None or cached.get("started_at") != info.get("started_at"):
+        return None
+    return cached["rows"] or None
 
 
 class LiveMemoryProvider:
@@ -832,12 +1304,13 @@ class LiveMemoryProvider:
     Provider for live datasets loaded through memory/WebSocket.
 
     This provider detects memory references with the "memory://" protocol and
-    resolves them to live datasets based on measurement IDs. It attempts to load
-    the dataset through a WebSocket connection for real-time access, and falls back
-    to disk loading if the WebSocket is unavailable. The provider annotates the
-    loaded dataset with source and measurement metadata for provenance. This allows
-    users to access live datasets in a seamless way through Qimchi's dataset APIs,
-    even if the underlying data is changing in real time or only partially available on disk.
+    resolves them to live datasets based on measurement IDs. It attempts to
+    load the dataset through a WebSocket connection for real-time access, and
+    falls back to disk loading if the WebSocket is unavailable. The provider
+    annotates the loaded dataset with source and measurement metadata for
+    provenance. This allows users to access live datasets in a seamless way
+    through Qimchi's dataset APIs, even if the underlying data is changing in
+    real time or only partially available on disk.
 
     """
 
@@ -882,6 +1355,11 @@ class LiveMemoryProvider:
     def _load_from_disk(
         self, ref: str, measurement_id: str, info: Dict[str, Any]
     ) -> LoadedData:
+        if info.get("ended_at"):
+            # The run is over and its data is on disk, so the rows held for
+            # incremental polling are dead weight.
+            forget_live_rows(measurement_id)
+
         disk_path = self.resolve_disk_path(ref)
         path = Path(disk_path)
         if not path.exists():
@@ -890,6 +1368,7 @@ class LiveMemoryProvider:
             )
         fmt = _detect_filesystem_format(path)
         dataset = _load_xarray_dataset(path, fmt)
+        dataset, fmt = _prepare_quantify_dataset(dataset, fmt)
         _annotate_dataset(
             dataset,
             source_ref=ref,
@@ -928,11 +1407,33 @@ class LiveMemoryProvider:
         info = resolve_live_dataset(measurement_id)
         ws_url = info.get("ws_url")
 
-        if ws_url:
+        if _ws_worth_trying(measurement_id, info):
             try:
-                dataset = live_client.open_live_dataset_sync(
-                    measurement_id, ws_url=ws_url
+                since_rows = _live_since_rows(measurement_id, info)
+                # Older producers never create a row cache, so they receive no
+                # start_row parameter.
+                extra = {"since_rows": since_rows} if since_rows else {}
+                dataset = live_client.open_live_measurement_sync(
+                    measurement_id, ws_url=ws_url, **extra
                 )
+                merged = _merge_live_rows(
+                    measurement_id, info, dataset, _LIVE_ACCUM.get(measurement_id)
+                )
+                if merged is not None:
+                    dataset = merged
+                else:
+                    if since_rows and (
+                        dataset.encoding.get("qimchi_connect_rows") or {}
+                    ).get("rows_from"):
+                        # Rows that cannot be folded into what is held: start
+                        # again from a whole snapshot rather than plot a gap.
+                        dataset = live_client.open_live_measurement_sync(
+                            measurement_id, ws_url=ws_url
+                        )
+                    dataset = _remember_live_rows(measurement_id, info, dataset)
+                source = dataset.encoding.get("qimchi_connect_source", {})
+                fmt = source.get("source_format", "live")
+                dataset, fmt = _prepare_quantify_dataset(dataset, fmt)
                 _annotate_dataset(
                     dataset,
                     source_ref=normalized,
@@ -947,16 +1448,18 @@ class LiveMemoryProvider:
                     obj=dataset,
                     source_ref=normalized,
                     actual_path=info.get("disk_path"),
-                    format="zarr",
+                    format=fmt,
                     loaded_from="memory",
                     metadata={
                         "measurement_id": measurement_id,
                         "ws_url": ws_url,
                         "live_status": info.get("live_status"),
                         "ended_at": info.get("ended_at"),
+                        "source": source,
                     },
                 )
             except Exception as exc:
+                _note_ws_failure(measurement_id, info, exc)
                 logger.info(
                     "WebSocket unavailable for '%s': %s. Falling back to disk.",
                     measurement_id,
@@ -966,6 +1469,26 @@ class LiveMemoryProvider:
         return self._load_from_disk(normalized, measurement_id, info)
 
     async def load_async(self, ref: str) -> LoadedData:
+        """Share concurrent and closely spaced fetches for one measurement."""
+        measurement_id = extract_measurement_id(normalize_memory_reference(ref) or "")
+        if not measurement_id:
+            return await self._fetch(ref)
+
+        cached = _live_poll_results.get(measurement_id)
+        if cached and time.monotonic() - cached[0] < _live_poll_window():
+            return _with_own_attrs(cached[1])
+
+        poll = _live_polls.get(measurement_id)
+        if poll is None or poll.done():
+            poll = asyncio.create_task(self._fetch(ref))
+            _live_polls[measurement_id] = poll
+
+        # One cancelled caller must not cancel the shared fetch.
+        loaded = await asyncio.shield(poll)
+        _live_poll_results[measurement_id] = (time.monotonic(), loaded)
+        return _with_own_attrs(loaded)
+
+    async def _fetch(self, ref: str) -> LoadedData:
         normalized = normalize_memory_reference(ref)
         if normalized is None:
             raise DatasetResolutionError(f"Not a memory reference: {ref}")
@@ -979,11 +1502,32 @@ class LiveMemoryProvider:
         info = resolve_live_dataset(measurement_id)
         ws_url = info.get("ws_url")
 
-        if ws_url:
+        if _ws_worth_trying(measurement_id, info):
             try:
-                dataset = await live_client.open_live_dataset(
-                    measurement_id, ws_url=ws_url
+                since_rows = _live_since_rows(measurement_id, info)
+                # See the note in load_sync: not sent unless rows are held.
+                extra = {"since_rows": since_rows} if since_rows else {}
+                dataset = await live_client.open_live_measurement(
+                    measurement_id, ws_url=ws_url, **extra
                 )
+                merged = _merge_live_rows(
+                    measurement_id, info, dataset, _LIVE_ACCUM.get(measurement_id)
+                )
+                if merged is not None:
+                    dataset = merged
+                else:
+                    if since_rows and (
+                        dataset.encoding.get("qimchi_connect_rows") or {}
+                    ).get("rows_from"):
+                        # Rows that cannot be folded into what is held: start
+                        # again from a whole snapshot rather than plot a gap.
+                        dataset = await live_client.open_live_measurement(
+                            measurement_id, ws_url=ws_url
+                        )
+                    dataset = _remember_live_rows(measurement_id, info, dataset)
+                source = dataset.encoding.get("qimchi_connect_source", {})
+                fmt = source.get("source_format", "live")
+                dataset, fmt = _prepare_quantify_dataset(dataset, fmt)
                 _annotate_dataset(
                     dataset,
                     source_ref=normalized,
@@ -998,16 +1542,18 @@ class LiveMemoryProvider:
                     obj=dataset,
                     source_ref=normalized,
                     actual_path=info.get("disk_path"),
-                    format="zarr",
+                    format=fmt,
                     loaded_from="memory",
                     metadata={
                         "measurement_id": measurement_id,
                         "ws_url": ws_url,
                         "live_status": info.get("live_status"),
                         "ended_at": info.get("ended_at"),
+                        "source": source,
                     },
                 )
             except Exception as exc:
+                _note_ws_failure(measurement_id, info, exc)
                 logger.info(
                     "WebSocket unavailable for '%s': %s. Falling back to disk.",
                     measurement_id,
@@ -1049,6 +1595,7 @@ class NetcdfHdf5Provider:
 
         fmt = _detect_filesystem_format(path)
         dataset = _load_xarray_dataset(path, fmt)
+        dataset, fmt = _prepare_quantify_dataset(dataset, fmt)
         _annotate_dataset(
             dataset,
             source_ref=ref,
@@ -1069,7 +1616,8 @@ class NetcdfHdf5Provider:
         return self._load(ref)
 
     async def load_async(self, ref: str) -> LoadedData:
-        return self._load(ref)
+        # Keep blocking dataset I/O off the event loop.
+        return await asyncio.to_thread(self._load, ref)
 
 
 class DataTreeProvider:
@@ -1169,6 +1717,7 @@ class FilesystemXarrayProvider:
             )
 
         dataset = _load_xarray_dataset(path, fmt)
+        dataset, fmt = _prepare_quantify_dataset(dataset, fmt)
         _annotate_dataset(
             dataset,
             source_ref=ref,
@@ -1189,7 +1738,8 @@ class FilesystemXarrayProvider:
         return self._load(ref)
 
     async def load_async(self, ref: str) -> LoadedData:
-        return self._load(ref)
+        # Keep blocking dataset I/O off the event loop.
+        return await asyncio.to_thread(self._load, ref)
 
 
 class QcodesSqliteProvider:
@@ -1305,6 +1855,51 @@ class FlatFmtProvider:
         return self.load_sync(ref)
 
 
+class MatlabProvider:
+    """
+    Load MATLAB v4-v7 files with scipy.io.loadmat.
+
+    See `_load_matlab_dataset` for how the file's arrays are laid out.
+
+    """
+
+    name = "matlab_provider"
+    _suffixes = {".mat"}
+
+    def supports(self, ref: str) -> bool:
+        return Path(ref).suffix.lower() in self._suffixes and not is_memory_reference(
+            ref
+        )
+
+    def resolve_disk_path(self, ref: str) -> str:
+        path = Path(ref)
+        if not path.exists() or not path.is_file():
+            raise DatasetResolutionError(f"Dataset file not found: {path}")
+        return str(path)
+
+    def load_sync(self, ref: str) -> LoadedData:
+        path = Path(self.resolve_disk_path(ref))
+        dataset = _load_matlab_dataset(path)
+        _annotate_dataset(
+            dataset,
+            source_ref=ref,
+            actual_path=str(path),
+            loaded_from="disk",
+        )
+        return LoadedData(
+            kind="dataset",
+            obj=dataset,
+            source_ref=ref,
+            actual_path=str(path),
+            format="matlab",
+            loaded_from="disk",
+            metadata={},
+        )
+
+    async def load_async(self, ref: str) -> LoadedData:
+        return await asyncio.to_thread(self.load_sync, ref)
+
+
 # NOTE: These are the default built-in providers.
 # NOTE: Custom providers can be registered at runtime and
 # will take precedence over these based on registration order.
@@ -1312,6 +1907,7 @@ _BUILTIN_PROVIDERS: list[DataProvider] = [
     LiveMemoryProvider(),
     QcodesSqliteProvider(),
     FlatFmtProvider(),
+    MatlabProvider(),
     DataTreeProvider(),
     NetcdfHdf5Provider(),
     FilesystemXarrayProvider(),
@@ -1358,12 +1954,12 @@ def resolve_to_disk_path(ref: str) -> str:
 
 def load_data_sync(ref: str) -> LoadedData:
     provider = _select_provider(ref)
-    return provider.load_sync(ref)
+    return _with_real_parts(provider.load_sync(ref))
 
 
 async def load_data_async(ref: str) -> LoadedData:
     provider = _select_provider(ref)
-    return await provider.load_async(ref)
+    return _with_real_parts(await provider.load_async(ref))
 
 
 def load_dataset_sync(ref: str) -> xr.Dataset:

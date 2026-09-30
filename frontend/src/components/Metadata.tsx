@@ -1,32 +1,50 @@
 import { useState, useEffect, useMemo, memo } from "react";
 import { PROD_BACKEND_URL } from "../config";
 import {
+  BadgeInfo,
+  Check,
+  Copy,
+  Expand,
   Eye,
   EyeOff,
-  Expand,
   Minimize,
+  Pin,
+  PinOff,
   Search,
   X,
-  BadgeInfo,
 } from "lucide-react";
 import axios from "axios";
 import JsonView from "@uiw/react-json-view";
 import { BasketItem } from "./Basket";
 import { useSidebarStore } from "../stores/sidebarStore";
+import { usePinnedParametersStore } from "../stores/pinnedParametersStore";
+import { useThemeStore } from "../stores/themeStore";
 import Tooltip from "./Tooltip";
 import { useToast } from "../hooks/useToast";
+import { parseMetadataValue } from "../utils/parseMetadataValue";
 
-// Type definitions for metadata
-interface Metadata {
-  Sweeps: Record<string, unknown>;
-  "Parameters Snapshot": Record<string, unknown>;
-  "Extra Metadata": Record<string, unknown>;
-  "Instruments Snapshot": Record<string, unknown>;
-}
+// Dataset-defined metadata sections, ordered by the backend.
+type Metadata = Record<string, unknown>;
+
+// Sections that are habitually huge, so they open collapsed regardless of
+// which acquisition tool wrote them.
+const BULKY_META_KEYS = new Set([
+  "Instruments Snapshot",
+  "QCoDeS Metadata",
+  "snapshot",
+  "Snapshot",
+  "instruments",
+]);
+
+// qanary stores parameters as `{value, unit, label}`.
+const PARAMETERS_SNAPSHOT_KEY = "Parameters Snapshot";
+
+const isParameterEntry = (value: unknown): boolean =>
+  typeof value === "object" && value !== null && !Array.isArray(value) && "value" in value;
 
 // The custom theme for the metadata JSON view
 const metadataCustomTheme = {
-  "--w-rjv-font-family": "Martian Mono",
+  "--w-rjv-font-family": "Martian Mono Variable, Martian Mono, monospace",
   "--w-rjv-color": "#333333",
   "--w-rjv-key-number": "#0066cc",
   "--w-rjv-key-string": "#333333",
@@ -56,6 +74,40 @@ const metadataCustomTheme = {
   "--w-rjv-type-null-color": "#dc3545",
   "--w-rjv-type-nan-color": "#fd7e14",
   "--w-rjv-type-undefined-color": "#dc3545",
+};
+
+// Dark counterpart of the metadata JSON view (Atom One Dark palette).
+const metadataDarkTheme = {
+  "--w-rjv-font-family": "Martian Mono Variable, Martian Mono, monospace",
+  "--w-rjv-color": "#abb2bf",
+  "--w-rjv-key-number": "#61afef",
+  "--w-rjv-key-string": "#abb2bf",
+  "--w-rjv-background-color": "inherit",
+  "--w-rjv-line-color": "#3e4451",
+  "--w-rjv-arrow-color": "#7f848e",
+  "--w-rjv-edit-color": "var(--w-rjv-color)",
+  "--w-rjv-info-color": "#7f848e",
+  "--w-rjv-update-color": "#abb2bf",
+  "--w-rjv-copied-color": "#abb2bf",
+  "--w-rjv-copied-success-color": "#98c379",
+
+  "--w-rjv-curlybraces-color": "#abb2bf",
+  "--w-rjv-colon-color": "#abb2bf",
+  "--w-rjv-brackets-color": "#abb2bf",
+  "--w-rjv-ellipsis-color": "#e06c75",
+  "--w-rjv-quotes-color": "var(--w-rjv-key-string)",
+  "--w-rjv-quotes-string-color": "var(--w-rjv-type-string-color)",
+
+  "--w-rjv-type-string-color": "#98c379",
+  "--w-rjv-type-int-color": "#d19a66",
+  "--w-rjv-type-float-color": "#d19a66",
+  "--w-rjv-type-bigint-color": "#d19a66",
+  "--w-rjv-type-boolean-color": "#d19a66",
+  "--w-rjv-type-date-color": "#56b6c2",
+  "--w-rjv-type-url-color": "#61afef",
+  "--w-rjv-type-null-color": "#e06c75",
+  "--w-rjv-type-nan-color": "#e5c07b",
+  "--w-rjv-type-undefined-color": "#e06c75",
 };
 
 // Progress bar component to avoid inline styles
@@ -90,9 +142,7 @@ const retryRequest = async function <T>(
 
       if (attempt < maxRetries) {
         // Wait before retrying with exponential backoff
-        await new Promise((resolve) =>
-          setTimeout(resolve, delay * Math.pow(2, attempt)),
-        );
+        await new Promise((resolve) => setTimeout(resolve, delay * Math.pow(2, attempt)));
       }
     }
   }
@@ -154,21 +204,13 @@ const Metadata = ({ basketItems }: MetadataProps) => {
   const { showToast } = useToast();
 
   // State for metadata - now stores metadata for each basket item
-  const [metadataMap, setMetadataMap] = useState<Map<string, Metadata>>(
-    new Map(),
-  );
-  const [loadingMetadata, setLoadingMetadata] = useState<Set<string>>(
-    new Set(),
-  );
-  const [metadataErrors, setMetadataErrors] = useState<Map<string, string>>(
-    new Map(),
-  );
+  const [metadataMap, setMetadataMap] = useState<Map<string, Metadata>>(new Map());
+  const [loadingMetadata, setLoadingMetadata] = useState<Set<string>>(new Set());
+  const [metadataErrors, setMetadataErrors] = useState<Map<string, string>>(new Map());
   const [collapsedCards, setCollapsedCards] = useState<Set<string>>(new Set());
 
   // Track ongoing requests to prevent duplicates
-  const [ongoingRequests, setOngoingRequests] = useState<
-    Map<string, Promise<unknown>>
-  >(new Map());
+  const [ongoingRequests, setOngoingRequests] = useState<Map<string, Promise<unknown>>>(new Map());
 
   // Debounce search input
   useEffect(() => {
@@ -205,11 +247,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
       const parsedMetadata: Record<string, unknown> = {};
 
       for (const [sectionKey, sectionValue] of Object.entries(metadata)) {
-        try {
-          parsedMetadata[sectionKey] = JSON.parse(sectionValue as string);
-        } catch {
-          parsedMetadata[sectionKey] = sectionValue;
-        }
+        parsedMetadata[sectionKey] = parseMetadataValue(sectionValue);
       }
 
       parsed.set(itemId, parsedMetadata);
@@ -237,8 +275,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
       const item = basketItems.find((item) => item.id === itemId);
       if (!item) continue;
 
-      const allMatches: Array<{ key: string; value: string; path: string[] }> =
-        [];
+      const allMatches: Array<{ key: string; value: string; path: string[] }> = [];
 
       // Search through each metadata section
       for (const [sectionKey, sectionValue] of Object.entries(parsedMetadata)) {
@@ -302,9 +339,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
       }
 
       // Set loading state for all new items at once
-      setLoadingMetadata(
-        (prev) => new Set([...prev, ...newItems.map((item) => item.id)]),
-      );
+      setLoadingMetadata((prev) => new Set([...prev, ...newItems.map((item) => item.id)]));
 
       // Clear any previous errors for these items
       setMetadataErrors((prev) => {
@@ -336,15 +371,11 @@ const Metadata = ({ basketItems }: MetadataProps) => {
           // Create and track the request promise
           const requestPromise = (async () => {
             try {
-              const requestFn = () =>
-                axiosInstance.post("/load-meta/", { path: item.path });
+              const requestFn = () => axiosInstance.post("/load-meta/", { path: item.path });
               const response = await retryRequest(requestFn, 2, 500);
 
               // Update metadata map for successful response
-              setMetadataMap(
-                (prev) =>
-                  new Map([...prev, [item.id, response.data as Metadata]]),
-              );
+              setMetadataMap((prev) => new Map([...prev, [item.id, response.data as Metadata]]));
               // console.log("Metadata loaded for item:", item.id);
 
               return { success: true, itemId: item.id };
@@ -371,9 +402,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
           })();
 
           // Track the ongoing request
-          setOngoingRequests(
-            (prev) => new Map([...prev, [item.id, requestPromise]]),
-          );
+          setOngoingRequests((prev) => new Map([...prev, [item.id, requestPromise]]));
 
           return requestPromise;
         });
@@ -384,7 +413,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
     };
 
     fetchMetadata();
-  }, [basketItems, metadataMap, loadingMetadata, ongoingRequests]);
+  }, [basketItems, metadataMap, loadingMetadata, ongoingRequests, showToast]);
 
   // Effect to clean up metadata when basket items are removed
   useEffect(() => {
@@ -449,10 +478,10 @@ const Metadata = ({ basketItems }: MetadataProps) => {
   return (
     <>
       {/* Metadata section */}
-      <div className="font-medium p-2 m-2 h-full flex flex-col">
-        {/* Header with search and expand/collapse all button - Fixed at top */}
+      <div className="flex h-full flex-col font-medium">
+        {/* Header with search and expand/collapse controls. */}
         {basketItems.filter((item) => item.type === "file").length > 0 && (
-          <div className="mb-4 p-3 bg-white border border-gray-300 rounded-lg shrink-0">
+          <div className="shrink-0 border-b border-gray-200 bg-gray-50 p-3">
             {/* Loading progress indicator */}
             {loadingMetadata.size > 0 && (
               <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded-md">
@@ -465,21 +494,16 @@ const Metadata = ({ basketItems }: MetadataProps) => {
                 </div>
                 <ProgressBar
                   progress={
-                    basketItems.filter(
-                      (item) =>
-                        item.type === "file" && metadataMap.has(item.id),
-                    ).length /
-                    Math.max(
-                      1,
-                      basketItems.filter((item) => item.type === "file").length,
-                    )
+                    basketItems.filter((item) => item.type === "file" && metadataMap.has(item.id))
+                      .length /
+                    Math.max(1, basketItems.filter((item) => item.type === "file").length)
                   }
                 />
               </div>
             )}
 
             {/* Search bar */}
-            <div className="flex items-center gap-2 mb-3">
+            <div className="mb-2 flex items-center gap-2">
               <div className="relative flex-1">
                 <Search
                   size={16}
@@ -489,21 +513,22 @@ const Metadata = ({ basketItems }: MetadataProps) => {
                   type="text"
                   placeholder="Search metadata..."
                   value={searchInput}
-                  onChange={(e) =>
-                    updateMetadataState({ searchInput: e.target.value })
-                  }
-                  className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  onChange={(e) => updateMetadataState({ searchInput: e.target.value })}
+                  className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 text-sm"
                 />
                 {searchInput && (
-                  <button
-                    onClick={() => {
-                      updateMetadataState({ searchInput: "", searchQuery: "" });
-                    }}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                    title="Clear search"
-                  >
-                    <X size={16} />
-                  </button>
+                  <Tooltip content="Clear search" position="top">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateMetadataState({ searchInput: "", searchQuery: "" });
+                      }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      aria-label="Clear metadata search"
+                    >
+                      <X size={16} />
+                    </button>
+                  </Tooltip>
                 )}
               </div>
             </div>
@@ -520,76 +545,57 @@ const Metadata = ({ basketItems }: MetadataProps) => {
                     )}
                   </span>
                 )}
-                {!searchQuery && searchInput && (
-                  <span className="text-gray-400">Searching...</span>
-                )}
+                {!searchQuery && searchInput && <span className="text-gray-400">Searching...</span>}
                 {!searchQuery && !searchInput && (
                   <span>
-                    {basketItems.filter((item) => item.type === "file").length}{" "}
-                    file
-                    {basketItems.filter((item) => item.type === "file")
-                      .length !== 1
-                      ? "s"
-                      : ""}{" "}
-                    in basket
+                    {basketItems.filter((item) => item.type === "file").length} file
+                    {basketItems.filter((item) => item.type === "file").length !== 1 ? "s" : ""} in
+                    basket
                     {metadataMap.size > 0 && (
-                      <span className="ml-1 text-green-600">
-                        ({metadataMap.size} loaded)
-                      </span>
+                      <span className="ml-1 text-green-600">({metadataMap.size} loaded)</span>
                     )}
                   </span>
                 )}
               </div>
-              <button
-                onClick={toggleAllCards}
-                className="flex items-center gap-2 px-3 py-1 text-sm bg-gray-200 hover:bg-gray-300 transition-colors rounded-md"
-                title="Toggle all metadata cards"
-              >
-                {(() => {
-                  const fileItems = basketItems.filter(
-                    (item) => item.type === "file",
-                  );
-                  const fileItemIds = fileItems.map((item) => item.id);
-                  const allCollapsed = fileItemIds.every((id) =>
-                    collapsedCards.has(id),
-                  );
-
-                  return allCollapsed ? (
-                    <Tooltip content="Expand all">
-                      <span
-                        className="flex items-center p-1"
-                        title="Expand all"
-                      >
-                        <Expand size={16} />
-                      </span>
-                    </Tooltip>
-                  ) : (
-                    <Tooltip content="Collapse all">
-                      <span
-                        className="flex items-center p-1"
-                        title="Collapse all"
-                      >
-                        <Minimize size={16} />
-                      </span>
-                    </Tooltip>
-                  );
-                })()}
-              </button>
+              {(() => {
+                const fileItems = basketItems.filter((item) => item.type === "file");
+                const allCollapsed = fileItems.every((item) => collapsedCards.has(item.id));
+                const label = allCollapsed ? "Expand all" : "Collapse all";
+                return (
+                  <Tooltip content={label} position="top">
+                    <button
+                      type="button"
+                      onClick={toggleAllCards}
+                      className="qimchi-dark-hover-plain flex h-8 w-8 items-center justify-center rounded bg-gray-200 text-gray-600 transition-colors hover:bg-gray-300"
+                      aria-label={`${label} metadata cards`}
+                    >
+                      {allCollapsed ? <Expand size={16} /> : <Minimize size={16} />}
+                    </button>
+                  </Tooltip>
+                );
+              })()}
             </div>
           </div>
         )}
 
         {/* No datasets message - Fixed at top when header is hidden */}
         {basketItems.filter((item) => item.type === "file").length === 0 && (
-          <div className="h-32 flex flex-col items-center justify-center text-gray-500">
+          <div className="flex-1 min-h-0 flex flex-col items-center justify-center text-gray-500">
             <BadgeInfo size={48} className="mb-2 text-gray-400" />
             <p>No datasets in basket</p>
             <p className="text-sm mt-1">Add datasets to view their metadata</p>
           </div>
         )}
 
-        {/* Scrollable container for search results or regular metadata cards */}
-        <div className="flex-1 overflow-y-auto min-h-0">
+        {/* Scrollable container for search results or regular metadata cards.
+            With an empty basket it renders nothing, so it must not claim half
+            the pane -- otherwise the empty-state message centres in the top
+            half instead of the whole panel. */}
+        <div
+          className={`min-h-0 overflow-y-auto p-3 ${
+            basketItems.filter((item) => item.type === "file").length > 0 ? "flex-1" : "hidden"
+          }`}
+        >
           {/* Search results or regular metadata cards */}
           {searchQuery ? (
             // Search results view
@@ -610,7 +616,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
                 return (
                   <div
                     key={itemId}
-                    className="mb-4 border border-gray-300 rounded-lg overflow-hidden bg-blue-50"
+                    className="mb-2 overflow-hidden rounded-lg border border-gray-300 bg-blue-50 last:mb-0"
                   >
                     {/* Search Result Card Header */}
                     <div
@@ -618,10 +624,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
                       onClick={() => toggleCardCollapse(itemId)}
                     >
                       <div className="flex-1 min-w-0">
-                        <h3
-                          className="text-sm font-semibold truncate"
-                          title={item.path}
-                        >
+                        <h3 className="text-sm font-semibold truncate" title={item.path}>
                           {result.itemName}
                         </h3>
                         <p className="text-xs text-gray-600 mt-1">
@@ -662,9 +665,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
                                   {match.path.join(" → ")}
                                 </div>
                                 <div className="text-gray-700">
-                                  <span className="font-semibold">
-                                    {match.key}:
-                                  </span>{" "}
+                                  <span className="font-semibold">{match.key}:</span>{" "}
                                   <span className="bg-yellow-200 px-1 rounded">
                                     {match.value.length > 100
                                       ? match.value.substring(0, 100) + "..."
@@ -711,20 +712,6 @@ const Metadata = ({ basketItems }: MetadataProps) => {
   );
 };
 
-// Inside MetadataCard file, above the component:
-const parseMetadataValue = (value: unknown) => {
-  if (typeof value === "string") {
-    try {
-      return JSON.parse(value);
-    } catch {
-      // Not valid JSON string, just return as-is
-      return value;
-    }
-  }
-
-  // Already an object/array/number/etc
-  return value;
-};
 // Memoized metadata card component for better performance
 const MetadataCard = memo(
   ({
@@ -741,64 +728,125 @@ const MetadataCard = memo(
     metadata?: Metadata;
     isCardCollapsed: boolean;
     onToggle: () => void;
-  }) => (
-    <div className="mb-4 border border-gray-300 rounded-lg overflow-hidden">
-      {/* Card Header */}
-      <div
-        className="bg-gray-200 p-3 cursor-pointer hover:bg-gray-300 transition-colors flex items-center justify-between"
-        onClick={onToggle}
-      >
-        <div className="flex-1 min-w-0">
-          <h3 className="text-sm font-semibold truncate" title={item.path}>
-            {item.name}
-          </h3>
+  }) => {
+    const jsonTheme =
+      useThemeStore((state) => state.theme) === "dark" ? metadataDarkTheme : metadataCustomTheme;
+    const { pinned, toggle: togglePin } = usePinnedParametersStore();
+    return (
+      <div className="mb-2 overflow-hidden rounded-lg border border-gray-300 last:mb-0">
+        {/* Card Header */}
+        <div
+          className="bg-gray-200 p-3 cursor-pointer hover:bg-gray-300 transition-colors flex items-center justify-between"
+          onClick={onToggle}
+        >
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-semibold truncate" title={item.path}>
+              {item.name}
+            </h3>
+          </div>
+          <div className="ml-2 text-gray-500">
+            {isCardCollapsed ? (
+              <EyeOff size={16} className="text-red-600" />
+            ) : (
+              <Eye size={16} className="text-green-600" />
+            )}
+          </div>
         </div>
-        <div className="ml-2 text-gray-500">
-          {isCardCollapsed ? (
-            <EyeOff size={16} className="text-red-600" />
-          ) : (
-            <Eye size={16} className="text-green-600" />
-          )}
-        </div>
+
+        {/* Card Content */}
+        {!isCardCollapsed && (
+          <div className="p-3 bg-white">
+            {isLoading && <div className="text-center text-gray-500 p-4">Loading metadata...</div>}
+            {error && <div className="text-center text-red-500 p-4">{error}</div>}
+            {!isLoading && !error && !metadata && (
+              <div className="text-center text-gray-500 p-4">
+                No metadata available for this file.
+              </div>
+            )}
+            {metadata &&
+              Object.entries(metadata).map(([key, value]) => {
+                const parsedValue = parseMetadataValue(value);
+                // JsonView is for trees; render scalars directly.
+                const isTree = typeof parsedValue === "object" && parsedValue !== null;
+
+                return (
+                  <div key={key} className="mb-3">
+                    <strong className="text-sm">{key}:</strong>
+                    {isTree ? (
+                      <JsonView
+                        value={parsedValue as object}
+                        style={jsonTheme as React.CSSProperties}
+                        indentWidth={10}
+                        displayDataTypes={false}
+                        enableClipboard={true}
+                        displayObjectSize={true}
+                        collapsed={BULKY_META_KEYS.has(key) ? 0 : 2}
+                      >
+                        {key === PARAMETERS_SNAPSHOT_KEY && (
+                          <JsonView.Copied
+                            render={(props, { value: node, keyName, parentValue }) => {
+                              const { onClick, style } = props as {
+                                onClick?: React.MouseEventHandler;
+                                style?: React.CSSProperties;
+                              };
+                              const copied = (props as { "data-copied"?: boolean })["data-copied"];
+                              const name = String(keyName);
+                              const pinnable =
+                                parentValue === parsedValue && isParameterEntry(node);
+                              const isPinned = pinnable && pinned.includes(name);
+                              return (
+                                <span className="inline-flex items-center gap-1.5" style={style}>
+                                  <span
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={onClick}
+                                    className="cursor-pointer"
+                                    aria-label="Copy"
+                                  >
+                                    {copied ? (
+                                      <Check size={12} className="text-green-600" />
+                                    ) : (
+                                      <Copy size={12} />
+                                    )}
+                                  </span>
+                                  {pinnable && (
+                                    <span
+                                      role="button"
+                                      tabIndex={0}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        togglePin(name);
+                                      }}
+                                      className={`cursor-pointer ${isPinned ? "text-blue-600" : ""}`}
+                                      aria-label={isPinned ? `Unpin ${name}` : `Pin ${name}`}
+                                      title={isPinned ? "Unpin" : "Pin to the floating window"}
+                                    >
+                                      {isPinned ? <PinOff size={12} /> : <Pin size={12} />}
+                                    </span>
+                                  )}
+                                </span>
+                              );
+                            }}
+                          />
+                        )}
+                      </JsonView>
+                    ) : (
+                      <div className="mt-0.5 font-mono text-xs break-all text-gray-700">
+                        {parsedValue === "" || parsedValue === null ? (
+                          <span className="text-gray-400">empty</span>
+                        ) : (
+                          String(parsedValue)
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+        )}
       </div>
-
-      {/* Card Content */}
-      {!isCardCollapsed && (
-        <div className="p-3 bg-white">
-          {isLoading && (
-            <div className="text-center text-gray-500 p-4">
-              Loading metadata...
-            </div>
-          )}
-          {error && <div className="text-center text-red-500 p-4">{error}</div>}
-          {!isLoading && !error && !metadata && (
-            <div className="text-center text-gray-500 p-4">
-              No metadata available for this file.
-            </div>
-          )}
-          {metadata &&
-            Object.entries(metadata).map(([key, value]) => {
-              const parsedValue = parseMetadataValue(value);
-
-              return (
-                <div key={key} className="mb-3">
-                  <strong className="text-sm">{key}:</strong>
-                  <JsonView
-                    value={parsedValue as object}
-                    style={metadataCustomTheme as React.CSSProperties}
-                    indentWidth={10}
-                    displayDataTypes={false}
-                    enableClipboard={true}
-                    displayObjectSize={true}
-                    collapsed={key === "Instruments Snapshot" ? 0 : 2}
-                  />
-                </div>
-              );
-            })}
-        </div>
-      )}
-    </div>
-  ),
+    );
+  },
 );
 
 MetadataCard.displayName = "MetadataCard";

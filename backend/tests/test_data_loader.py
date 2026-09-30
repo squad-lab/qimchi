@@ -1,9 +1,64 @@
+import asyncio
+import sqlite3
+import sys
+import threading
+from contextlib import nullcontext
+from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
 import pytest
 import xarray as xr
-from pathlib import Path
-import sqlite3
 
 from api import data_loader
+
+
+@pytest.mark.asyncio
+async def test_load_data_async_zarr_runs_off_the_event_loop(tmp_path, monkeypatch):
+    """The zarr provider must open files outside the event-loop thread."""
+    zarr_path = tmp_path / "demo.zarr"
+    zarr_path.mkdir(parents=True)
+
+    ds = xr.Dataset(
+        data_vars={"signal": (("x",), [1.0, 2.0, 3.0])},
+        coords={"x": [0, 1, 2]},
+    )
+
+    opened_on = []
+
+    def _record_thread(*_args):
+        opened_on.append(threading.current_thread().name)
+        return ds
+
+    monkeypatch.setattr(data_loader, "_load_xarray_dataset", _record_thread)
+
+    loaded = await data_loader.load_data_async(str(zarr_path))
+
+    assert loaded.kind == "dataset"
+    assert loaded.format == "zarr"
+    # asyncio.to_thread runs on a worker, never the thread the loop is on.
+    assert opened_on and opened_on[0] != threading.current_thread().name
+
+
+def test_qcodes_loader_decodes_the_station_snapshot(tmp_path, monkeypatch):
+    import qcodes.dataset
+
+    db_path = tmp_path / "runs.db"
+    db_path.write_bytes(b"qcodes")
+    qcodes_dataset = SimpleNamespace(
+        to_xarray_dataset=lambda: xr.Dataset(
+            attrs={"snapshot": '{"station": {"temperature": 0.02}}'}
+        )
+    )
+    monkeypatch.setattr(
+        qcodes.dataset, "initialised_database_at", lambda _path: nullcontext()
+    )
+    monkeypatch.setattr(qcodes.dataset, "load_by_id", lambda _run_id: qcodes_dataset)
+
+    loaded = data_loader._load_qcodes_xarray_dataset(db_path, 7)
+
+    assert loaded.attrs["snapshot"] == {"station": {"temperature": 0.02}}
+    assert loaded.attrs["run_id"] == 7
 
 
 def test_load_data_sync_zarr(tmp_path, monkeypatch):
@@ -169,7 +224,7 @@ def test_memory_reference_falls_back_to_disk(tmp_path, monkeypatch):
     def _fail_ws(*_args, **_kwargs):
         raise RuntimeError("ws unavailable")
 
-    monkeypatch.setattr(data_loader.live_client, "open_live_dataset_sync", _fail_ws)
+    monkeypatch.setattr(data_loader.live_client, "open_live_measurement_sync", _fail_ws)
 
     loaded = data_loader.load_data_sync("memory://m-001")
     assert loaded.kind == "dataset"
@@ -205,8 +260,8 @@ async def test_sync_async_parity_for_memory_ws(monkeypatch):
     async def _async_ws(*_args, **_kwargs):
         return base.copy(deep=True)
 
-    monkeypatch.setattr(data_loader.live_client, "open_live_dataset_sync", _sync_ws)
-    monkeypatch.setattr(data_loader.live_client, "open_live_dataset", _async_ws)
+    monkeypatch.setattr(data_loader.live_client, "open_live_measurement_sync", _sync_ws)
+    monkeypatch.setattr(data_loader.live_client, "open_live_measurement", _async_ws)
 
     sync_loaded = data_loader.load_data_sync("memory://m-002")
     async_loaded = await data_loader.load_data_async("memory://m-002")
@@ -215,6 +270,252 @@ async def test_sync_async_parity_for_memory_ws(monkeypatch):
     assert async_loaded.loaded_from == "memory"
     assert sync_loaded.obj.attrs["measurement_id"] == "m-002"
     assert async_loaded.obj.attrs["measurement_id"] == "m-002"
+
+
+def _live_row(**overrides):
+    """A registry row for a running measurement, with fields overridden."""
+    row = {
+        "disk_path": None,
+        "ws_url": "ws://localhost:9999",
+        "ws_port": 9999,
+        "live_status": True,
+        "started_at": "2026-01-01T00:00:00",
+        "ended_at": None,
+    }
+    row.update(overrides)
+    return row
+
+
+def _counting_ws(monkeypatch, result):
+    """Install a WebSocket loader and return its call counter."""
+    calls = []
+
+    def _ws(*_args, **_kwargs):
+        calls.append(1)
+        if isinstance(result, Exception):
+            raise result
+        return result.copy(deep=True)
+
+    monkeypatch.setattr(data_loader.live_client, "open_live_measurement_sync", _ws)
+    monkeypatch.setattr(data_loader, "_WS_DISOWNED", {})
+    return calls
+
+
+def _disk_backed(tmp_path, monkeypatch):
+    """Give the loader a readable disk artefact and return its path."""
+    zarr_path = tmp_path / "ended.zarr"
+    zarr_path.mkdir(parents=True)
+    ds = xr.Dataset(
+        data_vars={"signal": (("x",), [1.0, 2.0])},
+        coords={"x": [0, 1]},
+    )
+    monkeypatch.setattr(data_loader, "_load_xarray_dataset", lambda *_args: ds)
+    return zarr_path
+
+
+def test_a_finished_measurement_is_read_from_disk_without_dialling_the_socket(
+    tmp_path, monkeypatch
+):
+    """
+    A producer that has ended has also exited, so its endpoint cannot answer.
+    Dialling it once per plot refresh only delays the plot.
+
+    """
+    zarr_path = _disk_backed(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        data_loader,
+        "resolve_live_dataset",
+        lambda _m: _live_row(
+            disk_path=str(zarr_path),
+            live_status=False,
+            ended_at="2026-01-01T00:01:00",
+        ),
+    )
+    calls = _counting_ws(monkeypatch, RuntimeError("should not be called"))
+
+    loaded = data_loader.load_data_sync("memory://m-ended")
+
+    assert calls == []
+    assert loaded.loaded_from == "disk"
+    loaded.obj.close()
+
+
+def test_a_finished_measurement_with_no_disk_path_still_tries_the_socket(monkeypatch):
+    """With nothing on disk to fall back to, the socket is the only source."""
+    base = xr.Dataset(data_vars={"value": (("x",), [1.0])}, coords={"x": [0]})
+    monkeypatch.setattr(
+        data_loader,
+        "resolve_live_dataset",
+        lambda _m: _live_row(live_status=False, ended_at="2026-01-01T00:01:00"),
+    )
+    calls = _counting_ws(monkeypatch, base)
+
+    loaded = data_loader.load_data_sync("memory://m-no-disk")
+
+    assert len(calls) == 1
+    assert loaded.loaded_from == "memory"
+
+
+def test_a_server_that_disowns_a_measurement_is_not_asked_again(tmp_path, monkeypatch):
+    """
+    "Measurement not found" comes from a live server that answered, so it is
+    conclusive -- it is what a later producer inheriting the port reports.
+
+    """
+    zarr_path = _disk_backed(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        data_loader,
+        "resolve_live_dataset",
+        lambda _m: _live_row(disk_path=str(zarr_path)),
+    )
+    calls = _counting_ws(
+        monkeypatch,
+        RuntimeError("Failed to get snapshot for m-gone: Measurement m-gone not found"),
+    )
+
+    first = data_loader.load_data_sync("memory://m-gone")
+    second = data_loader.load_data_sync("memory://m-gone")
+
+    assert len(calls) == 1, "the denial should be remembered, not re-asked"
+    assert first.loaded_from == "disk"
+    assert second.loaded_from == "disk"
+    first.obj.close()
+    second.obj.close()
+
+
+def test_a_refused_connection_is_tried_again(tmp_path, monkeypatch):
+    """A producer can be slow to bind or restarting; that is not conclusive."""
+    zarr_path = _disk_backed(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        data_loader,
+        "resolve_live_dataset",
+        lambda _m: _live_row(disk_path=str(zarr_path)),
+    )
+    calls = _counting_ws(monkeypatch, OSError("[WinError 1225] refused"))
+
+    data_loader.load_data_sync("memory://m-refused").obj.close()
+    data_loader.load_data_sync("memory://m-refused").obj.close()
+
+    assert len(calls) == 2
+
+
+class TestLiveRowAccumulation:
+    """Verify incremental live rows, snapshot fallbacks, and bounded state."""
+
+    ROWS, COLS = 6, 3
+
+    def _grid(self, written: int, *, offset: float = 0.0):
+        """A grid whose first ``written`` rows hold values."""
+        values = np.full((self.ROWS, self.COLS), np.nan)
+        values[:written] = offset + np.arange(written * self.COLS, dtype=float).reshape(
+            written, self.COLS
+        )
+        return xr.Dataset(
+            {"signal": (("y", "x"), values)},
+            coords={"y": np.arange(self.ROWS), "x": np.arange(self.COLS)},
+        )
+
+    def _rows(self, ds, *, rows_from, rows_written, rows_total=None):
+        ds.encoding["qimchi_connect_rows"] = {
+            "append_dim": "y",
+            "rows_from": rows_from,
+            "rows_written": rows_written,
+            "rows_total": self.ROWS if rows_total is None else rows_total,
+        }
+        return ds
+
+    def _serve(self, monkeypatch, responses):
+        """Serve the given datasets in order, recording each since_rows."""
+        asked = []
+
+        def _ws(_measurement_id, ws_url=None, since_rows=None, **_kwargs):
+            asked.append(since_rows)
+            return responses[min(len(asked) - 1, len(responses) - 1)]
+
+        monkeypatch.setattr(data_loader, "_LIVE_ACCUM", {})
+        monkeypatch.setattr(data_loader.live_client, "open_live_measurement_sync", _ws)
+        monkeypatch.setattr(data_loader, "resolve_live_dataset", lambda _m: _live_row())
+        return asked
+
+    def test_the_first_poll_fetches_everything_and_records_the_frontier(
+        self, monkeypatch
+    ):
+        whole = self._rows(self._grid(2), rows_from=0, rows_written=2)
+        asked = self._serve(monkeypatch, [whole])
+
+        data_loader.load_data_sync("memory://m-acc")
+
+        assert asked == [None], "nothing is held yet, so nothing to ask from"
+        assert data_loader._LIVE_ACCUM["m-acc"]["rows"] == 2
+
+    def test_the_next_poll_asks_only_for_what_it_is_missing(self, monkeypatch):
+        whole = self._rows(self._grid(2), rows_from=0, rows_written=2)
+        later = self._rows(
+            self._grid(4).isel(y=slice(2, 4)), rows_from=2, rows_written=4
+        )
+        asked = self._serve(monkeypatch, [whole, later])
+
+        data_loader.load_data_sync("memory://m-acc")
+        loaded = data_loader.load_data_sync("memory://m-acc")
+
+        assert asked == [None, 2]
+        assert loaded.obj.sizes["y"] == self.ROWS, "the full grid is still plotted"
+        assert data_loader._LIVE_ACCUM["m-acc"]["rows"] == 4
+
+    def test_the_fetched_rows_land_where_they_belong(self, monkeypatch):
+        whole = self._rows(self._grid(2), rows_from=0, rows_written=2)
+        fresh = self._grid(4, offset=100.0)
+        later = self._rows(fresh.isel(y=slice(2, 4)), rows_from=2, rows_written=4)
+        self._serve(monkeypatch, [whole, later])
+
+        data_loader.load_data_sync("memory://m-acc")
+        loaded = data_loader.load_data_sync("memory://m-acc")
+
+        values = loaded.obj["signal"].values
+        assert np.array_equal(values[:2], whole["signal"].values[:2]), "kept"
+        assert np.array_equal(values[2:4], fresh["signal"].values[2:4]), "folded in"
+        assert np.isnan(values[4:]).all(), "the unmeasured tail stays empty"
+
+    def test_rows_from_a_differently_shaped_run_force_a_whole_refetch(
+        self, monkeypatch
+    ):
+        whole = self._rows(self._grid(2), rows_from=0, rows_written=2)
+        mismatched = self._rows(
+            self._grid(4).isel(y=slice(2, 4)),
+            rows_from=2,
+            rows_written=4,
+            rows_total=self.ROWS + 10,
+        )
+        asked = self._serve(monkeypatch, [whole, mismatched, whole])
+
+        data_loader.load_data_sync("memory://m-acc")
+        loaded = data_loader.load_data_sync("memory://m-acc")
+
+        assert asked == [None, 2, None], "the unfoldable answer is refetched whole"
+        assert loaded.obj.sizes["y"] == self.ROWS
+
+    def test_a_producer_that_cannot_describe_rows_is_never_accumulated(
+        self, monkeypatch
+    ):
+        """An older qimchi-connect sends no row fields, so nothing is held."""
+        plain = self._grid(2)
+        asked = self._serve(monkeypatch, [plain])
+
+        data_loader.load_data_sync("memory://m-old")
+        data_loader.load_data_sync("memory://m-old")
+
+        assert asked == [None, None]
+        assert data_loader._LIVE_ACCUM == {}
+
+    def test_only_a_bounded_number_of_measurements_is_held(self, monkeypatch):
+        """Each entry is a whole measurement in memory, so the map is capped."""
+        whole = self._rows(self._grid(2), rows_from=0, rows_written=2)
+        self._serve(monkeypatch, [whole])
+
+        for i in range(data_loader._LIVE_ACCUM_MAX + 2):
+            data_loader.load_data_sync(f"memory://m-{i}")
+
+        assert len(data_loader._LIVE_ACCUM) == data_loader._LIVE_ACCUM_MAX
 
 
 def test_custom_provider_registration_smoke():
@@ -365,3 +666,458 @@ def test_datatree_reference_loads_selected_node_dataset(tmp_path, monkeypatch):
     assert loaded.metadata["dt_path"] == "/group/run_1"
     assert loaded.obj.attrs["path"] == ref
     loaded.obj.close()
+
+
+# --- Quantify support ---
+#
+# Fixtures mirror verified quantify-core output, including flat dim_0
+# coordinates and grid metadata.
+
+
+def _quantify_1d_dataset() -> xr.Dataset:
+    x_vals = np.linspace(-1, 1, 21)
+    ds = xr.Dataset(
+        {"y0": ("dim_0", np.sin(x_vals))},
+        coords={"x0": ("dim_0", x_vals)},
+        attrs={
+            "tuid": "20260902-172313-694-c1732f",
+            "name": "qimchi_test_1d",
+            "grid_2d": False,
+            "grid_2d_uniformly_spaced": False,
+        },
+    )
+    ds["x0"].attrs.update({"name": "x", "long_name": "X Voltage", "units": "V"})
+    ds["y0"].attrs.update({"name": "y", "long_name": "Signal", "units": "A"})
+    return ds
+
+
+def _quantify_2d_dataset(*, measured_points: int | None = None) -> xr.Dataset:
+    x_vals = np.linspace(-1, 1, 5)
+    y_vals = np.linspace(0, 2, 4)
+    xx, yy = np.meshgrid(x_vals, y_vals, indexing="ij")
+    x0_full = xx.flatten()
+    x1_full = yy.flatten()
+    y0_full = np.sin(x0_full) + np.cos(x1_full)
+    if measured_points is not None:
+        y0_full = y0_full.copy()
+        y0_full[measured_points:] = np.nan
+
+    ds = xr.Dataset(
+        {"y0": ("dim_0", y0_full)},
+        coords={"x0": ("dim_0", x0_full), "x1": ("dim_0", x1_full)},
+        attrs={
+            "tuid": "20260902-172330-257-5069c6",
+            "name": "qimchi_test_2d",
+            "grid_2d": True,
+            "grid_2d_uniformly_spaced": True,
+            "xlen": 5,
+            "ylen": 4,
+        },
+    )
+    ds["x0"].attrs.update({"name": "x", "long_name": "X Voltage", "units": "V"})
+    ds["x1"].attrs.update({"name": "y", "long_name": "Y Voltage", "units": "V"})
+    ds["y0"].attrs.update({"name": "z", "long_name": "Signal", "units": "A"})
+    return ds
+
+
+def test_quantify_1d_dataset_is_tagged_but_left_ungridded(tmp_path, monkeypatch):
+    h5_path = tmp_path / "dataset.hdf5"
+    h5_path.write_text("placeholder")
+    ds = _quantify_1d_dataset()
+    monkeypatch.setattr(data_loader, "_load_xarray_dataset", lambda *_args: ds)
+
+    loaded = data_loader.load_data_sync(str(h5_path))
+    assert loaded.format == "quantify"
+    assert loaded.obj.sizes == {"dim_0": 21}
+    # A single settable is already directly plottable via its dim_0 coord.
+    assert loaded.obj["x0"].attrs["label"] == "X Voltage"
+    assert loaded.obj["x0"].attrs["unit"] == "V"
+    assert loaded.obj["y0"].attrs["label"] == "Signal"
+    assert loaded.obj["y0"].attrs["unit"] == "A"
+    loaded.obj.close()
+
+
+def test_quantify_2d_dataset_is_gridded(tmp_path, monkeypatch):
+    h5_path = tmp_path / "dataset.hdf5"
+    h5_path.write_text("placeholder")
+    ds = _quantify_2d_dataset()
+    monkeypatch.setattr(data_loader, "_load_xarray_dataset", lambda *_args: ds)
+
+    loaded = data_loader.load_data_sync(str(h5_path))
+    gridded = loaded.obj
+    assert loaded.format == "quantify"
+    assert gridded.sizes == {"x0": 5, "x1": 4}
+    np.testing.assert_allclose(gridded["x0"].values, np.linspace(-1, 1, 5))
+    np.testing.assert_allclose(gridded["x1"].values, np.linspace(0, 2, 4))
+    np.testing.assert_allclose(
+        gridded["y0"].values,
+        np.sin(gridded["x0"].values)[:, None] + np.cos(gridded["x1"].values)[None, :],
+    )
+    assert gridded.attrs["grid_2d"] is False
+    assert gridded.attrs["qimchi_quantify_gridded"] is True
+    # CF long_name/units survive the reshape and get mirrored to label/unit.
+    assert gridded["x1"].attrs["label"] == "Y Voltage"
+    assert gridded["x1"].attrs["unit"] == "V"
+    assert gridded["y0"].attrs["label"] == "Signal"
+    loaded.obj.close()
+
+
+def test_quantify_2d_mid_run_dataset_grids_with_nan_gaps(tmp_path, monkeypatch):
+    h5_path = tmp_path / "dataset.hdf5"
+    h5_path.write_text("placeholder")
+    ds = _quantify_2d_dataset(measured_points=11)
+    monkeypatch.setattr(data_loader, "_load_xarray_dataset", lambda *_args: ds)
+
+    loaded = data_loader.load_data_sync(str(h5_path))
+    gridded = loaded.obj
+    assert gridded.sizes == {"x0": 5, "x1": 4}
+    assert int(gridded["y0"].isnull().sum()) == 20 - 11
+    loaded.obj.close()
+
+
+def test_quantify_dataset_without_grid_2d_left_sparse(tmp_path, monkeypatch):
+    # A 3+ settable sweep: quantify-core itself never sets grid_2d for this
+    # case, so Qimchi does not attempt to grid it either.
+    h5_path = tmp_path / "dataset.hdf5"
+    h5_path.write_text("placeholder")
+    ds = xr.Dataset(
+        {"y0": ("dim_0", [1.0, 2.0])},
+        coords={
+            "x0": ("dim_0", [0.0, 1.0]),
+            "x1": ("dim_0", [0.0, 0.0]),
+            "x2": ("dim_0", [0.0, 0.0]),
+        },
+        attrs={"tuid": "fake-3d", "name": "n", "grid_2d": False},
+    )
+    monkeypatch.setattr(data_loader, "_load_xarray_dataset", lambda *_args: ds)
+
+    loaded = data_loader.load_data_sync(str(h5_path))
+    assert loaded.format == "quantify"
+    assert loaded.obj.sizes == {"dim_0": 2}
+    loaded.obj.close()
+
+
+def test_non_quantify_hdf5_dataset_is_unaffected(tmp_path, monkeypatch):
+    h5_path = tmp_path / "demo.h5"
+    h5_path.write_text("placeholder")
+    ds = xr.Dataset(data_vars={"signal": (("x",), [1.0, 2.0])}, coords={"x": [0, 1]})
+    monkeypatch.setattr(data_loader, "_load_xarray_dataset", lambda *_args: ds)
+
+    loaded = data_loader.load_data_sync(str(h5_path))
+    assert loaded.format == "hdf5"
+    assert "qimchi_quantify_gridded" not in loaded.obj.attrs
+    loaded.obj.close()
+
+
+@pytest.mark.asyncio
+async def test_plots_of_one_measurement_share_a_single_live_fetch(monkeypatch):
+    base = xr.Dataset(
+        data_vars={"value": (("x",), [1.0, 2.0])},
+        coords={"x": [0, 1]},
+    )
+    fetches = 0
+
+    async def _async_ws(*_args, **_kwargs):
+        nonlocal fetches
+        fetches += 1
+        await asyncio.sleep(0.02)  # a round trip the other callers can join
+        return base.copy(deep=True)
+
+    monkeypatch.setattr(data_loader, "resolve_live_dataset", lambda _m: _live_row())
+    monkeypatch.setattr(data_loader.live_client, "open_live_measurement", _async_ws)
+
+    loaded = await asyncio.gather(
+        *(data_loader.load_data_async("memory://m-share") for _ in range(4))
+    )
+
+    assert fetches == 1, f"{fetches} fetches for four concurrent polls"
+    assert all(item.obj.attrs["measurement_id"] == "m-share" for item in loaded)
+    # Callers may update attrs independently.
+    loaded[0].obj.attrs["path"] = "rewritten by the first caller"
+    assert loaded[1].obj.attrs["path"] == "memory://m-share"
+
+
+def test_a_qcodes_database_is_read_without_taking_write_locks(tmp_path, monkeypatch):
+    db = tmp_path / "runs.db"
+    connection = sqlite3.connect(db)
+    connection.execute("CREATE TABLE runs (run_id INTEGER, name TEXT)")
+    connection.execute("INSERT INTO runs VALUES (1, 'sweep')")
+    connection.commit()
+    connection.close()
+
+    modes: list[str | None] = []
+    real_connect = sqlite3.connect
+
+    def recording_connect(target, *args, **kwargs):
+        modes.append(str(target) if kwargs.get("uri") else None)
+        return real_connect(target, *args, **kwargs)
+
+    monkeypatch.setattr(data_loader.sqlite3, "connect", recording_connect)
+
+    rows = data_loader._read_qcodes_sqlite(db, "SELECT run_id FROM runs")
+
+    assert rows == [(1,)]
+    assert modes and modes[0] is not None and modes[0].endswith("?mode=ro")
+
+
+def test_an_unreadable_qcodes_database_still_reports_why(tmp_path, monkeypatch):
+    db = tmp_path / "missing.db"
+    db.write_text("not a database", encoding="utf-8")
+
+    with pytest.raises(sqlite3.DatabaseError):
+        data_loader._read_qcodes_sqlite(db, "SELECT run_id FROM runs")
+
+
+def test_complex_variables_are_split_into_real_parts(tmp_path, monkeypatch):
+    nc_path = tmp_path / "iq.nc"
+    nc_path.write_text("placeholder")
+    signal = np.array([1 + 1j, -2 + 0j], dtype=np.complex64)
+    ds = xr.Dataset(
+        data_vars={
+            "iq": (("x",), signal, {"unit": "V"}),
+            "temp": (("x",), [0.1, 0.2]),
+        },
+        coords={"x": [0, 1]},
+    )
+    monkeypatch.setattr(data_loader, "_load_xarray_dataset", lambda *_args: ds)
+
+    split = data_loader.load_data_sync(str(nc_path)).obj
+
+    assert list(split.data_vars) == [
+        "iq_amplitude",
+        "iq_phase",
+        "iq_real",
+        "iq_imag",
+        "temp",
+    ]
+    np.testing.assert_allclose(split["iq_amplitude"], np.abs(signal))
+    np.testing.assert_allclose(split["iq_phase"], np.angle(signal))
+    np.testing.assert_allclose(split["iq_imag"], [1.0, 0.0])
+    assert split["iq_amplitude"].attrs["unit"] == "V"
+    assert split["iq_phase"].attrs["unit"] == "rad"
+    assert all(split[v].dtype.kind == "f" for v in split.data_vars)
+
+
+def test_complex_phase_is_unwrapped_along_each_axis():
+    # Cross ±π several times along both axes.
+    x = np.linspace(0, 6 * np.pi, 40)
+    y = np.linspace(0, 4 * np.pi, 30)
+    expected = y[:, None] + x[None, :]
+    signal = np.exp(1j * expected)
+
+    phase = data_loader.unwrapped_phase(signal)
+
+    np.testing.assert_allclose(
+        phase - phase[0, 0], expected - expected[0, 0], atol=1e-9
+    )
+
+
+def test_complex_phase_unwrapping_skips_unmeasured_points():
+    expected = np.linspace(0, 6 * np.pi, 20)
+    signal = np.exp(1j * expected)
+    signal[[3, 11]] = np.nan
+    signal[-5:] = np.nan
+
+    phase = data_loader.unwrapped_phase(signal)
+
+    measured = np.isfinite(signal)
+    assert np.isnan(phase[~measured]).all()
+    np.testing.assert_allclose(phase[measured], expected[measured], atol=1e-9)
+
+
+def test_datasets_without_complex_variables_are_returned_as_is():
+    ds = xr.Dataset(data_vars={"signal": (("x",), [1.0, 2.0])}, coords={"x": [0, 1]})
+    assert data_loader.split_complex_variables(ds) is ds
+
+
+# --- MATLAB .mat support ---
+
+
+def test_matlab_provider_infers_grid_from_monotonic_vectors(tmp_path):
+    import scipy.io
+
+    x = np.linspace(0.0, 1.0, 4)
+    y = np.linspace(-2.0, 2.0, 3)
+    z = np.arange(5.0)
+    signal = np.random.default_rng(0).random((3, 4, 5))
+    # Preallocated larger than needed; only the first column was filled.
+    peak = np.full((5, 5), np.nan)
+    peak[:, 0] = [3.0, 1.0, 4.0, 1.0, 5.0]
+    path = tmp_path / "run.mat"
+    scipy.io.savemat(
+        path,
+        {
+            "x": x,
+            "y": y,
+            "z": z,
+            "signal": signal,
+            "peak": peak,
+            "gain": 2.5,
+            "sample": "flake A",
+            "setup": {"fridge": "bluefors", "tc": 0.3},
+        },
+    )
+
+    loaded = data_loader.load_data_sync(str(path))
+    ds = loaded.obj
+
+    assert loaded.format == "matlab"
+    assert loaded.loaded_from == "disk"
+    assert set(ds.coords) == {"x", "y", "z"}
+    assert ds["signal"].dims == ("y", "x", "z")
+    np.testing.assert_allclose(ds["signal"].values, signal)
+    assert ds["peak"].dims == ("z",)
+    np.testing.assert_allclose(ds["peak"].values, peak[:, 0])
+    assert ds.attrs["gain"] == 2.5
+    assert ds.attrs["sample"] == "flake A"
+    assert ds.attrs["setup.fridge"] == "bluefors"
+    assert ds.attrs["setup.tc"] == 0.3
+    assert ds.attrs["mat_header"].startswith("MATLAB 5.0 MAT-file")
+    assert ds.attrs["path"] == str(path)
+
+
+def test_matlab_provider_gives_ambiguous_arrays_their_own_dims(tmp_path):
+    import scipy.io
+
+    path = tmp_path / "square.mat"
+    # Two axes of one length: neither can claim the dimension.
+    scipy.io.savemat(
+        path,
+        {"a": np.arange(3.0), "b": np.arange(3.0) * 2, "m": np.ones((3, 3))},
+    )
+
+    ds = data_loader.load_data_sync(str(path)).obj
+
+    assert ds["m"].dims == ("m_dim_0", "m_dim_1")
+    assert ds["a"].dims == ("a_dim_0",)
+
+
+def _write_mat73(path, variables):
+    """Write a minimal HDF5 layout compatible with MATLAB v7.3 files."""
+    import h5py
+
+    def put(parent, file, name, value):
+        if isinstance(value, dict):
+            group = parent.create_group(name)
+            group.attrs["MATLAB_class"] = np.bytes_("struct")
+            for key, field in value.items():
+                put(group, file, key, field)
+            return
+        if isinstance(value, list):
+            refs_group = file.require_group("#refs#")
+            refs = []
+            for index, item in enumerate(value):
+                put(refs_group, file, f"{name}_{index}", item)
+                refs.append(refs_group[f"{name}_{index}"].ref)
+            node = parent.create_dataset(
+                name, data=np.array([refs], dtype=h5py.ref_dtype).T
+            )
+            node.attrs["MATLAB_class"] = np.bytes_("cell")
+            return
+        if isinstance(value, str):
+            codes = np.array([[ord(c) for c in value]], dtype=np.uint16)
+            node = parent.create_dataset(name, data=codes.T)
+            node.attrs["MATLAB_class"] = np.bytes_("char")
+            node.attrs["MATLAB_int_decode"] = np.int32(2)
+            return
+        array = np.asarray(value)
+        if array.size == 0:
+            node = parent.create_dataset(name, data=np.array([0, 0], dtype=np.uint64))
+            node.attrs["MATLAB_class"] = np.bytes_("double")
+            node.attrs["MATLAB_empty"] = np.uint8(1)
+            return
+        # MATLAB stores vectors as 1xN matrices.
+        matlab = array.reshape(1, -1) if array.ndim <= 1 else array
+        if np.iscomplexobj(matlab):
+            stored = np.empty(matlab.T.shape, dtype=[("real", "<f8"), ("imag", "<f8")])
+            stored["real"], stored["imag"] = matlab.T.real, matlab.T.imag
+            matlab_class = "double"
+        elif matlab.dtype == bool:
+            stored, matlab_class = matlab.T.astype(np.uint8), "logical"
+        else:
+            stored = matlab.T
+            matlab_class = {"float64": "double", "float32": "single"}.get(
+                str(matlab.dtype), str(matlab.dtype)
+            )
+        node = parent.create_dataset(name, data=stored)
+        node.attrs["MATLAB_class"] = np.bytes_(matlab_class)
+
+    with h5py.File(path, "w", userblock_size=512) as file:
+        for name, value in variables.items():
+            put(file, file, name, value)
+    header = b"MATLAB 7.3 MAT-file, Platform: PCWIN64, Created on: Wed Sep 24 12:00:00 2026 HDF5 schema 1.00 ."
+    with open(path, "r+b") as handle:
+        handle.write(header.ljust(116, b" ") + b"\x00" * 8 + b"\x00\x02IM")
+
+
+def test_matlab_v73_files_load_like_v7_files(tmp_path):
+    import scipy.io
+
+    rng = np.random.default_rng(1)
+    variables = {
+        "x": np.linspace(0.0, 1.0, 4),
+        "y": np.linspace(-2.0, 2.0, 3),
+        "z": np.arange(5.0),
+        "signal": rng.random((3, 4, 5)),
+        "trace": rng.random(4),
+        "gain": 2.5,
+        "sample": "flake A",
+        "setup": {"fridge": "bluefors", "tc": 0.3},
+    }
+    v7, v73 = tmp_path / "v7.mat", tmp_path / "v73.mat"
+    scipy.io.savemat(v7, variables)
+    _write_mat73(v73, variables)
+
+    expected = data_loader.load_data_sync(str(v7)).obj
+    loaded = data_loader.load_data_sync(str(v73))
+    ds = loaded.obj
+
+    assert loaded.format == "matlab"
+    assert ds["signal"].dims == expected["signal"].dims == ("y", "x", "z")
+    assert set(ds.coords) == set(expected.coords)
+    assert set(ds.data_vars) == set(expected.data_vars)
+    for name in ds.variables:
+        np.testing.assert_allclose(ds[name].values, expected[name].values)
+    for key in ("gain", "sample", "setup.fridge", "setup.tc"):
+        assert ds.attrs[key] == expected.attrs[key]
+    assert ds.attrs["mat_header"].startswith("MATLAB 7.3 MAT-file")
+
+
+def test_matlab_v73_reads_complex_logical_integer_cell_and_text_values(tmp_path):
+    f = np.linspace(4e9, 5e9, 6)
+    iq = np.exp(1j * np.linspace(0, np.pi, 6))
+    path = tmp_path / "rf.mat"
+    _write_mat73(
+        path,
+        {
+            "f": f,
+            "iq": iq,
+            "mask": np.array([True, False, True, True, False, True]),
+            "counts": np.array([3, 1, 4, 1, 5, 9], dtype=np.int32),
+            "gates": ["P1", "P2"],
+            "note": "cooldown 3",
+            "unused": np.zeros((0, 0)),
+        },
+    )
+
+    ds = data_loader.load_data_sync(str(path)).obj
+
+    assert "unused" not in ds.variables
+    assert ds.attrs["gates"] == ["P1", "P2"]
+    assert ds.attrs["note"] == "cooldown 3"
+    assert ds["counts"].dtype == np.int32
+    np.testing.assert_array_equal(ds["counts"].values, [3, 1, 4, 1, 5, 9])
+    np.testing.assert_array_equal(ds["mask"].values, [1, 0, 1, 1, 0, 1])
+    # The common loader still splits complex variables into real-valued parts.
+    amplitude = next(name for name in ds.data_vars if "iq" in name and "amp" in name)
+    np.testing.assert_allclose(ds[amplitude].values, np.abs(iq))
+    assert ds[amplitude].dims == ("f",)
+
+
+def test_matlab_v73_without_h5py_says_what_to_do(tmp_path, monkeypatch):
+    path = tmp_path / "big.mat"
+    _write_mat73(path, {"x": np.arange(3.0)})
+    monkeypatch.setitem(sys.modules, "h5py", None)
+
+    with pytest.raises(data_loader.UnsupportedDatasetFormatError, match="-v7"):
+        data_loader.load_data_sync(str(path))

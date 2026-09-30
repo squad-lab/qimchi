@@ -16,27 +16,39 @@ import {
   FlipHorizontal,
   Info,
   MoveHorizontal,
+  Ruler,
   AlertTriangle,
+  ListOrdered,
   Crosshair,
+  Zap,
+  Bookmark,
 } from "lucide-react";
+import { createPortal } from "react-dom";
 import { Rnd } from "react-rnd";
 
 // Local imports
 import "./FiltersModal.css";
 import { useToast } from "../../hooks/useToast";
-import type {
-  FilterSettings,
-  AppliedFilter,
-  SliderConfig,
-} from "../../components/interfaces";
+import NumericInput from "../NumericInput";
+import type { FilterSettings, AppliedFilter, SliderConfig } from "../../components/interfaces";
 import {
-  ApplyButton,
-  formatTitleWithUUID,
-  getPlotTypeIcon,
-  LogChartIcon,
-} from "./UtilComponents";
+  sliderIndexOf,
+  sliderSteps,
+  sliderText,
+  sliderValueAt,
+  visibleSliders,
+} from "../../utils/sliders";
+import { ApplyButton, formatTitleWithUUID, getPlotTypeIcon, LogChartIcon } from "./UtilComponents";
 import Tooltip from "../Tooltip";
 import RadialDial from "./RadialDial";
+import AppliedFilterOrder from "./AppliedFilterOrder";
+import { FILTER_LABELS } from "../../utils/filterNames";
+import TexMath from "../TexMath";
+import { AppliedPreset, SavedPresets } from "./FilterPresets";
+import { presetSummary } from "../../utils/filterPresets";
+import type { FilterPreset } from "../../services/libraryAPI";
+import { useFilterPresetsStore } from "../../stores/filterPresetsStore";
+import { useLibraryStore } from "../../stores/libraryStore";
 
 type BGCorrPoint = {
   x: number;
@@ -49,17 +61,33 @@ type BGCorrPoint = {
 interface FiltersModalProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Apply filters and optionally update their preset link. */
   onApplyFilters: (
     filters: AppliedFilter[],
     sliders?: Record<string, SliderConfig>,
+    link?: { presetId: number | null },
   ) => void;
+  /** Preset linked to the current filters. */
+  presetId?: number | null;
+  /** Set or clear the current preset link. */
+  onPresetLinkChange?: (presetId: number | null) => void;
   plotType?: string;
   plotTitle?: string;
   currentFilters: AppliedFilter[];
   currentSliders?: Record<string, SliderConfig>;
   availableSliders?: Record<string, SliderConfig>;
   onRequestBGCorr?: (mode: string) => void;
+  /** Whether x contains measured data instead of an ordered sweep. */
+  xAxisIsMeasured?: boolean;
 }
+
+// Keep in step with _NEEDS_A_SWEPT_X in backend/api/filters.py.
+const NEEDS_A_SWEPT_X: Record<string, string> = {
+  diff: "Differentiation needs the step between swept X values.",
+  savgol: "Savitzky–Golay smoothing needs evenly spaced swept X values.",
+  sma: "Moving average needs points ordered along a swept X axis.",
+  polyfit: "Polynomial fit needs a swept X axis.",
+};
 
 // Filter categories and their available filters
 const FILTER_CATEGORIES = {
@@ -69,6 +97,7 @@ const FILTER_CATEGORIES = {
     "sma",
     "normalize",
     "log_scale",
+    "transform",
     "polyfit",
     "bg_corr_constant",
     "bg_corr_linear",
@@ -88,6 +117,8 @@ const FILTER_CATEGORIES = {
     "bg_corr_col_mean",
     "bg_corr_plane",
     "log_scale",
+    "transform",
+    "r_in_correction",
     "rotate",
   ],
 };
@@ -95,103 +126,121 @@ const FILTER_CATEGORIES = {
 // Filter definitions with icons and descriptions
 const FILTER_DEFINITIONS = {
   diff: {
-    name: "Differentiate",
+    name: FILTER_LABELS.diff,
     icon: ChartGantt,
     description: "Calculate the derivative of the data",
   },
   diff_y: {
-    name: "Diff along X",
+    name: FILTER_LABELS.diff_y,
     icon: ChartColumn,
     description: "Differentiate along X-axis",
   },
   diff_x: {
-    name: "Diff along Y",
+    name: FILTER_LABELS.diff_x,
     icon: ChartGantt,
     description: "Differentiate along Y-axis",
   },
   log_scale: {
-    name: "Log Scale",
+    name: FILTER_LABELS.log_scale,
     icon: LogChartIcon,
     description: "Apply logarithmic scaling to axis",
   },
   savgol: {
-    name: "Savitzky-Golay",
+    name: FILTER_LABELS.savgol,
     icon: ChartSpline,
     description: "Smooth data using Savitzky-Golay filter",
   },
   sma: {
-    name: "Moving Average",
+    name: FILTER_LABELS.sma,
     icon: ChartSpline,
     description: "Smooth data using simple moving average",
   },
   normalize: {
-    name: "Normalize",
+    name: FILTER_LABELS.normalize,
     icon: SlidersHorizontal,
     description: "Normalize data along specified axis",
   },
+  polyfit: {
+    name: FILTER_LABELS.polyfit,
+    icon: ChartLine,
+    description: "Fit a polynomial to the line plot",
+  },
+  transform: {
+    name: FILTER_LABELS.transform,
+    icon: Ruler,
+    description: "Scale or invert Y/Z data with smart unit handling",
+  },
+  r_in_correction: {
+    name: FILTER_LABELS.r_in_correction,
+    icon: Zap,
+    description: "Correct bias for the voltage drop across an inline resistance",
+  },
+  rotate: {
+    name: FILTER_LABELS.rotate,
+    icon: Rotate3D,
+    description: "Rotate heatmap by specified angle. Use mouse/arrow keys to adjust angle.",
+  },
+  flip: {
+    name: FILTER_LABELS.flip,
+    icon: FlipHorizontal,
+    description: "Invert the color scale by multiplying Z-axis data by -1",
+  },
   gamma_corr: {
-    name: "Gamma Correction",
+    name: FILTER_LABELS.gamma_corr,
     icon: Contrast,
     description: "Apply gamma correction to enhance contrast",
   },
   log_corr: {
-    name: "Log Correction",
+    name: FILTER_LABELS.log_corr,
     icon: LogChartIcon,
     description: "Apply logarithmic correction",
   },
   sig_corr: {
-    name: "Sigmoid Correction",
+    name: FILTER_LABELS.sig_corr,
     icon: Gauge,
     description: "Apply sigmoid correction for enhanced dynamic range",
   },
   rescale_intensity: {
-    name: "Rescale Intensity",
+    name: FILTER_LABELS.rescale_intensity,
     icon: Sliders,
     description: "Rescale intensity values to full range",
   },
-
-  polyfit: {
-    name: "Polynomial Fit",
-    icon: ChartLine,
-    description: "Fit a polynomial to the line plot",
-  },
-  rotate: {
-    name: "Rotate Heatmap",
-    icon: Rotate3D,
-    description:
-      "Rotate heatmap by specified angle. Use mouse/arrow keys to adjust angle.",
-  },
-  flip: {
-    name: "Flip Heatmap",
-    icon: FlipHorizontal,
-    description: "Invert the color scale by multiplying Z-axis data by -1",
-  },
   bg_corr_constant: {
-    name: "BG Correction (Constant)",
+    name: FILTER_LABELS.bg_corr_constant,
     icon: Crosshair,
     description: "Subtract a constant offset baseline",
   },
   bg_corr_linear: {
-    name: "BG Correction (Linear)",
+    name: FILTER_LABELS.bg_corr_linear,
     icon: Crosshair,
     description: "Subtract a linear baseline",
   },
   bg_corr_row_mean: {
-    name: "BG Correction (Row Mean)",
+    name: FILTER_LABELS.bg_corr_row_mean,
     icon: Crosshair,
     description: "Subtract the mean of a selected row",
   },
   bg_corr_col_mean: {
-    name: "BG Correction (Col Mean)",
+    name: FILTER_LABELS.bg_corr_col_mean,
     icon: Crosshair,
     description: "Subtract the mean of a selected column",
   },
   bg_corr_plane: {
-    name: "BG Correction (Plane)",
+    name: FILTER_LABELS.bg_corr_plane,
     icon: Crosshair,
     description: "Subtract a plane defined by 3 points",
   },
 };
+
+// Typeset the R_in label; other labels are plain text.
+const filterTitle = (key: string): React.ReactNode =>
+  key === "r_in_correction" ? (
+    <>
+      <TexMath tex="R_\mathrm{in}" fallback="R_in" /> Correction
+    </>
+  ) : (
+    FILTER_DEFINITIONS[key as keyof typeof FILTER_DEFINITIONS].name
+  );
 
 // Default filter options
 const DEFAULT_FILTER_OPTIONS = {
@@ -202,7 +251,7 @@ const DEFAULT_FILTER_OPTIONS = {
     enabled: false,
     window: 5,
     polyorder: 2,
-    axis: 2,
+    axis: 0,
     deriv: 0,
     delta: 1.0,
     mode: "interp",
@@ -238,12 +287,26 @@ const DEFAULT_FILTER_OPTIONS = {
 
   polyfit: {
     enabled: false,
-    deg: 5,
+    deg: 2,
     window: [0, 1],
+  },
+  transform: {
+    enabled: false,
+    operation: "multiply",
+    factor: 1,
+    factor_unit: "",
+    result_unit: "",
+    result_label: "",
   },
   rotate: {
     enabled: false,
     angle: 0,
+  },
+  r_in_correction: {
+    enabled: false,
+    r_in: 0,
+    r_in_unit: "kΩ",
+    bias_axis: "x",
   },
   bg_corr_constant: {
     enabled: false,
@@ -272,12 +335,41 @@ const DEFAULT_FILTER_OPTIONS = {
   },
 };
 
+const settingsFromAppliedFilters = (
+  currentFilters: AppliedFilter[],
+  previous: FilterSettings = {},
+): { settings: FilterSettings; order: string[] } => {
+  const settings: FilterSettings = {};
+  for (const [key, config] of Object.entries(previous)) {
+    (settings as Record<string, unknown>)[key] =
+      config && typeof config === "object"
+        ? { ...(config as Record<string, unknown>), enabled: false }
+        : false;
+  }
+
+  const order: string[] = [];
+  for (const filter of currentFilters) {
+    order.push(filter.name);
+    if (typeof filter.options === "object" && filter.options !== null) {
+      const existing = settings[filter.name as keyof FilterSettings];
+      (settings as Record<string, unknown>)[filter.name] = {
+        ...(existing && typeof existing === "object" ? existing : {}),
+        enabled: true,
+        ...filter.options,
+      };
+    } else {
+      (settings as Record<string, unknown>)[filter.name] = true;
+    }
+  }
+  return { settings, order };
+};
+
 // z-index manager shared across modals
 const getNextGlobalModalZ = (): number => {
-  if (typeof window === "undefined") return 1000;
+  if (typeof window === "undefined") return 2000;
   const w = window as unknown as { __qimchi_modal_z?: number };
-  if (!w.__qimchi_modal_z) w.__qimchi_modal_z = 1000;
-  w.__qimchi_modal_z = (w.__qimchi_modal_z || 1000) + 1;
+  if (!w.__qimchi_modal_z) w.__qimchi_modal_z = 2000;
+  w.__qimchi_modal_z = (w.__qimchi_modal_z || 2000) + 1;
   return w.__qimchi_modal_z;
 };
 
@@ -285,30 +377,29 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   isOpen,
   onClose,
   onApplyFilters,
+  presetId = null,
+  onPresetLinkChange,
   plotType = "line",
   plotTitle,
   currentFilters,
   currentSliders = {},
   availableSliders = {},
   onRequestBGCorr,
+  xAxisIsMeasured = false,
 }) => {
-  const [localFilterSettings, setLocalFilterSettings] =
-    useState<FilterSettings>({});
-  const [filterOrder, setFilterOrder] = useState<string[]>([]);
+  const initialFilters = useRef(settingsFromAppliedFilters(currentFilters));
+  const [localFilterSettings, setLocalFilterSettings] = useState<FilterSettings>(
+    initialFilters.current.settings,
+  );
+  const [filterOrder, setFilterOrder] = useState<string[]>(initialFilters.current.order);
 
   // Slider state
-  const [localSliders, setLocalSliders] =
-    useState<Record<string, SliderConfig>>(currentSliders);
+  const [localSliders, setLocalSliders] = useState<Record<string, SliderConfig>>(currentSliders);
 
   // Sync localSliders with currentSliders when they change from parent
   useEffect(() => {
     setLocalSliders(currentSliders);
   }, [currentSliders]);
-
-  // Flag to prevent useEffect from triggering during local filter application
-  const isApplyingLocalFilters = useRef(false);
-  // Flag to prevent debounced filter application during toggle operations
-  const isTogglingFilter = useRef(false);
 
   // Get filter keys relevant to plotType, plus sliders if available
   const filterKeys = Object.keys(FILTER_DEFINITIONS).filter((key) => {
@@ -320,17 +411,30 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
 
   // Add sliders as a tab if there are any available - put it at the top
   const hasSliders = Object.keys(availableSliders).length > 0;
-  const allTabs = hasSliders ? ["sliders", ...filterKeys] : filterKeys;
+  const allTabs = [...(hasSliders ? ["sliders"] : []), "applied", "presets", ...filterKeys];
 
-  const [activeTab, setActiveTab] = useState<string>(allTabs[0] || "diff");
+  const dbAvailable = useLibraryStore((state) => state.dbAvailable);
+  const presets = useFilterPresetsStore((state) => state.presets);
+  const presetsError = useFilterPresetsStore((state) => state.error);
+  const linkedPreset = presets?.find((preset) => preset.id === presetId) ?? null;
+  const presetsUnavailable = dbAvailable
+    ? null
+    : "Presets are saved in the library database, which is unavailable this session.";
+
+  const unavailableReason = (key: string): string | null =>
+    xAxisIsMeasured && NEEDS_A_SWEPT_X[key]
+      ? `Unavailable for this plot. ${NEEDS_A_SWEPT_X[key]} Here, X is measured data.`
+      : null;
+
+  const [activeTab, setActiveTab] = useState<string>(
+    hasSliders ? "sliders" : filterKeys[0] || "diff",
+  );
   const [isDragging, setIsDragging] = useState(false);
 
   // Debounce ref to prevent excessive API calls
   const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Separate debounce ref for sliders (shorter delay for better responsiveness)
-  const sliderDebounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
+  const sliderDebounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { showToast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -360,100 +464,43 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
     setZIndexLocal(next);
   };
 
-  // Initialize filter settings from current filters
+  // Sync parent state only while closed. While open, local edits may be newer
+  // than an in-flight request's response.
   useEffect(() => {
-    // Skip if we're in the middle of applying local filter changes
-    if (isApplyingLocalFilters.current) {
-      console.log(
-        "FiltersModal: Skipping currentFilters sync - applying local filters",
-      );
-      return;
-    }
-
+    if (isOpen) return;
     setLocalFilterSettings((prevSettings) => {
-      const settings: FilterSettings = { ...prevSettings }; // Preserve existing settings
-      const order: string[] = [];
-
-      // First, mark all existing filters as disabled
-      Object.keys(settings).forEach((key) => {
-        const config = settings[key as keyof FilterSettings];
-        if (config && typeof config === "object" && "enabled" in config) {
-          (config as Record<string, unknown>).enabled = false;
-        }
-      });
-
-      // Then enable and update settings for current filters
-      currentFilters.forEach((filter) => {
-        order.push(filter.name);
-        if (typeof filter.options === "object" && filter.options !== null) {
-          const existingSetting = settings[filter.name as keyof FilterSettings];
-          const existingOptions =
-            existingSetting &&
-            typeof existingSetting === "object" &&
-            "enabled" in existingSetting
-              ? (existingSetting as Record<string, unknown>)
-              : {};
-
-          (settings as Record<string, unknown>)[filter.name] = {
-            ...existingOptions, // Preserve existing settings
-            enabled: true,
-            ...filter.options,
-          };
-        } else {
-          (settings as Record<string, unknown>)[filter.name] = true;
-        }
-      });
-
-      setFilterOrder(order);
-      return settings;
+      const synced = settingsFromAppliedFilters(currentFilters, prevSettings);
+      setFilterOrder(synced.order);
+      return synced.settings;
     });
-  }, [currentFilters]);
+  }, [currentFilters, isOpen]);
 
-  // Initialize slider settings from current and available sliders
   useEffect(() => {
     if (isOpen) {
-      const updatedSliders = { ...currentSliders };
-
-      // Add any available sliders that aren't already in currentSliders
-      Object.keys(availableSliders).forEach((key) => {
-        if (!updatedSliders[key]) {
-          updatedSliders[key] = {
-            ...availableSliders[key],
-            value: availableSliders[key].min,
-          };
-        }
-      });
-
-      setLocalSliders(updatedSliders);
+      setLocalSliders(visibleSliders(availableSliders, currentSliders));
     }
   }, [isOpen, currentSliders, availableSliders]);
 
-  const updateFilterSetting = (
-    filterKey: string,
-    setting: string,
-    value: unknown,
-  ) => {
+  const updateFilterSetting = (filterKey: string, setting: string, value: unknown) => {
     setLocalFilterSettings((prev) => {
       const newSettings = { ...prev };
-      if (!newSettings[filterKey as keyof FilterSettings]) {
+      const existing = newSettings[filterKey as keyof FilterSettings];
+      if (!existing || typeof existing !== "object") {
         const defaultOptions =
-          DEFAULT_FILTER_OPTIONS[
-            filterKey as keyof typeof DEFAULT_FILTER_OPTIONS
-          ];
+          DEFAULT_FILTER_OPTIONS[filterKey as keyof typeof DEFAULT_FILTER_OPTIONS];
         (newSettings as Record<string, unknown>)[filterKey] = {
           ...defaultOptions,
           enabled: false, // Start disabled when creating new config
         };
+      } else {
+        (newSettings as Record<string, unknown>)[filterKey] = { ...existing };
       }
-      const filterConfig = (
-        newSettings as Record<string, Record<string, unknown>>
-      )[filterKey];
+      const filterConfig = (newSettings as Record<string, Record<string, unknown>>)[filterKey];
       if (filterConfig && typeof filterConfig === "object") {
         filterConfig[setting] = value;
       }
 
-      // Only apply filters if this filter is currently enabled and we're not changing the 'enabled' state
-      // This prevents duplicate applications when toggling filters on/off
+      // Toggling enabled is applied by the toggle handler.
       if (setting !== "enabled") {
         const filter = newSettings[filterKey as keyof FilterSettings];
         const isEnabled =
@@ -478,31 +525,22 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   const toggleFilter = (filterKey: string) => {
     const wasEnabled = isFilterEnabled(filterKey);
 
-    // Set flags to prevent useEffect and debounced calls from triggering during toggle
-    isApplyingLocalFilters.current = true;
-    isTogglingFilter.current = true;
-
     // Build the new filter list immediately based on current state and toggle action
     const appliedFilters: AppliedFilter[] = [];
 
-    // Calculate new filter order
+    // Keep configured filters in the list so they can be switched back on there.
     let newOrder: string[];
     if (!wasEnabled) {
-      // Filter is being enabled - add to end if not already in order
-      newOrder = filterOrder.includes(filterKey)
-        ? filterOrder
-        : [...filterOrder, filterKey];
+      newOrder = filterOrder.includes(filterKey) ? filterOrder : [...filterOrder, filterKey];
     } else {
-      // Filter is being disabled - remove from order
-      newOrder = filterOrder.filter((key) => key !== filterKey);
+      newOrder = filterOrder;
     }
 
     // Build applied filters based on new order
     newOrder.forEach((fKey) => {
       // For the filter being toggled, we know its new state
       // For other filters, check their current state
-      const shouldInclude =
-        fKey === filterKey ? !wasEnabled : isFilterEnabled(fKey);
+      const shouldInclude = fKey === filterKey ? !wasEnabled : isFilterEnabled(fKey);
 
       if (shouldInclude) {
         const filterConfig = localFilterSettings[fKey as keyof FilterSettings];
@@ -512,16 +550,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
             name: fKey,
             options: {},
           });
-        } else if (
-          filterConfig &&
-          typeof filterConfig === "object" &&
-          "enabled" in filterConfig
-        ) {
+        } else if (filterConfig && typeof filterConfig === "object" && "enabled" in filterConfig) {
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const { enabled, ...options } = filterConfig as Record<
-            string,
-            unknown
-          >;
+          const { enabled, ...options } = filterConfig as Record<string, unknown>;
           appliedFilters.push({
             name: fKey,
             options,
@@ -529,19 +560,11 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
         } else if (fKey === filterKey && !wasEnabled) {
           // Handle the case where we're enabling a filter that wasn't configured yet
           // First check if we have existing settings for this filter (even if disabled)
-          const existingConfig =
-            localFilterSettings[fKey as keyof FilterSettings];
-          if (
-            existingConfig &&
-            typeof existingConfig === "object" &&
-            "enabled" in existingConfig
-          ) {
+          const existingConfig = localFilterSettings[fKey as keyof FilterSettings];
+          if (existingConfig && typeof existingConfig === "object" && "enabled" in existingConfig) {
             // Use existing configuration, just re-enabling it
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            const { enabled, ...options } = existingConfig as Record<
-              string,
-              unknown
-            >;
+            const { enabled, ...options } = existingConfig as Record<string, unknown>;
             appliedFilters.push({
               name: fKey,
               options,
@@ -549,9 +572,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
           } else {
             // No existing config, use defaults
             const defaultOptions =
-              DEFAULT_FILTER_OPTIONS[
-                fKey as keyof typeof DEFAULT_FILTER_OPTIONS
-              ];
+              DEFAULT_FILTER_OPTIONS[fKey as keyof typeof DEFAULT_FILTER_OPTIONS];
             if (defaultOptions) {
               // eslint-disable-next-line @typescript-eslint/no-unused-vars
               const { enabled, ...options } = defaultOptions;
@@ -570,26 +591,13 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
       }
     });
 
-    // Apply filters first (single call)
     onApplyFilters(appliedFilters);
 
-    // Reset flags after a delay to allow state updates to complete
-    setTimeout(() => {
-      isApplyingLocalFilters.current = false;
-      isTogglingFilter.current = false;
-    }, 50); // Shorter delay - just enough for React state updates
-
-    // Then update state (no additional calls since we removed the logic from state setters)
     setLocalFilterSettings((prev) => {
       const newSettings = { ...prev };
       const filterConfig = newSettings[filterKey as keyof FilterSettings];
 
-      if (
-        filterConfig &&
-        typeof filterConfig === "object" &&
-        "enabled" in filterConfig
-      ) {
-        // Create a new object instead of mutating the existing one
+      if (filterConfig && typeof filterConfig === "object" && "enabled" in filterConfig) {
         (newSettings as Record<string, unknown>)[filterKey] = {
           ...(filterConfig as Record<string, unknown>),
           enabled: !(filterConfig as Record<string, unknown>).enabled,
@@ -597,11 +605,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
       } else if (typeof filterConfig === "boolean") {
         (newSettings as Record<string, unknown>)[filterKey] = !filterConfig;
       } else {
-        // Initialize with default but preserve any existing settings
+        // Preserve existing options when enabling the filter.
         const defaultOptions =
-          DEFAULT_FILTER_OPTIONS[
-            filterKey as keyof typeof DEFAULT_FILTER_OPTIONS
-          ];
+          DEFAULT_FILTER_OPTIONS[filterKey as keyof typeof DEFAULT_FILTER_OPTIONS];
         (newSettings as Record<string, unknown>)[filterKey] = {
           ...defaultOptions,
           enabled: !wasEnabled,
@@ -615,9 +621,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
     setFilterOrder(newOrder);
   };
 
-  // Apply filters when state changes (only after user interaction)
-  // Removed the automatic useEffect to prevent infinite loops
-  // Filters are now applied directly in the toggleFilter function
+  // Apply filters directly from user actions, not a state-watching effect.
 
   const isFilterEnabled = (filterKey: string): boolean => {
     const filter = localFilterSettings[filterKey as keyof FilterSettings];
@@ -648,9 +652,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
         const filterEnabled =
           typeof filterConfig === "boolean"
             ? filterConfig
-            : filterConfig &&
-                typeof filterConfig === "object" &&
-                "enabled" in filterConfig
+            : filterConfig && typeof filterConfig === "object" && "enabled" in filterConfig
               ? Boolean((filterConfig as Record<string, unknown>).enabled)
               : false;
 
@@ -666,10 +668,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
             "enabled" in filterConfig
           ) {
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            const { enabled, ...options } = filterConfig as Record<
-              string,
-              unknown
-            >;
+            const { enabled, ...options } = filterConfig as Record<string, unknown>;
             appliedFilters.push({
               name: fKey,
               options,
@@ -724,7 +723,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
     sliderDebounceTimeoutRef.current = setTimeout(() => {
       const appliedFilters = buildAppliedFilters();
       onApplyFilters(appliedFilters, updatedSliders);
-    }, 80); // Balanced slider debounce - responsive but not excessive
+    }, 50);
   };
 
   const resetSlider = (key: string) => {
@@ -760,17 +759,15 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   };
 
   // Helper function to build applied filters from current state
-  const buildAppliedFilters = (): AppliedFilter[] => {
+  const buildAppliedFilters = (order: string[] = filterOrder): AppliedFilter[] => {
     const appliedFilters: AppliedFilter[] = [];
 
-    filterOrder.forEach((fKey) => {
+    order.forEach((fKey) => {
       const filterConfig = localFilterSettings[fKey as keyof FilterSettings];
       const filterEnabled =
         typeof filterConfig === "boolean"
           ? filterConfig
-          : filterConfig &&
-              typeof filterConfig === "object" &&
-              "enabled" in filterConfig
+          : filterConfig && typeof filterConfig === "object" && "enabled" in filterConfig
             ? Boolean((filterConfig as Record<string, unknown>).enabled)
             : false;
 
@@ -780,19 +777,12 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
             name: fKey,
             options: {},
           });
-        } else if (
-          filterConfig &&
-          typeof filterConfig === "object" &&
-          "enabled" in filterConfig
-        ) {
+        } else if (filterConfig && typeof filterConfig === "object" && "enabled" in filterConfig) {
           const options = Object.fromEntries(
             Object.entries(filterConfig as Record<string, unknown>).filter(
               ([key]) => key !== "enabled",
             ),
-          ) as Record<
-            string,
-            string | number | boolean | Record<string, unknown>
-          >;
+          ) as Record<string, string | number | boolean | Record<string, unknown>>;
           appliedFilters.push({
             name: fKey,
             options,
@@ -802,6 +792,86 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
     });
 
     return appliedFilters;
+  };
+
+  const appliedOrder = filterOrder.filter((key) => isFilterEnabled(key));
+
+  const removeFilter = (filterKey: string) => {
+    const nextOrder = filterOrder.filter((key) => key !== filterKey);
+    const nextSettings = { ...localFilterSettings };
+    const filterConfig = nextSettings[filterKey as keyof FilterSettings];
+    (nextSettings as Record<string, unknown>)[filterKey] =
+      filterConfig && typeof filterConfig === "object"
+        ? { ...(filterConfig as Record<string, unknown>), enabled: false }
+        : false;
+    setLocalFilterSettings(nextSettings);
+    setFilterOrder(nextOrder);
+    onApplyFilters(buildAppliedFilters(nextOrder));
+  };
+
+  useEffect(() => {
+    if (isOpen && dbAvailable) void useFilterPresetsStore.getState().load();
+  }, [isOpen, dbAvailable]);
+
+  // Clear links to presets removed from another panel.
+  useEffect(() => {
+    if (presets && presetId !== null && !presets.some((preset) => preset.id === presetId)) {
+      onPresetLinkChange?.(null);
+    }
+  }, [presets, presetId, onPresetLinkChange]);
+
+  const presetUnusableReason = (preset: FilterPreset): string | null => {
+    const missing = preset.filters.filter((filter) => !filterKeys.includes(filter.name));
+    if (missing.length === 0) return null;
+    const kind = plotType === "heatmap" ? "heat maps" : "line plots";
+    return `${presetSummary(missing)} ${missing.length === 1 ? "isn't" : "aren't"} available for ${kind}.`;
+  };
+
+  const applyPreset = (preset: FilterPreset) => {
+    const filters: AppliedFilter[] = preset.filters.map((filter) => ({
+      name: filter.name,
+      options: filter.options ?? {},
+    }));
+    const { settings, order } = settingsFromAppliedFilters(filters, localFilterSettings);
+    setLocalFilterSettings(settings);
+    setFilterOrder(order);
+    onApplyFilters(filters, localSliders, { presetId: preset.id });
+    showToast(`Applied \u201c${preset.name}\u201d`, "success");
+  };
+
+  const saveNewPreset = async (name: string): Promise<string | null> => {
+    const result = await useFilterPresetsStore.getState().create(name, buildAppliedFilters());
+    if (!result.preset) return result.error;
+    onPresetLinkChange?.(result.preset.id);
+    showToast(`Saved \u201c${result.preset.name}\u201d`, "success");
+    return null;
+  };
+
+  const replacePresetFilters = async (target: FilterPreset): Promise<string | null> => {
+    const result = await useFilterPresetsStore
+      .getState()
+      .update(target.id, { filters: buildAppliedFilters() }, "The preset could not be saved.");
+    if (!result.preset) return result.error;
+    onPresetLinkChange?.(result.preset.id);
+    showToast(`Updated \u201c${result.preset.name}\u201d`, "success");
+    return null;
+  };
+
+  const renamePreset = async (target: FilterPreset, name: string): Promise<string | null> => {
+    if (name === target.name) return null;
+    const result = await useFilterPresetsStore
+      .getState()
+      .update(target.id, { name }, "The preset could not be renamed.");
+    return result.preset ? null : result.error;
+  };
+
+  const removePreset = (target: FilterPreset) => useFilterPresetsStore.getState().remove(target.id);
+
+  // Reorder enabled filters without discarding settings for disabled filters.
+  const reorderFilters = (order: string[]) => {
+    const next = [...order, ...filterOrder.filter((key) => !order.includes(key))];
+    setFilterOrder(next);
+    onApplyFilters(buildAppliedFilters(next));
   };
 
   const handleExport = () => {
@@ -814,11 +884,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
     };
 
     const dataStr = JSON.stringify(exportData, null, 2);
-    const dataUri =
-      "data:application/json;charset=utf-8," + encodeURIComponent(dataStr);
+    const dataUri = "data:application/json;charset=utf-8," + encodeURIComponent(dataStr);
 
-    const sanitizeFilename = (str: string) =>
-      str.replace(/[^a-z0-9-_]/gi, "_").substring(0, 50);
+    const sanitizeFilename = (str: string) => str.replace(/[^a-z0-9-_]/gi, "_").substring(0, 50);
     const titleForFilename = plotTitle ? sanitizeFilename(plotTitle) : "plot";
     const exportFileDefaultName = `${
       new Date().toISOString().split("T")[0]
@@ -876,10 +944,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
             "enabled" in filterConfig
           ) {
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            const { enabled, ...options } = filterConfig as Record<
-              string,
-              unknown
-            >;
+            const { enabled, ...options } = filterConfig as Record<string, unknown>;
             appliedFilters.push({
               name: filterKey,
               options,
@@ -888,16 +953,11 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
         });
         onApplyFilters(appliedFilters, localSliders);
 
-        const sourcePlot = importedData.plotTitle
-          ? ` from "${importedData.plotTitle}"`
-          : "";
+        const sourcePlot = importedData.plotTitle ? ` from "${importedData.plotTitle}"` : "";
         showToast(`Filters imported successfully${sourcePlot}`, "success");
       } catch (error) {
         console.error("Error importing filters:", error);
-        showToast(
-          "Error parsing filter file. Please check the file format.",
-          "error",
-        );
+        showToast("Error parsing filter file. Please check the file format.", "error");
       }
     };
     reader.readAsText(file);
@@ -947,7 +1007,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
 
   if (!isOpen) return null;
 
-  return (
+  // Render in <body> to avoid clipping or transforms inherited from the plot tile.
+  return createPortal(
     <div ref={wrapperRef} className="fixed inset-0 pointer-events-none">
       <Rnd
         default={{
@@ -965,6 +1026,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
         onPointerDown={() => bringToFront()}
       >
         <div
+          data-tour="filters-panel"
           className={`bg-gray-100 rounded-lg shadow-2xl border-2 w-full h-full overflow-hidden flex flex-col transition-colors ${
             isDragging ? "border-blue-500 bg-blue-50" : "border-gray-300"
           }`}
@@ -1038,18 +1100,73 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
             <div className="w-2/5 border-r-2 border-gray-300 bg-gray-50 flex flex-col">
               <div className="flex-1 overflow-y-auto" role="tablist">
                 {allTabs.map((key) => {
+                  if (key === "applied") {
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => setActiveTab(key)}
+                        // Use the section-tab style rather than the individual-filter style.
+                        className={`w-full px-3 py-2.5 text-sm font-medium transition-colors flex items-center gap-2 border-b-2 border-gray-300 ${
+                          activeTab === key
+                            ? "text-blue-600 bg-blue-50 border-l-4 border-l-blue-600 shadow-inner dark:text-blue-300 dark:border-l-blue-400"
+                            : "qimchi-dark-hover-plain text-blue-700 hover:text-blue-800 hover:bg-blue-50 bg-linear-to-r from-blue-50 to-sky-50 border-l-2 border-l-blue-300 dark:from-blue-950/50 dark:to-sky-950/30 dark:text-blue-300 dark:hover:text-blue-200 dark:border-l-blue-700"
+                        }`}
+                        aria-controls={`tab-panel-${key}`}
+                        role="tab"
+                      >
+                        <ListOrdered
+                          size={18}
+                          className={
+                            appliedOrder.length > 0
+                              ? "text-blue-600 dark:text-blue-300"
+                              : "text-blue-400 dark:text-blue-500"
+                          }
+                        />
+                        <span className="text-left flex-1 font-semibold">Applied</span>
+                        {appliedOrder.length > 0 && (
+                          <span className="rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white">
+                            {appliedOrder.length}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  }
+
+                  if (key === "presets") {
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => setActiveTab(key)}
+                        className={`w-full px-3 py-2.5 text-sm font-medium transition-colors flex items-center gap-2 border-b-2 border-gray-300 ${
+                          activeTab === key
+                            ? "text-blue-600 bg-blue-50 border-l-4 border-l-blue-600 shadow-inner dark:text-blue-300 dark:border-l-blue-400"
+                            : "qimchi-dark-hover-plain text-blue-700 hover:text-blue-800 hover:bg-blue-50 bg-linear-to-r from-blue-50 to-sky-50 border-l-2 border-l-blue-300 dark:from-blue-950/50 dark:to-sky-950/30 dark:text-blue-300 dark:hover:text-blue-200 dark:border-l-blue-700"
+                        }`}
+                        aria-controls={`tab-panel-${key}`}
+                        role="tab"
+                      >
+                        <Bookmark size={18} className="text-blue-600 dark:text-blue-300" />
+                        <span className="text-left flex-1 font-semibold">Saved Presets</span>
+                        {presets && presets.length > 0 && (
+                          <span className="rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white">
+                            {presets.length}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  }
+
                   if (key === "sliders") {
                     // Special handling for sliders tab
-                    const hasActiveSliders =
-                      Object.keys(localSliders).length > 0;
+                    const hasActiveSliders = Object.keys(localSliders).length > 0;
                     return (
                       <button
                         key={key}
                         onClick={() => setActiveTab(key)}
                         className={`w-full px-3 py-2.5 text-sm font-medium transition-colors flex items-center gap-2 border-b border-gray-200 ${
                           activeTab === key
-                            ? "text-blue-600 bg-blue-50 border-l-4 border-l-blue-600 shadow-inner"
-                            : "text-purple-700 hover:text-purple-800 hover:bg-purple-50 bg-linear-to-r from-purple-50 to-indigo-50 border-l-2 border-l-purple-300"
+                            ? "text-blue-600 bg-blue-50 border-l-4 border-l-blue-600 shadow-inner dark:text-blue-300 dark:border-l-blue-400"
+                            : "qimchi-dark-hover-plain text-purple-700 hover:text-purple-800 hover:bg-purple-50 bg-linear-to-r from-purple-50 to-indigo-50 border-l-2 border-l-purple-300 dark:from-purple-950/50 dark:to-indigo-950/30 dark:text-purple-300 dark:hover:text-purple-200 dark:border-l-purple-700"
                         }`}
                         aria-controls={`tab-panel-${key}`}
                         role="tab"
@@ -1058,13 +1175,11 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                           size={18}
                           className={
                             hasActiveSliders
-                              ? "text-purple-600"
-                              : "text-purple-400"
+                              ? "text-purple-600 dark:text-purple-300"
+                              : "text-purple-400 dark:text-purple-500"
                           }
                         />
-                        <span className="text-left flex-1 font-semibold">
-                          Sliders
-                        </span>
+                        <span className="text-left flex-1 font-semibold">Sliders</span>
                         {hasActiveSliders && (
                           <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
                         )}
@@ -1073,33 +1188,52 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                   }
 
                   // Regular filter tabs
-                  const filterDef =
-                    FILTER_DEFINITIONS[key as keyof typeof FILTER_DEFINITIONS];
+                  const filterDef = FILTER_DEFINITIONS[key as keyof typeof FILTER_DEFINITIONS];
                   const IconComponent = filterDef.icon;
                   const isEnabled = isFilterEnabled(key);
-                  return (
+                  const reason = unavailableReason(key);
+                  const tab = (
                     <button
                       key={key}
-                      onClick={() => setActiveTab(key)}
+                      onClick={() => !reason && setActiveTab(key)}
+                      // Keep pointer events so the disabled reason can appear.
+                      title={reason ? undefined : filterDef.name}
                       className={`w-full px-3 py-2.5 text-sm font-medium transition-colors flex items-center gap-2 border-b border-gray-200 ${
-                        activeTab === key
-                          ? "text-blue-600 bg-white border-l-3 border-l-blue-600 shadow-inner"
-                          : "text-gray-600 hover:text-gray-800 hover:bg-gray-100"
+                        reason
+                          ? "text-gray-400 cursor-not-allowed bg-gray-50"
+                          : activeTab === key
+                            ? "text-blue-600 bg-white border-l-3 border-l-blue-600 shadow-inner"
+                            : "text-gray-600 hover:text-gray-800 hover:bg-gray-100"
                       }`}
                       aria-controls={`tab-panel-${key}`}
+                      aria-disabled={!!reason}
                       role="tab"
                     >
                       <IconComponent
                         size={18}
                         className={
-                          isEnabled ? "text-green-600" : "text-gray-400"
+                          reason ? "text-gray-300" : isEnabled ? "text-green-600" : "text-gray-400"
                         }
                       />
-                      <span className="text-left flex-1">{filterDef.name}</span>
-                      {isEnabled && (
-                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      <span className="text-left flex-1">{filterTitle(key)}</span>
+                      {isEnabled && !reason && (
+                        // One-based position in the applied filter order.
+                        <span
+                          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-green-600 text-[10px] font-bold text-white"
+                          aria-label={`Applied ${appliedOrder.indexOf(key) + 1} of ${appliedOrder.length}`}
+                        >
+                          {appliedOrder.indexOf(key) + 1}
+                        </span>
                       )}
                     </button>
+                  );
+
+                  return reason ? (
+                    <Tooltip key={key} content={reason} position="right">
+                      {tab}
+                    </Tooltip>
+                  ) : (
+                    tab
                   );
                 })}
               </div>
@@ -1113,6 +1247,73 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
             >
               {(() => {
                 // Special handling for sliders tab
+                if (activeTab === "applied") {
+                  return (
+                    <div className="h-full flex flex-col">
+                      <div className="mb-3 flex items-center gap-2">
+                        <ListOrdered size={22} className="text-gray-600" />
+                        <h3 className="text-lg font-semibold text-gray-800">Applied</h3>
+                      </div>
+                      {filterOrder.length > 0 ? (
+                        <>
+                          <p className="mb-3 text-xs text-gray-500">
+                            Filters run from top to bottom. Toggle, drag, or use the arrows to
+                            manage them.
+                          </p>
+                          <AppliedFilterOrder
+                            order={filterOrder}
+                            isEnabled={isFilterEnabled}
+                            onToggle={toggleFilter}
+                            onReorder={reorderFilters}
+                            onRemove={removeFilter}
+                          />
+                          <div className="mt-4 border-t border-gray-200 pt-4">
+                            <AppliedPreset
+                              filters={buildAppliedFilters()}
+                              linked={linkedPreset}
+                              disabledReason={presetsUnavailable}
+                              onSaveNew={saveNewPreset}
+                              onUpdate={replacePresetFilters}
+                              onRevert={applyPreset}
+                              onUnlink={() => onPresetLinkChange?.(null)}
+                            />
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-sm text-gray-500">
+                          No filters applied. Choose a filter or apply a saved preset.
+                        </p>
+                      )}
+                    </div>
+                  );
+                }
+
+                if (activeTab === "presets") {
+                  return (
+                    <div className="h-full flex flex-col">
+                      <div className="mb-3 flex items-center gap-2">
+                        <Bookmark size={22} className="text-gray-600" />
+                        <h3 className="text-lg font-semibold text-gray-800">Saved Presets</h3>
+                      </div>
+                      <p className="mb-3 text-xs text-gray-500">
+                        Applying a preset replaces this plot&apos;s filters.
+                      </p>
+                      <SavedPresets
+                        presets={presets}
+                        filters={buildAppliedFilters()}
+                        linkedId={presetId}
+                        error={presetsUnavailable ?? presetsError}
+                        unusableReason={presetUnusableReason}
+                        onApply={applyPreset}
+                        onSaveNew={saveNewPreset}
+                        onReplace={replacePresetFilters}
+                        onRename={renamePreset}
+                        onDelete={removePreset}
+                      />
+                    </div>
+                  );
+                }
+
                 if (activeTab === "sliders") {
                   const sliderKeys = Object.keys(localSliders);
 
@@ -1123,17 +1324,12 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                         <div className="flex items-center gap-2 mb-3">
                           <MoveHorizontal size={22} className="text-gray-600" />
                           <div className="flex justify-between items-center w-full">
-                            <h3 className="text-lg font-semibold text-gray-800">
-                              Data Sliders
-                            </h3>
+                            <h3 className="text-lg font-semibold text-gray-800">Data Sliders</h3>
                             <Tooltip
                               content="Drag to navigate through extra data dimensions."
                               position="left"
                             >
-                              <Info
-                                size={16}
-                                className="text-gray-400 cursor-help"
-                              />
+                              <Info size={16} className="text-gray-400 cursor-help" />
                             </Tooltip>
                           </div>
                         </div>
@@ -1155,16 +1351,13 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                       <div className="flex-1 overflow-y-auto">
                         {sliderKeys.length === 0 ? (
                           <div className="text-center py-8">
-                            <SlidersHorizontal
-                              size={48}
-                              className="text-gray-300 mx-auto mb-4"
-                            />
+                            <SlidersHorizontal size={48} className="text-gray-300 mx-auto mb-4" />
                             <p className="text-gray-500">
                               No data sliders available for this plot.
                             </p>
                             <p className="text-sm text-gray-400 mt-1">
-                              Sliders appear when your data has extra dimensions
-                              not used in the plot axes.
+                              Sliders appear when your data has extra dimensions not used in the
+                              plot axes.
                             </p>
                           </div>
                         ) : (
@@ -1174,17 +1367,14 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               const available = availableSliders[key] || slider;
 
                               return (
-                                <div
-                                  key={key}
-                                  className="bg-gray-50 p-3 rounded-lg space-y-3"
-                                >
+                                <div key={key} className="bg-gray-50 p-3 rounded-lg space-y-3">
                                   <div className="flex items-center justify-between">
                                     <label className="text-sm font-medium text-gray-700">
                                       {key}
                                     </label>
                                     <div className="flex items-center space-x-2">
                                       <span className="text-sm text-gray-500 font-mono bg-white px-2 py-1 rounded">
-                                        {slider.value.toFixed(6)}
+                                        {sliderText(available, slider.value)}
                                       </span>
                                       <button
                                         onClick={() => resetSlider(key)}
@@ -1199,17 +1389,15 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                   <div className="space-y-2">
                                     <input
                                       type="range"
-                                      title={`${key} slider value: ${slider.value.toFixed(
-                                        6,
-                                      )}`}
-                                      min={available.min}
-                                      max={available.max}
-                                      step={available.step}
-                                      value={slider.value}
+                                      title={`${key} slider value: ${sliderText(available, slider.value)}`}
+                                      min={0}
+                                      max={sliderSteps(available)}
+                                      step={1}
+                                      value={sliderIndexOf(available, slider.value)}
                                       onChange={(e) =>
                                         updateSliderValue(
                                           key,
-                                          parseFloat(e.target.value),
+                                          sliderValueAt(available, Number(e.target.value)),
                                         )
                                       }
                                       className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1227,8 +1415,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                     />
 
                                     <div className="flex justify-between text-xs text-gray-400">
-                                      <span>{available.min.toFixed(6)}</span>
-                                      <span>{available.max.toFixed(6)}</span>
+                                      <span>{sliderText(available, available.min)}</span>
+                                      <span>{sliderText(available, available.max)}</span>
                                     </div>
                                   </div>
                                 </div>
@@ -1243,18 +1431,16 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
 
                 // Regular filter handling
                 const isEnabled = isFilterEnabled(activeTab);
-                const storedFilterConfig =
-                  localFilterSettings[activeTab as keyof FilterSettings];
+                const storedFilterConfig = localFilterSettings[activeTab as keyof FilterSettings];
 
                 // Ensure we always have a configuration object for rendering options
                 const filterConfig =
                   storedFilterConfig && typeof storedFilterConfig === "object"
                     ? storedFilterConfig
-                    : DEFAULT_FILTER_OPTIONS[
-                        activeTab as keyof typeof DEFAULT_FILTER_OPTIONS
-                      ] || { enabled: false };
-                const selectedPoints =
-                  (filterConfig as { points?: BGCorrPoint[] }).points ?? [];
+                    : DEFAULT_FILTER_OPTIONS[activeTab as keyof typeof DEFAULT_FILTER_OPTIONS] || {
+                        enabled: false,
+                      };
+                const selectedPoints = (filterConfig as { points?: BGCorrPoint[] }).points ?? [];
 
                 return (
                   <div className="h-full flex flex-col">
@@ -1263,34 +1449,22 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                       <div className="flex items-center gap-2 mb-3">
                         {(() => {
                           const filterDef =
-                            FILTER_DEFINITIONS[
-                              activeTab as keyof typeof FILTER_DEFINITIONS
-                            ];
+                            FILTER_DEFINITIONS[activeTab as keyof typeof FILTER_DEFINITIONS];
                           const IconComponent = filterDef.icon;
-                          return (
-                            <IconComponent
-                              size={22}
-                              className="text-gray-600"
-                            />
-                          );
+                          return <IconComponent size={22} className="text-gray-600" />;
                         })()}
 
                         {/* Tooltip with description */}
                         <div className="flex justify-between items-center w-full">
                           <h3 className="text-lg font-semibold text-gray-800">
-                            {
-                              FILTER_DEFINITIONS[
-                                activeTab as keyof typeof FILTER_DEFINITIONS
-                              ].name
-                            }
+                            {filterTitle(activeTab)}
                           </h3>
                           <Tooltip
                             // TODOLATER: Looks a bit weird covering the title
                             position="left"
                             content={
-                              FILTER_DEFINITIONS[
-                                activeTab as keyof typeof FILTER_DEFINITIONS
-                              ].description
+                              FILTER_DEFINITIONS[activeTab as keyof typeof FILTER_DEFINITIONS]
+                                .description
                             }
                           >
                             <Info
@@ -1300,10 +1474,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                           </Tooltip>
                         </div>
                       </div>
-                      <ApplyButton
-                        isEnabled={isEnabled}
-                        onToggle={() => toggleFilter(activeTab)}
-                      />
+                      <ApplyButton isEnabled={isEnabled} onToggle={() => toggleFilter(activeTab)} />
                     </div>
 
                     {/* Filter options */}
@@ -1316,10 +1487,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Window Size
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .window,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).window)}
                               </span>
                             </label>
                             <input
@@ -1327,16 +1495,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               min="3"
                               max="21"
                               step="2"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .window as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).window as number}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "window",
-                                  parseInt(e.target.value),
-                                )
+                                updateFilterSetting(activeTab, "window", parseInt(e.target.value))
                               }
                               className="w-full"
                               aria-label="Savitzky-Golay window size"
@@ -1347,20 +1508,14 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Polynomial Order
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .polyorder,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).polyorder)}
                               </span>
                             </label>
                             <input
                               type="range"
                               min="1"
                               max="5"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .polyorder as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).polyorder as number}
                               onChange={(e) =>
                                 updateFilterSetting(
                                   activeTab,
@@ -1379,16 +1534,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                 Axis
                               </label>
                               <select
-                                value={
-                                  (filterConfig as Record<string, unknown>)
-                                    .axis as number
-                                }
+                                value={(filterConfig as Record<string, unknown>).axis as number}
                                 onChange={(e) =>
-                                  updateFilterSetting(
-                                    activeTab,
-                                    "axis",
-                                    parseInt(e.target.value),
-                                  )
+                                  updateFilterSetting(activeTab, "axis", parseInt(e.target.value))
                                 }
                                 className="w-full p-2 border border-gray-300 rounded"
                                 aria-label="Savitzky-Golay axis"
@@ -1404,26 +1552,16 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Derivative Order
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .deriv,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).deriv)}
                               </span>
                             </label>
                             <input
                               type="range"
                               min="0"
                               max="3"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .deriv as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).deriv as number}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "deriv",
-                                  parseInt(e.target.value),
-                                )
+                                updateFilterSetting(activeTab, "deriv", parseInt(e.target.value))
                               }
                               className="w-full"
                               aria-label="Savitzky-Golay derivative order"
@@ -1434,10 +1572,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Delta
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .delta,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).delta)}
                               </span>
                             </label>
                             <input
@@ -1445,16 +1580,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               min="0.1"
                               max="5.0"
                               step="0.1"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .delta as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).delta as number}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "delta",
-                                  parseFloat(e.target.value),
-                                )
+                                updateFilterSetting(activeTab, "delta", parseFloat(e.target.value))
                               }
                               className="w-full"
                               aria-label="Savitzky-Golay delta spacing"
@@ -1466,16 +1594,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               Mode
                             </label>
                             <select
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .mode as string
-                              }
+                              value={(filterConfig as Record<string, unknown>).mode as string}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "mode",
-                                  e.target.value,
-                                )
+                                updateFilterSetting(activeTab, "mode", e.target.value)
                               }
                               className="w-full p-2 border border-gray-300 rounded"
                               aria-label="Savitzky-Golay boundary mode"
@@ -1492,10 +1613,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Constant Value (cval)
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .cval,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).cval)}
                               </span>
                             </label>
                             <input
@@ -1503,16 +1621,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               min="-10"
                               max="10"
                               step="0.1"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .cval as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).cval as number}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "cval",
-                                  parseFloat(e.target.value),
-                                )
+                                updateFilterSetting(activeTab, "cval", parseFloat(e.target.value))
                               }
                               className="w-full"
                               aria-label="Savitzky-Golay constant value"
@@ -1527,26 +1638,16 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                           <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                             Window Size
                             <span className="text-xs text-gray-500">
-                              {String(
-                                (filterConfig as Record<string, unknown>)
-                                  .window,
-                              )}
+                              {String((filterConfig as Record<string, unknown>).window)}
                             </span>
                           </label>
                           <input
                             type="range"
                             min="2"
                             max="20"
-                            value={
-                              (filterConfig as Record<string, unknown>)
-                                .window as number
-                            }
+                            value={(filterConfig as Record<string, unknown>).window as number}
                             onChange={(e) =>
-                              updateFilterSetting(
-                                activeTab,
-                                "window",
-                                parseInt(e.target.value),
-                              )
+                              updateFilterSetting(activeTab, "window", parseInt(e.target.value))
                             }
                             className="w-full"
                             aria-label="Simple moving average window size"
@@ -1561,8 +1662,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                 className="text-yellow-600 mt-0.5 shrink-0"
                               />
                               <div className="text-xs text-yellow-800">
-                                <strong>WARNING:</strong> Output length is same
-                                as the input length because of{" "}
+                                <strong>WARNING:</strong> Output length is same as the input length
+                                because of{" "}
                                 <code className="bg-yellow-100 px-1 rounded text-xs">
                                   mode='same'
                                 </code>{" "}
@@ -1583,17 +1684,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             Normalize Axis
                           </label>
                           <select
-                            value={
-                              (filterConfig as Record<string, unknown>)
-                                .axis as string
-                            }
-                            onChange={(e) =>
-                              updateFilterSetting(
-                                activeTab,
-                                "axis",
-                                e.target.value,
-                              )
-                            }
+                            value={(filterConfig as Record<string, unknown>).axis as string}
+                            onChange={(e) => updateFilterSetting(activeTab, "axis", e.target.value)}
                             className="w-full p-2 border border-gray-300 rounded"
                             aria-label="Normalize axis"
                             title="Normalize axis"
@@ -1611,10 +1703,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Gamma
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .gamma,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).gamma)}
                               </span>
                             </label>
                             <input
@@ -1622,16 +1711,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               min="0.1"
                               max="5"
                               step="0.1"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .gamma as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).gamma as number}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "gamma",
-                                  parseFloat(e.target.value),
-                                )
+                                updateFilterSetting(activeTab, "gamma", parseFloat(e.target.value))
                               }
                               className="w-full"
                               aria-label="Gamma correction gamma value"
@@ -1642,10 +1724,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Gain
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .gain,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).gain)}
                               </span>
                             </label>
                             <input
@@ -1653,16 +1732,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               min="0.1"
                               max="10"
                               step="0.1"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .gain as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).gain as number}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "gain",
-                                  parseFloat(e.target.value),
-                                )
+                                updateFilterSetting(activeTab, "gain", parseFloat(e.target.value))
                               }
                               className="w-full"
                               aria-label="Gamma correction gain value"
@@ -1678,10 +1750,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Gain
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .gain,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).gain)}
                               </span>
                             </label>
                             <input
@@ -1689,16 +1758,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               min="0.1"
                               max="10"
                               step="0.1"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .gain as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).gain as number}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "gain",
-                                  parseFloat(e.target.value),
-                                )
+                                updateFilterSetting(activeTab, "gain", parseFloat(e.target.value))
                               }
                               className="w-full"
                               aria-label="Log correction gain value"
@@ -1708,23 +1770,14 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                           <div className="flex items-center">
                             <input
                               type="checkbox"
-                              checked={
-                                (filterConfig as Record<string, unknown>)
-                                  .inv as boolean
-                              }
+                              checked={(filterConfig as Record<string, unknown>).inv as boolean}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "inv",
-                                  e.target.checked,
-                                )
+                                updateFilterSetting(activeTab, "inv", e.target.checked)
                               }
                               className="mr-2"
                               aria-label="Log correction invert"
                             />
-                            <label className="text-sm text-gray-700">
-                              Invert
-                            </label>
+                            <label className="text-sm text-gray-700">Invert</label>
                           </div>
                         </>
                       )}
@@ -1735,10 +1788,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Cutoff
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .cutoff,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).cutoff)}
                               </span>
                             </label>
                             <input
@@ -1746,16 +1796,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               min="0.1"
                               max="1"
                               step="0.05"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .cutoff as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).cutoff as number}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "cutoff",
-                                  parseFloat(e.target.value),
-                                )
+                                updateFilterSetting(activeTab, "cutoff", parseFloat(e.target.value))
                               }
                               className="w-full"
                               aria-label="Sigmoid correction cutoff value"
@@ -1766,10 +1809,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                             <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                               Gain
                               <span className="text-xs text-gray-500">
-                                {String(
-                                  (filterConfig as Record<string, unknown>)
-                                    .gain,
-                                )}
+                                {String((filterConfig as Record<string, unknown>).gain)}
                               </span>
                             </label>
                             <input
@@ -1777,16 +1817,9 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                               min="1"
                               max="20"
                               step="0.5"
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .gain as number
-                              }
+                              value={(filterConfig as Record<string, unknown>).gain as number}
                               onChange={(e) =>
-                                updateFilterSetting(
-                                  activeTab,
-                                  "gain",
-                                  parseFloat(e.target.value),
-                                )
+                                updateFilterSetting(activeTab, "gain", parseFloat(e.target.value))
                               }
                               className="w-full"
                               aria-label="Sigmoid correction gain value"
@@ -1797,30 +1830,117 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                       )}
 
                       {/* Polynomial Fit options */}
+                      {activeTab === "transform" && (
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Operation
+                            </label>
+                            <select
+                              value={(filterConfig as Record<string, unknown>).operation as string}
+                              onChange={(e) =>
+                                updateFilterSetting(activeTab, "operation", e.target.value)
+                              }
+                              className="w-full p-2 border border-gray-300 rounded"
+                              aria-label="Scale operation"
+                              title="Scale operation"
+                            >
+                              <option value="multiply">Multiply</option>
+                              <option value="inverse">Inverse (1/value)</option>
+                              <option value="g0">Divide by e² / h (G₀)</option>
+                              <option value="2g0">Divide by 2e² / h (2G₀)</option>
+                              <option value="r0">Divide by h / e² (R₀)</option>
+                            </select>
+                          </div>
+
+                          {(filterConfig as Record<string, unknown>).operation === "multiply" && (
+                            <>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Scalar
+                                </label>
+                                <NumericInput
+                                  value={(filterConfig as Record<string, unknown>).factor as number}
+                                  onChange={(factor) =>
+                                    updateFilterSetting(activeTab, "factor", factor)
+                                  }
+                                  className="w-full p-2 border border-gray-300 rounded"
+                                  aria-label="Scale scalar"
+                                  title="Scale scalar"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Scalar Unit (optional)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={
+                                    (filterConfig as Record<string, unknown>).factor_unit as string
+                                  }
+                                  onChange={(e) =>
+                                    updateFilterSetting(activeTab, "factor_unit", e.target.value)
+                                  }
+                                  placeholder="e.g. V, mA, Ω"
+                                  className="w-full p-2 border border-gray-300 rounded"
+                                  aria-label="Scale scalar unit"
+                                />
+                              </div>
+                            </>
+                          )}
+
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Result Unit (optional override)
+                            </label>
+                            <input
+                              type="text"
+                              value={
+                                (filterConfig as Record<string, unknown>).result_unit as string
+                              }
+                              onChange={(e) =>
+                                updateFilterSetting(activeTab, "result_unit", e.target.value)
+                              }
+                              placeholder="Leave blank to infer"
+                              className="w-full p-2 border border-gray-300 rounded"
+                              aria-label="Result unit override"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Result Label (optional)
+                            </label>
+                            <input
+                              type="text"
+                              value={
+                                (filterConfig as Record<string, unknown>).result_label as string
+                              }
+                              onChange={(e) =>
+                                updateFilterSetting(activeTab, "result_label", e.target.value)
+                              }
+                              placeholder="Leave blank to retain the label"
+                              className="w-full p-2 border border-gray-300 rounded"
+                              aria-label="Result label override"
+                            />
+                          </div>
+                        </div>
+                      )}
+
                       {activeTab === "polyfit" && (
                         <div>
                           <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                             Polynomial Degree
                             <span className="text-xs text-gray-500">
-                              {String(
-                                (filterConfig as Record<string, unknown>).deg,
-                              )}
+                              {String((filterConfig as Record<string, unknown>).deg)}
                             </span>
                           </label>
                           <input
                             type="range"
                             min="1"
                             max="10"
-                            value={
-                              (filterConfig as Record<string, unknown>)
-                                .deg as number
-                            }
+                            value={(filterConfig as Record<string, unknown>).deg as number}
                             onChange={(e) =>
-                              updateFilterSetting(
-                                activeTab,
-                                "deg",
-                                parseInt(e.target.value),
-                              )
+                              updateFilterSetting(activeTab, "deg", parseInt(e.target.value))
                             }
                             className="w-full"
                             aria-label="Polynomial fit degree"
@@ -1834,21 +1954,13 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                           <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1.5">
                             Angle
                             <span className="text-xs text-gray-500">
-                              {String(
-                                (filterConfig as Record<string, unknown>).angle,
-                              )}
-                              °
+                              {String((filterConfig as Record<string, unknown>).angle)}°
                             </span>
                           </label>
                           <div className="flex justify-center m-2">
                             <RadialDial
-                              value={
-                                (filterConfig as Record<string, unknown>)
-                                  .angle as number
-                              }
-                              onChange={(value) =>
-                                updateFilterSetting(activeTab, "angle", value)
-                              }
+                              value={(filterConfig as Record<string, unknown>).angle as number}
+                              onChange={(value) => updateFilterSetting(activeTab, "angle", value)}
                               min={-180}
                               max={180}
                               step={1}
@@ -1860,15 +1972,78 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                         </div>
                       )}
 
+                      {activeTab === "r_in_correction" && (
+                        <div className="space-y-4">
+                          <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                            <div className="text-center text-gray-800">
+                              <TexMath
+                                tex="V_\mathrm{S} = V_\mathrm{b} - I \, R_\mathrm{in}"
+                                fallback="V_S = V_b − I × R_in"
+                                display
+                              />
+                            </div>
+                            <p className="mt-2 text-xs leading-relaxed text-gray-600">
+                              Subtracts the voltage dropped across the inline resistance from the
+                              applied bias V<sub>b</sub>, taking the heat map&apos;s values as the
+                              measured current I. The bias axis then shows the voltage across the
+                              sample, V<sub>S</sub>.
+                            </p>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Inline resistance R<sub>in</sub>
+                            </label>
+                            <div className="flex gap-2">
+                              <NumericInput
+                                value={(filterConfig as Record<string, unknown>).r_in as number}
+                                onChange={(value) => updateFilterSetting(activeTab, "r_in", value)}
+                                className="min-w-0 flex-1 p-2 border border-gray-300 rounded"
+                                aria-label="Inline resistance"
+                                title="Inline resistance"
+                              />
+                              <select
+                                value={
+                                  (filterConfig as Record<string, unknown>).r_in_unit as string
+                                }
+                                onChange={(e) =>
+                                  updateFilterSetting(activeTab, "r_in_unit", e.target.value)
+                                }
+                                className="p-2 border border-gray-300 rounded"
+                                aria-label="Inline resistance unit"
+                                title="Inline resistance unit"
+                              >
+                                <option value="Ω">Ω</option>
+                                <option value="kΩ">kΩ</option>
+                                <option value="MΩ">MΩ</option>
+                                <option value="GΩ">GΩ</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Bias axis
+                            </label>
+                            <select
+                              value={(filterConfig as Record<string, unknown>).bias_axis as string}
+                              onChange={(e) =>
+                                updateFilterSetting(activeTab, "bias_axis", e.target.value)
+                              }
+                              className="w-full p-2 border border-gray-300 rounded"
+                              aria-label="Bias axis"
+                              title="Bias axis"
+                            >
+                              <option value="x">X axis</option>
+                              <option value="y">Y axis</option>
+                            </select>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Background Correction options */}
                       {activeTab.startsWith("bg_corr_") && (
                         <div className="space-y-4">
                           <button
-                            onClick={() =>
-                              onRequestBGCorr?.(
-                                activeTab.replace("bg_corr_", ""),
-                              )
-                            }
+                            onClick={() => onRequestBGCorr?.(activeTab.replace("bg_corr_", ""))}
                             className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-2.5 py-2 rounded-md border border-blue-600 shadow-sm transition-colors inline-flex items-center justify-center gap-2"
                           >
                             <Crosshair size={14} />
@@ -1898,14 +2073,10 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                     className="text-xs font-mono bg-white border border-gray-200 p-2 rounded flex justify-between items-center shadow-sm"
                                   >
                                     <div className="flex items-center gap-2">
-                                      <span className="font-bold text-gray-500">
-                                        P{i + 1}:
-                                      </span>
+                                      <span className="font-bold text-gray-500">P{i + 1}:</span>
                                       <span className="text-blue-700">
                                         ({p.x.toFixed(2)}, {p.y.toFixed(2)}
-                                        {p.z !== undefined &&
-                                          `, Z:${p.z.toFixed(2)}`}
-                                        )
+                                        {p.z !== undefined && `, Z:${p.z.toFixed(2)}`})
                                       </span>
                                     </div>
                                     {p.row_idx !== undefined && (
@@ -1932,16 +2103,15 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
             <div className="absolute inset-0 bg-blue-100 bg-opacity-90 flex items-center justify-center z-10 border-2 border-dashed border-blue-500 rounded-lg">
               <div className="text-center">
                 <Upload size={48} className="mx-auto text-blue-600 mb-2" />
-                <p className="text-blue-800 font-medium">
-                  Drop filter file here
-                </p>
+                <p className="text-blue-800 font-medium">Drop filter file here</p>
                 <p className="text-blue-600 text-sm">JSON files only</p>
               </div>
             </div>
           )}
         </div>
       </Rnd>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

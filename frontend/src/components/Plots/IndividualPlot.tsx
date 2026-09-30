@@ -1,19 +1,17 @@
-import React, {
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  useMemo,
-} from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Data, Layout, Config } from "plotly.js";
 import PlotWrapper from "./PlotWrapper";
 import { PlotAPI, PlotRequest } from "../../services/plotAPI";
-import type {
-  SliderConfig,
-  PlotConfiguration,
-} from "../../components/interfaces";
+import type { AttrData, SliderConfig, PlotConfiguration } from "../../components/interfaces";
 import { useToast } from "../../hooks/useToast";
 import { usePlotStore } from "../../stores/plotStore";
+import { useSettingsStore } from "../../stores/settingsStore";
+import { withSavedTransforms } from "../../utils/savedTransforms";
+import {
+  createLiveRefreshRecorder,
+  markLivePlotActive,
+  reportLiveRefresh,
+} from "../../utils/liveRefreshStats";
 
 type PlotlyJSON = {
   data: Data[];
@@ -26,36 +24,61 @@ type CreatePlotOptions = {
   skipIfPending?: boolean;
 };
 
-const MEMORY_REFRESH_INTERVAL_MS = 750;
+const MAX_MEMORY_REFRESH_INTERVAL_MS = 5000;
+// Read the current refresh interval on every cycle.
+const minRefreshMs = () => useSettingsStore.getState().settings.live.minRefreshMs;
 
-const inferSourceFromPath = (path: string): "memory" | "disk" => {
-  const inferred = path.startsWith("memory://") ? "memory" : "disk";
-  console.log(`[IndividualPlot] inferSourceFromPath(${path}) -> ${inferred}`);
-  return inferred;
-};
+const inferSourceFromPath = (path: string): "memory" | "disk" =>
+  path.startsWith("memory://") ? "memory" : "disk";
 
 interface IndividualPlotProps {
   config: PlotConfiguration;
   onRemove: (id: string) => void;
+  /** Move this plot by `offset` places, from the keyboard on its drag handle. */
+  onMoveBy?: (offset: number) => void;
+  onSetPinned?: (id: string, pinned: boolean) => void;
   onAddPlot?: (config: Omit<PlotConfiguration, "id">) => void;
+  measurementInfo?: AttrData;
+  /** The plot's current share of the Viewer's width. */
+  widthPercent?: number;
 }
 
 type PlotLiveStatus = "live" | "paused" | "error" | "completed";
 
+/** Count the points represented by the first trace. */
+const pointsInPlot = (plot: PlotlyJSON | null): number => {
+  const trace = plot?.data?.[0] as { z?: unknown; x?: unknown } | undefined;
+  const shape = (trace?.z as { shape?: string } | undefined)?.shape;
+  if (typeof shape === "string") {
+    return shape
+      .split(",")
+      .map((part) => Number(part.trim()))
+      .filter((n) => Number.isFinite(n) && n > 0)
+      .reduce((product, n) => product * n, 1);
+  }
+  if (Array.isArray(trace?.z)) return (trace.z as unknown[]).flat().length;
+  if (Array.isArray(trace?.x)) return (trace.x as unknown[]).length;
+  return 0;
+};
+
 const IndividualPlot: React.FC<IndividualPlotProps> = ({
   config,
   onRemove,
+  onMoveBy,
+  onSetPinned,
   onAddPlot,
+  measurementInfo,
+  widthPercent,
 }) => {
   const [plotJson, setPlotJson] = useState<PlotlyJSON | null>(null);
   const [plotRef, setPlotRef] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [currentConfig, setCurrentConfig] = useState<PlotConfiguration>(config);
+  const [currentConfig, setCurrentConfig] = useState<PlotConfiguration>(() =>
+    withSavedTransforms(config),
+  );
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
-  const [availableSliders, setAvailableSliders] = useState<
-    Record<string, SliderConfig>
-  >({});
+  const [availableSliders, setAvailableSliders] = useState<Record<string, SliderConfig>>({});
   const currentConfigRef = useRef(currentConfig);
   const getPlotState = usePlotStore((state) => state.getPlotState);
 
@@ -73,10 +96,17 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
   const { showToast } = useToast();
   const fetchInFlight = useRef(false);
   const autoRefreshTimer = useRef<number | null>(null);
+  const refreshRecorder = useRef(createLiveRefreshRecorder());
+  const plotJsonRef = useRef<PlotlyJSON | null>(null);
   // Guard against transient live read failures by requiring multiple
   // consecutive non-live responses before marking the measurement completed.
   const consecutiveNonLiveCount = useRef(0);
   const CONSECUTIVE_NON_LIVE_THRESHOLD = 10;
+  // A live poll sends the config it started with, which is stale while a filter,
+  // swap or reset is being applied. Hold polls until the new config arrives, and
+  // drop any response that started before it, so the plot never flips back.
+  const transformPending = useRef(false);
+  const configGeneration = useRef(0);
 
   const plotStatus: PlotLiveStatus = useMemo(() => {
     if (error) {
@@ -93,16 +123,31 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
   // Keep ref in sync with state
   useEffect(() => {
     currentConfigRef.current = currentConfig;
+    configGeneration.current += 1;
+    transformPending.current = false;
   }, [currentConfig]);
 
+  const handleTransformStart = useCallback(() => {
+    transformPending.current = true;
+    configGeneration.current += 1;
+  }, []);
+
+  const handleTransformEnd = useCallback(() => {
+    transformPending.current = false;
+  }, []);
+
   const createPlot = useCallback(
-    async (
-      configToUse?: PlotConfiguration,
-      options: CreatePlotOptions = {},
-    ) => {
+    async (configToUse?: PlotConfiguration, options: CreatePlotOptions = {}) => {
       if (options.skipIfPending && fetchInFlight.current) {
         return;
       }
+      if (options.silent && transformPending.current) {
+        return;
+      }
+      // Only background refreshes are dropped; an explicit request always lands.
+      const isStale = (generation: number) =>
+        options.silent === true && generation !== configGeneration.current;
+      const generation = configGeneration.current;
 
       fetchInFlight.current = true;
 
@@ -112,9 +157,6 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
 
       try {
         const plotConfig = configToUse || currentConfigRef.current;
-        console.log(
-          `[IndividualPlot] Creating plot with dataset: ${plotConfig.fpath}`,
-        );
         const request: PlotRequest = {
           fpaths: [plotConfig.fpath], // Convert single path to array for backend compatibility
           indeps: plotConfig.indeps,
@@ -124,9 +166,13 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
           filters_opts: plotConfig.filters_opts || {},
           slider: plotConfig.slider || {},
           swap_xy: isAxesSwappedRef.current,
+          cut: plotConfig.cut,
         };
 
         const response = await PlotAPI.createPlots(request);
+        if (isStale(generation)) {
+          return;
+        }
 
         if (response.success && response.plots.length > 0) {
           // Take the first plot from the response
@@ -158,8 +204,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
             consecutiveNonLiveCount.current >= CONSECUTIVE_NON_LIVE_THRESHOLD
           ) {
             const resolvedPath =
-              typeof plot.resolved_fpath === "string" &&
-              plot.resolved_fpath.length > 0
+              typeof plot.resolved_fpath === "string" && plot.resolved_fpath.length > 0
                 ? plot.resolved_fpath
                 : currentConfigRef.current.fpath;
             console.log(
@@ -218,10 +263,8 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
             ...(clonedPlotJson.layout || {}),
             // Ensure Plotly.react sees a revision bump even if data arrays compare equal
             datarevision: Date.now(),
-            // Keep uirevision stable so Plotly preserves the user's zoom/pan state
-            // across live refresh cycles. Changing it would reset zoom every 500 ms.
-            uirevision: currentConfigRef.current.fpath,
           };
+          plotJsonRef.current = clonedPlotJson;
           setPlotJson(clonedPlotJson);
           setError(null);
 
@@ -236,48 +279,40 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
           // Keep the existing plot and silently skip this refresh cycle.
         } else {
           const errorMsg = response.message || "No plots created";
+          // Remove plots rejected as permanently invalid by the backend.
+          if (response.invalid && !plotJsonRef.current) {
+            showToast(errorMsg, "error", 6000);
+            onRemove(plotConfig.id);
+            return;
+          }
           setError(errorMsg);
           if (!options.silent) {
-            showToast(
-              `Failed to create plot: ${errorMsg}`,
-              "error",
-              5000,
-              "Plotter",
-              {
-                dataset: plotConfig.fpath,
-                type: plotConfig.plotType,
-                vars: { indeps: plotConfig.indeps, deps: plotConfig.deps },
-                backend_error: errorMsg,
-              },
-            );
+            showToast(`Failed to create plot: ${errorMsg}`, "error", 5000, "Plotter", {
+              dataset: plotConfig.fpath,
+              type: plotConfig.plotType,
+              vars: { indeps: plotConfig.indeps, deps: plotConfig.deps },
+              backend_error: errorMsg,
+            });
           }
         }
       } catch (err) {
+        if (isStale(generation)) {
+          return;
+        }
         let errorMessage = "Unknown error occurred";
 
         if (err instanceof Error) {
           errorMessage = err.message;
 
           // Provide more specific error messages for common issues
-          if (
-            errorMessage.includes("not found") ||
-            errorMessage.includes("KeyError")
-          ) {
+          if (errorMessage.includes("not found") || errorMessage.includes("KeyError")) {
             const config = currentConfigRef.current;
             errorMessage = `Variable not found in dataset. The plot uses variables [${config.indeps.join(
               ", ",
-            )}] → [${config.deps.join(
-              ", ",
-            )}] which may not exist in this dataset.`;
-          } else if (
-            errorMessage.includes("dimension") ||
-            errorMessage.includes("shape")
-          ) {
+            )}] → [${config.deps.join(", ")}] which may not exist in this dataset.`;
+          } else if (errorMessage.includes("dimension") || errorMessage.includes("shape")) {
             errorMessage = `Data shape mismatch. The selected variables may have incompatible dimensions in this dataset.`;
-          } else if (
-            errorMessage.includes("path") ||
-            errorMessage.includes("file")
-          ) {
+          } else if (errorMessage.includes("path") || errorMessage.includes("file")) {
             errorMessage = `Dataset file not accessible: ${currentConfigRef.current.fpath}`;
           }
         }
@@ -291,75 +326,62 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         fetchInFlight.current = false;
       }
     },
-    [showToast],
+    [showToast, onRemove],
   ); // No dependency on currentConfig, use ref instead
 
-  const handleConfigUpdate = useCallback(
-    (updates: Partial<PlotConfiguration>) => {
-      console.log("[IndividualPlot] handleConfigUpdate invoked with", updates);
-      setCurrentConfig((prev) => {
-        // For filters, completely replace them instead of merging to avoid duplication
-        const newConfig = { ...prev };
+  const handleConfigUpdate = useCallback((updates: Partial<PlotConfiguration>) => {
+    console.log("[IndividualPlot] handleConfigUpdate invoked with", updates);
+    setCurrentConfig((prev) => {
+      // For filters, completely replace them instead of merging to avoid duplication
+      const newConfig = { ...prev };
 
-        // Handle filters specially to avoid duplication
-        if ("filters_order" in updates || "filters_opts" in updates) {
-          newConfig.filters_order = updates.filters_order || [];
-          newConfig.filters_opts = updates.filters_opts || {};
+      // Handle filters specially to avoid duplication
+      if ("filters_order" in updates || "filters_opts" in updates) {
+        newConfig.filters_order = updates.filters_order || [];
+        newConfig.filters_opts = updates.filters_opts || {};
+      }
+
+      // Handle other updates normally
+      Object.keys(updates).forEach((key) => {
+        if (
+          key === "filters_order" ||
+          key === "filters_opts" ||
+          key === "fpath" ||
+          key === "source"
+        ) {
+          return;
         }
 
-        // Handle other updates normally
-        Object.keys(updates).forEach((key) => {
-          if (
-            key === "filters_order" ||
-            key === "filters_opts" ||
-            key === "fpath" ||
-            key === "source"
-          ) {
-            return;
-          }
-
-          const typedKey = key as keyof PlotConfiguration;
-          const typedNewConfig = newConfig as Record<
-            keyof PlotConfiguration,
-            unknown
-          >;
-          const typedUpdates = updates as Record<
-            keyof PlotConfiguration,
-            unknown
-          >;
-          typedNewConfig[typedKey] = typedUpdates[typedKey];
-        });
-
-        if (typeof updates.fpath === "string") {
-          newConfig.fpath = updates.fpath;
-          const shouldDeriveSource =
-            !("source" in updates) || updates.source === undefined;
-          if (shouldDeriveSource) {
-            const inferred = inferSourceFromPath(updates.fpath);
-            console.log(
-              `[IndividualPlot] handleConfigUpdate inferred source ${inferred} for ${updates.fpath}`,
-            );
-            newConfig.source = inferred;
-          }
-        }
-
-        if (typeof updates.source === "string") {
-          console.log(
-            `[IndividualPlot] handleConfigUpdate received explicit source ${updates.source}`,
-          );
-          newConfig.source = updates.source;
-        }
-
-        console.log(
-          "[IndividualPlot] handleConfigUpdate next config",
-          newConfig,
-        );
-        return newConfig;
+        const typedKey = key as keyof PlotConfiguration;
+        const typedNewConfig = newConfig as Record<keyof PlotConfiguration, unknown>;
+        const typedUpdates = updates as Record<keyof PlotConfiguration, unknown>;
+        typedNewConfig[typedKey] = typedUpdates[typedKey];
       });
-      // Don't automatically refresh - let the PlotWrapper handle refresh via onRefresh
-    },
-    [],
-  );
+
+      if (typeof updates.fpath === "string") {
+        newConfig.fpath = updates.fpath;
+        const shouldDeriveSource = !("source" in updates) || updates.source === undefined;
+        if (shouldDeriveSource) {
+          const inferred = inferSourceFromPath(updates.fpath);
+          console.log(
+            `[IndividualPlot] handleConfigUpdate inferred source ${inferred} for ${updates.fpath}`,
+          );
+          newConfig.source = inferred;
+        }
+      }
+
+      if (typeof updates.source === "string") {
+        console.log(
+          `[IndividualPlot] handleConfigUpdate received explicit source ${updates.source}`,
+        );
+        newConfig.source = updates.source;
+      }
+
+      console.log("[IndividualPlot] handleConfigUpdate next config", newConfig);
+      return newConfig;
+    });
+    // Don't automatically refresh - let the PlotWrapper handle refresh via onRefresh
+  }, []);
 
   const handleRetryClick = useCallback(() => {
     createPlot();
@@ -368,7 +390,7 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
   // Update current config when props change and refresh plot if fpath changed
   useEffect(() => {
     const previousFpath = currentConfigRef.current.fpath;
-    setCurrentConfig(config);
+    setCurrentConfig(withSavedTransforms(config));
 
     // If this is not the initial setup and the fpath has changed, DON'T recreate the plot
     // Let PlotWrapper handle the dataset change by updating data source in place
@@ -386,55 +408,51 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
     // (fpath may still be memory:// even when loading from disk)
     const isMemorySource = currentConfig.source === "memory";
 
-    // Log current source and fpath
-    console.log(
-      `[IndividualPlot] auto-refresh check: fpath=${currentConfig.fpath} | source=${currentConfig.source} | isMemorySource=${isMemorySource}`,
-    );
-
     if (!isMemorySource || isFiltersModalOpen) {
-      console.log(
-        `[IndividualPlot] auto-refresh disabled for source=${currentConfig.source}, filtersModalOpen=${isFiltersModalOpen}`,
-      );
       if (autoRefreshTimer.current !== null) {
-        window.clearInterval(autoRefreshTimer.current);
+        window.clearTimeout(autoRefreshTimer.current);
         autoRefreshTimer.current = null;
       }
       return;
     }
 
     if (autoRefreshTimer.current !== null) {
-      console.log(
-        "[IndividualPlot] Clearing existing auto-refresh interval before creating new one",
-      );
-      window.clearInterval(autoRefreshTimer.current);
+      window.clearTimeout(autoRefreshTimer.current);
     }
 
-    const intervalId = window.setInterval(() => {
-      console.log(
-        "[IndividualPlot] auto-refresh interval firing for memory dataset",
-      );
-      createPlot(undefined, { silent: true, skipIfPending: true });
-    }, MEMORY_REFRESH_INTERVAL_MS);
-    console.log(
-      `[IndividualPlot] auto-refresh interval set (id=${intervalId}) for source=${currentConfig.source} fpath=${currentConfig.fpath}`,
-    );
-    autoRefreshTimer.current = intervalId;
+    // Pace polling from the previous refresh time to avoid overlapping work.
+    let cancelled = false;
+    markLivePlotActive(true);
+    const scheduleNext = (delay: number) => {
+      if (cancelled) return;
+      autoRefreshTimer.current = window.setTimeout(async () => {
+        const started = performance.now();
+        try {
+          await createPlot(undefined, { silent: true, skipIfPending: true });
+        } finally {
+          const elapsed = performance.now() - started;
+          // Record the sustained local refresh rate.
+          const summary = refreshRecorder.current.record(
+            currentConfigRef.current.plotType,
+            elapsed,
+            pointsInPlot(plotJsonRef.current),
+          );
+          if (summary) void reportLiveRefresh(summary);
+          scheduleNext(Math.min(MAX_MEMORY_REFRESH_INTERVAL_MS, Math.max(minRefreshMs(), elapsed)));
+        }
+      }, delay);
+    };
+    scheduleNext(minRefreshMs());
 
     return () => {
-      console.log(
-        "[IndividualPlot] auto-refresh effect cleanup running, clearing interval",
-      );
+      cancelled = true;
+      markLivePlotActive(false);
       if (autoRefreshTimer.current !== null) {
-        window.clearInterval(autoRefreshTimer.current);
+        window.clearTimeout(autoRefreshTimer.current);
         autoRefreshTimer.current = null;
       }
     };
-  }, [
-    currentConfig.fpath,
-    currentConfig.source,
-    createPlot,
-    isFiltersModalOpen,
-  ]);
+  }, [currentConfig.fpath, currentConfig.source, createPlot, isFiltersModalOpen]);
 
   // Only create plot on initial mount - prevent double execution
   useEffect(() => {
@@ -461,19 +479,19 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
 
   if (error) {
     return (
-      <div className="relative min-h-[400px] flex items-center justify-center bg-red-50 rounded-lg border border-red-200">
-        <div className="text-center max-w-md">
+      <div className="relative min-h-[400px] flex items-center justify-center bg-red-50 rounded-lg border border-red-200 p-4 overflow-hidden">
+        <div className="text-center w-full max-w-md min-w-0 break-words">
           <p className="text-red-700 font-medium">Failed to create plot</p>
           <p className="text-red-600 text-sm mt-1 mb-2">{error}</p>
 
           {/* Show current plot configuration for debugging */}
           <div className="text-xs text-gray-600 bg-gray-100 p-2 rounded mb-3">
-            <div>
-              <strong>Dataset:</strong> {currentConfig.fpath.split("/").pop()}
+            <div className="break-all" title={currentConfig.fpath}>
+              <strong>Dataset:</strong> {currentConfig.fpath.split(/[\\/]/).pop()}
             </div>
             <div>
-              <strong>Variables:</strong> [{currentConfig.indeps.join(", ")}] →
-              [{currentConfig.deps.join(", ")}]
+              <strong>Variables:</strong> [{currentConfig.indeps.join(", ")}] → [
+              {currentConfig.deps.join(", ")}]
             </div>
             <div>
               <strong>Plot Type:</strong> {currentConfig.plotType}
@@ -517,11 +535,17 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
         plotRef={plotRef}
         plotStatus={plotStatus}
         onClose={handleClose}
+        onMoveBy={onMoveBy}
+        onTogglePinned={onSetPinned ? (pinned) => onSetPinned(config.id, pinned) : undefined}
         plotConfig={currentConfig}
         onUpdateConfig={handleConfigUpdate}
+        onTransformStart={handleTransformStart}
+        onTransformEnd={handleTransformEnd}
         onFiltersModalOpenChange={setIsFiltersModalOpen}
         availableSliders={availableSliders}
         onAddPlot={onAddPlot}
+        measurementInfo={measurementInfo}
+        widthPercent={widthPercent}
         onSwapAxesChange={(swapped) => {
           isAxesSwappedRef.current = swapped;
         }}

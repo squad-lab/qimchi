@@ -1,17 +1,29 @@
 @import "tailwindcss";
 
+/* Class-based dark mode: toggled via the `dark` class on <html> (see
+   src/App.tsx), driven by src/stores/themeStore.ts. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 html,
 body {
   overflow: hidden;
-  height: 100vh;
+  height: 100%;
   margin: 0;
   padding: 0;
 }
 
 #root {
   margin: 0 auto;
-  height: 100vh;
+  height: 100%;
   overflow: hidden;
+}
+
+/* Theme changes must be atomic. Components retain their normal hover,
+   resize, and disclosure transitions at every other time. */
+html.qimchi-theme-switching *,
+html.qimchi-theme-switching *::before,
+html.qimchi-theme-switching *::after {
+  transition: none !important;
 }
 
 /* Subtle fade-in for the Basket field-row hover expansion (a touch of transition). */
@@ -29,7 +41,7 @@ body {
 
 body {
   background-color: #f0f0f0;
-  font-family: "Martian Mono", monospace;
+  font-family: "Martian Mono Variable", "Martian Mono", monospace;
   color: #333;
 }
 
@@ -87,6 +99,15 @@ select {
   user-select: none;
 }
 
+select:not([multiple]) {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: right 0.625rem center;
+  background-repeat: no-repeat;
+  background-size: 1rem;
+  padding-right: 2rem;
+}
+
 /* Ensure draggable items can still be dragged */
 [draggable="true"] {
   -webkit-user-drag: element;
@@ -106,24 +127,21 @@ select {
   top: 0;
 }
 
-/* Tooltip portal - escapes ancestor clipping by using fixed positioning
-   and reading the coordinates from CSS variables set on :root by the
-   component. High z-index prevents it from being painted under other
-   app elements. */
 .tooltip-portal > .tooltip-positioned {
   position: fixed !important;
   left: var(--tooltip-left, 0);
   top: var(--tooltip-top, 0);
   transform: var(--tooltip-transform, translate(-50%, -100%));
   z-index: 9999 !important;
-  pointer-events: auto;
+  pointer-events: none;
+  /* A fixed element's automatic width stops at the viewport edge, so a
+     left-hand tooltip near the right of the window wrapped word by word. */
+  width: max-content;
+  max-width: min(22rem, calc(100vw - 1rem));
 }
 
 .tooltip-top {
-  transform: translate(
-    calc(var(--tooltip-x) - 50%),
-    calc(var(--tooltip-y) - 100%)
-  );
+  transform: translate(calc(var(--tooltip-x) - 50%), calc(var(--tooltip-y) - 100%));
 }
 
 .tooltip-bottom {
@@ -131,10 +149,7 @@ select {
 }
 
 .tooltip-left {
-  transform: translate(
-    calc(var(--tooltip-x) - 100%),
-    calc(var(--tooltip-y) - 50%)
-  );
+  transform: translate(calc(var(--tooltip-x) - 100%), calc(var(--tooltip-y) - 50%));
 }
 
 .tooltip-right {
@@ -142,6 +157,14 @@ select {
 }
 
 /* Modebar positioning - bottom middle horizontal */
+/* Cross-component layer stack, in paint order.
+     1000  Plotly modebar (below)
+     1100  LineCut pop-up (LineCutPopup.tsx)
+     1500  full-window Explorer (ExplorerLayer.tsx)
+     1600  Explorer tag/filter popovers
+     2001+ modals, incrementing per open (getNextGlobalModalZ)
+     9999  tooltip portal
+*/
 .modebar-container {
   position: absolute !important;
   top: 0% !important;
@@ -231,21 +254,767 @@ select {
   height: 15px;
 }
 
-/* Global media rules */
-/* @layer base {
-  @media (max-width: 1920px) {
-    body {
-      --zoom-ratio: 0.8;
-      transform-origin: 0 0;
-      transform: scale(var(--zoom-ratio));
+.wmde-markdown.release-notes h1,
+.wmde-markdown.release-notes h2,
+.wmde-markdown.release-notes h3 {
+  margin: 0.6em 0 0.3em;
+  padding: 0;
+  border: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
 
-      width: calc(100% / var(--zoom-ratio));
-      height: calc(100% / var(--zoom-ratio));
+.wmde-markdown.release-notes > :first-child {
+  margin-top: 0;
+}
 
-    }
+.wmde-markdown.release-notes ul,
+.wmde-markdown.release-notes ol {
+  margin: 0.2em 0;
+  padding-left: 1.4em;
+  list-style: disc;
+}
 
-    html, #root {
-      height: 100%;
-    }
+.wmde-markdown.release-notes ol {
+  list-style: decimal;
+}
+
+.dark .wmde-markdown.release-notes {
+  --color-fg-default: #d7dae0;
+  color: #d7dae0;
+}
+
+.dark .notes-markdown-editor {
+  --color-fg-default: #fff;
+  --color-prettylights-syntax-constant: #fff;
+}
+
+.dark .notes-markdown-editor,
+.dark .notes-markdown-editor .w-md-editor-content,
+.dark .notes-markdown-editor .w-md-editor-area,
+.dark .notes-markdown-editor .w-md-editor-text,
+.dark .notes-markdown-editor .w-md-editor-text-input,
+.dark .notes-markdown-editor .w-md-editor-text-pre {
+  background-color: #23262d !important;
+}
+
+.dark .notes-markdown-editor .w-md-editor-text-pre > code,
+.dark .notes-markdown-editor .w-md-editor-text-input {
+  color: #fff !important;
+  caret-color: #fff;
+}
+
+.dark .notes-markdown-editor .w-md-editor-text-input {
+  -webkit-text-fill-color: #fff !important;
+}
+
+/* Dark mode: Atom One Dark neutrals and semantic colours. */
+
+:root {
+  color-scheme: light;
+
+  --qimchi-accent-header-bg: #dff1bd;
+  --qimchi-accent-light-bg: #f4fae8;
+  --qimchi-accent-overlay: rgba(223, 241, 189, 0.6);
+  --qimchi-accent-text: #2f4a11;
+  --qimchi-accent-border-light: #cfe59b;
+}
+
+.dark {
+  /* Let the OS apply the dark palette to native controls. */
+  color-scheme: dark;
+
+  /* --qimchi-accent-header-bg: #2d3b1f; */
+  --qimchi-accent-header-bg: rgba(110, 160, 48, 0.82);
+  --qimchi-accent-light-bg: #26301c;
+  --qimchi-accent-overlay: rgba(45, 59, 31, 0.6);
+  --qimchi-accent-text: #b8d98a;
+  --qimchi-accent-border-light: #4a5c34;
+}
+
+/* Theme-dependent values shared across components. */
+:root {
+  /* Sidebar section headers (Explorer / Metadata / Notes). */
+  --qimchi-panel-title-fg: #22330d;
+  --qimchi-panel-title-bg: rgba(140, 198, 62, 0.85);
+  --qimchi-panel-title-bg-hover: rgba(110, 160, 48, 0.8);
+
+  /* DirTree rows. Folders take the strongest contrast against the
+     page; datasets sit one step in from it, so the hierarchy reads
+     without needing a second hue. */
+  --qimchi-tree-folder-fg: #010409;
+  --qimchi-tree-dataset-fg: #46536b;
+  --qimchi-tree-shortened-marker-fg: #9aa3af;
+
+  /* Trashed rows: still findable, plainly out of the way. */
+  --qimchi-trashed-fg: #9aa3af;
+  --qimchi-trashed-opacity: 0.5;
+
+  /* Basket overflow fade. Must match each slot's own tint, or the
+     fade shows up as a pale band over a dark panel. */
+  --qimchi-basket-fade-indep: #eff6ff; /* bg-blue-50 */
+  --qimchi-basket-fade-dep: #fef2f2; /* bg-red-50  */
+
+  /* Chrome that previously hardcoded an alpha per component. */
+  --qimchi-surface-border: rgba(229, 231, 235, 0.8);
+  --qimchi-modebar-bg: rgba(255, 255, 255, 0.85);
+}
+
+.dark {
+  /* White at 0.85 rather than pure white: full white on the accent
+     green vibrates. */
+  --qimchi-panel-title-fg: rgba(255, 255, 255, 0.85);
+  --qimchi-panel-title-bg: rgba(140, 198, 62, 0.8);
+  --qimchi-panel-title-bg-hover: rgba(110, 160, 48, 0.8);
+
+  --qimchi-tree-folder-fg: #f0f6fc;
+  --qimchi-tree-dataset-fg: #cddaf3;
+  --qimchi-tree-shortened-marker-fg: #7f8795;
+
+  --qimchi-trashed-fg: #6b7280;
+  --qimchi-trashed-opacity: 0.5;
+
+  --qimchi-basket-fade-indep: #1c2733; /* .dark .bg-blue-50 */
+  --qimchi-basket-fade-dep: #2c1e20; /* .dark .bg-red-50  */
+
+  --qimchi-surface-border: rgba(62, 68, 81, 0.8);
+  --qimchi-modebar-bg: rgba(40, 44, 52, 0.85);
+}
+
+/* Dataset-type icon colours shared by both themes. */
+:root {
+  --qimchi-icon-zarr: #cd9900;
+  --qimchi-icon-netcdf: #3b9ae1;
+  --qimchi-icon-hdf5: #8b7bf3;
+  --qimchi-icon-qcodes: #17a5a5;
+  --qimchi-icon-sqlite: #2fa86a;
+  --qimchi-icon-csv: #e2803c;
+  --qimchi-icon-matlab: #e0567a;
+  --qimchi-icon-generic: #6cb33f;
+}
+
+/* Label only -- the tint arrives via themeClasses.accentBg, which
+   points at the same token. */
+.qimchi-panel-title {
+  color: var(--qimchi-panel-title-fg);
+}
+
+.qimchi-tree-folder {
+  color: var(--qimchi-tree-folder-fg);
+}
+
+.qimchi-tree-dataset {
+  color: var(--qimchi-tree-dataset-fg);
+}
+
+/* Only the Explorer's Qanary/QCUtils abbreviation marker is subdued. */
+.qimchi-tree-shortened-marker {
+  color: var(--qimchi-tree-shortened-marker-fg);
+}
+
+/* A trashed row loses its colour and its weight, and keeps only the
+   strike-through as the signal. */
+.qimchi-trashed,
+.qimchi-trashed .qimchi-tree-dataset,
+.qimchi-trashed .qimchi-tree-folder {
+  color: var(--qimchi-trashed-fg);
+}
+
+.qimchi-trashed {
+  opacity: var(--qimchi-trashed-opacity);
+  text-decoration: line-through;
+}
+
+/* Explicit recovery/view controls on a trashed row keep pointer events and
+   lift to normal opacity on hover so they remain reachable without being loud. */
+.qimchi-trashed-interactive {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+/* Show Explorer dates when its container is wide enough. */
+.qimchi-row-meta {
+  display: none;
+}
+
+.qimchi-dirtree-wide .qimchi-row-meta {
+  display: flex;
+}
+
+/* Full-window Explorer: rule the rows so the eye can track from the name
+   across to the date and actions. */
+.qimchi-dirtree-wide [data-level] {
+  border-bottom: 1px solid rgba(128, 128, 128, 0.16);
+}
+
+.qimchi-dirtree-wide .qimchi-row-actions {
+  width: 232px;
+  flex-shrink: 0;
+  justify-content: flex-end;
+}
+
+/* Explicit Windows Chromium colours for select controls and their popups. */
+.qimchi-help-hit {
+  animation: qimchi-help-hit 1.6s ease-out;
+  border-radius: 0.25rem;
+}
+
+@keyframes qimchi-help-hit {
+  0%,
+  40% {
+    background-color: rgba(251, 191, 36, 0.35);
   }
-} */
+  100% {
+    background-color: transparent;
+  }
+}
+
+.dark select {
+  background-color: #21252b;
+  color: #f0f6fc;
+}
+
+.dark select option {
+  background-color: #21252b;
+  color: #f0f6fc;
+}
+
+.dark select option:checked,
+.dark select option:hover {
+  background-color: #323842;
+  color: #f0f6fc;
+}
+
+.dark select:disabled,
+.dark select option:disabled {
+  color: #7f8795;
+}
+
+.dark body {
+  /* GitHub's canvas: near-black page, near-white text. The surface
+     ramp above stays Atom One Dark, so panels read as raised. */
+  background-color: #010409;
+  color: #f0f6fc;
+}
+
+.dark .drag-over {
+  background-color: #22344a;
+  border-color: #61afef;
+}
+
+.dark .modebar {
+  background: var(--qimchi-modebar-bg) !important;
+  border-color: rgba(171, 178, 191, 0.15) !important;
+}
+
+.dark .scrollbar-track-gray-100::-webkit-scrollbar-track {
+  background: #21252b;
+}
+.dark .scrollbar-thumb-gray-300::-webkit-scrollbar-thumb {
+  background: #4b5263;
+}
+.dark .hover\:scrollbar-thumb-gray-400:hover::-webkit-scrollbar-thumb,
+.dark .scrollbar-thumb-gray-300::-webkit-scrollbar-thumb:hover {
+  background: #5c6370;
+}
+.dark .scrollbar-thin {
+  scrollbar-color: #4b5263 #21252b;
+}
+
+/* Inverted neutral ramp for dark surfaces and text. */
+.dark .bg-gray-50,
+.dark .bg-slate-50 {
+  background-color: #21252b;
+}
+.dark .bg-gray-100,
+.dark .bg-slate-100 {
+  background-color: #282c34;
+}
+.dark .bg-gray-200,
+.dark .bg-slate-200 {
+  background-color: #323842;
+}
+.dark .bg-gray-300,
+.dark .bg-slate-300 {
+  background-color: #3e4451;
+}
+.dark .bg-white,
+.dark .group-hover\:bg-white {
+  background-color: #282c34;
+}
+.dark .border-white {
+  border-color: #3e4451;
+}
+
+.dark .border-gray-100,
+.dark .border-slate-100 {
+  border-color: #282c34;
+}
+.dark .border-gray-200,
+.dark .border-slate-200 {
+  border-color: #323842;
+}
+.dark .border-gray-300,
+.dark .border-slate-300 {
+  border-color: #3e4451;
+}
+.dark .ring-slate-400 {
+  --tw-ring-color: #5c6370;
+}
+
+.dark .text-gray-300,
+.dark .text-slate-300 {
+  color: #3e4451;
+}
+.dark .text-gray-400,
+.dark .text-slate-400 {
+  color: #828997;
+}
+.dark .text-gray-500,
+.dark .text-slate-500 {
+  color: #9da5b4;
+}
+.dark .text-gray-600,
+.dark .text-slate-600 {
+  color: #ffffff; /* abb2bf */
+  /* color: #abb2bf; */
+}
+.dark .text-gray-700,
+.dark .text-slate-700 {
+  color: #c8ccd4;
+}
+.dark .text-gray-800,
+.dark .text-slate-800 {
+  color: #dcdfe4;
+}
+.dark .text-gray-900,
+.dark .text-slate-900 {
+  color: #f3f3f3;
+}
+
+.dark .hover\:bg-gray-50:hover {
+  background-color: #21252b;
+}
+.dark .hover\:bg-gray-100:hover,
+.dark .hover\:bg-slate-100:hover {
+  background-color: #282c34;
+}
+.dark .hover\:bg-gray-200:hover,
+.dark .hover\:bg-slate-200:hover {
+  background-color: #323842;
+}
+.dark .hover\:bg-gray-300:hover {
+  background-color: #3e4451;
+}
+.dark .hover\:bg-gray-700:hover {
+  background-color: #4b5263;
+}
+.dark .hover\:text-gray-600:hover,
+.dark .hover\:text-slate-600:hover {
+  /* color: #abb2bf; */
+  color: #ffffff; /* abb2bf */
+}
+.dark .hover\:text-gray-700:hover,
+.dark .hover\:text-slate-700:hover {
+  color: #c8ccd4;
+}
+.dark .hover\:text-gray-800:hover,
+.dark .hover\:text-slate-800:hover {
+  color: #dcdfe4;
+}
+
+/* Dark semantic hover fills for opted-in compact action bars. */
+.dark .qimchi-dark-hover-plain:hover {
+  background-color: #323842;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-gray-50:hover {
+  background-color: #21252b;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-gray-100:hover {
+  background-color: #282c34;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-gray-200:hover {
+  background-color: #323842;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-gray-300:hover {
+  background-color: #3e4451;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-blue-50:hover {
+  background-color: #1c2733;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-blue-100:hover {
+  background-color: #223244;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-blue-200:hover {
+  background-color: #2b3f57;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-red-50:hover {
+  background-color: #2c1e20;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-red-100:hover {
+  background-color: #3a2529;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-red-200:hover {
+  background-color: #4a2e33;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-green-200:hover,
+.dark .qimchi-dark-hover-plain.qimchi-dark-hover-accent:hover {
+  background-color: #33452c;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-green-50:hover {
+  background-color: #212a1c;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-amber-100:hover {
+  background-color: #3a301b;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-amber-200:hover {
+  background-color: #4a3e22;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-indigo-200:hover {
+  background-color: #343a5a;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-indigo-50:hover {
+  background-color: #262436;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-purple-50:hover {
+  background-color: #2b2233;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-purple-200:hover {
+  background-color: #42334f;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-orange-100:hover {
+  background-color: #3a2e1e;
+}
+.dark .qimchi-dark-hover-plain.hover\:bg-orange-50:hover {
+  background-color: #2e2519;
+}
+
+/* Dark variants for semantic chips, dropzones, and alerts. */
+
+/* blue / sky */
+.dark .bg-blue-50,
+.dark .bg-sky-50 {
+  background-color: #1c2733;
+}
+.dark .bg-sky-50\/50 {
+  background-color: #1c2733;
+}
+.dark .bg-blue-100 {
+  background-color: #223244;
+}
+.dark .bg-blue-200 {
+  background-color: #2b3f57;
+}
+.dark .border-blue-100,
+.dark .border-sky-100 {
+  border-color: #2b3f57;
+}
+.dark .border-blue-200 {
+  border-color: #35507a;
+}
+.dark .border-blue-300 {
+  border-color: #41628f;
+}
+.dark .border-blue-300\/50 {
+  border-color: rgb(65 98 143 / 0.5);
+}
+.dark .text-blue-600 {
+  color: #7cc0f7;
+}
+.dark .text-blue-700 {
+  color: #8fc8f8;
+}
+.dark .text-blue-800 {
+  color: #a9d5fa;
+}
+.dark .text-blue-900 {
+  color: #c3e2fb;
+}
+
+/* indigo / violet (tag UI: chips + TagPopover) */
+.qimchi-tag-action {
+  color: #6b7280;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+.qimchi-tag-action-edit:hover,
+.qimchi-tag-action-edit:focus-visible {
+  color: #4f46e5;
+  background-color: #eef2ff;
+}
+.qimchi-tag-action-delete:hover,
+.qimchi-tag-action-delete:focus-visible {
+  color: #dc2626;
+  background-color: #fef2f2;
+}
+.dark .qimchi-tag-action {
+  color: #9da5b4;
+}
+.dark .qimchi-tag-action-edit:hover,
+.dark .qimchi-tag-action-edit:focus-visible {
+  color: #c7d2fe;
+  background-color: #343a5a;
+}
+.dark .qimchi-tag-action-delete:hover,
+.dark .qimchi-tag-action-delete:focus-visible {
+  color: #f5aeb4;
+  background-color: #4a2e33;
+}
+.dark .bg-indigo-50 {
+  background-color: #262436;
+}
+.dark .bg-indigo-50\/50 {
+  background-color: #262436;
+}
+.dark .bg-indigo-100 {
+  background-color: #262c44;
+}
+.dark .border-indigo-100 {
+  border-color: #333050;
+}
+.dark .border-indigo-300 {
+  border-color: #414873;
+}
+.dark .text-indigo-600 {
+  color: #a5b4fc;
+}
+.dark .text-indigo-700 {
+  color: #b4c0fd;
+}
+.dark .text-indigo-800 {
+  color: #c7d2fe;
+}
+.dark .bg-violet-50 {
+  background-color: #2b2233;
+}
+.dark .bg-violet-50\/50 {
+  background-color: #2b2233;
+}
+.dark .border-violet-100 {
+  border-color: #3a2d45;
+}
+
+/* cyan / fuchsia / rose (Explorer format tags: Quantify, xarray DataTree, MATLAB) */
+.dark .bg-cyan-50,
+.dark .bg-cyan-50\/50 {
+  background-color: #16292e;
+}
+.dark .border-cyan-100 {
+  border-color: #23404a;
+}
+.dark .text-cyan-600 {
+  color: #62c2d4;
+}
+.dark .bg-fuchsia-50,
+.dark .bg-fuchsia-50\/50 {
+  background-color: #2e2133;
+}
+.dark .border-fuchsia-100 {
+  border-color: #472f4e;
+}
+.dark .text-fuchsia-600 {
+  color: #d18ade;
+}
+.dark .bg-rose-50,
+.dark .bg-rose-50\/50 {
+  background-color: #2e1f24;
+}
+.dark .border-rose-100 {
+  border-color: #4a2d36;
+}
+.dark .text-rose-600 {
+  color: #e0869e;
+}
+
+/* red */
+.dark .bg-red-50 {
+  background-color: #2c1e20;
+}
+.dark .bg-red-100 {
+  background-color: #3a2529;
+}
+.dark .bg-red-200 {
+  background-color: #4a2e33;
+}
+.dark .border-red-100 {
+  border-color: #4a2e33;
+}
+.dark .border-red-200 {
+  border-color: #5c3941;
+}
+.dark .text-red-600 {
+  color: #ef8790;
+}
+.dark .text-red-700 {
+  color: #f29aa2;
+}
+.dark .text-red-800 {
+  color: #f5aeb4;
+}
+.dark .text-red-900 {
+  color: #f8c2c7;
+}
+.dark .border-red-300 {
+  border-color: #6e4048;
+}
+.dark .border-red-400 {
+  border-color: #8a4c55;
+}
+
+/* green / emerald */
+.dark .bg-green-50,
+.dark .bg-emerald-50 {
+  background-color: #212a1c;
+}
+.dark .bg-emerald-50\/50 {
+  background-color: #212a1c;
+}
+.dark .bg-green-100,
+.dark .bg-emerald-100 {
+  background-color: #283522;
+}
+.dark .bg-green-200 {
+  background-color: #33452c;
+}
+.dark .border-green-200 {
+  border-color: #3d5334;
+}
+.dark .border-green-300 {
+  border-color: #4d6a41;
+}
+.dark .border-emerald-100 {
+  border-color: #2c3625;
+}
+.dark .text-green-600 {
+  color: #aed596;
+}
+.dark .text-green-800 {
+  color: #cce4bd;
+}
+
+/* amber / yellow */
+.dark .bg-amber-50,
+.dark .bg-yellow-50 {
+  background-color: #2e2716;
+}
+.dark .bg-amber-50\/50 {
+  background-color: #2e2716;
+}
+.dark .bg-amber-100,
+.dark .bg-yellow-100 {
+  background-color: #3a301b;
+}
+.dark .bg-amber-200,
+.dark .bg-yellow-200 {
+  background-color: #4a3e22;
+}
+.dark .border-amber-100 {
+  border-color: #4a3e22;
+}
+.dark .border-amber-200,
+.dark .border-yellow-200 {
+  border-color: #5c4d2b;
+}
+.dark .text-amber-600,
+.dark .text-yellow-600 {
+  color: #e9c98c;
+}
+.dark .text-amber-700 {
+  color: #edd29d;
+}
+.dark .text-amber-800,
+.dark .text-yellow-800 {
+  color: #f0dbae;
+}
+.dark .text-amber-900 {
+  color: #f3e3c0;
+}
+.dark .border-amber-300 {
+  border-color: #7a6434;
+}
+.dark .border-amber-300\/50 {
+  border-color: rgb(122 100 52 / 0.5);
+}
+
+/* teal / cyan */
+.dark .bg-teal-100 {
+  background-color: #1c333a;
+}
+.dark .bg-teal-50\/50 {
+  background-color: #1c333a;
+}
+.dark .border-teal-100 {
+  border-color: #24424b;
+}
+.dark .border-teal-200 {
+  border-color: #2c505b;
+}
+.dark .text-teal-600 {
+  color: #62c2d4;
+}
+.dark .text-teal-700 {
+  color: #7cc9d2;
+}
+
+/* orange */
+.dark .bg-orange-50 {
+  background-color: #2e2519;
+}
+.dark .bg-orange-50\/50 {
+  background-color: #2e2519;
+}
+.dark .bg-orange-100 {
+  background-color: #3a2e1e;
+}
+.dark .border-orange-100 {
+  border-color: #4a3a26;
+}
+
+/* BrandingFooter overrides requiring higher specificity than Tailwind. */
+.dark .qimchi-footer {
+  background-image: linear-gradient(to bottom, #282c34, #282c34, #21252b);
+}
+.dark .qimchi-footer-badge {
+  background-image: linear-gradient(to right, #323842, #282c34);
+}
+.dark .qimchi-footer-sep {
+  background-image: linear-gradient(to bottom, transparent, #3e4451, transparent);
+}
+.dark .qimchi-footer-toggle:hover {
+  background-color: #323842;
+}
+.dark .qimchi-icon-btn {
+  background-color: #1c2733;
+  border-color: #2b3f57;
+}
+.dark .qimchi-icon-btn:hover {
+  background-image: linear-gradient(to bottom right, #223244, #262436);
+  border-color: #35507a;
+  color: #8fc8f8;
+}
+.dark .qimchi-icon-btn:active {
+  background-color: #2b3f57;
+}
+
+/* Dark toggle colours need selectors stronger than the :where() variant. */
+.dark .qimchi-toggle {
+  background-color: #21252b;
+  border: 1px solid #4b5263;
+}
+.dark .qimchi-toggle::after {
+  background-color: #848b98;
+  border-color: #5c6370;
+}
+.dark .peer:checked ~ .qimchi-toggle {
+  background-color: #61afef;
+  border-color: #61afef;
+}
+.dark .peer:checked ~ .qimchi-toggle::after {
+  background-color: #f0f6fc;
+  border-color: #f0f6fc;
+}
+.dark .peer:focus-visible ~ .qimchi-toggle {
+  outline: 2px solid #61afef;
+  outline-offset: 2px;
+}

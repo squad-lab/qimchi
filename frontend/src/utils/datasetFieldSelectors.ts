@@ -13,6 +13,8 @@
 export interface DatasetAttributesLike {
   independents?: string[];
   dependents?: string[];
+  /** Per-dependent list of the independents it varies over (see AttrData). */
+  variable_independents?: Record<string, string[]>;
 }
 
 export interface DatasetLike {
@@ -25,6 +27,7 @@ export interface DatasetLike {
 export interface ComposerSelectionLike {
   indeps: string[];
   deps: string[];
+  plotType?: "LinePlot" | "HeatMap";
 }
 
 export interface SharedFieldResult {
@@ -54,6 +57,64 @@ const intersect = (base: Set<string>, next: Set<string>): Set<string> => {
 
 const hasAllNames = (set: Set<string>, values: string[]): boolean =>
   values.every((value) => set.has(value));
+
+/**
+ * The independents a dependent actually varies over, or null when the dataset
+ * did not report it -- older cached payloads and flat tables have no such
+ * relation, and every caller must then fall back to the plain field lists.
+ */
+export const getFieldIndependents = (
+  field: string,
+  attributes?: DatasetAttributesLike,
+): string[] | null => {
+  const dims = attributes?.variable_independents?.[field];
+  return Array.isArray(dims) ? dims : null;
+};
+
+/**
+ * Resolve an axis field to its sweep. For measured fields spanning multiple
+ * sweeps, use the last sweep and expose the others as sliders, matching the
+ * backend's `sweep_dimension`. Heat-map axes must map to exactly one sweep.
+ */
+export const axisIndependents = (
+  field: string,
+  attributes?: DatasetAttributesLike,
+  plotType?: "LinePlot" | "HeatMap",
+): string[] | null => {
+  if ((attributes?.independents ?? []).includes(field)) return [field];
+  const dims = getFieldIndependents(field, attributes);
+  if (dims === null) return null; // unknown: callers stay permissive
+  if (dims.length === 1) return dims;
+  if (dims.length === 0 || plotType === "HeatMap") return [];
+  return [dims[dims.length - 1]];
+};
+
+/** Resolve all selected axes to their sweep variables. */
+export const resolveAxisIndependents = (
+  axisFields: string[],
+  attributes?: DatasetAttributesLike,
+): string[] => {
+  const resolved = new Set<string>();
+  axisFields.forEach((field) => {
+    (axisIndependents(field, attributes) ?? [field]).forEach((name) => resolved.add(name));
+  });
+  return [...resolved];
+};
+
+/**
+ * Whether a dependent varies over every one of `indeps`. Unknown dim info is
+ * permissive: a dependent is only rejected on evidence.
+ */
+export const dependsOnAll = (
+  field: string,
+  indeps: string[],
+  attributes?: DatasetAttributesLike,
+): boolean => {
+  if (indeps.length === 0) return true;
+  const dims = getFieldIndependents(field, attributes);
+  if (dims === null || dims.length === 0) return true;
+  return indeps.every((indep) => dims.includes(indep));
+};
 
 export const getSelectedDatasets = <T extends DatasetLike>(
   items: T[],
@@ -122,10 +183,21 @@ export const isComposerCompatibleWithDataset = (
   const indeps = toSet(datasetAttributes.independents);
   const deps = toSet(datasetAttributes.dependents);
 
-  const indepsMatch = hasAllNames(indeps, composerSelection.indeps);
+  // A measured value can be an axis when it runs along one sweep.
+  const axesMatch = composerSelection.indeps.every((name) => {
+    if (indeps.has(name)) return true;
+    if (!deps.has(name)) return false;
+    const resolved = axisIndependents(name, datasetAttributes, composerSelection.plotType);
+    return resolved === null || resolved.length === 1;
+  });
   const depsMatch = hasAllNames(deps, composerSelection.deps);
+  if (!axesMatch || !depsMatch) return false;
 
-  return indepsMatch && depsMatch;
+  // Each dependent must vary along the sweeps its axes run along.
+  const axisDims = composerSelection.indeps.flatMap(
+    (name) => axisIndependents(name, datasetAttributes, composerSelection.plotType) ?? [],
+  );
+  return composerSelection.deps.every((dep) => dependsOnAll(dep, axisDims, datasetAttributes));
 };
 
 export const getEligibleDatasetsForComposer = <T extends DatasetLike>(
@@ -137,10 +209,7 @@ export const getEligibleDatasetsForComposer = <T extends DatasetLike>(
   const unknown: T[] = [];
 
   selectedDatasets.forEach((dataset) => {
-    const compatibility = isComposerCompatibleWithDataset(
-      composerSelection,
-      dataset.attributes,
-    );
+    const compatibility = isComposerCompatibleWithDataset(composerSelection, dataset.attributes);
 
     if (compatibility === "unknown") {
       unknown.push(dataset);

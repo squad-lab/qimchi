@@ -17,25 +17,17 @@ const DATASET_EXTENSIONS = [
   ".csv",
   ".txt",
   ".dat",
+  ".mat",
 ] as const;
-const DATASET_TAGS = ["zarr", "netcdf", "hdf5", "qcodes", "sqlite", "csv"] as const;
+const DATASET_TAGS = ["zarr", "netcdf", "hdf5", "qcodes", "sqlite", "csv", "matlab"] as const;
 export type DatasetKind =
-  | "zarr"
-  | "netcdf"
-  | "hdf5"
-  | "qcodes"
-  | "sqlite"
-  | "csv"
-  | "unknown";
+  "zarr" | "netcdf" | "hdf5" | "qcodes" | "sqlite" | "csv" | "matlab" | "unknown";
 
-const normalizeDatasetPath = (path: string): string =>
-  path.split("#", 1)[0].toLowerCase();
+const normalizeDatasetPath = (path: string): string => path.split("#", 1)[0].toLowerCase();
 
-export const isMemoryPath = (path: string): boolean =>
-  path.startsWith("memory://");
+export const isMemoryPath = (path: string): boolean => path.startsWith("memory://");
 
-export const isZarrPath = (path: string): boolean =>
-  path.toLowerCase().endsWith(".zarr");
+export const isZarrPath = (path: string): boolean => path.toLowerCase().endsWith(".zarr");
 
 export const isDatasetPath = (path: string): boolean => {
   if (isMemoryPath(path)) return true;
@@ -49,11 +41,7 @@ export const isDatasetTag = (tag: string): boolean =>
 export const hasDatasetTag = (tags?: string[]): boolean =>
   Array.isArray(tags) && tags.some(isDatasetTag);
 
-export const isDatasetNode = (node: {
-  type?: string;
-  path?: string;
-  tags?: string[];
-}): boolean =>
+export const isDatasetNode = (node: { type?: string; path?: string; tags?: string[] }): boolean =>
   node.type === "file" &&
   typeof node.path === "string" &&
   (isDatasetPath(node.path) || hasDatasetTag(node.tags));
@@ -63,10 +51,7 @@ export const isSqliteContainerPath = (path: string): boolean => {
   return (lower.endsWith(".db") || lower.endsWith(".sqlite")) && !path.includes("#");
 };
 
-export const detectDatasetKind = (
-  path: string,
-  tags?: string[],
-): DatasetKind => {
+export const detectDatasetKind = (path: string, tags?: string[]): DatasetKind => {
   if (Array.isArray(tags)) {
     if (tags.includes("zarr")) return "zarr";
     if (tags.includes("netcdf")) return "netcdf";
@@ -74,6 +59,7 @@ export const detectDatasetKind = (
     if (tags.includes("qcodes") || tags.includes("qcodes-run")) return "qcodes";
     if (tags.includes("sqlite")) return "sqlite";
     if (tags.includes("csv")) return "csv";
+    if (tags.includes("matlab")) return "matlab";
   }
 
   if (isMemoryPath(path)) {
@@ -88,6 +74,7 @@ export const detectDatasetKind = (
   if (lower.endsWith(".csv") || lower.endsWith(".txt") || lower.endsWith(".dat")) {
     return "csv";
   }
+  if (lower.endsWith(".mat")) return "matlab";
 
   return "unknown";
 };

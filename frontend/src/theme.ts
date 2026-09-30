@@ -1,6 +1,8 @@
 export const themeColors = {
-  accent: "rgba(140,198,62,0.6)",
-  accentHover: "rgba(110,160,48,0.65)",
+  // accent: "rgba(140,198,62,0.6)",
+  accent: "bg-[rgba(140,198,62,0.85)]",
+  // accentHover: "rgba(110,160,48,0.65)",
+  accentHover: "rgba(110,160,48,0.80)",
   accentBorder: "#7ab134",
   accentBorderLight: "#cfe59b",
   accentHeaderBg: "#dff1bd",
@@ -10,15 +12,20 @@ export const themeColors = {
   accentIcon: "#6ea030",
 } as const;
 
+// Pale accent tints (header/light bg, overlay, text-on-tint, light border) are
+// backed by CSS variables so they can flip in dark mode (see index.css) while
+// the saturated brand green below stays fixed in both themes.
 export const themeClasses = {
-  accentBg: "bg-[rgba(140,198,62,0.6)]",
-  accentHoverBg: "hover:bg-[rgba(110,160,48,0.65)]",
+  // Panel headers: backed by tokens so dark mode can soften both the
+  // tint and the label (see --qimchi-panel-title-* in index.css).
+  accentBg: "bg-[var(--qimchi-panel-title-bg)]",
+  accentHoverBg: "hover:bg-[var(--qimchi-panel-title-bg-hover)]",
   accentBorder: "border-[#7ab134]",
-  accentBorderLight: "border-[#cfe59b]",
-  accentHeaderBg: "bg-[#dff1bd]",
-  accentLightBg: "bg-[#f4fae8]",
-  accentOverlay: "bg-[rgba(223,241,189,0.6)]",
-  accentText: "text-[#2f4a11]",
+  accentBorderLight: "border-[var(--qimchi-accent-border-light)]",
+  accentHeaderBg: "bg-[var(--qimchi-accent-header-bg)]",
+  accentLightBg: "bg-[var(--qimchi-accent-light-bg)]",
+  accentOverlay: "bg-[var(--qimchi-accent-overlay)]",
+  accentText: "text-[var(--qimchi-accent-text)]",
   accentIcon: "text-[#6ea030]",
   accentFocusRing: "focus:ring-[#8cc63e]",
 } as const;
@@ -32,7 +39,6 @@ export const BRAND_COLORS = {
 export const BRAND_BG_CLASS = themeClasses.accentBg;
 export const BRAND_HOVER_BG_CLASS = themeClasses.accentHoverBg;
 export const BRAND_BORDER_CLASS = themeClasses.accentBorder;
-
 
 // TODOLATER: Try these as well - official SQUAD Lab colors
 // export const themeColors = {

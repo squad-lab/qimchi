@@ -1,12 +1,166 @@
-image: "python:3.13"
+# Bookkeeping jobs use GitLab's default small Linux runner (1x). Tests and
+# builds opt into the fastest runner explicitly below; Windows keeps its
+# existing project runner and macOS keeps the hosted M2 Pro runner.
+default:
+  image: "python:3.13"
+
 variables:
   DOCKER_HOST: "tcp://docker:2375"
   DOCKER_DRIVER: "overlay2"
   CI_BUILD_ARCHS: linux/amd64 #, linux/arm64
+  UV_CACHE_DIR: "$CI_PROJECT_DIR/.uv-cache"
+  # NOTE: Run pipeline -> select preview -> choose a target here for a one-off
+  # installer build that does not create a release tag.
+  AD_HOC_DESKTOP_BUILD:
+    value: "none"
+    options:
+      - "none"
+      - "windows"
+      - "linux"
+      - "macos"
+      - "all"
+    description: "Optional ad-hoc desktop build target for a preview web pipeline"
 stages:
+  - format
+  - test
   - auto_tag_version
   - build
   - release
+
+# Applies the formatters and pushes the result back to the branch, so a merge
+# request is never blocked on a forgotten `ruff format` or `prettier --write`.
+# Only fixable issues are fixed here; anything eslint or ruff cannot fix still
+# fails `frontend-quality` below.
+#
+# The commit carries [skip ci]: GitLab creates no pipeline for such a push, so
+# this job cannot trigger itself. It runs on branches other than the default
+# one -- never on tags (a release build must package the commit that was
+# tagged) and never on main (merge-only, and protected).
+autofix:
+  stage: format
+  image: node:22.12.0
+  tags:
+    - saas-linux-2xlarge-amd64
+  variables:
+    NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.npm"
+  # A push race, or a branch this token may not write to, must not take the
+  # pipeline down -- the quality jobs below still report the real state.
+  allow_failure: true
+  before_script:
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - export PATH="$HOME/.local/bin:$PATH"
+    - git config --global user.name "Janitor"
+    - git config --global user.email "squad@fz-juelich.de"
+    - git remote set-url origin https://squad_janitor:$CI_FORMAT@$CI_SERVER_HOST/$CI_PROJECT_NAMESPACE/$CI_PROJECT_NAME
+    # CI checks out a detached HEAD; put the branch here so a commit lands on it.
+    - git checkout -B "$CI_COMMIT_BRANCH" "$CI_COMMIT_SHA"
+  script:
+    # Pinned to the same ruff as .pre-commit-config.yaml and the `dev` extra:
+    # two versions reformat each other's output forever.
+    - export PATH="$HOME/.local/bin:$PATH"
+    # Leftover unfixable errors are the pytest job's gate to report; exiting
+    # here would discard the fixes already written to disk.
+    - uv tool run --from ruff==0.16.6 ruff check --fix backend || true
+    - uv tool run --from ruff==0.16.6 ruff format backend
+    # Unfixable lint errors are frontend-quality's business; do not lose the
+    # fixes already written to disk by exiting here.
+    - cd frontend
+    - npm ci
+    - npm run lint:fix || true
+    - npm run format
+    - cd ..
+    - |
+      if git diff --quiet; then
+        echo "Nothing to fix."
+        exit 0
+      fi
+      git diff --stat
+      # -u, not -A: never sweep up a cache directory the job created.
+      git add -u
+      git commit -m "Apply ruff and prettier fixes [skip ci]"
+      # Never force: if the branch moved while this ran, the rejected push is
+      # the correct outcome and the next pipeline fixes the new tip instead.
+      git push origin "HEAD:$CI_COMMIT_BRANCH"
+  cache:
+    key: npm-$CI_JOB_NAME
+    paths:
+      - .npm/
+  rules:
+    - if: $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      when: on_success
+
+pytest:
+  stage: test
+  tags:
+    - saas-linux-2xlarge-amd64
+  timeout: 20m
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends fd-find
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - export PATH="$HOME/.local/bin:$PATH"
+  script:
+    # Whatever autofix could not fix is a real error; ruff is not in the
+    # `test` extra, so run the pinned one directly.
+    - uv tool run --from ruff==0.16.6 ruff check backend
+    # The `test` extra carries pytest-asyncio; without it every async test ERRORS instead of failing.
+    - cd backend
+    - uv sync --locked --extra test --extra datasets
+    - uv lock --check
+    - uv run --no-sync pytest --cov --cov-report=term --cov-report=xml --junitxml=report.xml
+  # GitLab reads the total off the pytest-cov terminal summary.
+  coverage: '/^TOTAL.*\s+(\d+%)$/'
+  artifacts:
+    when: always
+    reports:
+      junit: backend/report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: backend/coverage.xml
+  cache:
+    key: uv-$CI_JOB_NAME
+    paths:
+      - .uv-cache
+
+frontend-quality:
+  stage: test
+  image: node:22.12.0
+  tags:
+    - saas-linux-2xlarge-amd64
+  variables:
+    NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.npm"
+  script:
+    - cd frontend
+    - npm ci
+    - npm run lint
+    # Write rather than check: `autofix` has already pushed this exact
+    # result to the branch, and re-checking the pre-fix commit this job
+    # was created for would fail on formatting that is already corrected.
+    - npm run format
+    - npm run build
+    # Unit (vitest, jsdom) then e2e (playwright, chromium). Both enforce their
+    # own coverage floor; the unit run is first because it is seconds rather
+    # than a minute, so a broken build fails fast.
+    - npm run test:unit -- --coverage
+    - npx playwright install --with-deps chromium
+    - npm run test:e2e
+  cache:
+    key: npm-$CI_JOB_NAME
+    paths:
+      - .npm/
+  # Both runners print a "Lines : X%" summary and GitLab keeps the LAST match,
+  # so this reports the Playwright figure. Reordering the steps above would
+  # silently change which number the badge shows.
+  coverage: '/Lines\s*:\s*([0-9.]+)%/'
+  artifacts:
+    when: always
+    paths:
+      - frontend/coverage/playwright/
+      - frontend/coverage/unit/
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: frontend/coverage/playwright/cobertura-coverage.xml
+    expire_in: 30 days
 
 auto_tag_version:
   stage: auto_tag_version
@@ -43,35 +197,85 @@ auto_tag_version:
         exit 0
       fi
 
-    # Check if version line was changed in this commit
+    # Tag whenever the default branch carries a version that has no tag yet.
+    #
+    # This deliberately does NOT ask "was the version line changed in this
+    # commit". That test read `git diff HEAD~1 HEAD -- backend/pyproject.toml`,
+    # whose first parent depends on how the branch was merged: merging preview
+    # with --no-ff puts the bump in the merge diff and works, but a
+    # fast-forward (or squash, or rebase) leaves HEAD~1 as a preview commit
+    # that does not touch the version -- so the bump would land on main and
+    # silently produce no tag and no release.
+    #
+    # The "tag already exists" check above is what keeps this idempotent, so
+    # re-running on unrelated pushes is a no-op and merge strategy no longer
+    # matters.
     - |
-      # Check if this is the first commit (no parent)
-      if ! git rev-parse HEAD~1 >/dev/null 2>&1; then
-        echo "First commit detected - creating initial tag v$CURRENT_VERSION"
-        git tag -a "v$CURRENT_VERSION" -m "Release version $CURRENT_VERSION"
-        git push origin "v$CURRENT_VERSION"
-        echo "Successfully created initial tag v$CURRENT_VERSION"
-        exit 0
-      fi
-
-      # Check if version line was changed in this commit
-      if git diff HEAD~1 HEAD -- backend/pyproject.toml | grep -E '^\+[[:space:]]*version[[:space:]]*='; then
-        echo "Version was updated in this commit, creating tag v$CURRENT_VERSION"
-
-        # Create and push the tag
-        git tag -a "v$CURRENT_VERSION" -m "Release version $CURRENT_VERSION"
-        git push origin "v$CURRENT_VERSION"
-
-        echo "Successfully created and pushed tag v$CURRENT_VERSION"
-      else
-        echo "Version line was not changed in this commit, skipping tag creation"
-      fi
+      echo "No tag exists for v$CURRENT_VERSION -- creating it"
+      git tag -a "v$CURRENT_VERSION" -m "Release version $CURRENT_VERSION"
+      git push origin "v$CURRENT_VERSION"
+      echo "Successfully created and pushed tag v$CURRENT_VERSION"
   rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    # A preview branch may temporarily be the project default. Stable releases
+    # are cut from main only; preview tags are handled by tag_preview below.
+    - if: $CI_COMMIT_BRANCH == "main"
       when: on_success
   #     changes:
   #       - backend/pyproject.toml
   # allow_failure: false
+
+# Cut a PREVIEW release from the `preview` branch: vX.Y.Z-rc.N, where N is the
+# next unused rc for the version currently in pyproject.toml.
+#
+# Manual on purpose. Each tag fans out to three platform builds, and macOS runs
+# on GitLab's SaaS macOS runner (billed at a higher multiplier) -- auto-tagging
+# every push to preview would burn minutes on commits nobody wants to test.
+tag_preview:
+  stage: auto_tag_version
+  image: python:3.13-alpine
+  before_script:
+    - apk add --no-cache git
+    - pip3 install toml --break-system-packages
+    - git config --global user.name "Janitor"
+    - git config --global user.email "squad@fz-juelich.de"
+    - git remote set-url origin https://squad_janitor:$CI_FORMAT@$CI_SERVER_HOST/$CI_PROJECT_NAMESPACE/$CI_PROJECT_NAME
+    - git fetch --tags
+  script:
+    - |
+      python3 << 'EOF'
+      import toml
+      data = toml.load('backend/pyproject.toml')
+      with open('current_version.txt', 'w') as f:
+          f.write(data['project']['version'])
+      EOF
+    - export CURRENT_VERSION=$(cat current_version.txt)
+    - |
+      # An rc is a candidate for an UNRELEASED version. If vX.Y.Z is already
+      # tagged, the version needs bumping on this branch first -- otherwise we
+      # would mint v0.6.2-rc.1 *after* v0.6.2 shipped, which reads as a
+      # release candidate for something already released.
+      if git rev-parse "v${CURRENT_VERSION}" >/dev/null 2>&1; then
+        echo "v${CURRENT_VERSION} is already released."
+        echo "Bump the version in backend/pyproject.toml on this branch"
+        echo "before cutting a preview build."
+        exit 1
+      fi
+    - |
+      # Highest existing rc for this version, then +1. Sorted numerically so
+      # rc.10 beats rc.9 (a plain sort would not).
+      NEXT=$(git tag -l "v${CURRENT_VERSION}-rc.*" \
+        | sed -E "s/.*-rc\.([0-9]+)$/\1/" \
+        | sort -n | tail -1)
+      NEXT=$(( ${NEXT:-0} + 1 ))
+      PREVIEW_TAG="v${CURRENT_VERSION}-rc.${NEXT}"
+      echo "Creating preview tag $PREVIEW_TAG"
+      git tag -a "$PREVIEW_TAG" -m "Preview release $PREVIEW_TAG"
+      git push origin "$PREVIEW_TAG"
+      echo "Pushed $PREVIEW_TAG -- builds + a preview release will follow."
+  rules:
+    - if: $CI_COMMIT_BRANCH == "preview"
+      when: manual
+      allow_failure: true
 
 docker:
   image: jonoh/docker-buildx-qemu
@@ -87,18 +291,37 @@ docker:
   script:
     - VERSION=$(grep '^[[:space:]]*version[[:space:]]*=' backend/pyproject.toml | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')
     - update-binfmts --enable
-    - docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull -t "$CI_REGISTRY/squad-lab/qimchi:latest" -t "$CI_REGISTRY/squad-lab/qimchi:$VERSION" --push .
+    # -f: the Dockerfile lives in docker/, but the build context stays the
+    # repository root because the image builds backend/ and frontend/.
+    # Preview (-rc) tags publish a VERSIONED image only. `:latest` must keep
+    # pointing at the newest stable, or `docker pull qimchi` would silently
+    # hand people a preview build.
+    - |
+      TAG_ARGS="-t $CI_REGISTRY/squad-lab/qimchi:$VERSION"
+      case "$CI_COMMIT_TAG" in
+        *-rc.*) echo "Preview tag $CI_COMMIT_TAG -- leaving :latest on the stable image" ;;
+        *)      TAG_ARGS="$TAG_ARGS -t $CI_REGISTRY/squad-lab/qimchi:latest" ;;
+      esac
+      echo "Image tags: $TAG_ARGS"
+      docker buildx build --platform $CI_BUILD_ARCHS --progress plain --pull \
+        -f docker/Dockerfile --build-arg QIMCHI_VERSION="$CI_COMMIT_TAG" $TAG_ARGS --push .
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
       when: on_success
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-rc\.\d+$/
+      when: on_success
 
 # Builds the self-contained Windows desktop app (PyInstaller + pywebview) via
-# build_local.ps1 -- a single qimchi.exe that bundles the backend and serves the
+# scripts/build_windows.ps1 -- a single qimchi.exe that bundles the backend and
 # built SPA in a native window. Replaces the old qimchi.bat-wrapper exe.
 build-windows:
   stage: build
   tags:
     - windows
+  # The Windows runner is the release bottleneck. Put this job in its queue as
+  # soon as the pipeline is created instead of waiting for the Linux tests and
+  # earlier stages. Linux/macOS builds can finish while Windows is still busy.
+  needs: []
   before_script:
     # Inno Setup 6 -- builds the Windows installer after PyInstaller.
     # The custom Windows container may not have Chocolatey preinstalled.
@@ -133,17 +356,22 @@ build-windows:
   script:
     - $VERSION = (Select-String -Path "backend/pyproject.toml" -Pattern 'version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
     - echo "Building Qimchi v$VERSION (pywebview desktop) for Windows"
-    # build_local.ps1 handles everything:
+    # build_windows.ps1 handles everything:
     #   1. Frontend build (npm)
     #   2. Backend staging
     #   3. fd.exe download → vendor/fd-windows/fd.exe
     #   4. backend/.venv setup (datasets extra + PyInstaller + pywebview + pythonnet)
     #   5. PyInstaller onedir build → packaging/build/qimchi/
-    #   6. Inno Setup installer → packaging/build/qimchi-setup.exe
-    - ./build_local.ps1
-    - if (!(Test-Path "packaging/build/qimchi-setup.exe")) { throw "Installer build failed" }
-    - $installerSize = (Get-Item "packaging/build/qimchi-setup.exe").Length / 1MB
-    - echo "Successfully built qimchi-setup.exe ($([math]::Round($installerSize, 2)) MB)"
+    #   6. Inno Setup installer → packaging/build/qimchi-setup-<version>.exe
+    - ./scripts/build_windows.ps1
+    # The installer name carries the version, so find it rather than assume it.
+    - $installer = Get-ChildItem "packaging/build/qimchi-setup-*.exe" | Select-Object -First 1
+    - if (!$installer) { throw "Installer build failed" }
+    # This runner has no interactive Windows desktop. Exercise the actual
+    # packaged exe in headless smoke mode: backend, bundled SPA and downloads.
+    - backend/.venv/Scripts/python.exe scripts/run_packaged_smoke.py packaging/build/qimchi/qimchi.exe --mode headless
+    - $installerSize = $installer.Length / 1MB
+    - echo "Successfully built $($installer.Name) ($([math]::Round($installerSize, 2)) MB)"
 
     # --- Code signing (optional; enable once a cert is in GitLab secure files) -
     # Signs both the bundled exe and the installer for a clean install experience.
@@ -160,21 +388,28 @@ build-windows:
   artifacts:
     name: "qimchi-windows"
     paths:
-      - packaging/build/qimchi-setup.exe
+      - packaging/build/qimchi-setup-*.exe
     expire_in: 180 days
   rules:
-    # Release build on version tags...
+    # Stable release build on version tags.
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
       when: on_success
-    # ...and a manual build on the packaging branch for testing the pipeline.
-    - if: $CI_COMMIT_BRANCH == "packaging"
-      when: manual
-      allow_failure: true
+    # Preview release build on -rc tags (cut from the `preview` branch).
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-rc\.\d+$/
+      when: on_success
+    # Explicit ad-hoc build from Run pipeline (no tag, no release). Keeping
+    # this out of ordinary preview push pipelines prevents it from occupying
+    # the sole Windows runner just before tag_preview starts the release build.
+    - if: '$CI_COMMIT_BRANCH == "preview" && $CI_PIPELINE_SOURCE == "web" && $AD_HOC_DESKTOP_BUILD =~ /^(windows|all)$/'
+      when: on_success
 
 # Builds the self-contained macOS desktop app (PyInstaller + pywebview) via
 # scripts/build_macos.sh - produces qimchi.app (bundled by create-dmg into
-# qimchi.dmg).  Requires a self-hosted macOS runner tagged "macos".
-# Kept as when:manual until a runner is validated and signing is set up.
+# qimchi.dmg).  Runs on GitLab's HOSTED SaaS macOS runner
+# (saas-macos-large-m2pro, image macos-15-xcode-16) -- no self-hosted Mac
+# needed. Note SaaS macOS minutes bill at a higher multiplier, and `release`
+# declares `needs: build-macos artifacts: true`, so a macOS failure blocks the
+# whole release. Signing is still stubbed (scripts/sign_macos.sh).
 build-macos:
   stage: build
   image: macos-15-xcode-16
@@ -207,43 +442,47 @@ build-macos:
     - echo "Building Qimchi v$VERSION (pywebview desktop) for macOS"
     - bash scripts/build_macos.sh
     - |
-      if [ ! -f "packaging/build/qimchi.dmg" ]; then
-        echo "Error: DMG build failed - packaging/build/qimchi.dmg not found"
+      # The DMG name carries the version, so find it rather than assume it.
+      DMG=$(ls packaging/build/qimchi-*.dmg 2>/dev/null | head -1)
+      if [ -z "$DMG" ]; then
+        echo "Error: DMG build failed - no packaging/build/qimchi-*.dmg produced"
         exit 1
       fi
-    - echo "Successfully built qimchi.dmg ($(du -m packaging/build/qimchi.dmg | cut -f1) MB)"
+      echo "Successfully built $(basename "$DMG") ($(du -m "$DMG" | cut -f1) MB)"
 
     # --- Code signing (enable once a Developer ID cert is in GitLab secure files) ---
     # - bash scripts/sign_macos.sh packaging/build/qimchi.app packaging/build/qimchi.dmg
   artifacts:
     name: "qimchi-macos"
     paths:
-      - packaging/build/qimchi.dmg
+      - packaging/build/qimchi-*.dmg
     expire_in: 180 days
   rules:
-    # Release build on version tags.
+    # Stable release build on version tags.
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
       when: on_success
-    # Manual test build on the packaging branch.
-    - if: $CI_COMMIT_BRANCH == "packaging"
-      when: manual
-      allow_failure: true
+    # Preview release build on -rc tags (cut from the `preview` branch).
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-rc\.\d+$/
+      when: on_success
+    # Explicit ad-hoc build from Run pipeline (no tag, no release).
+    - if: '$CI_COMMIT_BRANCH == "preview" && $CI_PIPELINE_SOURCE == "web" && $AD_HOC_DESKTOP_BUILD =~ /^(macos|all)$/'
+      when: on_success
 
 # Builds the self-contained Linux desktop app (PyInstaller + pywebview GTK) via
 # scripts/build_linux.sh -- produces qimchi-x86_64.AppImage, a single executable
 # that bundles the backend and serves the built SPA in a GTK/WebKit2GTK window.
-# Uses GitLab's shared Linux runners (Docker, ubuntu:22.04) -- no special runner
-# tag needed.
+# Uses GitLab's fastest hosted Linux runner (Docker, ubuntu:22.04); unlike the
+# bookkeeping jobs, this expensive build intentionally opts into 2xlarge.
 build-linux:
   stage: build
+  image: ubuntu:22.04
   tags:
     - saas-linux-2xlarge-amd64
-  image: ubuntu:22.04
   before_script:
     - |
       apt-get update -qq
       DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-          python3-pip curl file patchelf squashfs-tools imagemagick \
+          python3-pip curl file patchelf squashfs-tools imagemagick xvfb dbus-x11 \
           libgirepository1.0-dev gcc pkg-config libcairo2-dev \
           gir1.2-gtk-3.0 gir1.2-webkit2-4.0 libwebkit2gtk-4.0-dev
       # uv: install via pip into /usr/local/bin so it is on PATH in script:.
@@ -262,24 +501,32 @@ build-linux:
     - bash scripts/build_linux.sh
     - |
       ARCH=$(uname -m)
-      if [ ! -f "packaging/build/qimchi-${ARCH}.AppImage" ]; then
+      # The AppImage name carries the version, so find it rather than assume it.
+      APPIMAGE=$(ls packaging/build/qimchi-${ARCH}-*.AppImage 2>/dev/null | head -1)
+      if [ -z "$APPIMAGE" ]; then
         echo "Error: AppImage build failed"
         exit 1
       fi
-      echo "Successfully built qimchi-${ARCH}.AppImage ($(du -m packaging/build/qimchi-${ARCH}.AppImage | cut -f1) MB)"
+      echo "Successfully built $(basename "$APPIMAGE") ($(du -m "$APPIMAGE" | cut -f1) MB)"
+      python3 scripts/run_packaged_smoke.py "$APPIMAGE" --mode headless
+      WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 dbus-run-session -- \
+        xvfb-run -a python3 scripts/run_packaged_smoke.py \
+          "$APPIMAGE" --mode native --timeout 240
   artifacts:
     name: "qimchi-linux"
     paths:
       - packaging/build/qimchi-*.AppImage
     expire_in: 180 days
   rules:
-    # Release build on version tags.
+    # Stable release build on version tags.
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
       when: on_success
-    # Manual test build on the packaging branch.
-    - if: $CI_COMMIT_BRANCH == "packaging"
-      when: manual
-      allow_failure: true
+    # Preview release build on -rc tags (cut from the `preview` branch).
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-rc\.\d+$/
+      when: on_success
+    # Explicit ad-hoc build from Run pipeline (no tag, no release).
+    - if: '$CI_COMMIT_BRANCH == "preview" && $CI_PIPELINE_SOURCE == "web" && $AD_HOC_DESKTOP_BUILD =~ /^(linux|all)$/'
+      when: on_success
 
 # Single release job: depends on every platform build and attaches all assets to
 # ONE GitLab Release. Three separate release jobs each ran `release-cli create`
@@ -302,29 +549,48 @@ release:
   # the asset links actually attach.
   script:
     - |
+      # Preview (-rc) tags get a clearly-labelled release. Stable installs are
+      # never offered one (api/updater.py::check_for_update), but a preview
+      # install follows the preview channel and is offered both.
+      case "$CI_COMMIT_TAG" in
+        *-rc.*)
+          RELEASE_NAME="Qimchi $CI_COMMIT_TAG (preview)"
+          PREVIEW_BANNER="**Preview build -- not a stable release.** Expect rough edges. Stable installs are never offered preview builds. Once you are on a preview, Qimchi keeps you on the preview channel: it offers the next preview, and the stable release of this version as soon as it ships."
+          ;;
+        *)
+          RELEASE_NAME="Qimchi $CI_COMMIT_TAG"
+          PREVIEW_BANNER=""
+          ;;
+      esac
       # Release notes (heredoc: $CI_* expand; no backticks present).
       NOTES=$(cat <<EOF
       # Qimchi $CI_COMMIT_TAG
 
+      $PREVIEW_BANNER
+
       ## Windows
-      1. Download qimchi-setup.exe below.
+      1. Download qimchi-setup-$CI_COMMIT_TAG.exe below.
       2. Run the installer -- no administrator rights needed for a per-user install. It creates a Start Menu entry and an optional desktop shortcut.
+      3. Windows SmartScreen will warn that the publisher is unrecognised. Click "More info", then "Run anyway", and Qimchi opens.
+      - Step 3 happens once per version you install: Qimchi is not code-signed yet.
       - Requires Windows 11 (x64) with the Edge WebView2 runtime (preinstalled).
 
       ## Linux
-      1. Download the qimchi-x86_64.AppImage asset below.
+      1. Download the qimchi-x86_64-$CI_COMMIT_TAG.AppImage asset below.
       2. Make it executable and run it from a terminal:
-             chmod +x qimchi-x86_64.AppImage
-             ./qimchi-x86_64.AppImage
+             chmod +x qimchi-x86_64-$CI_COMMIT_TAG.AppImage
+             ./qimchi-x86_64-$CI_COMMIT_TAG.AppImage
       - Requires x86_64 Linux (kernel 4.4+, glibc 2.31+) and the WebKit2GTK runtime:
         - Ubuntu/Debian: sudo apt-get install libwebkit2gtk-4.0-37
         - Fedora: sudo dnf install webkit2gtk4.0
         - Arch: sudo pacman -S webkit2gtk
 
       ## macOS
-      1. Download qimchi.dmg below.
+      1. Download qimchi-$CI_COMMIT_TAG.dmg below.
       2. Open the DMG and drag Qimchi.app to Applications.
-      3. On first launch, macOS may require opening it via Control-click -> Open because the app is not notarized yet.
+      3. Double-click Qimchi in Applications. macOS warns that the app cannot be opened because it is from an unidentified developer.
+      4. Open System Settings -> Privacy and Security, scroll down to Security, and click "Open Anyway" next to Qimchi. Confirm "Open Anyway" and enter your account credentials, and Qimchi opens.
+      - Steps 3 and 4 happen once per version you install: Qimchi is not notarized yet.
       - Requires Apple Silicon macOS. The current DMG is built on the GitLab macOS M2 Pro runner.
 
       ## Image export (all platforms)
@@ -335,13 +601,21 @@ release:
       )
       # delete-then-create makes re-runs idempotent (a pre-existing release would 409).
       release-cli delete --tag-name "$CI_COMMIT_TAG" 2>/dev/null || true
+      # Every artefact carries the tag in its own filename, so these paths and
+      # names do too. api/updater.py::_platform_asset_match picks the asset for
+      # the running OS out of these names -- keep the two in step, and see
+      # tests/test_release_packaging.py, which checks exactly that.
       release-cli create \
-        --name "Qimchi $CI_COMMIT_TAG" \
+        --name "$RELEASE_NAME" \
         --tag-name "$CI_COMMIT_TAG" \
         --description "$NOTES" \
-        --assets-link "{\"name\":\"qimchi-x86_64.AppImage (Linux)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-x86_64.AppImage?job=build-linux\",\"link_type\":\"package\"}" \
-        --assets-link "{\"name\":\"qimchi-setup.exe (Windows installer)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-setup.exe?job=build-windows\",\"link_type\":\"package\"}" \
-        --assets-link "{\"name\":\"qimchi.dmg (macOS)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi.dmg?job=build-macos\",\"link_type\":\"package\"}"
+        --assets-link "{\"name\":\"qimchi-x86_64-${CI_COMMIT_TAG}.AppImage (Linux)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-x86_64-${CI_COMMIT_TAG}.AppImage?job=build-linux\",\"link_type\":\"package\"}" \
+        --assets-link "{\"name\":\"qimchi-setup-${CI_COMMIT_TAG}.exe (Windows installer)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-setup-${CI_COMMIT_TAG}.exe?job=build-windows\",\"link_type\":\"package\"}" \
+        --assets-link "{\"name\":\"qimchi-${CI_COMMIT_TAG}.dmg (macOS)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-${CI_COMMIT_TAG}.dmg?job=build-macos\",\"link_type\":\"package\"}"
   rules:
+    # Stable release.
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: on_success
+    # Preview release (offered only to installs already on the preview channel).
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-rc\.\d+$/
       when: on_success

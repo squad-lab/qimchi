@@ -107,6 +107,9 @@ install_uv() {
     fi
 }
 
+# The name stays qcutils: this removes the directory older installers cloned,
+# which is what exists on an already-installed machine. The package itself is
+# now called qanary and is installed separately.
 remove_qcutils() {
     if [ -d "$QCUTILS_DIR" ]; then
         echo "qcutils found at $QCUTILS_DIR. Removing..."
@@ -205,9 +208,9 @@ uv venv --python 3.13 --seed --clear "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
 
 cd "$QIMCHI_DIR/qimchi/backend"
-uv pip install .
-
-# Note: QCUtils is optional and is not installed by this script.
+# The datasets extra carries the readers for NetCDF, HDF5, CSV/TXT and
+# zarr v2. Without it those formats fail to open.
+uv pip install ".[datasets]"
 
 # ----------------------------------------
 # Setup frontend

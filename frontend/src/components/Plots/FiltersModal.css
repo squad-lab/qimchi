@@ -26,3 +26,20 @@
 .border-l-3 {
   border-left-width: 3px;
 }
+
+/* Dark mode (Atom One Dark) */
+.dark .custom-scrollbar {
+  scrollbar-color: #4b5263 #21252b;
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-track {
+  background: #21252b;
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #4b5263;
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #5c6370;
+}

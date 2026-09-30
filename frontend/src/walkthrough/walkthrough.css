@@ -1,0 +1,297 @@
+/* Walkthrough theme overrides. */
+.driver-popover.qimchi-walkthrough {
+  --qw-bg: #ffffff;
+  --qw-text: #374151;
+  --qw-title: #111827;
+  --qw-muted: #6b7280;
+  --qw-border: #e5e7eb;
+  --qw-code-bg: #f3f4f6;
+  --qw-accent: #2563eb;
+  --qw-accent-hover: #1d4ed8;
+  --qw-note-text: #78350f;
+  --qw-note-bg: #fffbeb;
+  --qw-note-border: #f59e0b;
+  --qw-tip-text: #92400e;
+  --qw-tip-bg: rgb(255 251 235 / 0.5);
+  --qw-tip-border: #fef3c7;
+
+  font-family: inherit;
+  background-color: var(--qw-bg);
+  color: var(--qw-text);
+  border: 1px solid var(--qw-border);
+  border-radius: 10px;
+  max-width: 380px;
+  min-width: 280px;
+  padding: 16px 18px 14px;
+}
+
+.driver-popover.qimchi-walkthrough-wide {
+  max-width: min(540px, calc(100vw - 32px));
+}
+
+/* Animate the initial render of each step. */
+.driver-popover.qimchi-walkthrough-enter {
+  animation: qimchi-walkthrough-in 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes qimchi-walkthrough-in {
+  from {
+    opacity: 0;
+    translate: 0 3px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+.dark .driver-popover.qimchi-walkthrough {
+  --qw-bg: #282c34;
+  --qw-text: #c8ccd4;
+  --qw-title: #e6e9ef;
+  --qw-muted: #8b919c;
+  --qw-border: #3e4451;
+  --qw-code-bg: #21252b;
+  --qw-accent: #3b82f6;
+  --qw-accent-hover: #60a5fa;
+  --qw-note-text: #fcd34d;
+  --qw-note-bg: rgba(245, 158, 11, 0.12);
+  --qw-note-border: #d97706;
+  --qw-tip-text: #e5c07b;
+  --qw-tip-bg: rgb(229 192 123 / 0.07);
+  --qw-tip-border: rgb(229 192 123 / 0.25);
+}
+
+.qimchi-walkthrough .driver-popover-title {
+  color: var(--qw-title);
+  font-size: 16px;
+  padding-right: 28px;
+}
+
+.qimchi-walkthrough .driver-popover-description {
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* Consistent spacing between description blocks. */
+.qimchi-walkthrough .driver-popover-description > * + * {
+  margin-top: 10px;
+}
+
+.qimchi-walkthrough .qimchi-walkthrough-tip p + p,
+.qimchi-walkthrough .qimchi-walkthrough-tip p + ul {
+  margin-top: 4px;
+}
+
+.qimchi-walkthrough .driver-popover-description ul {
+  list-style: disc;
+  padding-left: 18px;
+}
+
+.qimchi-walkthrough .driver-popover-description li + li {
+  margin-top: 4px;
+}
+
+.qimchi-walkthrough .driver-popover-description a {
+  color: var(--qw-accent);
+  text-decoration: underline;
+}
+
+.qimchi-walkthrough-path,
+.qimchi-walkthrough-code {
+  font-size: 11.5px;
+  background-color: var(--qw-code-bg);
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+
+.qimchi-walkthrough-path {
+  padding: 1px 5px;
+}
+
+p.qimchi-walkthrough-path {
+  padding: 5px 8px;
+}
+
+.qimchi-walkthrough-code {
+  padding: 8px 10px;
+  white-space: pre;
+  overflow-x: auto;
+  overflow-wrap: normal;
+}
+
+.qimchi-walkthrough-note {
+  color: var(--qw-note-text);
+  background-color: var(--qw-note-bg);
+  border: 1px solid var(--qw-note-border);
+  border-left-width: 4px;
+  border-radius: 6px;
+  padding: 7px 10px;
+}
+
+/* Instructional asides. */
+.qimchi-walkthrough-tip {
+  padding: 8px 10px;
+  border: 1px solid var(--qw-tip-border);
+  border-radius: 8px;
+  background-color: var(--qw-tip-bg);
+  color: var(--qw-tip-text);
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+}
+
+.qimchi-walkthrough-tip-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+  font-weight: 600;
+}
+
+.qimchi-walkthrough-tip-title::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background-color: #f59e0b;
+}
+
+.qimchi-walkthrough .driver-popover-description .qimchi-walkthrough-tip ul {
+  margin-top: 2px;
+}
+
+.qimchi-walkthrough .driver-popover-description .qimchi-walkthrough-tip a {
+  color: inherit;
+}
+
+.qimchi-walkthrough-error {
+  color: #dc2626;
+}
+
+/* Sits on the title's line, inside the card's padding, instead of in the corner. */
+.qimchi-walkthrough .driver-popover-close-btn {
+  top: 16px;
+  right: 12px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--qw-muted);
+}
+
+.qimchi-walkthrough .driver-popover-close-btn:hover,
+.qimchi-walkthrough .driver-popover-close-btn:focus-visible {
+  color: var(--qw-title);
+  background-color: var(--qw-tip-bg);
+}
+
+.qimchi-walkthrough .driver-popover-progress-text {
+  color: var(--qw-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.qimchi-walkthrough .driver-popover-footer {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.qimchi-walkthrough .driver-popover-footer-btn {
+  font-size: 12.5px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  text-shadow: none;
+  color: var(--qw-text);
+  background-color: transparent;
+  border: 1px solid var(--qw-border);
+  white-space: nowrap;
+}
+
+.qimchi-walkthrough .driver-popover-footer-btn:hover,
+.qimchi-walkthrough .driver-popover-footer-btn:focus {
+  background-color: var(--qw-code-bg);
+}
+
+.qimchi-walkthrough .driver-popover-next-btn {
+  color: #ffffff;
+  background-color: var(--qw-accent);
+  border-color: var(--qw-accent);
+}
+
+.qimchi-walkthrough .driver-popover-next-btn:hover,
+.qimchi-walkthrough .driver-popover-next-btn:focus {
+  background-color: var(--qw-accent-hover);
+}
+
+.qimchi-walkthrough .driver-popover-navigation-btns {
+  gap: 4px;
+}
+
+.qimchi-walkthrough .driver-popover-navigation-btns button + button {
+  margin-left: 0;
+}
+
+/* Place the automatic-action button on its own row. */
+.qimchi-walkthrough .qimchi-walkthrough-action {
+  flex-basis: 100%;
+  text-align: center;
+}
+
+/* Keep detached plot panels interactive while the overlay is active. */
+.driver-active [data-tour="filters-panel"],
+.driver-active [data-tour="filters-panel"] *,
+.driver-active [data-tour="appearance-panel"],
+.driver-active [data-tour="appearance-panel"] * {
+  pointer-events: auto;
+}
+
+/* Preserve Plotly's pointer-event layering inside Driver's active element so
+   the hover surface stays above the rendered heat map. */
+.driver-active .driver-active-element .main-svg * {
+  pointer-events: inherit;
+}
+
+/* Keep detached popup lists interactive while the overlay is active. */
+.driver-active [data-qimchi-popup],
+.driver-active [data-qimchi-popup] * {
+  pointer-events: auto;
+}
+
+/* Render detached panels above the overlay. */
+.driver-active .fixed:has([data-tour="filters-panel"]),
+.driver-active .fixed:has([data-tour="appearance-panel"]) {
+  z-index: 10001 !important;
+}
+
+.qimchi-walkthrough .driver-popover-arrow {
+  border-color: var(--qw-bg);
+}
+
+.qimchi-walkthrough .driver-popover-arrow-side-left {
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+  border-right-color: transparent;
+}
+
+.qimchi-walkthrough .driver-popover-arrow-side-right {
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+  border-left-color: transparent;
+}
+
+.qimchi-walkthrough .driver-popover-arrow-side-top {
+  border-bottom-color: transparent;
+  border-left-color: transparent;
+  border-right-color: transparent;
+}
+
+.qimchi-walkthrough .driver-popover-arrow-side-bottom {
+  border-top-color: transparent;
+  border-left-color: transparent;
+  border-right-color: transparent;
+}

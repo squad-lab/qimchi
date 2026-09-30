@@ -42,9 +42,7 @@ export const convertApiNode = (apiNode: ApiNode): TreeNode => {
     size: apiNode.size,
     timestamp: apiNode.timestamp ? new Date(apiNode.timestamp) : undefined,
     tags: apiNode.tags,
-    children: apiNode.children
-      ? apiNode.children.map(convertApiNode)
-      : undefined,
+    children: apiNode.children ? apiNode.children.map(convertApiNode) : undefined,
     lastModified: apiNode.lastModified,
   };
 };
