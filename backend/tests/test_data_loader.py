@@ -15,14 +15,7 @@ from api import data_loader
 
 @pytest.mark.asyncio
 async def test_load_data_async_zarr_runs_off_the_event_loop(tmp_path, monkeypatch):
-    """
-    The zarr provider must open the file in a thread, not inline.
-
-    Opening a dataset is blocking I/O, and this provider is the common path.
-    Awaiting it inline pinned the event loop for the whole read, which is what
-    made a large Basket stall unrelated requests while metadata loaded.
-
-    """
+    """The zarr provider must open files outside the event-loop thread."""
     zarr_path = tmp_path / "demo.zarr"
     zarr_path.mkdir(parents=True)
 
@@ -294,17 +287,7 @@ def _live_row(**overrides):
 
 
 def _counting_ws(monkeypatch, result):
-    """
-    Install a WebSocket loader that counts its calls.
-
-    Args:
-        monkeypatch: Pytest fixture used to install the fake.
-        result: Dataset to return, or an exception instance to raise.
-
-    Returns:
-        list: One-element call counter, so a test can assert on attempts.
-
-    """
+    """Install a WebSocket loader and return its call counter."""
     calls = []
 
     def _ws(*_args, **_kwargs):
@@ -417,14 +400,7 @@ def test_a_refused_connection_is_tried_again(tmp_path, monkeypatch):
 
 
 class TestLiveRowAccumulation:
-    """
-    Following a live sweep by asking only for the rows measured since the last
-    poll. A producer preallocates its grid, so re-fetching the whole thing
-    every second moves the same bytes over and over; these pin the folding,
-    the cases that must fall back to a whole snapshot, and the bookkeeping
-    that keeps memory bounded.
-
-    """
+    """Verify incremental live rows, snapshot fallbacks, and bounded state."""
 
     ROWS, COLS = 6, 3
 
@@ -694,11 +670,8 @@ def test_datatree_reference_loads_selected_node_dataset(tmp_path, monkeypatch):
 
 # --- Quantify support ---
 #
-# Fixture datasets below mirror the exact on-disk structure of real
-# quantify-core-generated files (dim_0-indexed flat x0/x1 coordinates,
-# grid_2d/xlen/ylen attrs, long_name/units on every coord and data var),
-# verified against actual `quantify_core.data.handling.to_gridded_dataset()`
-# output.
+# Fixtures mirror verified quantify-core output, including flat dim_0
+# coordinates and grid metadata.
 
 
 def _quantify_1d_dataset() -> xr.Dataset:
@@ -923,6 +896,33 @@ def test_complex_variables_are_split_into_real_parts(tmp_path, monkeypatch):
     assert split["iq_amplitude"].attrs["unit"] == "V"
     assert split["iq_phase"].attrs["unit"] == "rad"
     assert all(split[v].dtype.kind == "f" for v in split.data_vars)
+
+
+def test_complex_phase_is_unwrapped_along_each_axis():
+    # Cross ±π several times along both axes.
+    x = np.linspace(0, 6 * np.pi, 40)
+    y = np.linspace(0, 4 * np.pi, 30)
+    expected = y[:, None] + x[None, :]
+    signal = np.exp(1j * expected)
+
+    phase = data_loader.unwrapped_phase(signal)
+
+    np.testing.assert_allclose(
+        phase - phase[0, 0], expected - expected[0, 0], atol=1e-9
+    )
+
+
+def test_complex_phase_unwrapping_skips_unmeasured_points():
+    expected = np.linspace(0, 6 * np.pi, 20)
+    signal = np.exp(1j * expected)
+    signal[[3, 11]] = np.nan
+    signal[-5:] = np.nan
+
+    phase = data_loader.unwrapped_phase(signal)
+
+    measured = np.isfinite(signal)
+    assert np.isnan(phase[~measured]).all()
+    np.testing.assert_allclose(phase[measured], expected[measured], atol=1e-9)
 
 
 def test_datasets_without_complex_variables_are_returned_as_is():

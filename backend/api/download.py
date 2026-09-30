@@ -14,6 +14,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
+from .data_loader import is_memory_reference, resolve_to_disk_path
 from .logger import logger
 
 # Local imports
@@ -24,6 +25,19 @@ router = APIRouter()
 
 # Extension of the sidecar written beside every downloaded dataset.
 LIBRARY_SIDECAR_SUFFIX = ".qimchi.json"
+
+
+def _resolve_download_path(path_ref: str) -> Path:
+    """Resolve a live measurement reference to its on-disk dataset."""
+    if is_memory_reference(path_ref):
+        try:
+            path_ref = resolve_to_disk_path(path_ref)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Live dataset path is unavailable: {exc}",
+            ) from exc
+    return Path(path_ref)
 
 
 def _write_library_sidecar(zipf, dataset_path: Path, prefix: Path) -> None:
@@ -119,7 +133,7 @@ async def download_dataset(path: PathData) -> FileResponse:
     logger.debug(f"download_dataset | POST path={path}")
 
     # Ensure path is a full path to the directory
-    path = Path(path.path)
+    path = _resolve_download_path(path.path)
 
     # NOTE: The datasets are .zarr folders, so we need to zip them before downloading
 
@@ -193,7 +207,14 @@ async def download_selected_datasets(paths: list[PathData]) -> FileResponse:
     # Validate all paths exist
     valid_paths = []
     for path_data in paths:
-        path = Path(path_data.path)
+        try:
+            path = _resolve_download_path(path_data.path)
+        except HTTPException:
+            logger.warning(
+                "download_selected_datasets | Live path unavailable: %s",
+                path_data.path,
+            )
+            continue
         if not path.exists():
             logger.warning(f"download_selected_datasets | Invalid path: {path}")
             continue
@@ -282,7 +303,13 @@ async def download_multiple_datasets(data: PathsData) -> FileResponse:
     valid_files = []
     valid_dirs = []
     for path_str in data.paths:
-        path = Path(path_str)
+        try:
+            path = _resolve_download_path(path_str)
+        except HTTPException:
+            logger.warning(
+                "download_multiple_datasets | Live path unavailable: %s", path_str
+            )
+            continue
         if not path.exists():
             logger.warning(f"download_multiple_datasets | Path does not exist: {path}")
             continue

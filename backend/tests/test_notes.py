@@ -233,6 +233,181 @@ async def test_measurement_note_load_save_and_sidecar_import(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_live_measurement_notes_use_the_resolved_disk_path(tmp_path, monkeypatch):
+    measurement = tmp_path / "sample" / "experiment" / "live-run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    monkeypatch.setattr(
+        notes,
+        "resolve_to_disk_path",
+        lambda ref: str(measurement) if ref == "memory://live-run" else ref,
+    )
+
+    blank = await notes.load_notes(PathData(path="memory://live-run"))
+    saved = await notes.save_notes(
+        NotesData(path="memory://live-run", notes="live note")
+    )
+    loaded = await notes.load_notes(PathData(path="memory://live-run"))
+
+    assert blank["notes"] == ""
+    assert saved["filename"] == "live-run"
+    assert loaded["notes"] == "live note"
+    assert notes._db_get_note("live-run")[0] == "live note"
+    assert (measurement.parent / "live-run" / "live-run.md").is_file()
+
+
+@pytest.mark.asyncio
+async def test_live_measurement_notes_work_without_a_disk_path(monkeypatch):
+    def no_disk_path(_ref):
+        raise RuntimeError("not persisted yet")
+
+    monkeypatch.setattr(notes, "resolve_to_disk_path", no_disk_path)
+
+    blank = await notes.load_notes(PathData(path="memory://stream-only"))
+    saved = await notes.save_notes(
+        NotesData(path="memory://stream-only", notes="in-memory note")
+    )
+    loaded = await notes.load_notes(PathData(path="memory://stream-only"))
+
+    assert blank["notes"] == ""
+    assert blank["notes_path"] is None
+    assert saved["path"] is None
+    assert loaded["notes"] == "in-memory note"
+    assert notes._db_get_note("stream-only")[0] == "in-memory note"
+
+
+@pytest.mark.asyncio
+async def test_live_pooled_notes_with_memory_sample_path(tmp_path, monkeypatch):
+    sample = tmp_path / "sample"
+    measurement = sample / "experiment" / "live-run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    monkeypatch.setattr(
+        notes,
+        "resolve_to_disk_path",
+        lambda ref: (
+            str(measurement)
+            if ref == "memory://live-run"
+            else (_ for _ in ()).throw(RuntimeError("not persisted"))
+        ),
+    )
+
+    blank = await notes.load_notes(
+        PathData(
+            path="memory://live-run",
+            note_scope="sample",
+            sample_path="memory:",
+            sample_name="test_sample",
+            cryostat_name="fridge",
+        )
+    )
+    assert blank["notes"] == ""
+    assert blank.get("error") is None
+    expected_pooled_file = sample / "fridge_test_sample.md"
+    assert expected_pooled_file.is_file()
+
+    saved = await notes.save_notes(
+        NotesData(
+            path="memory://live-run",
+            notes="pooled live note content",
+            note_scope="sample",
+            sample_path="memory:",
+            sample_name="test_sample",
+            cryostat_name="fridge",
+        )
+    )
+    assert saved["path"] == str(expected_pooled_file)
+    assert "pooled live note content" in expected_pooled_file.read_text(
+        encoding="utf-8"
+    )
+
+    loaded = await notes.load_notes(
+        PathData(
+            path="memory://live-run",
+            note_scope="sample",
+            sample_path="memory:",
+            sample_name="test_sample",
+            cryostat_name="fridge",
+        )
+    )
+    assert loaded["notes"] == "pooled live note content"
+
+    saved_measurement = await notes.save_notes(
+        NotesData(
+            path="memory://live-run",
+            notes="individual live measurement note",
+            note_scope="measurement",
+            sample_path="memory:",
+            sample_name="test_sample",
+            cryostat_name="fridge",
+        )
+    )
+    assert saved_measurement["sample_rollup"] is not None
+    assert saved_measurement["sample_rollup"]["appended"] == "true"
+    pooled_text = expected_pooled_file.read_text(encoding="utf-8")
+    assert "individual live measurement note" in pooled_text
+
+
+@pytest.mark.asyncio
+async def test_live_pooled_notes_with_memory_scheme_ref(tmp_path, monkeypatch):
+    sample = tmp_path / "sample"
+    measurement = sample / "experiment" / "live-run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    monkeypatch.setattr(
+        notes,
+        "resolve_to_disk_path",
+        lambda ref: (
+            str(measurement)
+            if ref == "memory://live-run"
+            else (_ for _ in ()).throw(RuntimeError("not persisted"))
+        ),
+    )
+
+    loaded = await notes.load_notes(
+        PathData(
+            path="memory://live-run",
+            note_scope="sample",
+            sample_path="memory://live-run",
+            sample_name="test_sample",
+            cryostat_name="fridge",
+        )
+    )
+    assert loaded.get("error") is None
+    expected_pooled_file = sample / "fridge_test_sample.md"
+    assert expected_pooled_file.is_file()
+
+
+@pytest.mark.asyncio
+async def test_live_pooled_notes_without_disk_path_raises_404(monkeypatch):
+    def no_disk_path(_ref):
+        raise RuntimeError("not persisted yet")
+
+    monkeypatch.setattr(notes, "resolve_to_disk_path", no_disk_path)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await notes.load_notes(
+            PathData(
+                path="memory://stream-only",
+                note_scope="sample",
+                sample_path="memory:",
+            )
+        )
+    assert exc_info.value.status_code == 404
+
+    with pytest.raises(HTTPException) as exc_info:
+        await notes.save_notes(
+            NotesData(
+                path="memory://stream-only",
+                notes="cannot save pooled without disk",
+                note_scope="sample",
+                sample_path="memory:",
+            )
+        )
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_opening_a_measurement_creates_no_sidecar(tmp_path, monkeypatch):
     """Loading notes for a measurement with none must not touch the disk."""
     measurement = tmp_path / "sample" / "experiment" / "run.zarr"

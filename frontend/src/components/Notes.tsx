@@ -3,8 +3,7 @@ import axios from "axios";
 import { Save, AlertCircle, Check, Clock, Loader2, NotebookPen, Copy } from "lucide-react";
 
 // Local imports
-// Load the editor and its parsers only when Notes opens.
-const MarkdownEditor = React.lazy(() => import("./MarkdownEditor"));
+import MarkdownEditor from "./MarkdownEditor";
 import { BasketItem } from "./Basket";
 import { PROD_BACKEND_URL } from "../config";
 import { isDatasetPath, isSqliteContainerPath } from "../utils/datasetPaths";
@@ -122,6 +121,9 @@ export default function Notes({
 
   const inferSamplePath = useCallback(
     (measurementPath: string): string => {
+      if (/^memory:(?:\/\/)?/i.test(measurementPath)) {
+        return "";
+      }
       const normalized = normalizePath(measurementPath);
       const parts = normalized.split("/").filter(Boolean);
       if (parts.length >= 3) {
@@ -203,7 +205,8 @@ export default function Notes({
         return;
       }
 
-      const samplePath = inferSamplePath(item.path);
+      const isMemory = /^memory:(?:\/\/)?/i.test(item.path);
+      const samplePath = isMemory ? "" : inferSamplePath(item.path);
       const samplePathParts = samplePath.split("/").filter(Boolean);
 
       const sampleName =
@@ -214,7 +217,9 @@ export default function Notes({
       const cryostatName = getAttrValue(item, "cryostat", "Cryostat") || "cryostat";
 
       const pooledFilename = `${cryostatName}_${sampleName}.md`;
-      const key = samplePath.toLowerCase();
+      const key = isMemory
+        ? `memory:${cryostatName.toLowerCase()}:${sampleName.toLowerCase()}`
+        : samplePath.toLowerCase() || `sample:${sampleName.toLowerCase()}`;
 
       const existing = groups.get(key);
       if (existing) {
@@ -256,7 +261,7 @@ export default function Notes({
         path: selectedMeasurement.path,
         uuid: qcodesUuid,
         runId: getRunId(selectedMeasurement),
-        samplePath: group?.samplePath,
+        samplePath: group?.samplePath || undefined,
         sampleName: group?.sampleName,
         cryostatName: group?.cryostatName,
         displayName: selectedMeasurement.name,
@@ -278,7 +283,7 @@ export default function Notes({
       return {
         scope: "sample" as NoteScope,
         path: fallbackMeasurement?.path || selectedSample.samplePath,
-        samplePath: selectedSample.samplePath,
+        samplePath: selectedSample.samplePath || undefined,
         sampleName: selectedSample.sampleName,
         cryostatName: selectedSample.cryostatName,
         displayName: selectedSample.pooledFilename,
@@ -474,10 +479,14 @@ export default function Notes({
             ?.replace(/\.(zarr|nc|h5|hdf5|csv|txt|dat)$/i, "")
             .toLowerCase();
 
+      const sampleContainsDataset = selectedSample?.items.some(
+        (item) =>
+          normalizePath(item.path).toLowerCase() === normalizePath(datasetPath).toLowerCase(),
+      );
       const shouldRefreshSample =
         selectedTarget.scope === "sample" &&
-        Boolean(selectedSamplePath) &&
-        selectedSamplePath === incomingSamplePath;
+        ((Boolean(selectedSamplePath) && selectedSamplePath === incomingSamplePath) ||
+          sampleContainsDataset);
 
       if (!shouldRefreshMeasurement && !shouldRefreshSample) {
         return;
@@ -498,7 +507,14 @@ export default function Notes({
     return () => {
       window.removeEventListener("notes:refresh", handleRefresh as EventListener);
     };
-  }, [selectedTarget, hasUnsavedChanges, inferSamplePath, normalizePath, loadNotes]);
+  }, [
+    selectedTarget,
+    selectedSample,
+    hasUnsavedChanges,
+    inferSamplePath,
+    normalizePath,
+    loadNotes,
+  ]);
 
   const saveNotes = useCallback(async (): Promise<boolean> => {
     if (!selectedTarget) {
@@ -906,16 +922,12 @@ export default function Notes({
                 </div>
               </div>
             )}
-            <React.Suspense
-              fallback={<div className="h-full w-full animate-pulse rounded-lg bg-gray-100" />}
-            >
-              <MarkdownEditor
-                value={notes}
-                onChange={handleNotesChange}
-                placeholder="Start typing your notes here... Auto-save is enabled. You can also drag and drop dataset paths from the explorer."
-                disabled={loading || !canEdit}
-              />
-            </React.Suspense>
+            <MarkdownEditor
+              value={notes}
+              onChange={handleNotesChange}
+              placeholder="Start typing your notes here... Auto-save is enabled. You can also drag and drop dataset paths from the explorer."
+              disabled={loading || !canEdit}
+            />
           </div>
         ) : (
           <div className="h-full flex flex-col items-center justify-center text-gray-500">

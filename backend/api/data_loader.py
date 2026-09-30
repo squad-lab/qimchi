@@ -3,10 +3,13 @@ Centralized dataset loading with provider-based dispatch.
 
 This module is the single loader entrypoint for API modules in Qimchi.
 It defines a provider protocol and implements built-in providers for
-common dataset types (e.g., live datasets, NetCDF/HDF5 files). It also
-provides utility functions for detecting dataset formats, loading
+common dataset types (e.g., live datasets, NetCDF/HDF5 files).
+
+It also provides utility functions for detecting dataset formats, loading
 datasets through xarray, and annotating loaded datasets with source
-metadata. This design allows for extensible support of various dataset
+metadata.
+
+This design allows for extensible support of various dataset
 formats and sources while maintaining a consistent loading interface
 for the rest of the application.
 
@@ -31,6 +34,7 @@ from qimchi_connect import client as live_client
 from qimchi_connect import registry as live_db
 
 # Local imports
+from .diagnostics import register_gauge
 from .logger import logger
 
 MEMORY_PROTOCOL = "memory://"
@@ -83,57 +87,37 @@ class LoadedData:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-def is_memory_reference(ref: str) -> bool:
-    """
-    Check if a reference is a memory reference.
-
-    Args:
-        ref (str): The reference string to check.
-
-    Returns:
-        bool: True if the reference is a memory reference, False otherwise.
-
-    """
-
-    return ref.startswith(MEMORY_PROTOCOL)
+def is_memory_reference(ref: str | None) -> bool:
+    """Return whether ``ref`` uses the memory protocol."""
+    if not ref or not isinstance(ref, str):
+        return False
+    return ref.startswith(MEMORY_PROTOCOL) or ref.startswith("memory:")
 
 
 def normalize_memory_reference(ref: str) -> Optional[str]:
-    """
-    Normalize a memory reference by ensuring it starts with the MEMORY_PROTOCOL
-    and has a measurement ID.
-
-    Args:
-        ref (str): The input reference string to normalize.
-
-    Returns:
-        Optional[str]: The normalized memory reference if valid, otherwise None.
-
-    """
+    """Return a normalized memory reference, or None if invalid."""
+    if not ref or not isinstance(ref, str):
+        return None
 
     if ref.startswith(MEMORY_PROTOCOL):
         return ref
 
     stripped = ref.rstrip("/")
-    if stripped == MEMORY_PROTOCOL.rstrip("/"):
+    if stripped == MEMORY_PROTOCOL.rstrip("/") or stripped == "memory:":
         return MEMORY_PROTOCOL
 
     return None
 
 
 def extract_measurement_id(ref: str) -> str:
-    """
-    Extract the measurement ID from a memory reference.
-
-    Args:
-        ref (str): The memory reference string, expected to be in the form "memory://<measurement_id>".
-
-    Returns:
-        str: The extracted measurement ID, or an empty string if the reference is not valid.
-
-    """
-
-    return ref[len(MEMORY_PROTOCOL) :].strip("/")
+    """Extract the measurement ID from a memory reference."""
+    if not ref:
+        return ""
+    if ref.startswith(MEMORY_PROTOCOL):
+        return ref[len(MEMORY_PROTOCOL) :].strip("/")
+    if ref.startswith("memory:"):
+        return ref[len("memory:") :].lstrip("/").strip()
+    return ref.strip("/")
 
 
 def _maintenance_interval() -> float:
@@ -150,6 +134,7 @@ _maintenance_lock = threading.Lock()
 # Live fetches are shared per measurement and only touched by the event loop.
 _live_polls: Dict[str, "asyncio.Task[LoadedData]"] = {}
 _live_poll_results: Dict[str, tuple] = {}
+register_gauge("live polls", lambda: len(_live_polls))
 
 
 def _live_poll_window() -> float:
@@ -351,23 +336,7 @@ def _annotate_dataset(
 
 
 def _normalize_cf_label_attrs(dataset: xr.Dataset) -> None:
-    """
-    Mirror CF-convention `long_name`/`units` attrs into Qimchi's own
-    `label`/`unit` attrs on every coordinate and data variable, in place.
-
-    figures.py only ever reads `label`/`unit` (qanary' own convention) when
-    deriving axis titles; sources that follow the more common CF convention
-    instead -- QCoDeS's native `to_xarray_dataset()` output and Quantify
-    datasets both do -- would otherwise silently fall back to bare variable
-    names. Existing `label`/`unit` attrs are left untouched.
-
-    Args:
-        dataset (xr.Dataset): The dataset to normalize, mutated in place.
-
-    Returns:
-        None
-
-    """
+    """Fill missing Qimchi labels and units from CF attributes in place."""
     for var in (*dataset.coords.values(), *dataset.data_vars.values()):
         if "long_name" in var.attrs:
             var.attrs.setdefault("label", var.attrs["long_name"])
@@ -375,26 +344,36 @@ def _normalize_cf_label_attrs(dataset: xr.Dataset) -> None:
             var.attrs.setdefault("unit", var.attrs["units"])
 
 
+def _unwrap_finite(values: np.ndarray) -> np.ndarray:
+    # Skip NaNs, which would otherwise propagate through np.unwrap.
+    finite = np.isfinite(values)
+    if finite.sum() < 2:
+        return values
+    values = values.copy()
+    values[finite] = np.unwrap(values[finite])
+    return values
+
+
+def unwrapped_phase(values: Any) -> np.ndarray:
+    """Return phase in radians, unwrapped from the innermost axis outward."""
+    phase = np.angle(np.asarray(values))
+    if phase.size == 0:
+        return phase
+    for axis in reversed(range(phase.ndim)):
+        phase = np.apply_along_axis(_unwrap_finite, axis, phase)
+    return phase
+
+
 _COMPLEX_PARTS = (
     ("amplitude", np.abs, None),
-    ("phase", np.angle, "rad"),
+    ("phase", unwrapped_phase, "rad"),
     ("real", np.real, None),
     ("imag", np.imag, None),
 )
 
 
 def split_complex_variables(dataset: xr.Dataset) -> xr.Dataset:
-    """
-    Replace each complex data variable with amplitude, phase, real, and imaginary
-    variables at the same position. Source metadata preserves content identity.
-
-    Args:
-        dataset (xr.Dataset): The loaded dataset. It is not modified.
-
-    Returns:
-        xr.Dataset: The same dataset when nothing is complex, else a new one.
-
-    """
+    """Replace complex variables with amplitude, phase, real, and imaginary parts."""
     if not any(var.dtype.kind == "c" for var in dataset.data_vars.values()):
         return dataset
 
@@ -498,17 +477,8 @@ def _load_xarray_dataset(path: Path, fmt: str) -> xr.Dataset:
 
 def load_xarray_dataset(path: str | Path, fmt: str) -> xr.Dataset:
     """
-    Public helper for custom providers to use Qimchi's normalized xarray loading.
-
-    Args:
-        path (str | Path): The filesystem path to the dataset.
-        fmt (str): The detected format of the dataset (e.g., "zarr", "netcdf", "hdf5").
-
-    Returns:
-        xr.Dataset: The loaded dataset.
-
-    Raises:
-        DatasetResolutionError: If the dataset cannot be loaded.
+    Public helper - kept for backward compatibility
+    See `_load_xarray_dataset()` for details.
 
     """
     return _load_xarray_dataset(Path(path), fmt)
@@ -531,10 +501,7 @@ def _grid_quantify_settables(dataset: xr.Dataset) -> xr.Dataset:
     left untouched.
 
     This mirrors `to_gridded_dataset()`'s pandas-MultiIndex-based reshape
-    without depending on the `quantify`/`quantify-core` package -- verified
-    against real quantify-core output, including for a partially-completed
-    (mid-run) sweep, where the untouched settables still cover the full grid
-    and only the measured variable is short, leaving NaNs in the gaps.
+    without depending on the `quantify`/`quantify-core` package.
 
     Args:
         dataset (xr.Dataset): The dataset to reshape.
@@ -603,16 +570,7 @@ def _prepare_quantify_dataset(dataset: xr.Dataset, fmt: str) -> tuple[xr.Dataset
 
 
 def _detect_filesystem_format(path: Path) -> str:
-    """
-    Detect dataset format based on filesystem path characteristics.
-
-    Args:
-        path (Path): The filesystem path to analyze.
-
-    Returns:
-        str: Detected format string (e.g., "zarr", "netcdf",
-
-    """
+    """Detect a dataset format from its path and marker files."""
 
     if path.is_dir():
         zarr_markers = {
@@ -645,20 +603,7 @@ def _detect_filesystem_format(path: Path) -> str:
 
 
 def _load_flat_table_dataset(path: Path) -> xr.Dataset:
-    """
-    Load a flat tabular file through polars and expose each column as a coordinate.
-
-    Args:
-        path (Path): Path to the flat tabular file.
-
-    Returns:
-        xr.Dataset: The loaded dataset.
-
-    Raises:
-        MissingBackendDependencyError: If polars is not available.
-        DatasetResolutionError: If the flat table cannot be loaded.
-
-    """
+    """Load a flat table through Polars with each column as a coordinate."""
     try:
         import polars as pl
     except Exception as exc:
@@ -1086,21 +1031,7 @@ def _open_xarray_datatree(path: Path, fmt: str) -> xr.DataTree:
 
 
 def _extract_dataset_from_datatree(dtree: Any, node_path: Optional[str]) -> xr.Dataset:
-    """
-    Extract xr.Dataset from a DataTree node path.
-
-    Args:
-        dtree (Any): The loaded DataTree object.
-        node_path (Optional[str]): The path to the node within the DataTree to extract the dataset from. If None, the root node is used.
-
-    Returns:
-        xr.Dataset: The extracted dataset from the specified DataTree node.
-
-    Raises:
-        DatasetResolutionError: If the specified node path does not exist in the DataTree.
-        DatasetKindMismatchError: If the specified node does not contain a dataset payload.
-
-    """
+    """Return the Dataset at a DataTree node path."""
     selected_path = node_path or "/"
     try:
         node = dtree[selected_path] if selected_path != "/" else dtree
@@ -1119,23 +1050,7 @@ def _extract_dataset_from_datatree(dtree: Any, node_path: Optional[str]) -> xr.D
 
 
 def list_datatree_nodes(ref: str | Path) -> list[dict[str, Any]]:
-    """
-    List nodes from a DataTree-backed store for discovery/tree views.
-
-    Args:
-        ref (str | Path): The reference to the DataTree store, which may include an optional node path fragment.
-
-    Returns:
-        list[dict[str, Any]]: A list of dictionaries containing metadata about each node in
-            the DataTree. Each dictionary includes:
-            - "path": The path of the node within the DataTree.
-            - "name": The name of the node (derived from the path).
-            - "has_dataset": A boolean indicating whether the node contains a dataset payload.
-
-    Raises:
-        DatasetResolutionError: If the DataTree path does not exist or cannot be loaded.
-
-    """
+    """List DataTree nodes for discovery views."""
     raw = str(ref)
     path, _ = _parse_datatree_reference(raw if "#" in raw else str(ref))
     if not path.exists():
@@ -1192,19 +1107,7 @@ def _read_qcodes_sqlite(path: Path, query: str) -> list[tuple]:
 
 
 def _get_latest_qcodes_run_id(db_path: Path) -> int:
-    """
-    Return the latest run_id from a QCoDeS sqlite DB.
-
-    Args:
-        db_path (Path): Path to the QCoDeS sqlite database file.
-
-    Returns:
-        int: The latest run_id in the database.
-
-    Raises:
-        DatasetResolutionError: If the QCoDeS DB cannot be queried.
-
-    """
+    """Return the latest run ID in a QCoDeS SQLite database."""
     try:
         rows = _read_qcodes_sqlite(db_path, "SELECT MAX(run_id) FROM runs")
     except Exception as exc:
@@ -1220,19 +1123,7 @@ def _get_latest_qcodes_run_id(db_path: Path) -> int:
 
 
 def list_qcodes_runs(db_path: str | Path) -> list[dict[str, Any]]:
-    """
-    List QCoDeS runs from a sqlite DB for tree/discovery use.
-
-    Args:
-        db_path (str | Path): Path to the QCoDeS sqlite database file.
-
-    Returns:
-        list[dict[str, Any]]: List of run metadata.
-
-    Raises:
-        DatasetResolutionError: If the QCoDeS DB cannot be read.
-
-    """
+    """List runs in a QCoDeS SQLite database."""
     path = Path(db_path)
     if not path.exists() or not path.is_file():
         raise DatasetResolutionError(f"QCoDeS database file not found: {path}")
@@ -1266,21 +1157,7 @@ def list_qcodes_runs(db_path: str | Path) -> list[dict[str, Any]]:
 
 
 def _load_qcodes_xarray_dataset(db_path: Path, run_id: int) -> xr.Dataset:
-    """
-    Load a QCoDeS run and convert to xarray Dataset.
-
-    Args:
-        db_path (Path): Path to the QCoDeS sqlite database file.
-        run_id (int): The run_id of the QCoDeS run to load.
-
-    Returns:
-        xr.Dataset: The loaded QCoDeS run as an xarray Dataset.
-
-    Raises:
-        DatasetResolutionError: If the QCoDeS run cannot be loaded.
-        MissingBackendDependencyError: If QCoDeS or its dependencies are not available.
-
-    """
+    """Load a QCoDeS run as an xarray dataset."""
     try:
         from qcodes.dataset import initialised_database_at, load_by_id
     except Exception as exc:
@@ -1300,11 +1177,8 @@ def _load_qcodes_xarray_dataset(db_path: Path, run_id: int) -> xr.Dataset:
     dataset.attrs.setdefault("run_id", run_id)
     dataset.attrs.setdefault("qcodes_db_path", str(db_path))
 
-    # QCoDeS persists the station snapshot as JSON text.  Keeping that text in
-    # xarray attrs makes the Metadata pane treat the whole station as a single
-    # string; decode it at the provider boundary so every consumer sees the
-    # actual object.  A malformed/legacy snapshot remains visible as its raw
-    # value rather than making the run unloadable.
+    # Decode QCoDeS station snapshots for Metadata. Preserve malformed legacy
+    # values instead of rejecting the run.
     snapshot = dataset.attrs.get("snapshot")
     if isinstance(snapshot, str):
         try:
@@ -1318,31 +1192,14 @@ def _load_qcodes_xarray_dataset(db_path: Path, run_id: int) -> xr.Dataset:
     return dataset
 
 
-# Measurements whose live server answered that it does not host them, keyed to
-# the registration they were disowned under. That answer is authoritative, so
-# re-asking once per plot refresh only costs a connection -- which is what
-# happens when a run ends and a later producer inherits its port. Keying on
-# ``started_at`` means a re-registration under the same id is tried afresh.
+# Live measurements rejected by their registered server, keyed by started_at.
+# A new registration clears the effective rejection.
 _WS_DISOWNED: Dict[str, Any] = {}
+register_gauge("disowned live producers", lambda: len(_WS_DISOWNED))
 
 
 def _ws_worth_trying(measurement_id: str, info: Dict[str, Any]) -> bool:
-    """
-    Return whether a live snapshot is worth requesting over the WebSocket.
-
-    A finished measurement whose data is on disk is read from there: its
-    producer has normally exited, so dialling the endpoint on every refresh
-    only delays the plot behind a connection that cannot succeed. One without
-    a disk path is still tried, because there is nothing to fall back to.
-
-    Args:
-        measurement_id (str): Measurement the reference points at.
-        info (Dict[str, Any]): Registry row for that measurement.
-
-    Returns:
-        bool: True when the WebSocket should be tried.
-
-    """
+    """Return whether to request a live snapshot over WebSocket."""
     if not info.get("ws_url"):
         return False
     if measurement_id in _WS_DISOWNED and _WS_DISOWNED[measurement_id] == info.get(
@@ -1353,62 +1210,27 @@ def _ws_worth_trying(measurement_id: str, info: Dict[str, Any]) -> bool:
 
 
 def _note_ws_failure(measurement_id: str, info: Dict[str, Any], exc: Exception) -> None:
-    """
-    Record an authoritative "no such measurement" answer from a live server.
-
-    Only the server denying the measurement is conclusive. A refused or timed
-    out connection can mean a producer that is merely starting up or busy, and
-    that is worth asking again.
-
-    Args:
-        measurement_id (str): Measurement the request was for.
-        info (Dict[str, Any]): Registry row the request was built from.
-        exc (Exception): Failure raised while fetching the snapshot.
-
-    """
+    """Cache definitive "not found" responses for this registration."""
     if isinstance(exc, RuntimeError) and "not found" in str(exc):
         _WS_DISOWNED[measurement_id] = info.get("started_at")
 
 
-# Live measurements accumulated row by row, keyed by measurement id: the grid
-# received so far and how many of its rows are trusted. A poll then asks only
-# for the rows past that point, so following a long sweep costs what was
-# measured since the last refresh rather than the whole run every time.
-# Bounded, because each entry holds a complete measurement in memory.
+# Per-measurement snapshots used to fetch only newly completed rows.
+# Keep at most two because each entry contains the full measurement.
 _LIVE_ACCUM: Dict[str, Dict[str, Any]] = {}
 _LIVE_ACCUM_MAX = 2
+register_gauge("live buffers", lambda: len(_LIVE_ACCUM))
 
 
 def forget_live_rows(measurement_id: str) -> None:
-    """
-    Drop an accumulated measurement, releasing its arrays.
-
-    Args:
-        measurement_id (str): Measurement to forget.
-
-    """
+    """Drop a measurement's accumulated rows."""
     _LIVE_ACCUM.pop(measurement_id, None)
 
 
 def _remember_live_rows(
     measurement_id: str, info: Dict[str, Any], dataset: xr.Dataset
 ) -> xr.Dataset:
-    """
-    Keep a whole snapshot as the base that later rows are folded into.
-
-    A producer that cannot describe its rows -- no shared leading dimension,
-    or a server too old to answer row requests -- is not accumulated at all,
-    and every poll fetches it whole as before.
-
-    Args:
-        measurement_id (str): Measurement the snapshot belongs to.
-        info (Dict[str, Any]): Registry row it was fetched under.
-        dataset (xr.Dataset): The snapshot.
-
-    Returns:
-        xr.Dataset: The same dataset, for use as an expression.
-
-    """
+    """Cache a full snapshot when its producer supports row requests."""
     rows = dataset.encoding.get("qimchi_connect_rows") or {}
     if not rows.get("append_dim"):
         forget_live_rows(measurement_id)
@@ -1432,25 +1254,9 @@ def _merge_live_rows(
     cached: Optional[Dict[str, Any]],
 ) -> Optional[xr.Dataset]:
     """
-    Fold newly fetched rows into the measurement accumulated so far.
+    Merge new rows into a cached snapshot.
 
-    The rows are written into the existing arrays rather than concatenated,
-    which keeps the cost proportional to what was measured since the last
-    poll. A refresh running concurrently may therefore read a row while it is
-    being filled -- the same half-written row a live plot shows anyway.
-
-    Args:
-        measurement_id (str): Measurement being followed.
-        info (Dict[str, Any]): Registry row the fetch was made under.
-        dataset (xr.Dataset): Rows returned by the producer.
-        cached (Optional[Dict[str, Any]]): Accumulator entry, if any.
-
-    Returns:
-        Optional[xr.Dataset]: The accumulated measurement, or None when the
-            two cannot be reconciled -- another run, a resized grid, or a
-            variable that was not there before -- and the caller should fetch
-            the whole measurement instead.
-
+    Return None if registration, shape, or variables no longer match.
     """
     rows = dataset.encoding.get("qimchi_connect_rows") or {}
     start = int(rows.get("rows_from", 0))
@@ -1486,17 +1292,7 @@ def _merge_live_rows(
 
 
 def _live_since_rows(measurement_id: str, info: Dict[str, Any]) -> Optional[int]:
-    """
-    Return how many rows of this measurement are already held, if any.
-
-    Args:
-        measurement_id (str): Measurement about to be fetched.
-        info (Dict[str, Any]): Registry row for it.
-
-    Returns:
-        Optional[int]: Rows to ask from, or None to fetch the whole thing.
-
-    """
+    """Return the first uncached row for this registration."""
     cached = _LIVE_ACCUM.get(measurement_id)
     if cached is None or cached.get("started_at") != info.get("started_at"):
         return None
@@ -1508,12 +1304,13 @@ class LiveMemoryProvider:
     Provider for live datasets loaded through memory/WebSocket.
 
     This provider detects memory references with the "memory://" protocol and
-    resolves them to live datasets based on measurement IDs. It attempts to load
-    the dataset through a WebSocket connection for real-time access, and falls back
-    to disk loading if the WebSocket is unavailable. The provider annotates the
-    loaded dataset with source and measurement metadata for provenance. This allows
-    users to access live datasets in a seamless way through Qimchi's dataset APIs,
-    even if the underlying data is changing in real time or only partially available on disk.
+    resolves them to live datasets based on measurement IDs. It attempts to
+    load the dataset through a WebSocket connection for real-time access, and
+    falls back to disk loading if the WebSocket is unavailable. The provider
+    annotates the loaded dataset with source and measurement metadata for
+    provenance. This allows users to access live datasets in a seamless way
+    through Qimchi's dataset APIs, even if the underlying data is changing in
+    real time or only partially available on disk.
 
     """
 
@@ -1613,9 +1410,8 @@ class LiveMemoryProvider:
         if _ws_worth_trying(measurement_id, info):
             try:
                 since_rows = _live_since_rows(measurement_id, info)
-                # Only sent when rows are actually held, which never happens
-                # against a producer whose qimchi-connect cannot describe
-                # them -- so an older one is asked exactly as it was before.
+                # Older producers never create a row cache, so they receive no
+                # start_row parameter.
                 extra = {"since_rows": since_rows} if since_rows else {}
                 dataset = live_client.open_live_measurement_sync(
                     measurement_id, ws_url=ws_url, **extra
@@ -1820,9 +1616,7 @@ class NetcdfHdf5Provider:
         return self._load(ref)
 
     async def load_async(self, ref: str) -> LoadedData:
-        # Opening a dataset is blocking file I/O. Awaiting it inline pinned the
-        # event loop for the whole read, which is what makes a basket of ~90
-        # datasets stall unrelated requests while the Metadata tab loads.
+        # Keep blocking dataset I/O off the event loop.
         return await asyncio.to_thread(self._load, ref)
 
 
@@ -1944,9 +1738,7 @@ class FilesystemXarrayProvider:
         return self._load(ref)
 
     async def load_async(self, ref: str) -> LoadedData:
-        # Opening a dataset is blocking file I/O. Awaiting it inline pinned the
-        # event loop for the whole read, which is what makes a basket of ~90
-        # datasets stall unrelated requests while the Metadata tab loads.
+        # Keep blocking dataset I/O off the event loop.
         return await asyncio.to_thread(self._load, ref)
 
 

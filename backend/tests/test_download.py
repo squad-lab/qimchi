@@ -67,6 +67,31 @@ async def test_download_dataset_archives_single_file(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_download_live_measurement_resolves_its_disk_path(tmp_path, monkeypatch):
+    dataset = tmp_path / "live-run.zarr"
+    dataset.mkdir()
+    (dataset / "zarr.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        download,
+        "resolve_to_disk_path",
+        lambda ref: str(dataset) if ref == "memory://live-run" else ref,
+    )
+
+    response = await download.download_dataset(PathData(path="memory://live-run"))
+    selected = await download.download_selected_datasets(
+        [PathData(path="memory://live-run")]
+    )
+    multiple = await download.download_multiple_datasets(
+        PathsData(paths=["memory://live-run"])
+    )
+
+    assert response.filename == "live-run.zip"
+    assert "live-run.zarr/zarr.json" in _data_members(response)
+    assert "live-run.zarr/zarr.json" in _data_members(selected)
+    assert "live-run.zarr/zarr.json" in _data_members(multiple)
+
+
+@pytest.mark.asyncio
 async def test_download_dataset_rejects_missing_path(tmp_path):
     with pytest.raises(HTTPException) as exc:
         await download.download_dataset(PathData(path=str(tmp_path / "missing.nc")))

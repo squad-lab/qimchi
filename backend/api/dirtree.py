@@ -6,6 +6,7 @@ FastAPI endpoint for many Explorer/DirTree related operations.
 import asyncio
 import hashlib
 import json
+import math
 import os
 import stat as stat_module
 import subprocess  # Windows compat
@@ -33,11 +34,13 @@ from .data_loader import (
     resolve_live_dataset,
     resolve_to_disk_path,
 )
+from .diagnostics import register_gauge
 from .json_utils import sanitize_for_json
 from .logger import logger
 
 # Local imports
-from .models import PathData
+from .models import PathData, PinnedParametersRequest
+from .units import format_quantity
 
 router = APIRouter()
 
@@ -103,16 +106,7 @@ def _get_dataset_last_modified(path: Path, store_mtime: float | None = None) -> 
 
 
 def _get_folder_size(path: Path) -> int:
-    """
-    Helper function to get approximate folder size in bytes.
-
-    Args:
-        path (Path): Path to the directory.
-
-    Returns:
-        int: Total size of files in the directory, limited to first 10 items.
-
-    """
+    """Estimate folder size from its first ten entries."""
     try:
         total_size = 0
 
@@ -128,15 +122,7 @@ def _get_folder_size(path: Path) -> int:
 
 
 def _close_dataset(dataset) -> None:
-    """
-    Release a loaded dataset, tolerating the ones that cannot be closed.
-
-    A dataset read out of a DataTree node is a ``DatasetView``, and xarray
-    raises AttributeError rather than closing it ("close the associated
-    DataTree node instead"). Raising from a ``finally`` replaced the response
-    with a 500 for every DataTree reference, so the close is best-effort.
-
-    """
+    """Close a dataset when supported; DataTree views cannot close independently."""
     try:
         dataset.close()
     except Exception as exc:  # noqa: BLE001 - releasing must never fail a request
@@ -151,19 +137,7 @@ def _iso_from_mtime(mtime: float) -> str:
 
 
 def _get_file_timestamp(path: Path) -> str:
-    """
-    Helper function to get file modification timestamp as ISO string.
-
-    Args:
-        path (Path): Path to the file or directory.
-
-    Returns:
-        str: ISO formatted timestamp of the last modification.
-
-    Raises:
-        OSError: If the path cannot be accessed.
-
-    """
+    """Return a path's modification time as an ISO string."""
     try:
         import datetime
 
@@ -181,14 +155,7 @@ def _store_fingerprint(st: os.stat_result) -> str:
 
 
 def _read_scan_cache(paths: list[str]) -> Dict[str, tuple]:
-    """
-    Look up cached (fingerprint, size, last_modified) for the given stores.
-
-    A DB failure is not fatal here: the cache only saves work, so a miss just
-    means the scan computes the values itself (see shared/db.py's degradation
-    contract -- the Explorer must keep working without the database).
-
-    """
+    """Return cached scan metadata; treat database errors as cache misses."""
     if not paths:
         return {}
 
@@ -249,14 +216,12 @@ def _write_scan_cache(entries: list[tuple]) -> None:
 
 # Simple TTL cache for zarr sizes
 _SIZE_CACHE: Dict[str, Dict] = {}
+register_gauge("size cache", lambda: len(_SIZE_CACHE))
 # cache entry: { 'value': int, 'expires_at': float }
 
 
 async def _run_subprocess(cmd, input_data: bytes = None):
-    """
-    Run subprocess asynchronously and return (returncode, stdout, stderr).
-
-    """
+    """Run a subprocess and return its code, stdout, and stderr."""
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -278,55 +243,12 @@ async def _run_subprocess(cmd, input_data: bytes = None):
 
 
 async def get_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
-    """
-    Build a dataset directory tree, off the event loop.
-
-    The scan is `fd` subprocesses plus a stat-heavy pass over every dataset --
-    all of it blocking. Qimchi runs a single uvicorn worker (plot_ref context is
-    per-worker, see CURRENT_ISSUES.md), so doing that work inline froze every
-    other request -- /health, plots, notes -- for the whole scan. This matches
-    the `asyncio.to_thread` convention already used by library.py and notes.py.
-
-    Args:
-        path: str or Path-like root directory to scan.
-        max_depth: maximum recursion depth to request from fd.
-
-    Returns:
-        Dict: TreeNode-style dict describing the directory tree.
-
-    """
+    """Build a dataset directory tree without blocking the event loop."""
     return await asyncio.to_thread(_build_directory_tree_zarr, path, max_depth)
 
 
 def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
-    """
-    Build a dataset directory tree using the `fd` utility for fast traversal.
-
-    Supported dataset items:
-    - `.zarr` directories
-    - `.nc`, `.h5`, `.hdf5` files
-    - `.csv`, `.txt`, `.dat` files
-    - `.mat` MATLAB files
-    - `.db` - QCoDeS SQLite databases with special handling to list runs as children
-    - `.sqlite` - Container SQLite databases with multiple measurements
-
-    If `fd` is not available (FD_EXEC is None), the function
-    returns an error dict so the caller can decide on fallback behavior.
-
-    Args:
-        path: str or Path-like root directory to scan.
-        max_depth: maximum recursion depth to request from fd.
-
-    Returns:
-        Dict: TreeNode-style dict describing the directory tree, or an
-        error dict when `fd` is unavailable or fails.
-
-    Raises:
-        FileNotFoundError: If the provided path does not exist.
-        NotADirectoryError: If the provided path is not a directory.
-        RuntimeError: If required system utilities are missing or if `fd` encounters an error.
-
-    """
+    """Build a dataset tree with ``fd``, including supported files and zarr stores."""
     path = Path(path)
 
     if not path.exists():
@@ -337,8 +259,6 @@ def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
         logger.error(f"get_directory_tree_zarr | Path is not a directory: {path}")
         raise NotADirectoryError("Path is not a folder")
 
-    # Check fd availability from config
-    # Require command-line utilities
     missing_tools = []
     if not FD_EXEC:
         missing_tools.append("fd")
@@ -356,7 +276,6 @@ def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
             f"Missing required system utilities: {', '.join(missing_tools)}"
         )
 
-    # Prepare root node
     root_id = f"folder-{hash(str(path)) % 100000}"
     root_node = {
         "id": root_id,
@@ -387,8 +306,6 @@ def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
         str(path),
     ]
 
-    # Windows compat - use subprocess.run instead of asyncio subprocess
-    # rc, out, err = await _run_subprocess(cmd)
     cmd_dataset_files = [
         FD_EXEC,
         "--hidden",
@@ -420,9 +337,7 @@ def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
         str(path),
     ]
 
-    # The two passes are independent and were ~46% of scan time once the
-    # per-dataset work was fixed, so overlap them rather than paying both in
-    # series. Two threads, since _run_fd_capture blocks on a subprocess.
+    # Run the two independent, blocking fd scans in parallel.
     with ThreadPoolExecutor(max_workers=2) as pool:
         future_dirs = pool.submit(_run_fd_capture, cmd_zarr_dirs)
         future_files = pool.submit(_run_fd_capture, cmd_dataset_files)
@@ -481,9 +396,7 @@ def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
             item = Path(p)
             item.relative_to(path)  # Ensure path is under root
 
-            # One stat per entry: is_dir()/is_file() plus the later size,
-            # mtime and timestamp lookups each stat-ed the same path again, so
-            # a scan cost 3-4 syscalls per dataset instead of one.
+            # Reuse one stat result for type, size, mtime, and timestamp.
             st = item.stat()
             is_directory = stat_module.S_ISDIR(st.st_mode)
 
@@ -584,9 +497,7 @@ def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
 
     _write_scan_cache(cache_writes)
 
-    # Build parent-child relationships. The duplicate check is a per-parent set
-    # rather than a scan of the children list, which made attaching a folder of
-    # N siblings O(N^2) -- ~12M comparisons for a folder of 5k measurements.
+    # Use per-parent sets to build relationships in O(N).
     seen_child_paths: Dict[str, set] = {}
 
     for p_str, node in list(nodes.items()):
@@ -624,63 +535,6 @@ def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
                 sort_children(c)
 
     sort_children(nodes[str(path)])
-
-    # Serialising every node here cost a full string build -- and a multi-MB
-    # write, since the file handler runs at DEBUG -- on every single scan.
-    # logger.debug(f"Directory tree built with these nodes:\n{nodes}")
-    # print(f"Directory tree built with these nodes:\n{nodes}")  # DEBUG:
-
-    # TODOLATER: Re-enable size computation using du/xargs if windows compat is ever resolved.
-    # --- Compute sizes for .zarr nodes using fast external tool (du) if available ---
-    # Collect zarr paths
-    # Compute sizes for zarr paths using du + xargs in parallel. We expect
-    # GNU du with -b to be available on the user's linux host. Use xargs to
-    # parallelize work. Any missing utility is an error which we already
-    # checked above.
-    # zarr_paths = [p for p, n in nodes.items() if n.get("tags") == ["zarr"]]
-
-    # sizes_from_du = {}
-
-    # if zarr_paths:
-    #     # Check cache first
-    #     now = time.time()
-    #     to_query = []
-    #     for p in zarr_paths:
-    #         ent = _SIZE_CACHE.get(p)
-    #         if ent and ent.get("expires_at", 0) > now:
-    #             sizes_from_du[p] = ent["value"]
-    #         else:
-    #             to_query.append(p)
-
-    #     if to_query:
-    #         # Build null-separated input and run: xargs -0 -n50 -P4 du -sb
-    #         input_data = "\0".join(to_query).encode("utf-8") + b"\0"
-    #         cmd = [XARGS_EXEC, "-0", "-n", "50", "-P", "4", DU_EXEC, "-sb"]
-    #         rc, out, err = await _run_subprocess(cmd, input_data=input_data)
-    #         if rc != 0:
-    #             raise RuntimeError(
-    #                 f"Error running du/xargs: {err.strip() or out.strip()}"
-    #             )
-
-    #         for line in out.splitlines():
-    #             parts = line.strip().split(None, 1)
-    #             if len(parts) == 2:
-    #                 size_str, pth = parts
-    #                 try:
-    #                     size = int(size_str)
-    #                     sizes_from_du[str(Path(pth))] = size
-    #                     # store in cache for 30s
-    #                     _SIZE_CACHE[str(Path(pth))] = {
-    #                         "value": size,
-    #                         "expires_at": now + 30,
-    #                     }
-    #                 except ValueError:
-    #                     continue
-
-    # # Attach computed sizes to nodes
-    # for pth, size in sizes_from_du.items():
-    #     if pth in nodes and nodes[pth].get("tags") == ["zarr"]:
-    #         nodes[pth]["size"] = size
 
     return nodes[str(path)]
 
@@ -832,24 +686,7 @@ def _build_memory_tree(path_str: str) -> Dict[str, object]:
 
 
 def _build_sqlite_tree(db_path: Path) -> Dict[str, object]:
-    """
-    Build a virtual tree for a QCoDeS sqlite file. Children are run references.
-
-    Each run reference has a path like "path/to/db.sqlite#run_id=123" which can be used
-    to load that run's dataset. This allows users to explore runs within a sqlite file
-    without needing to know the internal structure of the database. The frontend can use
-    the run_id and db_path to load the dataset when the user clicks on a run node.
-
-    Args:
-        db_path (Path): Path to the sqlite file.
-
-    Returns:
-        Dict[str, object]: TreeNode-style dict representing the sqlite file and its runs.
-
-    Raises:
-        FileNotFoundError: If the sqlite file does not exist.
-
-    """
+    """Build a virtual tree of QCoDeS runs grouped by date."""
     if not db_path.exists() or not db_path.is_file():
         raise FileNotFoundError(f"SQLite file does not exist: {db_path}")
 
@@ -925,23 +762,7 @@ def _build_sqlite_tree(db_path: Path) -> Dict[str, object]:
 
 
 def _build_datatree_tree(store_path: Path) -> Dict[str, object]:
-    """
-    Build a virtual tree for a DataTree-backed store/file.
-
-    Each leaf that has a dataset payload receives a dataset reference path:
-    "<store>#dt_path=/node/path"
-
-    Args:
-        store_path (Path): Path to the DataTree store (e.g. .zarr directory or .nc file)
-
-    Returns:
-        Dict[str, object]: TreeNode-style dict representing the DataTree structure.
-
-    Raises:
-        FileNotFoundError: If the store path does not exist.
-        ValueError: If the path is not a DataTree-capable format or if no nodes are found.
-
-    """
+    """Build a virtual tree whose dataset leaves use ``#dt_path=`` references."""
     if not store_path.exists():
         raise FileNotFoundError(f"DataTree path does not exist: {store_path}")
 
@@ -1076,21 +897,7 @@ async def load_live_measurements() -> Dict:
 
 @router.post("/load/")
 async def load_directory(path: PathData) -> Dict:
-    """
-    Load the directory tree structure at the given path.
-    Returns up to 3 levels of directories and includes .zarr files.
-
-    Args:
-        path (PathData): Path to the directory.
-
-    Returns:
-        Dict: Directory tree structure in TreeNode format.
-
-    Raises:
-        HTTPException: If the path does not exist, is not a directory, or if there
-                    is an error loading the directory or its contents.
-
-    """
+    """Load a filesystem, live-memory, SQLite, or DataTree path as a tree."""
     raw_path = path.path
     logger.debug(f"load_directory | POST path={raw_path}")
 
@@ -1159,19 +966,7 @@ async def load_directory(path: PathData) -> Dict:
 
 
 async def _load_dataset_for_metadata(path_ref: str) -> xr.Dataset:
-    """
-    Resolve and load a dataset for metadata endpoints.
-
-    Args:
-        path_ref (str): The path reference which can be a memory:// URI or a filesystem path.
-
-    Returns:
-        xr.Dataset: The loaded dataset ready for metadata extraction.
-
-    Raises:
-        HTTPException: If the path reference is invalid, if the dataset cannot be loaded, or if the dataset is not found.
-
-    """
+    """Resolve a dataset reference for metadata endpoints."""
     normalized_ref = (path_ref or "").strip()
     if normalized_ref in {"", "/", "\\"}:
         raise HTTPException(
@@ -1206,8 +1001,7 @@ INTERNAL_META_KEYS: frozenset = frozenset(
     }
 )
 
-# qanary's own sections. Listed first when present.
-# Other measurement utilities may not write them
+# Preferred qanary metadata sections.
 PREFERRED_META_KEYS: list = [
     "Sweeps",
     "Parameters Snapshot",
@@ -1215,9 +1009,7 @@ PREFERRED_META_KEYS: list = [
     "Instruments Snapshot",
 ]
 
-# QCoDeS writes many implementation attrs into its xarray conversion.  The
-# Metadata pane intentionally exposes the stable, user-facing subset only and
-# packages it as one JSON document, matching qanary's structured sections.
+# Expose stable QCoDeS metadata as one structured section.
 QCODES_META_SECTION: str = "QCoDeS Metadata"
 QCODES_META_KEYS: tuple[str, ...] = (
     "ds_name",
@@ -1230,16 +1022,7 @@ QCODES_META_KEYS: tuple[str, ...] = (
 
 
 def _expand_json_string(text: str) -> object | None:
-    """
-    Parse a value that is a JSON document stored as a string, else None.
-
-    Args:
-        text (str): The string to parse as JSON.
-
-    Returns:
-        object | None: The parsed JSON object if it's a dict or list, else None.
-
-    """
+    """Parse a JSON object or array stored as a string."""
     stripped = text.lstrip()
     if not stripped.startswith(("{", "[")):
         return None
@@ -1280,20 +1063,7 @@ NON_QANARY_ATTR_KEYS: list = [
 
 
 def build_attrs_payload(data: xr.Dataset) -> Dict:
-    """
-    Project a dataset onto the ``/load-attrs/`` response shape.
-
-    Shared with the library's metadata cache so a cached payload is byte-for-byte
-    what the endpoint would have produced -- if these ever diverged, a cache hit
-    would return a different shape from a cache miss.
-
-    Args:
-        data (xr.Dataset): The xarray dataset from which to extract metadata.
-
-    Returns:
-        Dict: A dictionary containing the selected metadata attributes, independents, and dependents.
-
-    """
+    """Build the canonical ``/load-attrs/`` response for a dataset."""
     metadata: dict = data.attrs
     if not isinstance(metadata, dict):
         metadata = dict(metadata)
@@ -1348,23 +1118,11 @@ def build_attrs_payload(data: xr.Dataset) -> Dict:
 
 @router.post("/load-attrs/")
 async def get_meta_attrs(path: PathData) -> Dict:
-    """
-    Get metadata attrs for a .zarr dataset.
-
-    Args:
-        path (PathData): Path to the .zarr dataset directory.
-
-    Returns:
-        Dict: Metadata attrs from the zarr dataset
-
-    """
+    """Return a dataset's summary metadata and variables."""
     raw_path = path.path
     logger.debug(f"get_meta_attrs | POST path={raw_path}")
 
-    # NOTE: Read-through cache: metadata is assumed unchanging, so once a dataset has
-    # been opened its attrs are served from the DB instead of re-reading the
-    # file. The cached row is only used while its stat fingerprint still
-    # matches (see api/library.py::get_cached_attrs).
+    # Serve cached attrs while the dataset's stat fingerprint matches.
     from .library import get_cached_attrs, store_cached_attrs
 
     cached = await get_cached_attrs(raw_path)
@@ -1397,16 +1155,7 @@ async def get_meta_attrs(path: PathData) -> Dict:
 
 @router.post("/load-meta/")
 async def get_metadata(path: PathData) -> Dict:
-    """
-    Get collapsible metadata key-vals for a .zarr dataset.
-
-    Args:
-        path (PathData): Path to the .zarr dataset directory.
-
-    Returns:
-        Dict: Collapsible metadata key-vals from the zarr dataset
-
-    """
+    """Return a dataset's collapsible metadata sections."""
     raw_path = path.path
 
     logger.debug(f"get_metadata | POST path={raw_path}")
@@ -1441,14 +1190,10 @@ async def get_metadata(path: PathData) -> Dict:
                 key for key in PREFERRED_META_KEYS if key in metadata
             ]
             if qanary_sections:
-                # A qanary dataset shows its four sections and nothing else.
-                # Its other attrs -- Cryostat, Wafer ID, Measurement ID and the
-                # rest -- are the Basket's attribute strip, not this pane, and
-                # listing them here buries the sections people come for.
+                # qanary reserves this pane for its four metadata sections.
                 meta_dict = {key: metadata[key] for key in qanary_sections}
             else:
-                # Anything else (Quantify, a bare xarray file) has no sections
-                # to show, so show what it does carry rather than nothing.
+                # Other formats expose their remaining attrs directly.
                 meta_dict = {
                     key: metadata[key]
                     for key in sorted(metadata)
@@ -1476,18 +1221,58 @@ async def get_metadata(path: PathData) -> Dict:
             _close_dataset(data)
 
 
+def _parameter_display(value: object, unit: object) -> str:
+    """Format a parameter to four significant digits with an SI prefix."""
+    unit_text = str(unit or "").strip()
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        number = float(value)
+        if math.isfinite(number):
+            return format_quantity(float(f"{number:.4g}"), unit_text)
+    text = "" if value is None else str(value)
+    return f"{text} {unit_text}".strip()
+
+
+@router.post("/load-meta/parameters/")
+async def get_pinned_parameters(request: PinnedParametersRequest) -> Dict:
+    """Return requested Parameters Snapshot entries in request order."""
+    data: Optional[xr.Dataset] = None
+    try:
+        data = await _load_dataset_for_metadata(request.path)
+        snapshot = data.attrs.get("Parameters Snapshot")
+        if isinstance(snapshot, str):
+            snapshot = _expand_json_string(snapshot)
+        if not isinstance(snapshot, dict):
+            snapshot = {}
+
+        parameters = []
+        for name in request.names:
+            entry = snapshot.get(name)
+            if not isinstance(entry, dict):
+                parameters.append({"name": name, "missing": True})
+                continue
+            parameters.append(
+                {
+                    "name": name,
+                    "label": str(entry.get("label") or name),
+                    "display": _parameter_display(
+                        entry.get("value"), entry.get("unit")
+                    ),
+                }
+            )
+        return sanitize_for_json({"parameters": parameters})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("get_pinned_parameters | Error loading parameters")
+        raise HTTPException(status_code=500, detail=f"Error loading parameters: {e}")
+    finally:
+        if data is not None:
+            _close_dataset(data)
+
+
 @router.post("/dataset-status/")
 async def get_dataset_status(data: PathData) -> Dict:
-    """
-    Get live status and metadata for a dataset.
-
-    Args:
-        data (PathData): Path to the zarr dataset directory.
-
-    Returns:
-        dict: Live status, last modification time, and other metadata.
-
-    """
+    """Return a dataset's live status and modification metadata."""
     try:
         disk_path = (
             resolve_to_disk_path(data.path)

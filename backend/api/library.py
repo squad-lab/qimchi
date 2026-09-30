@@ -1,14 +1,20 @@
 """
-Library endpoints: per-measurement state (hearts/trash) backed by the Qimchi DB.
+Library endpoints for measurement state such as hearts, trash, and tags.
 
-Register a measurement when it is opened and toggle heart/trash/tags, so the
-DirTree can filter on them. Keyed on the measurement UUID resolved by
-``shared/identity.py``: the qanary ``Measurement ID``, else a QCoDeS run
-``guid``, else a content-signature uuid5. ``measurements.uuid_origin`` records
-which tier answered. Only datasets that fail every tier (unreadable) stay
-unpersisted -- those calls return ``uuid=None`` and are no-ops.
+Measurements are registered when they are opened, and their library state is
+stored in the Qimchi database so the directory tree can filter against it.
 
-All DB work runs off the event loop via ``asyncio.to_thread`` (repo convention).
+Measurements are keyed by the UUID resolved in ``shared/identity.py``. The
+resolver prefers the qanary ``Measurement ID``, then a QCoDeS run ``guid``,
+and finally a content-signature-based UUID5. ``measurements.uuid_origin``
+records which source produced the UUID.
+
+Datasets that cannot be identified because they are unreadable are not stored.
+In those cases the API returns ``uuid=None``, and state-changing operations are
+treated as no-ops.
+
+Database operations are run outside the event loop with ``asyncio.to_thread``,
+following the convention used elsewhere in the repository.
 
 """
 
@@ -16,6 +22,7 @@ import asyncio
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -25,6 +32,7 @@ from sqlmodel import Session, select
 
 from .db_models import (
     LOCAL_USER_ID,
+    FilterPreset,
     Measurement,
     MeasurementState,
     MeasurementTag,
@@ -36,8 +44,7 @@ from .logger import logger
 from .shared.db import require_db, session_scope
 from .shared.identity import folder_uuid, resolve_from_attrs, resolve_identity
 
-# Every library endpoint needs the database; require_db turns a failed startup
-# migration into a 503 with the reason, rather than an opaque 500.
+# Report database startup failures as 503 responses.
 router = APIRouter(prefix="/library", dependencies=[Depends(require_db)])
 
 # Attrs cached per measurement (mirrors /load-attrs/, minus the
@@ -110,6 +117,32 @@ class TagMeasurementRequest(BaseModel):
     uuid: str
     tag_id: int
     add: bool = True
+
+
+class PresetFilter(BaseModel):
+    """A filter key and its options."""
+
+    name: str
+    options: Any = None
+
+
+class FilterPresetOut(BaseModel):
+    id: int
+    name: str
+    filters: list[PresetFilter]
+    updatedAt: datetime
+
+
+class CreateFilterPresetRequest(BaseModel):
+    name: str
+    filters: list[PresetFilter]
+
+
+class UpdateFilterPresetRequest(BaseModel):
+    """Fields to rename a preset or replace its filters."""
+
+    name: str | None = None
+    filters: list[PresetFilter] | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -242,15 +275,7 @@ def _upsert_measurement(
 
 
 def _lean_attrs(ds) -> dict:
-    """
-    Build the attrs payload cached for a dataset.
-
-    Deliberately the same shape ``/load-attrs/`` returns (via
-    ``dirtree.build_attrs_payload``) plus the QCoDeS ``guid`` used for identity
-    resolution -- the metadata cache is read back as that endpoint's response,
-    so a narrower projection here would make a cache hit differ from a miss.
-
-    """
+    """Build the cached ``/load-attrs/`` payload, including QCoDeS identity."""
     from .dirtree import build_attrs_payload
 
     out = build_attrs_payload(ds)
@@ -263,14 +288,7 @@ def _lean_attrs(ds) -> dict:
 async def _resolve(
     path: str, attrs: dict | None
 ) -> tuple[str | None, str | None, dict | None]:
-    """
-    Resolve ``(uuid, origin, attrs)`` for a dataset.
-
-    Native ids (qanary / QCoDeS) are answered straight from ``attrs`` when the
-    caller already has them, so the common path costs no dataset load. Only the
-    content-signature tier needs the dataset opened.
-
-    """
+    """Resolve dataset identity from attrs, loading data only when needed."""
     uuid, origin = resolve_from_attrs(attrs)
     if uuid:
         return uuid, origin, attrs
@@ -293,26 +311,7 @@ async def _resolve(
 
 
 def library_metadata(dataset_path: Path, dataset_uuid: str | None = None) -> dict:
-    """
-    Collect what the library knows about a measurement, for a file leaving Qimchi.
-
-    An exported image or a downloaded dataset otherwise leaves its annotations
-    behind: which tags it carried, whether it was hearted. The library database
-    is optional, so a failure here degrades to the identifiers alone rather
-    than failing the export or the download.
-
-    ``session_scope`` is imported inside the function, not at module level, so
-    the lookup is reached lazily and can be substituted in tests.
-
-    Args:
-        dataset_path (Path): Dataset the plots were made from.
-        dataset_uuid (str | None): Identifier to look up; defaults to the
-            filename stem, which is the measurement UUID for qanary datasets.
-
-    Returns:
-        dict: Metadata for a sidecar file, and for PNG text chunks.
-
-    """
+    """Return export metadata, including library state when available."""
     if dataset_uuid is None:
         dataset_uuid = dataset_path.stem
 
@@ -335,9 +334,7 @@ def library_metadata(dataset_path: Path, dataset_uuid: str | None = None) -> dic
         from .shared.db import session_scope
 
         with session_scope() as session:
-            # The filename stem is the canonical measurement UUID. Prefer it
-            # over the node-local path, while retaining the path lookup for
-            # legacy records whose filename was not their identity.
+            # Prefer the canonical filename UUID, with path lookup for legacy rows.
             measurement = session.get(Measurement, dataset_uuid)
             if measurement is None:
                 measurement = session.exec(
@@ -365,17 +362,8 @@ def library_metadata(dataset_path: Path, dataset_uuid: str | None = None) -> dic
 # --------------------------------------------------------------------------- #
 # Metadata read-through cache
 # --------------------------------------------------------------------------- #
-# Metadata is assumed unchanging, so once a dataset has been opened its attrs
-# are served from `measurements.metadata_json` instead of re-reading the file.
-#
-# The lookup keys on `abs_path` (an indexed column), NOT the measurement UUID:
-# resolving a UUID can require opening the dataset, which is exactly the work
-# the cache exists to avoid.
-#
-# "Assumed unchanging" is not "guaranteed unchanging", so a cheap stat
-# signature guards it -- a rewritten dataset reloads instead of serving stale
-# attrs. Live (`memory://`) datasets are never cached: they grow as the
-# measurement runs, so their attrs genuinely change.
+# Cache attrs by indexed abs_path and validate them with a stat fingerprint.
+# Live and QCoDeS references are excluded because their backing stores change.
 
 
 # Increment when loader changes require invalidating cached /load-attrs/ payloads.
@@ -392,9 +380,11 @@ def _fingerprint(path: str) -> str | None:
 
 
 def _is_cacheable(path: str) -> bool:
-    # memory:// is live and mutating; a "#run_id=" reference points into a
-    # QCoDeS db whose mtime changes whenever ANY run is added, so its
-    # fingerprint would churn even though the run itself is fixed.
+    # ``memory://`` sources are live and can change over time. A ``#run_id=``
+    # reference, however, points to a fixed run inside a QCoDeS database. Since
+    # the database mtime changes whenever any run is added, using it in the
+    # fingerprint would invalidate the cache even when this particular run has
+    # not changed.
     return not path.startswith("memory://") and "#run_id=" not in path
 
 
@@ -420,15 +410,7 @@ def _read_cached_attrs(path: str) -> dict | None:
 
 
 def _update_existing_cached_attrs(path: str, attrs: dict) -> bool:
-    """
-    Refresh the cache on a measurement that is already registered.
-
-    Returns True when a row was found and updated. Kept separate from the
-    create path so the common case costs one indexed lookup -- resolving a
-    content-signature UUID means sampling the dataset's coordinates, which is
-    pointless when the row it would key already exists.
-
-    """
+    """Refresh an existing cache row and return whether one was found."""
     fingerprint = _fingerprint(path)
     if fingerprint is None:
         return False
@@ -449,16 +431,7 @@ def _update_existing_cached_attrs(path: str, attrs: dict) -> bool:
 def _write_cached_attrs(
     path: str, attrs: dict, uuid: str | None, origin: str | None
 ) -> None:
-    """
-    Upsert the measurement row carrying the cached attrs.
-
-    The row is CREATED when absent. It has to be: nothing registers a
-    measurement merely because it was opened -- ``/library/register`` is called
-    lazily, only when the user first hearts/trashes/tags something. If this
-    returned early on a missing row, the cache would never populate for a
-    measurement the user never annotated, i.e. the common case.
-
-    """
+    """Upsert the measurement row that stores cached attrs."""
     if uuid is None:
         return  # unidentifiable dataset; nothing to key the cache on
     with session_scope() as session:
@@ -477,15 +450,7 @@ async def get_cached_attrs(path: str) -> dict | None:
 
 
 async def store_cached_attrs(path: str, attrs: dict, dataset=None) -> None:
-    """
-    Cache a freshly built ``/load-attrs/`` payload, registering the measurement
-    if this is the first time it has been opened. Best-effort: a DB problem must
-    never break metadata loading.
-
-    ``dataset`` is the already-open xarray Dataset, passed so a content-signature
-    UUID can be derived without re-reading the file.
-
-    """
+    """Cache attrs and register the measurement without failing metadata loads."""
     if not attrs:
         return
     try:
@@ -495,17 +460,12 @@ async def store_cached_attrs(path: str, attrs: dict, dataset=None) -> None:
             # identity plus the run integer, rather than each run's own GUID.
             attrs["qimchi_db_uuid"] = database_uuid
         cacheable = _is_cacheable(path)
-        # Already registered? Cheap indexed update, no identity work. QCoDeS
-        # runs are deliberately not cacheable because their shared database
-        # changes as other runs are added, but they still need registration so
-        # notes can use the Qimchi UUID instead of a filename-derived key.
+        # Refresh registered rows without resolving identity again.
         if cacheable and await asyncio.to_thread(
             _update_existing_cached_attrs, path, attrs
         ):
             return
-        # First time this measurement has been opened -- resolve its identity
-        # and create the row, so the cache works without waiting for the user
-        # to heart/tag it (which is what triggers /library/register).
+        # Register on first open so caching does not depend on hearting or tagging.
         uuid, origin = await asyncio.to_thread(resolve_identity, attrs, dataset)
         await asyncio.to_thread(_write_cached_attrs, path, attrs, uuid, origin)
     except Exception:
@@ -681,22 +641,7 @@ def _list_tags() -> list[TagOut]:
 
 
 def _rename_tag(tag_id: int, name: str) -> TagOut:
-    """
-    Rename a tag in place, keeping every measurement that carries it.
-
-    Args:
-        tag_id (int): Tag to rename.
-        name (str): New name.
-
-    Returns:
-        TagOut: The renamed tag.
-
-    Raises:
-        HTTPException: 404 for an unknown tag, 400 for an empty name, 409 when
-            another tag already has the name -- renaming onto it would need a
-            merge, which is a different decision than a rename.
-
-    """
+    """Rename a tag without changing its measurement assignments."""
     name = name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Tag name cannot be empty")
@@ -776,13 +721,90 @@ def _set_measurement_tag(uuid: str, tag_id: int, add: bool) -> list[int]:
 # --------------------------------------------------------------------------- #
 # Routes
 # --------------------------------------------------------------------------- #
+def _preset_out(preset: FilterPreset) -> FilterPresetOut:
+    return FilterPresetOut(
+        id=preset.id,
+        name=preset.name,
+        filters=json.loads(preset.filters_json or "[]"),
+        updatedAt=preset.updated_at,
+    )
+
+
+def _preset_name(name: str, session: Session, exclude_id: int | None = None) -> str:
+    """Validate and normalize a unique preset name."""
+    name = name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Preset name cannot be empty")
+    query = select(FilterPreset).where(
+        FilterPreset.user_id == LOCAL_USER_ID, FilterPreset.name == name
+    )
+    if exclude_id is not None:
+        query = query.where(FilterPreset.id != exclude_id)
+    if session.exec(query).first() is not None:
+        raise HTTPException(
+            status_code=409, detail=f"A preset named {name!r} already exists"
+        )
+    return name
+
+
+def _filters_json(filters: list[PresetFilter]) -> str:
+    if not filters:
+        raise HTTPException(
+            status_code=400, detail="A preset needs at least one filter"
+        )
+    return json.dumps([f.model_dump() for f in filters])
+
+
+def _list_filter_presets() -> list[FilterPresetOut]:
+    with session_scope() as session:
+        rows = session.exec(
+            select(FilterPreset)
+            .where(FilterPreset.user_id == LOCAL_USER_ID)
+            .order_by(FilterPreset.name)
+        ).all()
+        return [_preset_out(row) for row in rows]
+
+
+def _create_filter_preset(req: CreateFilterPresetRequest) -> FilterPresetOut:
+    with session_scope() as session:
+        preset = FilterPreset(
+            user_id=LOCAL_USER_ID,
+            name=_preset_name(req.name, session),
+            filters_json=_filters_json(req.filters),
+        )
+        session.add(preset)
+        session.flush()
+        return _preset_out(preset)
+
+
+def _update_filter_preset(
+    preset_id: int, req: UpdateFilterPresetRequest
+) -> FilterPresetOut:
+    with session_scope() as session:
+        preset = session.get(FilterPreset, preset_id)
+        if preset is None or preset.user_id != LOCAL_USER_ID:
+            raise HTTPException(status_code=404, detail="Unknown preset")
+        if req.name is not None:
+            preset.name = _preset_name(req.name, session, exclude_id=preset_id)
+        if req.filters is not None:
+            preset.filters_json = _filters_json(req.filters)
+        preset.updated_at = _utcnow()
+        session.add(preset)
+        session.flush()
+        return _preset_out(preset)
+
+
+def _delete_filter_preset(preset_id: int) -> None:
+    with session_scope() as session:
+        preset = session.get(FilterPreset, preset_id)
+        if preset is None or preset.user_id != LOCAL_USER_ID:
+            raise HTTPException(status_code=404, detail="Unknown preset")
+        session.delete(preset)
+
+
 @router.post("/register", response_model=StateOut)
 async def register(req: RegisterRequest) -> StateOut:
-    """Register/refresh a measurement on open; returns its heart/trash state.
-
-    The dataset is loaded only when ``attrs`` carries no native id and a content
-    signature has to be derived.
-    """
+    """Register a measurement and return its heart and trash state."""
     try:
         if req.folder:
             return await asyncio.to_thread(_register_folder, req.path)
@@ -836,3 +858,26 @@ async def delete_tag(tag_id: int) -> dict:
 async def tag_measurement(req: TagMeasurementRequest) -> list[int]:
     """Add/remove a tag on a measurement; returns the measurement's tag ids."""
     return await asyncio.to_thread(_set_measurement_tag, req.uuid, req.tag_id, req.add)
+
+
+@router.get("/filter-presets", response_model=list[FilterPresetOut])
+async def list_filter_presets() -> list[FilterPresetOut]:
+    return await asyncio.to_thread(_list_filter_presets)
+
+
+@router.post("/filter-presets", response_model=FilterPresetOut)
+async def create_filter_preset(req: CreateFilterPresetRequest) -> FilterPresetOut:
+    return await asyncio.to_thread(_create_filter_preset, req)
+
+
+@router.patch("/filter-presets/{preset_id}", response_model=FilterPresetOut)
+async def update_filter_preset(
+    preset_id: int, req: UpdateFilterPresetRequest
+) -> FilterPresetOut:
+    return await asyncio.to_thread(_update_filter_preset, preset_id, req)
+
+
+@router.delete("/filter-presets/{preset_id}")
+async def delete_filter_preset(preset_id: int) -> dict:
+    await asyncio.to_thread(_delete_filter_preset, preset_id)
+    return {"deleted": preset_id}

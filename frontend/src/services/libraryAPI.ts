@@ -44,11 +44,7 @@ export async function getDbStatus(): Promise<DbStatus> {
   return { dbReady: data.dbReady !== false, dbError: data.dbError ?? null };
 }
 
-/**
- * Register (or refresh) a measurement when it is opened, returning its
- * heart/trash state. `attrs` is the object already fetched from /load-attrs/,
- * passed through so the backend doesn't re-load the dataset.
- */
+/** Register an opened measurement using its already-fetched attrs. */
 export async function registerMeasurement(
   path: string,
   attrs?: Record<string, unknown>,
@@ -116,4 +112,55 @@ export async function tagMeasurement(uuid: string, tagId: number, add: boolean):
     add,
   });
   return data;
+}
+
+export interface PresetFilter {
+  name: string;
+  options?: unknown;
+}
+
+export interface FilterPreset {
+  id: number;
+  name: string;
+  filters: PresetFilter[];
+  updatedAt: string;
+}
+
+export async function getFilterPresets(): Promise<FilterPreset[]> {
+  const { data } = await axios.get<FilterPreset[]>(`${API_BASE_URL}/library/filter-presets`);
+  return data;
+}
+
+/** Create a preset. Duplicate names return HTTP 409. */
+export async function createFilterPreset(
+  name: string,
+  filters: PresetFilter[],
+): Promise<FilterPreset> {
+  const { data } = await axios.post<FilterPreset>(`${API_BASE_URL}/library/filter-presets`, {
+    name,
+    filters,
+  });
+  return data;
+}
+
+/** Rename a preset, replace its filters, or both. */
+export async function updateFilterPreset(
+  id: number,
+  changes: { name?: string; filters?: PresetFilter[] },
+): Promise<FilterPreset> {
+  const { data } = await axios.patch<FilterPreset>(
+    `${API_BASE_URL}/library/filter-presets/${id}`,
+    changes,
+  );
+  return data;
+}
+
+export async function deleteFilterPreset(id: number): Promise<void> {
+  await axios.delete(`${API_BASE_URL}/library/filter-presets/${id}`);
+}
+
+/** Return the server error detail or a fallback message. */
+export function libraryErrorMessage(error: unknown, fallback: string): string {
+  const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  return typeof detail === "string" ? detail : fallback;
 }
