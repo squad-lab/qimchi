@@ -1202,9 +1202,9 @@ const DesktopHelp = memo(() => (
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            To report a problem, open Settings &gt; Developer and choose Save logs for a bug report.
-            It saves both logs and a summary of your computer in one ZIP file to attach. Tick the
-            crash reports option to include recent crash reports from the app window as well
+            To report a problem, use the bug button on the sidebar rail. It explains what to
+            include, links to a new GitLab issue, and creates a ZIP containing the logs and a system
+            summary. Recent crash reports can be included as well
           </span>
         </li>
         <li className="flex gap-2 leading-relaxed">

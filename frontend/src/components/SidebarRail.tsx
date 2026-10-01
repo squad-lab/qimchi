@@ -32,6 +32,7 @@ import { useUpdateStore } from "../stores/updateStore";
 interface SidebarRailProps {
   onOpenHelp?: () => void; // For opening the Help modal
   onOpenSettings?: (section?: string) => void;
+  onOpenBugReport?: () => void;
 }
 
 // Rail tabs. Icon-only by design -- the labels live in the tooltips and the
@@ -70,7 +71,7 @@ const nextZoom = (current: number, direction: 1 | -1): number => {
   return ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, Math.max(0, index + direction))];
 };
 
-const SidebarRail = ({ onOpenHelp, onOpenSettings }: SidebarRailProps) => {
+const SidebarRail = ({ onOpenHelp, onOpenSettings, onOpenBugReport }: SidebarRailProps) => {
   const { sidebarCollapsed, activeSection, setSidebarCollapsed, setActiveSection } =
     useSidebarStore();
   const zoomLevel = useSettingsStore((state) => state.settings.general.zoom);
@@ -185,15 +186,14 @@ const SidebarRail = ({ onOpenHelp, onOpenSettings }: SidebarRailProps) => {
 
       <div className="mx-auto h-px w-6 shrink-0 bg-gray-300" role="separator" />
       <Tooltip content="Report a bug" position="right">
-        <a
-          href="https://gitlab.com/squad-lab/qimchi/-/work_items/new?type=Issue&initialCreationContext=list-route"
-          target="_blank"
-          rel="noreferrer"
+        <button
+          type="button"
+          onClick={() => onOpenBugReport?.()}
           className={`${railButtonBaseClass} ${railPlainButtonClass}`}
-          aria-label="Report a bug on GitLab"
+          aria-label="Report a bug"
         >
           <Bug size={17} />
-        </a>
+        </button>
       </Tooltip>
 
       <Tooltip content="Settings (Shift+S)" position="right">
