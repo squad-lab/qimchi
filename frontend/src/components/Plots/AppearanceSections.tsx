@@ -691,7 +691,7 @@ export const ColormapSection: React.FC<ColormapSectionProps> = ({
                     displayMax={displayMax}
                   />
                   {hasValidBounds && (
-                    <div className="flex justify-between text-[10px] text-gray-400 mt-1 pb-1">
+                    <div className="flex justify-between text-[0.625rem] text-gray-400 mt-1 pb-1">
                       <span>Data min: {formatZ(zMin)}</span>
                       <span>Data max: {formatZ(zMax)}</span>
                     </div>

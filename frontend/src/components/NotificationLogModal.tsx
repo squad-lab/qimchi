@@ -85,14 +85,16 @@ const NotificationLogEntry: React.FC<{
           </div>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5 opacity-70">
             {log.source && (
-              <span className="text-[10px] px-1.5 py-0.5 bg-black bg-opacity-10 rounded font-bold uppercase tracking-tight">
+              <span className="text-[0.625rem] px-1.5 py-0.5 bg-black bg-opacity-10 rounded font-bold uppercase tracking-tight">
                 {log.source}
               </span>
             )}
-            <span className="text-[10px] uppercase tracking-wider font-semibold">{log.type}</span>
+            <span className="text-[0.625rem] uppercase tracking-wider font-semibold">
+              {log.type}
+            </span>
             <span className="w-1 h-1 rounded-full bg-current opacity-40"></span>
             <span className="text-xs">{formatTime(log.timestamp)}</span>
-            <span className="text-[10px] ml-auto">{formatDate(log.timestamp)}</span>
+            <span className="text-[0.625rem] ml-auto">{formatDate(log.timestamp)}</span>
           </div>
         </div>
       </div>
@@ -102,7 +104,9 @@ const NotificationLogEntry: React.FC<{
           className="mt-2 p-2 bg-white bg-opacity-50 rounded border border-black border-opacity-5 overflow-hidden text-xs"
           onClick={(e) => e.stopPropagation()}
         >
-          <p className="text-[10px] font-bold uppercase text-slate-500 mb-1">Technical Details</p>
+          <p className="text-[0.625rem] font-bold uppercase text-slate-500 mb-1">
+            Technical Details
+          </p>
           {typeof log.metadata === "object" ? (
             <JsonView
               value={log.metadata}
@@ -112,7 +116,7 @@ const NotificationLogEntry: React.FC<{
               collapsed={1}
               style={
                 {
-                  fontSize: "11px",
+                  fontSize: "0.6875rem",
                   backgroundColor: "transparent",
                   "--w-rjv-background-color": "transparent",
                   "--w-rjv-line-color": "rgba(0,0,0,0.05)",
@@ -120,7 +124,7 @@ const NotificationLogEntry: React.FC<{
               }
             />
           ) : (
-            <pre className="whitespace-pre-wrap wrap-anywhere font-mono text-[11px]">
+            <pre className="whitespace-pre-wrap wrap-anywhere font-mono text-[0.6875rem]">
               {String(log.metadata)}
             </pre>
           )}
@@ -314,7 +318,7 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
               )}
             </div>
             {searchQuery && (
-              <div className="mt-1.5 px-0.5 flex justify-between items-center text-[11px] text-slate-500 italic">
+              <div className="mt-1.5 px-0.5 flex justify-between items-center text-[0.6875rem] text-slate-500 italic">
                 <span>
                   Found {filteredLogs.length} match
                   {filteredLogs.length !== 1 ? "es" : ""}

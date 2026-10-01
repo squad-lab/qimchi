@@ -1802,7 +1802,7 @@ const DirTree = ({
         {/* If Library DB is unavailable */}
         {!dbAvailable && (
           <div
-            className="mt-1 px-2 py-1.5 rounded-md border border-amber-300 bg-amber-50 text-amber-900 text-[11px] leading-snug"
+            className="mt-1 px-2 py-1.5 rounded-md border border-amber-300 bg-amber-50 text-amber-900 text-[0.6875rem] leading-snug"
             role="status"
             title={dbError ?? undefined}
           >
@@ -1903,7 +1903,7 @@ const DirTree = ({
                             <button
                               type="button"
                               onClick={() => toggleSelectedTag(tag.id)}
-                              className="rounded-full border border-indigo-300 bg-indigo-100 px-2 py-0.5 text-[11px] text-indigo-800 hover:bg-indigo-200"
+                              className="rounded-full border border-indigo-300 bg-indigo-100 px-2 py-0.5 text-[0.6875rem] text-indigo-800 hover:bg-indigo-200"
                             >
                               #{tag.name} &times;
                             </button>
@@ -2506,7 +2506,7 @@ const TreeItemComponent = ({
               {renderExplorerDisplayName()}
             </span>
             {isSqliteContainerNode && (
-              <span className="text-[10px] uppercase tracking-wide text-teal-700 bg-teal-100 border border-teal-200 rounded px-1 py-0.5 shrink-0">
+              <span className="text-[0.625rem] uppercase tracking-wide text-teal-700 bg-teal-100 border border-teal-200 rounded px-1 py-0.5 shrink-0">
                 RUNS
               </span>
             )}

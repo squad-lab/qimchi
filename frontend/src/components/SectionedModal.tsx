@@ -120,7 +120,7 @@ const SectionedModal = ({
           className={`w-full flex items-center gap-2.5 text-left text-sm font-semibold transition-all border-b border-gray-100 border-l-4 ${
             depth === 0
               ? "px-2.5 py-3.5 @min-[560px]/modal:px-4"
-              : "pl-5 pr-2.5 py-2.5 text-[13px] @min-[560px]/modal:pl-9 @min-[560px]/modal:pr-4"
+              : "pl-5 pr-2.5 py-2.5 text-[0.8125rem] @min-[560px]/modal:pl-9 @min-[560px]/modal:pr-4"
           } ${
             active
               ? `${colors.active} shadow-inner`
@@ -174,7 +174,7 @@ const SectionedModal = ({
                 <h2 className="text-sm font-bold text-gray-800 tracking-tight">{title}</h2>
                 {shortcut && (
                   <span
-                    className={`text-[12px] font-mono font-bold px-1 py-0.5 rounded border opacity-90 ${colors.badge}`}
+                    className={`text-[0.75rem] font-mono font-bold px-1 py-0.5 rounded border opacity-90 ${colors.badge}`}
                   >
                     {shortcut}
                   </span>

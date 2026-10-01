@@ -176,7 +176,7 @@ const SidebarRail = ({ onOpenHelp, onOpenSettings, onOpenBugReport }: SidebarRai
         >
           <button
             onClick={() => setZoomLevel(1)}
-            className={`${railButtonBaseClass} ${railPlainButtonClass} text-[10px] font-medium tabular-nums`}
+            className={`${railButtonBaseClass} ${railPlainButtonClass} text-[0.625rem] font-medium tabular-nums`}
             aria-label={`Zoom ${Math.round(zoomLevel * 100)} percent, reset to 100 percent`}
           >
             {Math.round(zoomLevel * 100)}

@@ -64,12 +64,12 @@
 
 .qimchi-walkthrough .driver-popover-title {
   color: var(--qw-title);
-  font-size: 16px;
+  font-size: 1rem;
   padding-right: 28px;
 }
 
 .qimchi-walkthrough .driver-popover-description {
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.55;
 }
 
@@ -99,7 +99,7 @@
 
 .qimchi-walkthrough-path,
 .qimchi-walkthrough-code {
-  font-size: 11.5px;
+  font-size: 0.71875rem;
   background-color: var(--qw-code-bg);
   border-radius: 6px;
   overflow-wrap: anywhere;
@@ -136,7 +136,7 @@ p.qimchi-walkthrough-path {
   border-radius: 8px;
   background-color: var(--qw-tip-bg);
   color: var(--qw-tip-text);
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.5;
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
 }
@@ -179,7 +179,7 @@ p.qimchi-walkthrough-path {
   align-items: center;
   justify-content: center;
   border-radius: 6px;
-  font-size: 18px;
+  font-size: 1.125rem;
   line-height: 1;
   color: var(--qw-muted);
 }
@@ -192,7 +192,7 @@ p.qimchi-walkthrough-path {
 
 .qimchi-walkthrough .driver-popover-progress-text {
   color: var(--qw-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   white-space: nowrap;
 }
 
@@ -202,7 +202,7 @@ p.qimchi-walkthrough-path {
 }
 
 .qimchi-walkthrough .driver-popover-footer-btn {
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   padding: 5px 10px;
   border-radius: 6px;
   text-shadow: none;

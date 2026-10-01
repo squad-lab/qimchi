@@ -115,13 +115,15 @@ const UpdateDialog = () => {
           </p>
           {state.notes && (
             <div>
-              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+              <div className="mb-1.5 text-[0.6875rem] font-semibold uppercase tracking-wider text-gray-500">
                 What's new
               </div>
               <div className="max-h-60 overflow-y-auto rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
                 <Suspense
                   fallback={
-                    <p className="whitespace-pre-wrap text-[13px] text-gray-700">{state.notes}</p>
+                    <p className="whitespace-pre-wrap text-[0.8125rem] text-gray-700">
+                      {state.notes}
+                    </p>
                   }
                 >
                   <ReleaseNotes notes={state.notes} />
