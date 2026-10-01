@@ -86,6 +86,21 @@ test("the export button offers export to disk and to notes", async ({ page }) =>
   await expect(page.getByRole("menu", { name: "Export" })).toHaveCount(0);
 });
 
+test("plot sidebar tooltips show keyboard shortcuts", async ({ page }) => {
+  await openBothPlots(page);
+  const heatmap = page.locator("[data-plot-id]").first();
+  await heatmap.hover();
+
+  await heatmap.getByRole("button", { name: "LineCut Tool" }).hover();
+  await expect(page.getByRole("tooltip", { name: "LineCut Tool (Shift+X)" })).toBeVisible();
+
+  await heatmap.getByRole("button", { name: "Swap X and Y axes" }).hover();
+  await expect(page.getByRole("tooltip", { name: "Swap X & Y Axes (S)" })).toBeVisible();
+
+  await heatmap.getByRole("button", { name: "Reset plot" }).hover();
+  await expect(page.getByRole("tooltip", { name: "Reset plot (R)" })).toBeVisible();
+});
+
 // Plot trace types and widths in the Viewer's order.
 const plotLayout = (page: Page) =>
   page.evaluate(() =>

@@ -73,7 +73,7 @@ test("a heatmap default applies to existing plots, except where a plot overrides
   await settingsDialog(page).getByRole("button", { name: "Close modal" }).click();
 
   // The plot's own choice wins over later defaults...
-  await page.getByTitle("Edit Appearance").first().click();
+  await page.getByRole("button", { name: "Edit appearance" }).first().click();
   await chooseColorscale(page, page, "Inferno");
   await expect.poll(async () => (await heatmapLook(page))?.colorscale).toBe(INFERNO);
   await openSettings(page, "HeatMap");
@@ -83,7 +83,7 @@ test("a heatmap default applies to existing plots, except where a plot overrides
   await settingsDialog(page).getByRole("button", { name: "Close modal" }).click();
 
   // ...until the plot is reset, which returns it to the user's defaults.
-  await page.getByTitle("Reset", { exact: true }).first().click();
+  await page.getByRole("button", { name: "Reset plot" }).first().click();
   await expect.poll(async () => (await heatmapLook(page))?.colorscale).toBe(CIVIDIS);
 });
 
