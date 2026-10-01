@@ -964,7 +964,7 @@ const Viewer = ({
                         close();
                       }}
                       aria-label={`${pct}% width (all plots)`}
-                      className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                      className={`rounded px-1.5 py-0.5 text-[0.6875rem] font-medium ${
                         plotWidthPercent === pct
                           ? "bg-blue-100 text-blue-700"
                           : "qimchi-dark-hover-plain text-gray-700 hover:bg-gray-100"

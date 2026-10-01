@@ -323,6 +323,7 @@ const PlotWrapper: React.FC<Props> = ({
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
   // Squarify state - when true, force the plot container to maintain 1:1 aspect ratio
   const isSquareMode = useSettingsStore((state) => state.settings.plots.squarify);
+  const interfaceZoom = useSettingsStore((state) => state.settings.general.zoom);
   // A plot stores only what differs from the user's defaults, so changing a
   // default in Settings reaches every plot that has not overridden that value.
   const appearanceDefaults = useSettingsStore((state) =>
@@ -956,7 +957,7 @@ const PlotWrapper: React.FC<Props> = ({
         ],
         layout: {
           meta: { qimchi_units: { x: units[alongAxis], y: units.z } },
-          title: { text: title, font: { size: 16 } },
+          title: { text: title, font: { size: 16 * interfaceZoom } },
           uirevision: title,
           margin: { t: 48, r: 20, b: 52, l: 70 },
           xaxis: {
@@ -965,16 +966,16 @@ const PlotWrapper: React.FC<Props> = ({
                 alongAxis === "y"
                   ? getTitleText(customizedPlotJson.layout?.yaxis)
                   : getTitleText(customizedPlotJson.layout?.xaxis),
-              font: { size: 14 },
+              font: { size: 14 * interfaceZoom },
             },
-            tickfont: { size: 13 },
+            tickfont: { size: 13 * interfaceZoom },
           },
           yaxis: {
             title: {
               text: getZTitle(),
-              font: { size: 14 },
+              font: { size: 14 * interfaceZoom },
             },
-            tickfont: { size: 13 },
+            tickfont: { size: 13 * interfaceZoom },
           },
           paper_bgcolor: "rgba(0,0,0,0)",
           plot_bgcolor: "rgba(0,0,0,0)",
@@ -3540,7 +3541,7 @@ const PlotWrapper: React.FC<Props> = ({
                   {lineCutModes.map(({ key, label }) => (
                     <div key={key} className="contents">
                       <dt>
-                        <kbd className="inline-block min-w-5 rounded border border-gray-300 bg-white px-1.5 py-0.5 font-mono text-[11px] text-gray-700 shadow-sm">
+                        <kbd className="inline-block min-w-5 rounded border border-gray-300 bg-white px-1.5 py-0.5 font-mono text-[0.6875rem] text-gray-700 shadow-sm">
                           {key}
                         </kbd>
                       </dt>
@@ -3745,7 +3746,7 @@ const PlotWrapper: React.FC<Props> = ({
                               }}
                               disabled={m.disabled}
                               title={m.disabled ? "WIP" : m.label}
-                              className={`flex-1 text-[10px] font-bold py-1.5 px-3 rounded-full transition-all ${
+                              className={`flex-1 text-[0.625rem] font-bold py-1.5 px-3 rounded-full transition-all ${
                                 bgCorrMode === m.id
                                   ? "bg-white text-blue-700 shadow-sm border border-blue-100"
                                   : m.disabled
@@ -3755,7 +3756,7 @@ const PlotWrapper: React.FC<Props> = ({
                             >
                               <span className="inline-flex items-center gap-1 justify-center w-full">
                                 {m.label}
-                                {m.disabled && <span className="text-[9px]">WIP</span>}
+                                {m.disabled && <span className="text-[0.5625rem]">WIP</span>}
                               </span>
                             </button>
                           ))}
@@ -3901,7 +3902,7 @@ const PlotWrapper: React.FC<Props> = ({
 
             {isBGCorrActive && (
               <div className="absolute top-12 left-1/2 transform -translate-x-1/2 z-30 flex items-center gap-2 bg-white/95 dark:bg-gray-800/95 backdrop-blur-md border border-blue-200 px-3 py-2 rounded-full shadow-xl animate-in fade-in slide-in-from-top-2 duration-300">
-                <span className="text-[10px] font-bold text-blue-600 px-1 uppercase tracking-wider">
+                <span className="text-[0.625rem] font-bold text-blue-600 px-1 uppercase tracking-wider">
                   {bgCorrPoints.length === 0
                     ? "Pick Points"
                     : `${bgCorrPoints.length} Pt${bgCorrPoints.length > 1 ? "s" : ""}`}
@@ -3911,13 +3912,13 @@ const PlotWrapper: React.FC<Props> = ({
                   <button
                     onClick={() => applyBGCorrNow(bgCorrPoints)}
                     disabled={bgCorrPoints.length === 0}
-                    className="qimchi-bg-corr-apply bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-[10px] font-bold px-2.5 py-1 rounded-full transition-all active:scale-95"
+                    className="qimchi-bg-corr-apply bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-[0.625rem] font-bold px-2.5 py-1 rounded-full transition-all active:scale-95"
                   >
                     Apply
                   </button>
                   <button
                     onClick={() => setIsBGCorrActive(false)}
-                    className="qimchi-dark-hover-plain hover:bg-red-50 text-red-600 text-[10px] font-bold px-2 py-1 rounded-full transition-colors"
+                    className="qimchi-dark-hover-plain hover:bg-red-50 text-red-600 text-[0.625rem] font-bold px-2 py-1 rounded-full transition-colors"
                   >
                     Cancel
                   </button>
@@ -4197,7 +4198,7 @@ const PlotWrapper: React.FC<Props> = ({
                         aria-label="Export images"
                       >
                         <ImageDown size={16} className="text-gray-600" />
-                        <span className="text-[11px] font-medium text-gray-700">Disk</span>
+                        <span className="text-[0.6875rem] font-medium text-gray-700">Disk</span>
                       </button>
                     </Tooltip>
                     <Tooltip content="Send to Notes" position="top">
@@ -4212,7 +4213,7 @@ const PlotWrapper: React.FC<Props> = ({
                         aria-label="Send to Notes"
                       >
                         <ImagePlus size={16} className="text-gray-600" />
-                        <span className="text-[11px] font-medium text-gray-700">Notes</span>
+                        <span className="text-[0.6875rem] font-medium text-gray-700">Notes</span>
                       </button>
                     </Tooltip>
                     <Tooltip content="Copy as PNG" position="top">
@@ -4227,7 +4228,7 @@ const PlotWrapper: React.FC<Props> = ({
                         aria-label="Copy to clipboard"
                       >
                         <ClipboardCopy size={16} className="text-gray-600" />
-                        <span className="text-[11px] font-medium text-gray-700">Copy</span>
+                        <span className="text-[0.6875rem] font-medium text-gray-700">Copy</span>
                       </button>
                     </Tooltip>
                   </>
@@ -4250,7 +4251,7 @@ const PlotWrapper: React.FC<Props> = ({
                         dispatchPlotWidthPreset(percent);
                         close();
                       }}
-                      className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                      className={`rounded px-1.5 py-0.5 text-[0.6875rem] font-medium ${
                         widthPercent === percent
                           ? "bg-blue-100 text-blue-700"
                           : "qimchi-dark-hover-plain text-gray-700 hover:bg-gray-100"

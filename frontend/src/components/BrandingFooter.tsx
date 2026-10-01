@@ -161,7 +161,7 @@ const BrandingFooter = () => {
           </div>
           <button
             onClick={() => setBrandingCollapsed(true)}
-            className="qimchi-footer-toggle w-full py-1.5 text-[9px] uppercase tracking-wider font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-100 border-t border-slate-200 transition-all duration-200"
+            className="qimchi-footer-toggle w-full py-1.5 text-[0.5625rem] uppercase tracking-wider font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-100 border-t border-slate-200 transition-all duration-200"
             title="Collapse Footer"
           >
             Collapse Footer
@@ -171,7 +171,7 @@ const BrandingFooter = () => {
       {brandingCollapsed && (
         <button
           onClick={() => setBrandingCollapsed(false)}
-          className="qimchi-footer-toggle shrink-0 w-full py-2 text-[9px] uppercase tracking-wider font-medium text-slate-500 hover:text-slate-700 bg-slate-50 hover:bg-slate-100 border-t-2 border-slate-300 transition-all duration-200 shadow-sm"
+          className="qimchi-footer-toggle shrink-0 w-full py-2 text-[0.5625rem] uppercase tracking-wider font-medium text-slate-500 hover:text-slate-700 bg-slate-50 hover:bg-slate-100 border-t-2 border-slate-300 transition-all duration-200 shadow-sm"
           title="Expand Footer"
         >
           Expand Footer

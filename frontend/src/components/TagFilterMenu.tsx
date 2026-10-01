@@ -119,7 +119,7 @@ const TagFilterMenu = ({ anchorEl, tags, selectedTagIds, onToggle, onClear, onCl
           <button
             type="button"
             onClick={onClear}
-            className="w-full rounded px-2 py-1 text-left text-[11px] text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="w-full rounded px-2 py-1 text-left text-[0.6875rem] text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
           >
             Clear {selectedTagIds.length} selected
           </button>

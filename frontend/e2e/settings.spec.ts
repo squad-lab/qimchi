@@ -39,6 +39,23 @@ test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
 });
 
+test("zoom scales text with custom font sizes", async ({ page }) => {
+  await mockLiveHeatmapApi(page);
+  await mockSettingsApi(page);
+  await page.goto("/");
+  await openSettings(page);
+
+  const shortcut = settingsDialog(page).getByText("Shift+S", { exact: true });
+  await expect
+    .poll(() => shortcut.evaluate((node) => getComputedStyle(node).fontSize))
+    .toBe("12px");
+
+  await settingsDialog(page).getByLabel("Zoom").selectOption("1.25");
+  await expect
+    .poll(() => shortcut.evaluate((node) => getComputedStyle(node).fontSize))
+    .toBe("15px");
+});
+
 test("a heatmap default applies to existing plots, except where a plot overrides it", async ({
   page,
 }) => {

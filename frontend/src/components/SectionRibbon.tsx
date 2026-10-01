@@ -57,7 +57,7 @@ const SectionRibbon = ({
         <div className="relative flex h-7 w-7 items-center justify-center text-gray-700">
           <Icon size={18} />
           {count !== undefined && count > 0 && (
-            <span className="absolute -bottom-1 -right-1 min-w-[15px] rounded-full bg-gray-700 px-1 text-center text-[9px] font-medium leading-[15px] text-white">
+            <span className="absolute -bottom-1 -right-1 min-w-[15px] rounded-full bg-gray-700 px-1 text-center text-[0.5625rem] font-medium leading-[0.9375rem] text-white">
               {count}
             </span>
           )}

@@ -91,7 +91,7 @@ const PinnedParameters = ({ basketItems }: { basketItems: BasketItem[] }) => {
             <div className="min-w-0">
               <h2 className="text-xs font-bold tracking-tight text-gray-800">Pinned parameters</h2>
               {measurement && (
-                <p className="truncate text-[11px] text-gray-500" title={measurement.path}>
+                <p className="truncate text-[0.6875rem] text-gray-500" title={measurement.path}>
                   {measurement.name}
                 </p>
               )}

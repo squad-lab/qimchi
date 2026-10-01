@@ -12,7 +12,7 @@ export default function ReleaseNotes({ notes }: { notes: string }) {
         source={notes}
         rehypePlugins={[[rehypeSanitize]]}
         className="release-notes"
-        style={{ background: "transparent", fontFamily: "inherit", fontSize: "13px" }}
+        style={{ background: "transparent", fontFamily: "inherit", fontSize: "0.8125rem" }}
       />
     </div>
   );

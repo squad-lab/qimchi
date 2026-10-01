@@ -1033,7 +1033,7 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
                     : "border-transparent hover:bg-gray-50"
                 }`}
               >
-                <div className="mb-0.5 flex items-center gap-1 text-[11px] font-medium text-gray-500">
+                <div className="mb-0.5 flex items-center gap-1 text-[0.6875rem] font-medium text-gray-500">
                   <span>{result.sectionLabel}</span>
                   <ChevronRight size={11} />
                   <span>Setting</span>

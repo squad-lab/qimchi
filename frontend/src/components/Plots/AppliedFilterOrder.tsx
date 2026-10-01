@@ -84,7 +84,7 @@ const Row = ({
           />
         )}
         <span
-          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white ${
+          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[0.6875rem] font-bold text-white ${
             enabled ? "bg-green-600" : "bg-gray-400 dark:bg-[#5c6370]"
           }`}
         >

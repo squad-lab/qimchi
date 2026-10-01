@@ -174,7 +174,7 @@ const TagPopover = ({
           if (confirmingId === tag.id) {
             const count = tag.count ?? 0;
             return (
-              <div key={tag.id} className="px-2 py-1.5 rounded bg-red-50 text-[11px]">
+              <div key={tag.id} className="px-2 py-1.5 rounded bg-red-50 text-[0.6875rem]">
                 <div className="text-red-900 leading-snug">
                   Delete <span className="font-medium">#{tag.name}</span>?{" "}
                   {count === 1 ? "1 dataset" : `${count} datasets`} will be affected.
@@ -220,7 +220,9 @@ const TagPopover = ({
                 </span>
                 <span className="truncate">#{tag.name}</span>
                 {(tag.count ?? 0) > 0 && (
-                  <span className="ml-auto text-[10px] text-gray-400 shrink-0">{tag.count}</span>
+                  <span className="ml-auto text-[0.625rem] text-gray-400 shrink-0">
+                    {tag.count}
+                  </span>
                 )}
               </button>
               {onRename && (
@@ -253,7 +255,10 @@ const TagPopover = ({
         })}
       </div>
       {error && (
-        <div className="mt-1 px-2 py-1 rounded bg-red-50 text-red-800 text-[11px]" role="alert">
+        <div
+          className="mt-1 px-2 py-1 rounded bg-red-50 text-red-800 text-[0.6875rem]"
+          role="alert"
+        >
           {error}
         </div>
       )}

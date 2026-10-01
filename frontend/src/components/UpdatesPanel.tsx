@@ -55,7 +55,7 @@ const UpdatesPanel = () => {
             {summary}
           </div>
           {checkedAt && state.status !== "checking" && (
-            <div className="mt-0.5 text-[11px] text-gray-400">Last checked {checkedAt}</div>
+            <div className="mt-0.5 text-[0.6875rem] text-gray-400">Last checked {checkedAt}</div>
           )}
         </div>
         <div className="flex shrink-0 gap-2">

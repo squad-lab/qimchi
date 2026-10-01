@@ -1132,7 +1132,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                         />
                         <span className="text-left flex-1 font-semibold">Applied</span>
                         {appliedOrder.length > 0 && (
-                          <span className="rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white">
+                          <span className="rounded-full bg-blue-600 px-1.5 text-[0.625rem] font-bold text-white">
                             {appliedOrder.length}
                           </span>
                         )}
@@ -1156,7 +1156,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                         <Bookmark size={18} className="text-blue-600 dark:text-blue-300" />
                         <span className="text-left flex-1 font-semibold">Saved Presets</span>
                         {presets && presets.length > 0 && (
-                          <span className="rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white">
+                          <span className="rounded-full bg-blue-600 px-1.5 text-[0.625rem] font-bold text-white">
                             {presets.length}
                           </span>
                         )}
@@ -1227,7 +1227,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                       {isEnabled && !reason && (
                         // One-based position in the applied filter order.
                         <span
-                          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-green-600 text-[10px] font-bold text-white"
+                          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-green-600 text-[0.625rem] font-bold text-white"
                           aria-label={`Applied ${appliedOrder.indexOf(key) + 1} of ${appliedOrder.length}`}
                         >
                           {appliedOrder.indexOf(key) + 1}
@@ -2088,7 +2088,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                       </span>
                                     </div>
                                     {p.row_idx !== undefined && (
-                                      <span className="text-[10px] text-gray-400">
+                                      <span className="text-[0.625rem] text-gray-400">
                                         [{p.row_idx},{p.col_idx}]
                                       </span>
                                     )}
