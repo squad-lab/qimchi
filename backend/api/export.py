@@ -4,12 +4,9 @@ FastAPI endpoint to export Plotly plots as PNG, PDF and SVG.
 """
 
 import asyncio
-import base64
 import json
 import os
-import queue
 import shutil
-import sys
 import tempfile
 import time
 import uuid
@@ -20,7 +17,6 @@ from html import escape
 from pathlib import Path
 from typing import Any, Dict
 
-import plotly.io as pio
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from plotly import graph_objects as go
@@ -29,6 +25,12 @@ from .data_loader import resolve_to_disk_path
 
 # Local imports
 from .diagnostics import register_gauge, sampler
+from .export_render import (
+    PLOTLY_DEFAULT_HEIGHT,
+    PLOTLY_DEFAULT_WIDTH,
+    write_image_worker,
+    write_plotly_image,
+)
 from .logger import logger
 from .notes import _measurement_notes_paths, _note_db_identity, append_measurement_note
 from .settings import ExportSettings, export_settings
@@ -75,232 +77,7 @@ _MEASUREMENT_INFO_FIELDS = (
     ("Measurement ID", ("Measurement ID", "measurement_id")),
 )
 
-_PLOTLY_DEFAULT_WIDTH = int(getattr(pio.defaults, "default_width", 700) or 700)
-_PLOTLY_DEFAULT_HEIGHT = int(getattr(pio.defaults, "default_height", 500) or 500)
 _EXPORT_INFO_FONT_FAMILY = "monospace"
-_FIRA_SANS_WEIGHTS = (400, 500, 600, 700)
-_MATHJAX_FIRA_SVG_URL = (
-    "https://cdn.jsdelivr.net/npm/@mathjax/mathjax-fira-font@4.1.3/"
-    "tex-mml-svg-mathjax-fira.js"
-)
-
-
-def _find_fira_sans_fonts() -> dict[int, Path]:
-    """Locate the bundled frontend font files in dev, Docker, and frozen builds."""
-    project_root = Path(__file__).resolve().parents[2]
-    asset_roots = [
-        project_root / "frontend" / "dist" / "assets",
-        Path("/app/frontend/dist/assets"),
-    ]
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        asset_roots.insert(0, Path(sys._MEIPASS) / "frontend" / "dist" / "assets")  # type: ignore[attr-defined]
-
-    for root in asset_roots:
-        found: dict[int, Path] = {}
-        for weight in _FIRA_SANS_WEIGHTS:
-            matches = sorted(root.glob(f"fira-sans-latin-{weight}-normal*.woff2"))
-            if matches:
-                found[weight] = matches[0]
-        if len(found) == len(_FIRA_SANS_WEIGHTS):
-            return found
-
-    source_root = (
-        project_root
-        / "frontend"
-        / "node_modules"
-        / "@fontsource"
-        / "fira-sans"
-        / "files"
-    )
-    source_fonts = {
-        weight: source_root / f"fira-sans-latin-{weight}-normal.woff2"
-        for weight in _FIRA_SANS_WEIGHTS
-    }
-    return source_fonts if all(path.is_file() for path in source_fonts.values()) else {}
-
-
-def _fira_sans_font_faces(fonts: dict[int, Path]) -> str:
-    """Return self-contained font-face rules suitable for HTML or SVG."""
-    return "\n".join(
-        (
-            "@font-face {"
-            "font-family:'Fira Sans';"
-            "font-style:normal;"
-            f"font-weight:{weight};"
-            "font-display:block;"
-            "src:url('data:font/woff2;base64,"
-            f"{base64.b64encode(path.read_bytes()).decode('ascii')}"
-            "') format('woff2');"
-            "}"
-        )
-        for weight, path in fonts.items()
-    )
-
-
-def _embed_fira_sans_in_svg(path: str | Path) -> None:
-    """Make an exported SVG portable instead of relying on installed fonts."""
-    svg_path = Path(path)
-    if svg_path.suffix.lower() != ".svg":
-        return
-
-    fonts = _find_fira_sans_fonts()
-    if not fonts:
-        logger.warning("Could not embed Fira Sans in SVG %s", svg_path)
-        return
-
-    svg = svg_path.read_text(encoding="utf-8")
-    if 'id="qimchi-export-fonts"' in svg:
-        return
-    opening_tag_end = svg.find(">")
-    if opening_tag_end < 0:
-        logger.warning("Could not find the opening tag in SVG %s", svg_path)
-        return
-
-    embedded_style = (
-        '<defs><style id="qimchi-export-fonts" type="text/css"><![CDATA['
-        f"{_fira_sans_font_faces(fonts)}"
-        "]]></style></defs>"
-    )
-    svg_path.write_text(
-        f"{svg[: opening_tag_end + 1]}{embedded_style}{svg[opening_tag_end + 1 :]}",
-        encoding="utf-8",
-    )
-
-
-def export_page_generator():
-    """Build Kaleido's page with Qimchi's Fira text and mathematics fonts."""
-    from kaleido import PageGenerator
-
-    base = PageGenerator(mathjax=_MATHJAX_FIRA_SVG_URL)
-    fonts = _find_fira_sans_fonts()
-    if not fonts:
-        logger.warning(
-            "Bundled Fira Sans files were not found; exports may use a fallback"
-        )
-        return base
-
-    font_faces = _fira_sans_font_faces(fonts)
-    font_loads = ",".join(
-        (
-            f"document.fonts.load('{weight} 16px \"Fira Sans\"')"
-            ".then((faces) => {"
-            "if (!faces.length) throw new Error('Fira Sans did not load');"
-            "return faces;"
-            "})"
-        )
-        for weight in fonts
-    )
-    injection = f"""
-        <style id="qimchi-export-fonts">{font_faces}</style>
-        <script>
-          (() => {{
-            const qimchiFontsReady = Promise.all([{font_loads}])
-              .then(() => document.fonts.ready);
-            const qimchiMathReady = window.MathJax?.startup?.promise
-              ?? Promise.resolve();
-            const qimchiExportReady = Promise.all([
-              qimchiFontsReady,
-              qimchiMathReady,
-            ]);
-            const plotlyToImage = Plotly.toImage.bind(Plotly);
-            Plotly.toImage = (...args) => qimchiExportReady
-              .then(() => plotlyToImage(...args));
-            window.qimchiFontsReady = qimchiFontsReady;
-            window.qimchiExportReady = qimchiExportReady;
-          }})();
-        </script>
-    """
-
-    class QimchiExportPage:
-        def generate_index(self) -> str:
-            return base.generate_index().replace("</head>", f"{injection}</head>", 1)
-
-    return QimchiExportPage()
-
-
-def _write_plotly_image(
-    fig: go.Figure | Dict,
-    path: str | Path,
-    *,
-    width: int | None = None,
-    height: int | None = None,
-    scale: float | None = None,
-) -> None:
-    """Write through Kaleido without re-supplying options to its live server.
-
-    Plotly's ``write_image`` currently always forwards a non-empty ``kopts``
-    dictionary. Kaleido ignores that dictionary, and emits a warning, when its
-    persistent sync server is running. Qimchi configures that server once with
-    :func:`export_page_generator`, so forwarding the page options per render is
-    both redundant and noisy.
-
-    If this function is used without the persistent server, the same custom
-    page is supplied to the one-shot Kaleido instance so font and MathJax
-    rendering remain identical.
-    """
-    import kaleido
-
-    target = Path(path)
-    figure_layout = (
-        fig.layout.to_plotly_json()
-        if isinstance(fig, go.Figure)
-        else fig.get("layout", {})
-    )
-    template_layout = figure_layout.get("template", {}).get("layout", {})
-    opts = {
-        "format": target.suffix.lstrip(".").lower()
-        or getattr(pio.defaults, "default_format", "png"),
-        "width": width
-        or figure_layout.get("width")
-        or template_layout.get("width")
-        or _PLOTLY_DEFAULT_WIDTH,
-        "height": height
-        or figure_layout.get("height")
-        or template_layout.get("height")
-        or _PLOTLY_DEFAULT_HEIGHT,
-        "scale": scale or getattr(pio.defaults, "default_scale", 1) or 1,
-    }
-    server = getattr(kaleido, "_global_server", None)
-    server_running = bool(server and server.is_running())
-    kwargs: Dict[str, Any] = {"topojson": getattr(pio.defaults, "topojson", None)}
-    if not server_running:
-        kwargs["kopts"] = {"page_generator": export_page_generator()}
-
-    if server_running:
-        image_bytes = _calc_fig_on_sync_server(server, fig, opts=opts, **kwargs)
-    else:
-        image_bytes = kaleido.calc_fig_sync(fig, opts=opts, **kwargs)
-    if isinstance(image_bytes, str):
-        image_bytes = image_bytes.encode("utf-8")
-    target.write_bytes(image_bytes)
-    _embed_fira_sans_in_svg(target)
-
-
-def _calc_fig_on_sync_server(server: Any, *args: Any, **kwargs: Any) -> Any:
-    """
-    Render on Kaleido's sync server and fail if Chrome exits.
-
-    Kaleido blocks if its server thread exits. Closing the dead server lets the
-    next render start a new Chrome process.
-
-    """
-    from kaleido._sync_server import Task
-
-    server._task_queue.put(Task("calc_fig", args, kwargs))
-    while True:
-        try:
-            result = server._return_queue.get(timeout=0.5)
-            break
-        except queue.Empty:
-            if not server._thread.is_alive():
-                server.close(silence_warnings=True)
-                raise RuntimeError(
-                    "Chrome closed while starting for image export; "
-                    "see the [chrome] lines in the desktop log"
-                ) from None
-    if isinstance(result, BaseException):
-        raise result
-    return result
 
 
 def _timings_in_archive(options: ExportSettings) -> bool:
@@ -353,8 +130,8 @@ def _add_export_info_footer(
     custom_tags: list[str] | None = None,
     *,
     dark: bool = False,
-    base_width: int = _PLOTLY_DEFAULT_WIDTH,
-    base_height: int = _PLOTLY_DEFAULT_HEIGHT,
+    base_width: int = PLOTLY_DEFAULT_WIDTH,
+    base_height: int = PLOTLY_DEFAULT_HEIGHT,
 ) -> None:
     """Append export details without changing the original plot canvas."""
     info_lines = []
@@ -587,7 +364,7 @@ def _export_plot_images_sync(
     )
     # Preserve the original canvas and extend only the height for the footer.
     base_width, base_height = (
-        (_PLOTLY_DEFAULT_WIDTH, _PLOTLY_DEFAULT_HEIGHT) if export_pool else (1920, 1080)
+        (PLOTLY_DEFAULT_WIDTH, PLOTLY_DEFAULT_HEIGHT) if export_pool else (1920, 1080)
     )
     export_meta = _library_metadata(dataset_path, dataset_uuid)
     custom_tags = export_meta.get("tags", [])
@@ -615,7 +392,7 @@ def _export_plot_images_sync(
         _height = int(local_fig.layout.height or 1080)
         _scale = options.scale or 300.0 / 96.0
         start = time.perf_counter()
-        _write_plotly_image(
+        write_plotly_image(
             local_fig, local_path_str, width=_width, height=_height, scale=_scale
         )
         elapsed = time.perf_counter() - start
@@ -651,7 +428,7 @@ def _export_plot_images_sync(
         for variant, fmt, path in outs:
             local_fig_dict = fig_dict if variant == "light" else dark_fig.to_dict()
             future = export_pool.submit(
-                _write_image_worker, local_fig_dict, str(path), options.scale
+                write_image_worker, local_fig_dict, str(path), options.scale
             )
             future_map[future] = (variant, fmt, path)
 
@@ -949,34 +726,6 @@ def _embed_png_metadata(path: str, meta: Dict[str, Any]) -> None:
         logger.info("Could not embed PNG metadata into %s: %s", path, exc)
 
 
-def _write_image_worker(
-    fig_dict: Dict, path_str: str, scale: float | None = None
-) -> tuple[str, float]:
-    """Write a figure dict to an image and return its path and elapsed time."""
-    import time
-
-    from plotly import graph_objects as go
-
-    fig = go.Figure(fig_dict)
-    start = time.perf_counter()
-    _write_plotly_image(
-        fig,
-        path_str,
-        scale=scale,
-    )
-    return path_str, time.perf_counter() - start
-
-
-def warm_export_worker() -> float:
-    """Warm an export worker with a temporary PNG and return the elapsed time."""
-    figure = go.Figure({"data": [{"x": [0, 1], "y": [0, 1]}]})
-    with tempfile.TemporaryDirectory(prefix="qimchi-warmup-") as tmp:
-        _, elapsed = _write_image_worker(
-            figure.to_dict(), str(Path(tmp) / "warmup.png")
-        )
-    return elapsed
-
-
 def _save_light_dark_pngs(
     plot_json: Dict,
     fpath: str,
@@ -1061,7 +810,7 @@ def _save_light_dark_pngs(
         # Only write the light PNG
         _add_export_info_footer(fig, applied_filters, measurement_info, custom_tags)
         try:
-            _write_plotly_image(
+            write_plotly_image(
                 fig,
                 str(out_light),
                 # width=_width,
@@ -1113,7 +862,7 @@ def _save_light_dark_pngs(
         with ThreadPoolExecutor(max_workers=2) as ex:
             futures = {
                 ex.submit(
-                    _write_plotly_image,
+                    write_plotly_image,
                     fig,
                     str(out_light),
                     # width=_width,
@@ -1121,7 +870,7 @@ def _save_light_dark_pngs(
                     # scale=_scale,
                 ): "light",
                 ex.submit(
-                    _write_plotly_image,
+                    write_plotly_image,
                     dark_fig,
                     str(out_dark),
                     # width=_width,
@@ -1143,7 +892,7 @@ def _save_light_dark_pngs(
         # fallback: try sequential writes
         logger.error(f"Parallel PNG write failed, falling back to sequential: {e}")
         try:
-            _write_plotly_image(
+            write_plotly_image(
                 fig,
                 str(out_light),
                 # width=_width,
@@ -1154,7 +903,7 @@ def _save_light_dark_pngs(
         except Exception as e2:
             logger.error(f"Failed to write light png: {e2}")
         try:
-            _write_plotly_image(
+            write_plotly_image(
                 dark_fig,
                 str(out_dark),
                 # width=_width,
