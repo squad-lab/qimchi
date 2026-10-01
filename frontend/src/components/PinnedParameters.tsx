@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Draggable from "react-draggable";
 import { Pin, PinOff, X } from "lucide-react";
 
@@ -7,10 +7,35 @@ import Tooltip from "./Tooltip";
 import { fetchPinnedParameters, type PinnedParameter } from "../services/parametersAPI";
 import { usePinnedParametersStore } from "../stores/pinnedParametersStore";
 
+const MARGIN = 12;
+
 /** Show pinned qanary parameters for the latest Basket measurement. */
 const PinnedParameters = ({ basketItems }: { basketItems: BasketItem[] }) => {
   const { pinned, unpin, clear } = usePinnedParametersStore();
   const nodeRef = useRef<HTMLDivElement>(null);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const visible = pinned.length > 0;
+
+  // Refit positions saved in a larger window.
+  useLayoutEffect(() => {
+    if (!visible) return;
+    const keepInside = () => {
+      const rect = nodeRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const dx =
+        rect.left < MARGIN
+          ? MARGIN - rect.left
+          : Math.min(0, window.innerWidth - MARGIN - rect.right);
+      const dy =
+        rect.top < MARGIN
+          ? MARGIN - rect.top
+          : Math.min(0, window.innerHeight - MARGIN - rect.bottom);
+      if (dx || dy) setOffset((current) => ({ x: current.x + dx, y: current.y + dy }));
+    };
+    keepInside();
+    window.addEventListener("resize", keepInside);
+    return () => window.removeEventListener("resize", keepInside);
+  }, [visible]);
   const [result, setResult] = useState<{ key: string; parameters?: PinnedParameter[] } | null>(
     null,
   );
@@ -44,7 +69,13 @@ const PinnedParameters = ({ basketItems }: { basketItems: BasketItem[] }) => {
   const byName = new Map((current?.parameters ?? []).map((p) => [p.name, p]));
 
   return (
-    <Draggable nodeRef={nodeRef} handle=".pinned-parameters-handle" bounds="body">
+    <Draggable
+      nodeRef={nodeRef}
+      handle=".pinned-parameters-handle"
+      bounds="body"
+      position={offset}
+      onStop={(_event, drag) => setOffset({ x: drag.x, y: drag.y })}
+    >
       <div
         ref={nodeRef}
         role="dialog"

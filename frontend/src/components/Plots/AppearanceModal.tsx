@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { Rnd } from "react-rnd";
+import { fitToWindow, useKeepRndInWindow } from "../../utils/keepInWindow";
 
 // Local imports
 import { useToast } from "../../hooks/useToast";
@@ -236,6 +237,8 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
   const [zIndexLocal, setZIndexLocal] = useState<number | undefined>(undefined);
   const zRef = useRef<number | undefined>(undefined);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const rndRef = useRef<Rnd>(null);
+  useKeepRndInWindow(rndRef, isOpen, 300, 240);
 
   useEffect(() => {
     if (isOpen) {
@@ -373,13 +376,18 @@ const AppearanceModal: React.FC<AppearanceModalProps> = ({
   return createPortal(
     <div ref={wrapperRef} className="fixed inset-0 pointer-events-none">
       <Rnd
-        default={{
-          // Bottom left
-          x: 22,
-          y: window.innerHeight - 578,
-          width: 384,
-          height: 550,
-        }}
+        ref={rndRef}
+        default={fitToWindow(
+          {
+            // Open in the bottom-left corner.
+            x: 22,
+            y: window.innerHeight - 578,
+            width: 384,
+            height: 550,
+          },
+          300,
+          240,
+        )}
         enableResizing={false}
         dragHandleClassName="drag-handle"
         bounds="parent"

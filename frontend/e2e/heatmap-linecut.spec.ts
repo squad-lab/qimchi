@@ -729,3 +729,36 @@ test("Follow is removed when a live plot completes", async ({ page }) => {
   await expect(follow).toHaveCount(0, { timeout: 5_000 });
   await expect(page.getByRole("button", { name: "Stop following the newest line" })).toHaveCount(0);
 });
+
+test("a LineCut card placed by hand stays inside a window that has become smaller", async ({
+  page,
+}) => {
+  await mockLiveHeatmapApi(page);
+  await openLiveHeatmap(page);
+  await page.getByRole("button", { name: "LineCut Tool" }).first().click();
+  const popup = page.getByRole("dialog", { name: "LineCut" });
+  await expect(popup).toBeVisible();
+
+  // Drag the card to the bottom-right corner of the large window.
+  const handle = (await popup.locator(".linecut-popup-handle").first().boundingBox())!;
+  await page.mouse.move(handle.x + 20, handle.y + handle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(1550, 950, { steps: 15 });
+  await page.mouse.up();
+  await popup.getByRole("button", { name: "Leave LineCut" }).click();
+  await expect(popup).toHaveCount(0);
+
+  const inside = async (width: number, height: number) => {
+    const box = (await popup.boundingBox())!;
+    return box.x >= 0 && box.y >= 0 && box.x + box.width <= width && box.y + box.height <= height;
+  };
+
+  // Reopening it in a smaller window moves it back inside.
+  await page.setViewportSize({ width: 1000, height: 650 });
+  await page.getByRole("button", { name: "LineCut Tool" }).first().click();
+  await expect.poll(() => inside(1000, 650)).toBe(true);
+
+  // Shrinking the window while it is open does the same.
+  await page.setViewportSize({ width: 820, height: 560 });
+  await expect.poll(() => inside(820, 560)).toBe(true);
+});
