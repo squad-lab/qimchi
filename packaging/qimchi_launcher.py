@@ -701,6 +701,10 @@ class _Api:
         """Start downloading the offered update in the background."""
         return self._updates.download()
 
+    def redownload_update(self) -> dict:
+        """Replace the downloaded installer with a fresh copy."""
+        return self._updates.redownload()
+
     def install_update(self) -> dict:
         """Install the downloaded update; the app closes to let it."""
         return self._updates.install()
@@ -1284,6 +1288,7 @@ class _Updates:
 
         if pending is not None and pending.get("tag") == result["tag"]:
             self._log(f"[updater] {result['tag']} is already downloaded")
+            self._offer = {**result, **pending}
             return self._set(status="downloaded", checkedAt=checked_at)
 
         self._offer = result
@@ -1337,6 +1342,7 @@ class _Updates:
                 "tag": offer["tag"],
                 "notes": offer.get("notes", ""),
                 "platform": offer["platform"],
+                "asset_url": offer["asset_url"],
                 "install_mode": offer.get("install_mode", ""),
                 "asset_name": offer.get("asset_name", ""),
                 "path": destination,
@@ -1356,6 +1362,42 @@ class _Updates:
         self._set(status="downloading", progress=0.0, error=None, prompt=None)
         threading.Thread(target=run, name="qimchi-update-download", daemon=True).start()
         return self.status()
+
+    def redownload(self) -> dict:
+        state = self.status()
+        pending = self._offer
+        if state["status"] != "downloaded" or not pending:
+            self._log(f"[updater] nothing to redownload (status {state['status']})")
+            return state
+        if not pending.get("asset_url"):
+            try:
+                from api.settings import desktop_settings
+                from api.updater import check_for_update
+
+                refreshed = check_for_update(
+                    include_previews=desktop_settings().previewReleases,
+                    log=self._log,
+                )
+            except Exception as exc:
+                self._log(f"[updater] could not refresh the download URL: {exc!r}")
+                refreshed = None
+            if refreshed and refreshed.get("tag") == pending.get("tag"):
+                pending = {**refreshed, **pending}
+                self._offer = pending
+            else:
+                return self._set(
+                    status="error",
+                    error="The download link could not be refreshed. Check for updates and try again.",
+                    prompt=None,
+                )
+
+        offer = dict(pending)
+        self._clear_pending()
+        offer.pop("path", None)
+        self._offer = offer
+        self._log(f"[updater] redownloading {offer['tag']}")
+        self._set(status="available", progress=0.0, error=None, prompt=None)
+        return self.download()
 
     def remind_at_next_launch(self) -> dict:
         self._log(

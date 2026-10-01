@@ -25,7 +25,7 @@ const primaryClass = `${buttonClass} bg-[#6ea030] text-white shadow-sm hover:bg-
 
 /** Offers a new desktop release, and asks to install it once it has downloaded. */
 const UpdateDialog = () => {
-  const { state, download, install, remindAtNextLaunch, dismiss } = useUpdateStore();
+  const { state, download, redownload, install, remindAtNextLaunch, dismiss } = useUpdateStore();
   const { showToast } = useToast();
 
   const open = state.prompt !== null && Boolean(state.tag);
@@ -104,7 +104,7 @@ const UpdateDialog = () => {
           <p className="text-sm leading-relaxed text-gray-600">
             {ready ? (
               <>
-                Qimchi {state.tag} has downloaded. {installNote(state.platform)}
+                Qimchi {state.tag} is already downloaded. {installNote(state.platform)}
               </>
             ) : (
               <>
@@ -142,6 +142,9 @@ const UpdateDialog = () => {
         <div className="flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-gray-50 px-4 py-3">
           {ready ? (
             <>
+              <button type="button" onClick={() => void redownload()} className={secondaryClass}>
+                Download again
+              </button>
               <button type="button" onClick={() => void later()} className={secondaryClass}>
                 Remind me at next launch
               </button>
