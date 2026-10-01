@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from "react";
 import type { AppliedFilter, PlotConfiguration } from "../components/interfaces";
 import { usePlotStore } from "../stores/plotStore";
 import { isMemoryPath, isDatasetPath } from "../utils/datasetPaths";
+import { readSessionValue, SESSION_KEYS, writeSessionValue } from "../utils/sessionRestore";
 
 const pinnedFirst = (plots: PlotConfiguration[]): PlotConfiguration[] => [
   ...plots.filter((plot) => plot.pinned),
@@ -38,12 +39,20 @@ export interface UsePlotCollectionReturn {
 }
 
 export const usePlotCollection = (): UsePlotCollectionReturn => {
-  const [plotConfigs, setPlotConfigs] = useState<PlotConfiguration[]>([]);
+  const [plotConfigs, setPlotConfigs] = useState<PlotConfiguration[]>(() =>
+    readSessionValue<PlotConfiguration[]>(SESSION_KEYS.plots, []),
+  );
 
-  // Plot IDs are session-scoped, so discard state left by earlier sessions.
+  // Discard state from earlier sessions, but keep state for restored plots.
   useEffect(() => {
-    usePlotStore.getState().keepOnly([]);
+    usePlotStore.getState().keepOnly(plotConfigs.map((plot) => plot.id));
+    // Subsequent changes update the store directly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    writeSessionValue(SESSION_KEYS.plots, plotConfigs);
+  }, [plotConfigs]);
 
   const inferSourceFromPath = useCallback((path: string): "memory" | "disk" => {
     return isMemoryPath(path) ? "memory" : "disk";

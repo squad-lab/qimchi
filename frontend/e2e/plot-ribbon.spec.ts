@@ -183,3 +183,15 @@ test("a plot can be copied to the clipboard as an image", async ({ page, context
   });
   expect(types).toContain("image/png");
 });
+
+test("a reload keeps the Basket, the plots and their widths", async ({ page }) => {
+  await openBothPlots(page);
+  await page.getByRole("button", { name: "Plot width", exact: true }).first().click();
+  await page.getByRole("menuitemradio", { name: "100% width (this plot)" }).click();
+  const before = await plotLayout(page);
+
+  await page.reload();
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(2);
+  await expect.poll(() => plotLayout(page)).toEqual(before);
+  await expect(page.locator("[data-tour='basket']").getByText("live-heat")).toBeVisible();
+});
