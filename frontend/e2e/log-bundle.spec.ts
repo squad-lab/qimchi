@@ -68,3 +68,51 @@ test("the desktop app saves the bundle and can show it in its folder", async ({ 
     .poll(() => page.evaluate(() => (window as unknown as { __revealed: string[] }).__revealed))
     .toEqual([saved]);
 });
+
+test("the bug-report button opens instructions and log collection", async ({ page }) => {
+  await mockLiveHeatmapApi(page);
+  await mockSettingsApi(page, { general: { theme: "dark" } });
+  await page.route("**/diagnostics/bundle", (route) =>
+    route.fulfill({
+      body: Buffer.from("PK\u0005\u0006" + "\u0000".repeat(18)),
+      headers: {
+        "content-type": "application/zip",
+        "content-disposition": 'attachment; filename="qimchi-logs.zip"',
+      },
+    }),
+  );
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Report a bug" }).click();
+  const dialog = page.getByRole("dialog", { name: "Report a bug" });
+  await expect(dialog.getByRole("button", { name: "Save logs", exact: true })).toBeVisible();
+  await expect(dialog.getByLabel(/Include recent crash reports/)).toBeChecked();
+  await expect(dialog).toContainText("Attach the logs zip to the issue.");
+  await expect(dialog).toContainText("steps to reproduce");
+  await expect
+    .poll(async () => {
+      const sizes = await Promise.all(
+        [
+          dialog.getByText("Reproduce the problem, then save the logs below."),
+          dialog.getByText("Creates one zip file to attach to a bug report. It includes:"),
+          dialog.locator("label").filter({ hasText: "Include recent crash reports" }),
+        ].map((locator) => locator.evaluate((node) => getComputedStyle(node).fontSize)),
+      );
+      return new Set(sizes).size;
+    })
+    .toBe(1);
+  await expect
+    .poll(() => dialog.evaluate((node) => getComputedStyle(node).backgroundColor))
+    .toBe("rgb(40, 44, 52)");
+  const issueLink = dialog.getByRole("link", { name: "Open a new GitLab issue" });
+  await expect(issueLink).toHaveAttribute("aria-disabled", "true");
+  await expect(issueLink).toHaveAttribute("href", /gitlab\.com\/squad-lab\/qimchi\/.+new/);
+
+  const download = page.waitForEvent("download");
+  await dialog.getByRole("button", { name: "Save logs", exact: true }).click();
+  await download;
+  await expect(issueLink).toHaveAttribute("aria-disabled", "false");
+
+  await page.getByTestId("bug-report-backdrop").click({ position: { x: 2, y: 2 } });
+  await expect(dialog).toHaveCount(0);
+});

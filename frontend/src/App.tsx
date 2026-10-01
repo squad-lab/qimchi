@@ -18,6 +18,7 @@ import HelpModal from "./components/HelpModal";
 import SettingsModal from "./components/SettingsModal";
 import PinnedParameters from "./components/PinnedParameters";
 import UpdateDialog from "./components/UpdateDialog";
+import BugReportModal from "./components/BugReportModal";
 import { useDesktopUpdates } from "./hooks/useDesktopUpdates";
 import { useShortcut } from "./hooks/useGlobalShortcuts";
 import { isDatasetPath, detectDatasetKind } from "./utils/datasetPaths";
@@ -48,6 +49,7 @@ const AppContent: React.FC = () => {
   const [notesSelectedItemId, setNotesSelectedItemId] = useState<string | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isBugReportOpen, setIsBugReportOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<string | undefined>();
   const { setSidebarCollapsed, setNotesCollapsed, updateExplorerState } = useSidebarStore();
   const theme = useThemeStore((state) => state.theme);
@@ -312,13 +314,14 @@ const AppContent: React.FC = () => {
   const registerWalkthrough = useWalkthroughStore((state) => state.registerBridge);
   const walkthroughActive = useWalkthroughStore((state) => state.active);
   useEffect(() => {
-    useWalkthroughStore.getState().setPaused(isHelpOpen || isSettingsOpen);
-  }, [isHelpOpen, isSettingsOpen]);
-  // Close Help and Settings when the walkthrough starts.
+    useWalkthroughStore.getState().setPaused(isHelpOpen || isSettingsOpen || isBugReportOpen);
+  }, [isBugReportOpen, isHelpOpen, isSettingsOpen]);
+  // Close auxiliary modals when the walkthrough starts.
   useEffect(() => {
     if (!walkthroughActive) return;
     setIsHelpOpen(false);
     setIsSettingsOpen(false);
+    setIsBugReportOpen(false);
   }, [walkthroughActive]);
   useEffect(
     () =>
@@ -389,6 +392,11 @@ const AppContent: React.FC = () => {
           rail={
             <SidebarRail
               onOpenHelp={() => setIsHelpOpen(true)}
+              onOpenBugReport={() => {
+                setIsHelpOpen(false);
+                setIsSettingsOpen(false);
+                setIsBugReportOpen(true);
+              }}
               onOpenSettings={(section) => {
                 setSettingsSection(section);
                 setIsSettingsOpen(true);
@@ -450,6 +458,7 @@ const AppContent: React.FC = () => {
         }}
       />
       <PinnedParameters basketItems={basketItems} />
+      <BugReportModal isOpen={isBugReportOpen} onClose={() => setIsBugReportOpen(false)} />
       <UpdateDialog />
       <Walkthrough />
     </>
