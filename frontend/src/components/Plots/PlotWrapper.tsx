@@ -67,6 +67,12 @@ import {
 } from "../../services/exportAPI";
 import { PLOT_WIDTHS, type LineCutDirection } from "../../settings/userSettings";
 import { findFrontier, type Frontier } from "../../utils/liveFrontier";
+import {
+  numeric2DExtent,
+  numericExtent,
+  toNumeric2DArray,
+  toNumericArray,
+} from "../../utils/numericArrays";
 import { engineeringPresentation, unitMetaFromLayout } from "./engineeringTicks";
 import { engineeringFormatter, type AxisUnitMeta } from "../../utils/engineeringFormat";
 import {
@@ -817,157 +823,6 @@ const PlotWrapper: React.FC<Props> = ({
     plotConfig?.id ? (state.plotStates[plotConfig.id]?.filter_preset_id ?? null) : null,
   );
 
-  const isArrayLikeValue = useCallback((value: unknown): boolean => {
-    if (value == null) return false;
-    if (Array.isArray(value) || ArrayBuffer.isView(value)) return true;
-    if (typeof value !== "object") return false;
-    const len = (value as { length?: unknown }).length;
-    return typeof len === "number" && Number.isFinite(len) && len >= 0;
-  }, []);
-
-  const toNumericArray = useCallback(
-    // keepNonFinite preserves NaN positions, which a 2D reshape needs: a live
-    // heatmap holds NaN for every point not yet measured.
-    (values: unknown, keepNonFinite = false): number[] => {
-      if (!values) return [];
-
-      if (typeof values === "object" && !Array.isArray(values)) {
-        const obj = values as Record<string, unknown>;
-
-        // Plotly/NumPy-style binary typed-array payload: { dtype, bdata }
-        if (typeof obj.bdata === "string" && typeof obj.dtype === "string") {
-          try {
-            const dtypeRaw = String(obj.dtype).trim();
-            const dtype = dtypeRaw.replace(/^[<>=|]/, "").toLowerCase();
-            const b64 = String(obj.bdata);
-            const bin = atob(b64);
-            const bytes = new Uint8Array(bin.length);
-            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-            const buffer = bytes.buffer;
-
-            const typedToNumbers = (arr: ArrayLike<number | bigint>) =>
-              Array.from(arr as ArrayLike<number | bigint>)
-                .map((v) => (typeof v === "bigint" ? Number(v) : Number(v)))
-                .filter((v) => keepNonFinite || Number.isFinite(v));
-
-            if (dtype === "f8" || dtype === "float64") {
-              return typedToNumbers(new Float64Array(buffer));
-            }
-            if (dtype === "f4" || dtype === "float32") {
-              return typedToNumbers(new Float32Array(buffer));
-            }
-            if (dtype === "i1" || dtype === "int8") {
-              return typedToNumbers(new Int8Array(buffer));
-            }
-            if (dtype === "u1" || dtype === "uint8") {
-              return typedToNumbers(new Uint8Array(buffer));
-            }
-            if (dtype === "i2" || dtype === "int16") {
-              return typedToNumbers(new Int16Array(buffer));
-            }
-            if (dtype === "u2" || dtype === "uint16") {
-              return typedToNumbers(new Uint16Array(buffer));
-            }
-            if (dtype === "i4" || dtype === "int32") {
-              return typedToNumbers(new Int32Array(buffer));
-            }
-            if (dtype === "u4" || dtype === "uint32") {
-              return typedToNumbers(new Uint32Array(buffer));
-            }
-          } catch {
-            // fall through to generic array-like decoder
-          }
-        }
-      }
-
-      if (!isArrayLikeValue(values)) return [];
-
-      return Array.from(values as ArrayLike<unknown>)
-        .map((v) => (v == null ? NaN : typeof v === "number" ? v : Number(v)))
-        .filter((v) => keepNonFinite || Number.isFinite(v));
-    },
-    [isArrayLikeValue],
-  );
-
-  const toNumeric2DArray = useCallback(
-    (values: unknown): number[][] => {
-      if (!values) return [];
-
-      // Handle ndarray-like payloads such as { dtype, bdata, shape, _inputArray }
-      if (typeof values === "object" && !Array.isArray(values)) {
-        const obj = values as Record<string, unknown>;
-
-        // Plotly often stores z as { dtype, bdata, shape, _inputArray }.
-        // Prefer _inputArray when present because it is already row-structured.
-        if (Array.isArray(obj._inputArray)) {
-          const rowsFromInputArray = (obj._inputArray as unknown[])
-            .map((row) => toNumericArray(row, true))
-            .filter((row) => row.length > 0);
-          if (rowsFromInputArray.length > 0) {
-            return rowsFromInputArray;
-          }
-        }
-
-        const shapeRaw = obj.shape;
-
-        const parseShape = (shape: unknown): { rows: number; cols: number } | null => {
-          if (Array.isArray(shape) && shape.length >= 2) {
-            const rows = Number(shape[0]);
-            const cols = Number(shape[1]);
-            if (Number.isFinite(rows) && Number.isFinite(cols)) {
-              return {
-                rows: Math.max(0, Math.floor(rows)),
-                cols: Math.max(0, Math.floor(cols)),
-              };
-            }
-          }
-          if (typeof shape === "string") {
-            const nums = shape
-              .replace(/[()[\]\s]/g, "")
-              .split(",")
-              .map((x) => Number(x))
-              .filter((x) => Number.isFinite(x));
-            if (nums.length >= 2) {
-              return {
-                rows: Math.max(0, Math.floor(nums[0])),
-                cols: Math.max(0, Math.floor(nums[1])),
-              };
-            }
-          }
-          return null;
-        };
-
-        const parsedShape = parseShape(shapeRaw);
-        if (parsedShape) {
-          const rows = parsedShape.rows;
-          const cols = parsedShape.cols;
-          const flat = toNumericArray(values, true);
-          if (rows > 0 && cols > 0 && flat.length >= rows * cols) {
-            const out: number[][] = [];
-            for (let r = 0; r < rows; r++) {
-              out.push(flat.slice(r * cols, (r + 1) * cols));
-            }
-            return out;
-          }
-        }
-      }
-
-      if (!isArrayLikeValue(values)) return [];
-
-      const rows = Array.from(values as ArrayLike<unknown>);
-      if (rows.length === 0) return [];
-
-      const first = rows[0];
-      if (isArrayLikeValue(first)) {
-        return rows.map((row) => toNumericArray(row, true)).filter((row) => row.length > 0);
-      }
-
-      const flat = toNumericArray(rows, true);
-      return flat.length > 0 ? [flat] : [];
-    },
-    [isArrayLikeValue, toNumericArray],
-  );
-
   const getClosestIndex = useCallback(
     (axisValues: number[], target: number, fallback: number): number => {
       if (!axisValues.length || !Number.isFinite(target)) {
@@ -1615,7 +1470,6 @@ const PlotWrapper: React.FC<Props> = ({
       plotConfig,
       sliderConfig,
       showToast,
-      toNumericArray,
     ],
   );
 
@@ -2062,7 +1916,7 @@ const PlotWrapper: React.FC<Props> = ({
           const values =
             explicitRange.length >= 2
               ? explicitRange.slice(0, 2)
-              : (updatedPlotJson.data || []).flatMap((trace: any) => toNumericArray(trace?.[axis]));
+              : (updatedPlotJson.data || []).flatMap((trace: any) => numericExtent(trace?.[axis]));
           const presentation = engineeringPresentation(
             unitDefinitions[axis],
             values,
@@ -2093,9 +1947,7 @@ const PlotWrapper: React.FC<Props> = ({
               : [];
           const zValues = explicitBounds.length
             ? explicitBounds
-            : (updatedPlotJson.data || []).flatMap((trace: any) =>
-                toNumeric2DArray(trace?.z).flat(),
-              );
+            : (updatedPlotJson.data || []).flatMap((trace: any) => numeric2DExtent(trace?.z));
           const presentation = engineeringPresentation(unitDefinitions.z, zValues, 5);
           const presentationTitle = presentation?.title;
           if (presentationTitle !== undefined) {
@@ -2134,7 +1986,7 @@ const PlotWrapper: React.FC<Props> = ({
 
       return updatedPlotJson;
     },
-    [toNumeric2DArray, toNumericArray],
+    [],
   );
 
   // Memoize appearance updates and temporary colour-scale previews.
@@ -3350,7 +3202,7 @@ const PlotWrapper: React.FC<Props> = ({
       xs: finite(toNumericArray(trace?.["x"])),
       ys: finite(toNumericArray(trace?.["y"])),
     };
-  }, [isLineCutActive, isHeatmapPlot, customizedPlotJson, toNumericArray]);
+  }, [isLineCutActive, isHeatmapPlot, customizedPlotJson]);
 
   const handlePlotClick = (event: Plotly.PlotMouseEvent) => {
     if (!isBGCorrActive) return;

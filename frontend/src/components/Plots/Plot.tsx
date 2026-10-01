@@ -6,6 +6,7 @@ import Plotly from "./plotly";
 import { engineeringPresentation, unitMetaFromLayout } from "./engineeringTicks";
 import { lightTheme, darkTheme, applyThemeToLayout } from "./themes";
 import { useThemeStore } from "../../stores/themeStore";
+import { releaseHeatmapImages } from "../../utils/heatmapImages";
 
 type PlotlyJSON = {
   data: Data[];
@@ -266,8 +267,14 @@ const PlotComponent: React.FC<Props> = React.memo(
     const hoverListenerRef = useRef<((event: Plotly.PlotMouseEvent) => void) | null>(null);
     const listenersNodeRef = useRef<HTMLDivElement | null>(null);
 
+    const releaseImagesRef = useRef<(() => void) | null>(null);
+
     // Purge the old Plotly node when a collapsed container removes it.
     const attachPlotNode = useCallback((node: HTMLDivElement | null) => {
+      if (node !== plotRef.current) {
+        releaseImagesRef.current?.();
+        releaseImagesRef.current = node ? releaseHeatmapImages(node) : null;
+      }
       const previous = plottedNodeRef.current;
       if (previous && previous !== node) {
         try {

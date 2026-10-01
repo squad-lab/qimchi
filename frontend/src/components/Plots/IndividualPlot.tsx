@@ -217,9 +217,10 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
             }));
           }
 
-          const clonedPlotJson: PlotlyJSON = structuredClone(plot.plotJson);
-          if (Array.isArray(clonedPlotJson.data)) {
-            clonedPlotJson.data = clonedPlotJson.data.map((trace, idx) => {
+          // Shallow-copy the response before replacing its trace array.
+          const nextPlotJson: PlotlyJSON = { ...plot.plotJson };
+          if (Array.isArray(nextPlotJson.data)) {
+            nextPlotJson.data = nextPlotJson.data.map((trace, idx) => {
               if (!trace || typeof trace !== "object") {
                 return trace;
               }
@@ -259,13 +260,13 @@ const IndividualPlot: React.FC<IndividualPlotProps> = ({
               return trace;
             });
           }
-          clonedPlotJson.layout = {
-            ...(clonedPlotJson.layout || {}),
+          nextPlotJson.layout = {
+            ...(nextPlotJson.layout || {}),
             // Ensure Plotly.react sees a revision bump even if data arrays compare equal
             datarevision: Date.now(),
           };
-          plotJsonRef.current = clonedPlotJson;
-          setPlotJson(clonedPlotJson);
+          plotJsonRef.current = nextPlotJson;
+          setPlotJson(nextPlotJson);
           setError(null);
 
           // Capture auto-generated slider configuration from backend
