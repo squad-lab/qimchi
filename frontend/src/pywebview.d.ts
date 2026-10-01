@@ -19,6 +19,8 @@ declare global {
         check_for_updates?: () => Promise<UpdateState>;
         /** Starts a background download; progress arrives as events. */
         download_update?: () => Promise<UpdateState>;
+        /** Replaces a downloaded installer with a fresh copy. */
+        redownload_update?: () => Promise<UpdateState>;
         /** Installs the downloaded update; the app closes. */
         install_update?: () => Promise<UpdateState>;
         remind_update_at_next_launch?: () => Promise<UpdateState>;

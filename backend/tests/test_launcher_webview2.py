@@ -256,6 +256,45 @@ def test_remind_at_next_launch_offers_the_download_again_without_fetching(
     assert next_launch.check(include_previews=False)["status"] == "downloaded"
 
 
+def test_a_downloaded_update_can_be_replaced_with_a_fresh_copy(
+    launcher, monkeypatch, tmp_path
+):
+    messages = []
+    updates, _ = _updates_with_offer(launcher, monkeypatch, tmp_path, messages)
+    updates.check(include_previews=False)
+    updates.download()
+    installer = tmp_path / "updates" / "qimchi-setup-v0.7.0-rc.9.exe"
+    installer.write_bytes(b"stale")
+
+    state = updates.redownload()
+
+    assert state["status"] == "downloaded"
+    assert state["prompt"] == "ready"
+    assert installer.read_bytes() == b"installer"
+    assert any("redownloading v0.7.0-rc.9" in message for message in messages)
+
+
+def test_redownload_refreshes_old_pending_metadata(launcher, monkeypatch, tmp_path):
+    import json
+
+    from api import settings
+
+    messages = []
+    monkeypatch.setattr(
+        settings, "desktop_settings", lambda: SimpleNamespace(previewReleases=False)
+    )
+    updates, _ = _updates_with_offer(launcher, monkeypatch, tmp_path, messages)
+    updates.check(include_previews=False)
+    updates.download()
+    updates._offer.pop("asset_url")
+    pending_path = tmp_path / "updates" / "pending.json"
+    pending = json.loads(pending_path.read_text(encoding="utf-8"))
+    pending.pop("asset_url")
+    pending_path.write_text(json.dumps(pending), encoding="utf-8")
+
+    assert updates.redownload()["status"] == "downloaded"
+
+
 def test_a_downloaded_update_is_forgotten_once_installed(
     launcher, monkeypatch, tmp_path
 ):

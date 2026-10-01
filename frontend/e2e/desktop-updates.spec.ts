@@ -43,6 +43,10 @@ async function fakeDesktopUpdater(page: Page, initial: Record<string, unknown>) 
           calls.push("download");
           return push({ status: "downloading", progress: 0, prompt: null });
         },
+        redownload_update: async () => {
+          calls.push("redownload");
+          return push({ status: "downloading", progress: 0, prompt: null });
+        },
         install_update: async () => {
           calls.push("install");
           return push({ status: "installing", prompt: null });
@@ -141,8 +145,11 @@ test("Settings > Updates checks, downloads and installs on demand", async ({ pag
   );
 
   await push(page, { status: "downloaded", progress: 1 });
+  await expect(settings.getByText("Qimchi v0.7.0-rc.9 is already downloaded.")).toBeVisible();
+  await settings.getByRole("button", { name: "Download again" }).click();
+  await push(page, { status: "downloaded", progress: 1 });
   await settings.getByRole("button", { name: "Install now" }).click();
-  await expect.poll(() => calls(page)).toEqual(["check", "download", "install"]);
+  await expect.poll(() => calls(page)).toEqual(["check", "download", "redownload", "install"]);
   await expect(settings.getByLabel("Check for updates at startup")).toBeChecked();
 });
 

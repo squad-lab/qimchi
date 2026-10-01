@@ -46,6 +46,7 @@ interface UpdateStore {
   refresh: () => Promise<void>;
   check: () => Promise<void>;
   download: () => Promise<void>;
+  redownload: () => Promise<void>;
   install: () => Promise<void>;
   remindAtNextLaunch: () => Promise<void>;
   dismiss: () => Promise<void>;
@@ -75,6 +76,7 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => {
     refresh: () => call(() => api()?.update_status?.()),
     check: () => call(() => api()?.check_for_updates?.()),
     download: () => call(() => api()?.download_update?.()),
+    redownload: () => call(() => api()?.redownload_update?.()),
     install: () => call(() => api()?.install_update?.()),
     remindAtNextLaunch: () => call(() => api()?.remind_update_at_next_launch?.()),
     dismiss: () => call(() => api()?.dismiss_update_prompt?.()),

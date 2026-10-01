@@ -12,7 +12,7 @@ const formatCheckedAt = (checkedAt: string | null) =>
 
 /** Settings > Updates: the running version, and checking, downloading and installing on demand. */
 const UpdatesPanel = () => {
-  const { state, check, download, install } = useUpdateStore();
+  const { state, check, download, redownload, install } = useUpdateStore();
   const busy = ["checking", "downloading", "installing"].includes(state.status);
   const percent = Math.round(state.progress * 100);
   const checkedAt = formatCheckedAt(state.checkedAt);
@@ -32,7 +32,7 @@ const UpdatesPanel = () => {
       summary = `Downloading Qimchi ${state.tag}… ${percent}%`;
       break;
     case "downloaded":
-      summary = `Qimchi ${state.tag} is downloaded and ready to install.`;
+      summary = `Qimchi ${state.tag} is already downloaded.`;
       break;
     case "installing":
       summary = `Installing Qimchi ${state.tag}…`;
@@ -65,9 +65,14 @@ const UpdatesPanel = () => {
             </button>
           )}
           {state.status === "downloaded" && (
-            <button type="button" onClick={() => void install()} className={primaryClass}>
-              Install now
-            </button>
+            <>
+              <button type="button" onClick={() => void redownload()} className={secondaryClass}>
+                Download again
+              </button>
+              <button type="button" onClick={() => void install()} className={primaryClass}>
+                Install now
+              </button>
+            </>
           )}
           <button
             type="button"
