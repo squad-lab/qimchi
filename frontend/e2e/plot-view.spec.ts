@@ -26,7 +26,7 @@ test("keeps the zoom when a filter result lands after the user zoomed", async ({
   await openLiveHeatmap(page);
   const ticksBefore = await drawnTicks(page);
 
-  await page.getByTitle("Apply Filters & Sliders").first().click();
+  await page.getByRole("button", { name: "Edit filters" }).first().click();
   await page.getByText("Diff along Y", { exact: true }).first().click();
   await page.getByText("Apply", { exact: true }).first().click();
 
@@ -140,7 +140,7 @@ test("resetting a filtered live plot does not flip back to the filtered state", 
   await openLiveHeatmap(page);
   const rawTicks = await drawnTicks(page);
 
-  await page.getByTitle("Apply Filters & Sliders").first().click();
+  await page.getByRole("button", { name: "Edit filters" }).first().click();
   await page.getByText("Diff along Y", { exact: true }).first().click();
   await page.getByText("Apply", { exact: true }).first().click();
   await page.getByRole("button", { name: "Close modal" }).first().click();
@@ -149,7 +149,7 @@ test("resetting a filtered live plot does not flip back to the filtered state", 
   // Let the filtered config reach the live polls.
   await page.waitForTimeout(2_000);
 
-  await page.getByTitle("Reset", { exact: true }).first().click();
+  await page.getByRole("button", { name: "Reset plot" }).first().click();
   const seen: string[] = [];
   for (const end = Date.now() + 3_000; Date.now() < end;) {
     const current = (await ticks()) === rawTicks ? "raw" : "filtered";
@@ -171,7 +171,7 @@ test("reverses the heatmap colormap from the Reverse toggle", async ({ page }) =
       return { reversed: axis.reversescale, first: axis.colorscale[0][1] };
     });
 
-  await page.getByTitle("Edit Appearance").first().click();
+  await page.getByRole("button", { name: "Edit appearance" }).first().click();
   await chooseColorscale(page, page, "Viridis");
   await expect.poll(async () => (await coloraxis()).reversed).toBe(false);
   const viridisStart = (await coloraxis()).first;
@@ -188,7 +188,7 @@ test("reverses the heatmap colormap from the Reverse toggle", async ({ page }) =
 });
 
 async function applyDiffAlongY(page: Page) {
-  await page.getByTitle("Apply Filters & Sliders").first().click();
+  await page.getByRole("button", { name: "Edit filters" }).first().click();
   await page.getByText("Diff along Y", { exact: true }).first().click();
   await page.getByText("Apply", { exact: true }).first().click();
   await page.getByRole("button", { name: "Close modal" }).first().click();
@@ -205,7 +205,7 @@ test("Reset clears the zoom without remounting the plot", async ({ page }) => {
     gd.dataset.beforeReset = "yes";
   });
 
-  await page.getByTitle("Reset", { exact: true }).first().click();
+  await page.getByRole("button", { name: "Reset plot" }).first().click();
 
   await expect.poll(async () => (await heatmapState(page))?.xRange[0]).toBeCloseTo(FULL_X[0], 2);
   // A remount would replace the element, flashing the plot blank.
@@ -221,7 +221,7 @@ test("a filter result still in flight when Reset is pressed is discarded", async
   const rawTicks = await drawnTicks(page);
 
   await applyDiffAlongY(page);
-  await page.getByTitle("Reset", { exact: true }).first().click();
+  await page.getByRole("button", { name: "Reset plot" }).first().click();
   releaseTransform();
 
   const ticks = async () => (await heatmapState(page))?.colorbar?.ticktext?.join();
@@ -239,9 +239,10 @@ test("names filters and labels the colour range in the data's units", async ({ p
   await openLiveHeatmap(page);
 
   await applyDiffAlongY(page);
-  await expect(page.locator("[title='Filters: Diff along Y']").first()).toBeAttached();
+  await page.getByRole("button", { name: "Edit filters" }).first().hover();
+  await expect(page.getByRole("tooltip", { name: "Filters (F): Diff along Y" })).toBeVisible();
 
-  await page.getByTitle("Edit Appearance").first().click();
+  await page.getByRole("button", { name: "Edit appearance" }).first().click();
   // The early frame spans 100-260 pA.
   await expect(page.getByText("Data min: 100 pA")).toBeVisible();
   await expect(page.getByText("Data max: 260 pA")).toBeVisible();
@@ -254,7 +255,7 @@ test("a filter changed while another is still loading is applied after it", asyn
   state.transformResult = liveHeatmap.later;
   await openLiveHeatmap(page);
 
-  await page.getByTitle("Apply Filters & Sliders").first().click();
+  await page.getByRole("button", { name: "Edit filters" }).first().click();
   for (const name of ["Diff along Y", "Diff along X"]) {
     await page.getByText(name, { exact: true }).first().click();
     await page.getByText("Apply", { exact: true }).first().click();
@@ -266,17 +267,19 @@ test("a filter changed while another is still loading is applied after it", asyn
   await expect.poll(() => state.transformRequests.length).toBe(2);
   expect([...state.transformRequests[1].filters_order].sort()).toEqual(["diff_x", "diff_y"]);
   await page.getByRole("button", { name: "Close modal" }).first().click();
-  await expect(page.locator("[title^='Filters: ']").first()).toHaveAttribute(
-    "title",
-    /Diff along Y.*Diff along X|Diff along X.*Diff along Y/,
-  );
+  await page.getByRole("button", { name: "Edit filters" }).first().hover();
+  await expect(
+    page.getByRole("tooltip", {
+      name: /Filters \(F\): (Diff along Y.*Diff along X|Diff along X.*Diff along Y)/,
+    }),
+  ).toBeVisible();
 });
 
 test("rapid filter parameter changes keep every applied filter", async ({ page }) => {
   const state = await mockLiveHeatmapApi(page);
   await openLiveHeatmap(page);
 
-  await page.getByTitle("Apply Filters & Sliders").first().click();
+  await page.getByRole("button", { name: "Edit filters" }).first().click();
   const panel = page.locator('[data-tour="filters-panel"]');
   for (const name of ["Diff along Y", "Savitzky-Golay"]) {
     await panel.getByRole("tab", { name }).click();
@@ -305,7 +308,7 @@ test("applied filters can be reordered and removed from their list", async ({ pa
   const state = await mockLiveHeatmapApi(page);
   await openLiveHeatmap(page);
 
-  await page.getByTitle("Apply Filters & Sliders").first().click();
+  await page.getByRole("button", { name: "Edit filters" }).first().click();
   const panel = page.locator('[data-tour="filters-panel"]');
   for (const name of ["Diff along Y", "Savitzky-Golay"]) {
     await panel.getByRole("tab", { name }).click();
@@ -393,7 +396,7 @@ test("a data slider reaches its maximum and keeps its place when a filter is app
       ?.slider?.temperature?.value;
   await openLiveHeatmap(page);
 
-  await page.getByTitle("Apply Filters & Sliders").first().click();
+  await page.getByRole("button", { name: "Edit filters" }).first().click();
   const panel = page.locator('[data-tour="filters-panel"]');
   await panel.getByRole("tab", { name: /Sliders/ }).click();
   const range = panel.locator('input[type="range"]').first();
@@ -433,7 +436,7 @@ test("switching an axis between linear and log clears the zoom", async ({ page }
   // Y is frequency, whose cells span 188.75-206.25 MHz.
   expect(zoomedY[1] - zoomedY[0]).toBeLessThan(10e6);
 
-  await page.getByTitle("Edit Appearance").first().click();
+  await page.getByRole("button", { name: "Edit appearance" }).first().click();
   await page.getByRole("button", { name: "Y-Axis", exact: true }).click();
   await page.getByLabel("Y-axis type").click();
   await page.getByText("Log", { exact: true }).last().click();
@@ -449,7 +452,7 @@ test("turning on background correction keeps the zoom", async ({ page }) => {
   await mockLiveHeatmapApi(page);
   await openLiveHeatmap(page);
   // BG correction maximizes the plot, which remounts it, so start maximized.
-  await page.getByTitle("Maximize").first().click();
+  await page.getByRole("button", { name: "Maximize plot" }).first().click();
   await expect.poll(() => heatmapState(page)).not.toBeNull();
   await zoomHeatmap(page, 0.1, 0.5);
   const zoomed = (await heatmapState(page))!.xRange;
@@ -466,7 +469,7 @@ test("the R_in correction filter shows its equation and sends its resistance", a
   const state = await mockLiveHeatmapApi(page);
   await openLiveHeatmap(page);
 
-  await page.getByTitle("Apply Filters & Sliders").first().click();
+  await page.getByRole("button", { name: "Edit filters" }).first().click();
   const panel = page.locator('[data-tour="filters-panel"]');
   await panel.getByRole("tab", { name: "R_in Correction" }).click();
   const equation = panel.getByRole("math", { name: "V_S = V_b − I × R_in" });
@@ -494,7 +497,7 @@ test("contrast filters follow Flip Heatmap in the filter menu", async ({ page })
   await mockLiveHeatmapApi(page);
   await openLiveHeatmap(page);
 
-  await page.getByTitle("Apply Filters & Sliders").first().click();
+  await page.getByRole("button", { name: "Edit filters" }).first().click();
   const panel = page.locator('[data-tour="filters-panel"]');
   const labels = (await panel.getByRole("tab").allTextContents()).map((label) => label.trim());
   const flip = labels.indexOf("Flip Heatmap");

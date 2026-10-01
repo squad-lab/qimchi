@@ -3493,7 +3493,7 @@ const PlotWrapper: React.FC<Props> = ({
         )}
         {view === "popup" ? (
           <>
-            <Tooltip content="Expand to the full window" position="bottom">
+            <Tooltip content="Expand to the full window (M)" position="bottom">
               <button
                 type="button"
                 onClick={() => setIsMaximized(true)}
@@ -3585,7 +3585,7 @@ const PlotWrapper: React.FC<Props> = ({
             <div className="flex items-center gap-1">
               {/* Swap X & Y Axes (heatmaps only) */}
               {isHeatmapPlot && (
-                <Tooltip content="Swap X & Y Axes" position="bottom">
+                <Tooltip content="Swap X & Y Axes (S)" position="bottom">
                   <button
                     onClick={handleSwapAxes}
                     className={`relative p-1.5 rounded transition-colors duration-150 ${
@@ -3593,7 +3593,7 @@ const PlotWrapper: React.FC<Props> = ({
                         ? "bg-blue-100 text-blue-600"
                         : "qimchi-dark-hover-plain hover:bg-gray-200"
                     }`}
-                    title="Swap X & Y Axes"
+                    aria-label="Swap X and Y axes"
                     disabled={isApplyingFilters}
                   >
                     <ArrowLeftRight
@@ -3607,7 +3607,7 @@ const PlotWrapper: React.FC<Props> = ({
               {/* LineCut (Heatmaps only) */}
               {isHeatmapPlot && (
                 <Tooltip
-                  content={isLineCutActive ? "Leave LineCut (Esc)" : "LineCut"}
+                  content={isLineCutActive ? "Leave LineCut (Esc)" : "LineCut (Shift+X)"}
                   position="bottom"
                 >
                   <button
@@ -3617,7 +3617,7 @@ const PlotWrapper: React.FC<Props> = ({
                         ? "bg-blue-100 text-blue-600 border border-blue-600"
                         : "qimchi-dark-hover-plain hover:bg-gray-200"
                     }`}
-                    title="Generate line slices (X/Y/O keys)"
+                    aria-label="LineCut"
                     disabled={isApplyingFilters}
                   >
                     <ScissorsLineDashed
@@ -3632,7 +3632,9 @@ const PlotWrapper: React.FC<Props> = ({
 
               <Tooltip
                 content={
-                  isLineCutActive ? "Return to the Viewer with LineCut in a pop-up" : "Restore"
+                  isLineCutActive
+                    ? "Return to the Viewer with LineCut in a pop-up (M)"
+                    : "Restore (M)"
                 }
                 position="bottom"
               >
@@ -3970,11 +3972,11 @@ const PlotWrapper: React.FC<Props> = ({
           <div className="flex justify-center">
             <div className="flex flex-col gap-1 items-center">
               {onClose && (
-                <Tooltip content="Close" position="left">
+                <Tooltip content="Close (Delete)" position="left">
                   <button
                     onClick={onClose}
                     className="qimchi-dark-hover-plain p-1.5 rounded hover:bg-gray-300 transition-colors"
-                    title="Close"
+                    aria-label="Close plot"
                   >
                     <X size={16} className="text-red-600" />
                   </button>
@@ -4019,7 +4021,7 @@ const PlotWrapper: React.FC<Props> = ({
                         ? "bg-amber-100 hover:bg-amber-200"
                         : "qimchi-dark-hover-plain hover:bg-gray-300"
                     }`}
-                    title={plotConfig?.pinned ? "Unpin" : "Pin to measurement"}
+                    aria-label={plotConfig?.pinned ? "Unpin plot" : "Pin plot to measurement"}
                     aria-pressed={Boolean(plotConfig?.pinned)}
                   >
                     {plotConfig?.pinned ? (
@@ -4032,11 +4034,11 @@ const PlotWrapper: React.FC<Props> = ({
               )}
 
               {/* Reset button at the top */}
-              <Tooltip content="Reset plot" position="left">
+              <Tooltip content="Reset plot (R)" position="left">
                 <button
                   onClick={handleReset}
                   className="qimchi-dark-hover-plain p-1.5 rounded hover:bg-orange-100 hover:text-orange-600 transition-colors duration-150"
-                  title="Reset"
+                  aria-label="Reset plot"
                 >
                   <RotateCcw size={16} className="text-gray-600" />
                 </button>
@@ -4049,7 +4051,7 @@ const PlotWrapper: React.FC<Props> = ({
             <div className="flex flex-col gap-1 items-center mt-1">
               {isHeatmapPlot && (
                 <>
-                  <Tooltip content="LineCut Tool" position="left">
+                  <Tooltip content="LineCut Tool (Shift+X)" position="left">
                     <button
                       onClick={toggleLineCutMode}
                       className={`relative p-1.5 rounded transition-colors duration-150 ${
@@ -4073,7 +4075,7 @@ const PlotWrapper: React.FC<Props> = ({
                     </button>
                   </Tooltip>
 
-                  <Tooltip content="Swap X & Y Axes" position="left">
+                  <Tooltip content="Swap X & Y Axes (S)" position="left">
                     <button
                       onClick={handleSwapAxes}
                       className={`relative p-1.5 rounded transition-colors duration-150 ${
@@ -4097,7 +4099,11 @@ const PlotWrapper: React.FC<Props> = ({
 
               {/* Appearance Settings */}
               <Tooltip
-                content={shiftHeld && hoverAppearanceBtn ? "Paint Appearance" : "Edit Appearance"}
+                content={
+                  shiftHeld && hoverAppearanceBtn
+                    ? "Paint Appearance (Shift+click)"
+                    : "Edit Appearance (A)"
+                }
                 position="left"
               >
                 <button
@@ -4112,7 +4118,7 @@ const PlotWrapper: React.FC<Props> = ({
                   onMouseEnter={() => setHoverAppearanceBtn(true)}
                   onMouseLeave={() => setHoverAppearanceBtn(false)}
                   className="qimchi-dark-hover-plain relative p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
-                  title={shiftHeld && hoverAppearanceBtn ? "Paint Appearance" : "Edit Appearance"}
+                  aria-label="Edit appearance"
                 >
                   <Palette
                     size={16}
@@ -4130,12 +4136,12 @@ const PlotWrapper: React.FC<Props> = ({
               <Tooltip
                 content={
                   shiftHeld && hoverFiltersBtn
-                    ? "Paint Filters"
+                    ? "Paint Filters (Shift+click)"
                     : appliedFilters.length > 0
                       ? // Names only, in the order they are applied -- the full
                         // filter strings live in the modal.
-                        `Filters: ${appliedFilters.map((f) => filterLabel(f.name)).join(" → ")}`
-                      : "Apply Filters & Sliders"
+                        `Filters (F): ${appliedFilters.map((f) => filterLabel(f.name)).join(" → ")}`
+                      : "Apply Filters & Sliders (F)"
                 }
                 position="left"
               >
@@ -4150,13 +4156,7 @@ const PlotWrapper: React.FC<Props> = ({
                   onMouseEnter={() => setHoverFiltersBtn(true)}
                   onMouseLeave={() => setHoverFiltersBtn(false)}
                   className="qimchi-dark-hover-plain relative p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
-                  title={
-                    shiftHeld && hoverFiltersBtn
-                      ? "Paint Filters"
-                      : appliedFilters.length > 0
-                        ? `Filters: ${appliedFilters.map((f) => filterLabel(f.name)).join(" → ")}`
-                        : "Apply Filters & Sliders"
-                  }
+                  aria-label="Edit filters"
                   disabled={isApplyingFilters}
                 >
                   <PocketKnife
@@ -4183,10 +4183,14 @@ const PlotWrapper: React.FC<Props> = ({
                 </button>
               </Tooltip>
 
-              <RibbonFlyout label="Export" icon={<Download size={16} className="text-gray-600" />}>
+              <RibbonFlyout
+                label="Export"
+                tooltip="Export (E)"
+                icon={<Download size={16} className="text-gray-600" />}
+              >
                 {(close) => (
                   <>
-                    <Tooltip content="Export images" position="top">
+                    <Tooltip content="Export images (E)" position="top">
                       <button
                         type="button"
                         role="menuitem"
@@ -4201,7 +4205,7 @@ const PlotWrapper: React.FC<Props> = ({
                         <span className="text-[0.6875rem] font-medium text-gray-700">Disk</span>
                       </button>
                     </Tooltip>
-                    <Tooltip content="Send to Notes" position="top">
+                    <Tooltip content="Send to Notes (N)" position="top">
                       <button
                         type="button"
                         role="menuitem"
@@ -4264,11 +4268,11 @@ const PlotWrapper: React.FC<Props> = ({
               </RibbonFlyout>
 
               {/* Maximize */}
-              <Tooltip content="Maximize" position="left">
+              <Tooltip content="Maximize (M)" position="left">
                 <button
                   onClick={handleMaximize}
                   className="qimchi-dark-hover-plain p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
-                  title="Maximize"
+                  aria-label="Maximize plot"
                 >
                   <Maximize2 size={16} className="text-gray-600" />
                 </button>

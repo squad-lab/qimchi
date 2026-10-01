@@ -300,8 +300,8 @@ test("a new measurement gets the Viewer's plots, not the defaults the user remov
   const linePlot = page
     .locator(".js-plotly-plot")
     .filter({ has: page.locator(".scatterlayer .trace") })
-    .locator("xpath=ancestor::*[.//button[@title='Close']][1]");
-  await linePlot.getByTitle("Close").first().click();
+    .locator("xpath=ancestor::*[@data-plot-id][1]");
+  await linePlot.getByRole("button", { name: "Close plot" }).first().click();
   await expect(page.locator(".js-plotly-plot")).toHaveCount(1);
 
   await addDatasetToBasket(page, "sweep.zarr");

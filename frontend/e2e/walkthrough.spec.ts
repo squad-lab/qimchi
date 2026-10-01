@@ -185,8 +185,8 @@ async function addLogoFromExplorer(page: Page) {
 async function openPlotTool(page: Page, tool: "filters" | "appearance") {
   const tile = page.locator("[data-plot-id]").first();
   await tile.hover();
-  const title = tool === "filters" ? /^(Apply Filters & Sliders|Filters: )/ : "Edit Appearance";
-  await tile.getByTitle(title).first().click();
+  const name = tool === "filters" ? "Edit filters" : "Edit appearance";
+  await tile.getByRole("button", { name }).first().click();
 }
 
 async function buildLinePlot(page: Page) {
@@ -494,7 +494,7 @@ test("puts back a demo plot that was removed by hand", async ({ page }) => {
 
   const plot = page.locator("[data-plot-id]");
   await plot.hover();
-  await plot.getByTitle("Close").click();
+  await plot.getByRole("button", { name: "Close plot" }).click();
   await expect(plot).toHaveCount(0);
 
   // The repair loop recreates a heat map removed during its required step.
@@ -625,7 +625,7 @@ test("the colour scale picker previews a scale without applying it", async ({ pa
   const PLASMA = "#0d0887";
 
   await page.locator("[data-plot-id]").hover();
-  await page.getByTitle("Edit Appearance").first().click();
+  await page.getByRole("button", { name: "Edit appearance" }).first().click();
   await expect.poll(firstColour).toBe(VIRIDIS);
 
   // Hover previews Plasma without persisting it.

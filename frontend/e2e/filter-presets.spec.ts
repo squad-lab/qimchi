@@ -68,11 +68,7 @@ test("a preset stays linked to the plot's filters until it is explicitly let go"
   await page.getByText("live-heat", { exact: true }).dblclick();
   await expect.poll(() => heatmapState(page)).not.toBeNull();
 
-  const openFilters = () =>
-    page
-      .getByTitle(/^(Apply Filters & Sliders|Filters: )/)
-      .first()
-      .click();
+  const openFilters = () => page.getByRole("button", { name: "Edit filters" }).first().click();
   await openFilters();
   const panel = page.locator('[data-tour="filters-panel"]');
   const tab = (name: RegExp | string) => panel.getByRole("tab", { name }).click();
@@ -178,7 +174,7 @@ test("updating a preset after a settings change names the setting, not the order
   await page.getByText("live-heat", { exact: true }).dblclick();
   await expect.poll(() => heatmapState(page)).not.toBeNull();
 
-  await page.getByTitle("Apply Filters & Sliders").first().click();
+  await page.getByRole("button", { name: "Edit filters" }).first().click();
   const panel = page.locator('[data-tour="filters-panel"]');
   await panel.getByRole("tab", { name: "R_in Correction" }).click();
   await panel.getByText("Apply", { exact: true }).click();
