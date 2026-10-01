@@ -24,6 +24,7 @@ import PlotComposer, {
 } from "./PlotComposer";
 import PlotContainer from "./PlotContainer";
 import { usePlotCollection } from "../hooks/usePlotCollection";
+import { readSessionValue, SESSION_KEYS, writeSessionValue } from "../utils/sessionRestore";
 import { collectPlotExports, exportManyPlotImages } from "../services/exportAPI";
 import { usePlotStore } from "../stores/plotStore";
 import { useSidebarStore } from "../stores/sidebarStore";
@@ -123,7 +124,10 @@ const Viewer = ({
       useSettingsStore.getState().update(["general", "plotWidth"], percent);
     }
   };
-  const [perPlotWidthMap, setPerPlotWidthMap] = useState<Record<string, number>>({});
+  const [perPlotWidthMap, setPerPlotWidthMap] = useState<Record<string, number>>(() =>
+    readSessionValue<Record<string, number>>(SESSION_KEYS.plotWidths, {}),
+  );
+  useEffect(() => writeSessionValue(SESSION_KEYS.plotWidths, perPlotWidthMap), [perPlotWidthMap]);
   const [selectedDatasetIds, setSelectedDatasetIds] = useState<Set<string>>(new Set());
   const [selectedPlotId, setSelectedPlotId] = useState<string | null>(null);
   const [viewerHeight, setViewerHeight] = useState<string>("calc(100vh - 200px)");
@@ -137,7 +141,11 @@ const Viewer = ({
   const recreateCustomPlotsRef = useRef(recreateCustomPlots);
   recreateCustomPlotsRef.current = recreateCustomPlots;
 
-  const processedAutoPlotItems = useRef<Set<string>>(new Set());
+  // Restored measurements already have restored plots.
+  const [restoredBasketIds] = useState(
+    () => new Set(readSessionValue<BasketItem[]>(SESSION_KEYS.basket, []).map((item) => item.id)),
+  );
+  const processedAutoPlotItems = useRef<Set<string>>(restoredBasketIds);
   const previousSelectionKeyRef = useRef<string>("");
 
   // Monitor basket changes for dataset cycling

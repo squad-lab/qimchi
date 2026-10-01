@@ -29,15 +29,18 @@ import Walkthrough from "./walkthrough/Walkthrough";
 import { useWalkthroughStore } from "./walkthrough/walkthroughStore";
 import { isHeldBackByWalkthrough } from "./walkthrough/steps";
 import { isPathTrashed, useLibraryStore } from "./stores/libraryStore";
+import { readSessionValue, SESSION_KEYS, writeSessionValue } from "./utils/sessionRestore";
 
 // Browser default, and what the rem-based Tailwind scales assume at 100%.
 const BASE_FONT_SIZE_PX = 16;
 
 const AppContent: React.FC = () => {
-  const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
+  const [basketItems, setBasketItems] = useState<BasketItem[]>(() =>
+    readSessionValue<BasketItem[]>(SESSION_KEYS.basket, []),
+  );
   // Several adds can run in one event (a multi-selection, a drop), before the
   // state re-renders, so the limit is checked against this synchronous copy.
-  const basketItemsRef = useRef<BasketItem[]>([]);
+  const basketItemsRef = useRef<BasketItem[]>(basketItems);
   const lastLimitWarningRef = useRef(0);
   const { showToast } = useToast();
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
@@ -268,8 +271,7 @@ const AppContent: React.FC = () => {
     setLoadingAttributes((prev) => new Set(prev).add(itemId));
   };
 
-  const addDatasetToBasket = (item: BasketItem) => {
-    if (!handleAddToBasket(item)) return;
+  const loadAttributes = (item: BasketItem) => {
     handleStartLoadingAttributes(item.id);
     axios
       .post(`${PROD_BACKEND_URL}/load-attrs/`, { path: item.path })
@@ -283,6 +285,27 @@ const AppContent: React.FC = () => {
         });
       });
   };
+
+  const addDatasetToBasket = (item: BasketItem) => {
+    if (handleAddToBasket(item)) loadAttributes(item);
+  };
+
+  // Store basket items without attributes, then reload them after restoration.
+  useEffect(() => {
+    writeSessionValue(
+      SESSION_KEYS.basket,
+      basketItems.map((item) => ({ ...item, attributes: undefined })),
+    );
+  }, [basketItems]);
+
+  useEffect(() => {
+    for (const item of basketItemsRef.current) {
+      if (item.type === "file" && !item.attributes) loadAttributes(item);
+    }
+    // Load attributes for items restored at startup.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const addDatasetToBasketRef = useRef(addDatasetToBasket);
   addDatasetToBasketRef.current = addDatasetToBasket;
 
