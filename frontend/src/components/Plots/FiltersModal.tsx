@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { Rnd } from "react-rnd";
+import { fitToWindow, useKeepRndInWindow } from "../../utils/keepInWindow";
 
 // Local imports
 import "./FiltersModal.css";
@@ -443,6 +444,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   const [zIndexLocal, setZIndexLocal] = useState<number | undefined>(undefined);
   const zRef = useRef<number | undefined>(undefined);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const rndRef = useRef<Rnd>(null);
+  useKeepRndInWindow(rndRef, isOpen, 300, 240);
 
   useEffect(() => {
     if (isOpen) {
@@ -1011,13 +1014,18 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   return createPortal(
     <div ref={wrapperRef} className="fixed inset-0 pointer-events-none">
       <Rnd
-        default={{
-          // Bottom right
-          x: window.innerWidth - 620,
-          y: window.innerHeight - 578,
-          width: 600,
-          height: 550,
-        }}
+        ref={rndRef}
+        default={fitToWindow(
+          {
+            // Open in the bottom-right corner.
+            x: window.innerWidth - 620,
+            y: window.innerHeight - 578,
+            width: 600,
+            height: 550,
+          },
+          300,
+          240,
+        )}
         enableResizing={false}
         dragHandleClassName="drag-handle"
         bounds="parent"

@@ -13,6 +13,7 @@ import {
   ScrollText,
 } from "lucide-react";
 import { Rnd } from "react-rnd";
+import { fitToWindow, useKeepRndInWindow } from "../utils/keepInWindow";
 import JsonView from "@uiw/react-json-view";
 import { LogItem } from "../hooks/useToast";
 
@@ -137,6 +138,8 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
 }) => {
   const zRef = useRef<number | undefined>(undefined);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const rndRef = useRef<Rnd>(null);
+  useKeepRndInWindow(rndRef, isOpen, 300, 200);
 
   // Search state
   const [searchInput, setSearchInput] = useState("");
@@ -227,13 +230,18 @@ const NotificationLogModal: React.FC<NotificationLogModalProps> = ({
   return (
     <div ref={wrapperRef} className="fixed inset-0 pointer-events-none" data-closes-on-escape>
       <Rnd
-        default={{
-          // Bottom left, just clear of the sidebar rail.
-          x: 48,
-          y: window.innerHeight - 550 - 28,
-          width: 384,
-          height: 550,
-        }}
+        ref={rndRef}
+        default={fitToWindow(
+          {
+            // Open in the bottom-left corner, clear of the sidebar rail.
+            x: 48,
+            y: window.innerHeight - 550 - 28,
+            width: 384,
+            height: 550,
+          },
+          300,
+          200,
+        )}
         minWidth={300}
         minHeight={200}
         bounds="parent"
