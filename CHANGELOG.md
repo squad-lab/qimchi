@@ -1,5 +1,18 @@
 ## Qimchi Changelog
 
+### v0.7.1 (Preview)
+
+- [Feature] The sidebar bug report button now opens reporting instructions, a direct link to a new GitLab issue, and the log-bundle controls.
+- [Feature] Downloaded updates can be downloaded again before installation.
+- [Fix] A live heat map no longer uses more and more memory as it refreshes. Over a long measurement this used to crash the window due to a plotly memory leak (see: https://github.com/plotly/plotly.js/issues/8097).
+- [Fix] If the window has to reload, for example after a crash, the Basket and the plots in the Viewer come back as they were.
+- [Fix] Qimchi uses much less memory while it is not exporting: each of its background image exporters now takes about 90% less memory.
+- [Fix] A LineCut that follows the newest line of a live heat map now goes all the way to the last row or column. It used to stop one or more lines before the end.
+- [Fix] The LineCut card no longer goes missing after the window gets smaller. A card you had moved could end up outside the window and stay there until Qimchi was restarted; it is now kept inside the window.
+- [Fix] The Filters, Appearance, Help, Settings and notification panels, and the pinned parameters card, now stay inside the window. In a small window they used to open with their title bar above the top edge, where they could not be moved or closed, and shrinking the window could leave them out of view.
+- [Fix] Interface zoom now applies consistently to compact labels, walkthroughs, notes, release notes, and docked LineCut text.
+- [Misc] Large live heat maps do much less work on each refresh, so they update more often and use less memory.
+
 ### v0.7.0 - 2026-10-01
 
 - [Feature] Complex variables, including HDF5 `r`/`i` pairs, are available as amplitude, phase in radians, real, and imaginary values. Library metadata is preserved for these measurements.
