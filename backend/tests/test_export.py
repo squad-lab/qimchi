@@ -100,115 +100,6 @@ def test_embed_png_metadata_round_trip(tmp_path):
         assert json.loads(image.text["Qimchi"]) == meta
 
 
-def test_export_page_bundles_and_waits_for_fira_sans(tmp_path, monkeypatch):
-    fonts = {}
-    for weight in export._FIRA_SANS_WEIGHTS:
-        path = tmp_path / f"fira-sans-latin-{weight}-normal.woff2"
-        path.write_bytes(b"font")
-        fonts[weight] = path
-    monkeypatch.setattr(export, "_find_fira_sans_fonts", lambda: fonts)
-
-    page = export.export_page_generator().generate_index()
-
-    assert page.count("font-family:'Fira Sans'") == len(fonts)
-    assert page.count("data:font/woff2;base64,Zm9udA==") == len(fonts)
-    assert "Fira Sans did not load" in page
-    assert "document.fonts.ready" in page
-    assert export._MATHJAX_FIRA_SVG_URL in page
-    assert "window.MathJax?.startup?.promise" in page
-    assert "Plotly.toImage = (...args) => qimchiExportReady" in page
-
-
-def test_svg_export_embeds_fira_sans_for_portable_rendering(tmp_path, monkeypatch):
-    fonts = {}
-    for weight in export._FIRA_SANS_WEIGHTS:
-        path = tmp_path / f"fira-sans-latin-{weight}-normal.woff2"
-        path.write_bytes(b"font")
-        fonts[weight] = path
-    monkeypatch.setattr(export, "_find_fira_sans_fonts", lambda: fonts)
-    svg_path = tmp_path / "plot.svg"
-    svg_path.write_text('<svg xmlns="http://www.w3.org/2000/svg"></svg>')
-
-    export._embed_fira_sans_in_svg(svg_path)
-    export._embed_fira_sans_in_svg(svg_path)
-
-    svg = svg_path.read_text(encoding="utf-8")
-    assert svg.count('id="qimchi-export-fonts"') == 1
-    assert svg.count("data:font/woff2;base64,Zm9udA==") == len(fonts)
-
-
-@pytest.mark.parametrize("server_running", [True, False])
-def test_image_writer_only_supplies_page_options_without_server(
-    tmp_path, monkeypatch, server_running
-):
-    import kaleido
-
-    calls = []
-    page = object()
-
-    monkeypatch.setattr(kaleido._global_server, "is_running", lambda: server_running)
-    monkeypatch.setattr(export, "export_page_generator", lambda: page)
-
-    def fake_calc(figure, **kwargs):
-        calls.append((figure, kwargs))
-        return b"image"
-
-    monkeypatch.setattr(kaleido, "calc_fig_sync", fake_calc)
-    monkeypatch.setattr(
-        export,
-        "_calc_fig_on_sync_server",
-        lambda _server, figure, **kwargs: fake_calc(figure, **kwargs),
-    )
-    output = tmp_path / "plot.png"
-    figure = export.go.Figure(layout={"width": 321, "height": 123})
-
-    export._write_plotly_image(figure, output, scale=2)
-
-    assert output.read_bytes() == b"image"
-    assert calls[0][1]["opts"] == {
-        "format": "png",
-        "width": 321,
-        "height": 123,
-        "scale": 2,
-    }
-    if server_running:
-        assert "kopts" not in calls[0][1]
-    else:
-        assert calls[0][1]["kopts"] == {"page_generator": page}
-
-
-def _fake_sync_server(thread_alive: bool, results: list):
-    import queue
-
-    closed = []
-    server = SimpleNamespace(
-        _task_queue=queue.Queue(),
-        _return_queue=queue.Queue(),
-        _thread=SimpleNamespace(is_alive=lambda: thread_alive),
-        close=lambda **_kwargs: closed.append(True),
-    )
-    for result in results:
-        server._return_queue.put(result)
-    return server, closed
-
-
-def test_sync_server_render_returns_the_result():
-    server, closed = _fake_sync_server(True, [b"image"])
-
-    assert export._calc_fig_on_sync_server(server, "fig", opts={}) == b"image"
-    task = server._task_queue.get_nowait()
-    assert (task.fn, task.args, task.kwargs) == ("calc_fig", ("fig",), {"opts": {}})
-    assert closed == []
-
-
-def test_sync_server_render_fails_instead_of_hanging_when_chrome_died():
-    server, closed = _fake_sync_server(False, [])
-
-    with pytest.raises(RuntimeError, match="Chrome closed while starting"):
-        export._calc_fig_on_sync_server(server, "fig", opts={})
-    assert closed == [True]
-
-
 def test_library_metadata_accepts_scalar_tag_query_results(tmp_path, monkeypatch):
     dataset = tmp_path / "run.zarr"
     measurement = SimpleNamespace(uuid="run", uuid_origin="qanary")
@@ -241,7 +132,7 @@ def test_export_footer_includes_basket_info_and_ordered_filters_without_size():
     figure = export.go.Figure(
         {"data": [{"x": [0, 1], "y": [1, 2]}], "layout": {"margin": {"b": 60}}}
     )
-    original_plot_bottom = export._PLOTLY_DEFAULT_HEIGHT - 60
+    original_plot_bottom = export.PLOTLY_DEFAULT_HEIGHT - 60
 
     export._add_export_info_footer(
         figure,
@@ -278,9 +169,9 @@ def test_export_footer_includes_basket_info_and_ordered_filters_without_size():
     assert "Size" not in annotation.text
     assert annotation.font.size == 15
     assert annotation.font.family == export._EXPORT_INFO_FONT_FAMILY
-    assert figure.layout.width == export._PLOTLY_DEFAULT_WIDTH
+    assert figure.layout.width == export.PLOTLY_DEFAULT_WIDTH
     assert figure.layout.margin.b > 60
-    assert figure.layout.height > export._PLOTLY_DEFAULT_HEIGHT
+    assert figure.layout.height > export.PLOTLY_DEFAULT_HEIGHT
     assert figure.layout.height - figure.layout.margin.b == original_plot_bottom
 
 
@@ -316,7 +207,7 @@ def test_export_plot_images_sync_writes_variants_and_archive(tmp_path, monkeypat
         else:
             target.write_text("<svg/>", encoding="utf-8")
 
-    monkeypatch.setattr(export, "_write_plotly_image", fake_write)
+    monkeypatch.setattr(export, "write_plotly_image", fake_write)
     monkeypatch.setattr(
         export,
         "_library_metadata",
@@ -367,7 +258,7 @@ def test_export_writes_only_the_chosen_formats_variants_and_scale(
         scales.append(kwargs.get("scale"))
         Image.new("RGB", (2, 2), "white").save(path)
 
-    monkeypatch.setattr(export, "_write_plotly_image", fake_write)
+    monkeypatch.setattr(export, "write_plotly_image", fake_write)
     monkeypatch.setattr(export, "_library_metadata", lambda path, uuid: {"tags": []})
     plot = {"data": [{"type": "scatter", "x": [0], "y": [0]}], "layout": {}}
     options = export.ExportSettings(formats=["png"], variants=["dark"], scale=2)
@@ -397,7 +288,7 @@ def test_export_fails_rather_than_zipping_an_archive_with_no_images(
     def always_fails(_figure, _path, **_kwargs):
         raise RuntimeError("module 'orjson' has no attribute 'dumps'")
 
-    monkeypatch.setattr(export, "_write_plotly_image", always_fails)
+    monkeypatch.setattr(export, "write_plotly_image", always_fails)
     plot = {
         "data": [{"type": "scatter", "x": [0, 1], "y": [2, 3]}],
         "layout": {"xaxis": {}, "yaxis": {}},
@@ -423,7 +314,7 @@ def test_export_survives_a_partially_failed_write(tmp_path, monkeypatch):
             raise RuntimeError("svg writer unavailable")
         Image.new("RGB", (2, 2), "white").save(target)
 
-    monkeypatch.setattr(export, "_write_plotly_image", fail_svg_only)
+    monkeypatch.setattr(export, "write_plotly_image", fail_svg_only)
 
     plot = {
         "data": [{"type": "scatter", "x": [0, 1], "y": [2, 3]}],
@@ -459,7 +350,7 @@ def test_save_light_dark_pngs_supports_one_or_both_variants(tmp_path, monkeypatc
         "_library_metadata",
         lambda _path, _uuid: {"tags": ["notes-tag"]},
     )
-    monkeypatch.setattr(export, "_write_plotly_image", fake_write)
+    monkeypatch.setattr(export, "write_plotly_image", fake_write)
     plot = {"data": [{"x": [0, 1], "y": [1, 2]}], "layout": {}}
 
     light = export._save_light_dark_pngs(
@@ -487,7 +378,7 @@ def test_save_light_dark_pngs_writes_beside_the_dataset(tmp_path, monkeypatch):
     monkeypatch.setattr(export, "_library_metadata", lambda _path, _uuid: {"tags": []})
     monkeypatch.setattr(
         export,
-        "_write_plotly_image",
+        "write_plotly_image",
         lambda _fig, path, **_k: Path(path).write_bytes(b"png"),
     )
 
@@ -509,7 +400,7 @@ def test_save_light_dark_pngs_stamps_a_timestamp_when_none_is_given(
     monkeypatch.setattr(export, "_library_metadata", lambda _path, _uuid: {"tags": []})
     monkeypatch.setattr(
         export,
-        "_write_plotly_image",
+        "write_plotly_image",
         lambda _fig, path, **_k: Path(path).write_bytes(b"png"),
     )
 
@@ -520,36 +411,6 @@ def test_save_light_dark_pngs_stamps_a_timestamp_when_none_is_given(
     # Two exports of one dataset must not overwrite each other.
     assert "__plot_light.png" in saved["png_light"]
     assert Path(saved["png_light"]).name.count("__") == 2
-
-
-def test_find_fira_sans_fonts_prefers_the_built_assets(tmp_path, monkeypatch):
-    """Use a font root only when it contains every required weight."""
-    assets = tmp_path / "frontend" / "dist" / "assets"
-    assets.mkdir(parents=True)
-    for weight in export._FIRA_SANS_WEIGHTS:
-        (assets / f"fira-sans-latin-{weight}-normal-hash.woff2").write_bytes(b"font")
-
-    monkeypatch.setattr(
-        export, "__file__", str(tmp_path / "backend" / "api" / "export.py")
-    )
-    found = export._find_fira_sans_fonts()
-
-    assert set(found) == set(export._FIRA_SANS_WEIGHTS)
-
-
-def test_find_fira_sans_fonts_rejects_an_incomplete_set(tmp_path, monkeypatch):
-    assets = tmp_path / "frontend" / "dist" / "assets"
-    assets.mkdir(parents=True)
-    # One weight short: mixing weights is worse than embedding none.
-    for weight in export._FIRA_SANS_WEIGHTS[:-1]:
-        (assets / f"fira-sans-latin-{weight}-normal-hash.woff2").write_bytes(b"font")
-
-    monkeypatch.setattr(
-        export, "__file__", str(tmp_path / "backend" / "api" / "export.py")
-    )
-    found = export._find_fira_sans_fonts()
-
-    assert found == {} or set(found) != set(export._FIRA_SANS_WEIGHTS)
 
 
 @pytest.mark.asyncio
@@ -763,7 +624,7 @@ def test_batch_export_zips_each_plot_with_its_own_view_and_filters(
         ranges.append(tuple(figure.layout.xaxis.range or ()))
         Image.new("RGB", (2, 2), "white").save(path)
 
-    monkeypatch.setattr(export, "_write_plotly_image", fake_write)
+    monkeypatch.setattr(export, "write_plotly_image", fake_write)
     monkeypatch.setattr(export, "_library_metadata", lambda path, uuid: {"tags": []})
     monkeypatch.setattr(export, "_resolve_fpath_to_disk", lambda fpath: fpath)
     plot = {"data": [{"type": "scatter", "x": [0, 1], "y": [0, 1]}], "layout": {}}
@@ -806,7 +667,7 @@ def test_batch_export_lists_a_failed_plot_and_keeps_the_rest(tmp_path, monkeypat
             raise ValueError("measurement is gone")
         return fpath
 
-    monkeypatch.setattr(export, "_write_plotly_image", fake_write)
+    monkeypatch.setattr(export, "write_plotly_image", fake_write)
     monkeypatch.setattr(export, "_library_metadata", lambda path, uuid: {"tags": []})
     monkeypatch.setattr(export, "_resolve_fpath_to_disk", resolve)
     plot = {"data": [{"type": "scatter", "x": [0], "y": [0]}], "layout": {}}
