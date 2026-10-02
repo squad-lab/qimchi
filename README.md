@@ -1,4 +1,4 @@
-# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.7.0
+# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.7.1
 
 Plotly based data visualization tool for `xarray` data. Optimized to work with the optional [`qanary`](https://gitlab.com/squad-lab/qanary) package. Qimchi supports any dataset format convertible to `xarray` (see [Supported Dataset Types](#supported-dataset-types) below). Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html).
 
@@ -33,7 +33,7 @@ Everything in this release is listed in the [changelog on `preview`](https://git
 
 ## Table of Contents
 
-- [ Qimchi v0.7.0](#-qimchi-v070)
+- [ Qimchi v0.7.1](#-qimchi-v071)
   - [What's new in 0.7.0](#whats-new-in-070)
   - [Table of Contents](#table-of-contents)
   - [Installation](#installation)
