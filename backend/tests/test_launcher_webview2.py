@@ -325,12 +325,17 @@ def test_installing_on_windows_runs_the_installer_and_closes(
     monkeypatch.setattr(launcher.os, "name", "nt")
     monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     monkeypatch.setattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 512, raising=False)
-    flags = []
+    flags, envs = [], []
+    monkeypatch.setenv("QIMCHI_LAUNCHER_ACTIVE", "1")
     monkeypatch.setattr(
         subprocess,
         "Popen",
         lambda args, **kwargs: (
-            (started.append(args) or flags.append(kwargs["creationflags"]))
+            (
+                started.append(args)
+                or flags.append(kwargs["creationflags"])
+                or envs.append(kwargs["env"])
+            )
             or SimpleNamespace(pid=1)
         ),
     )
@@ -352,6 +357,8 @@ def test_installing_on_windows_runs_the_installer_and_closes(
     # -Wait would include the relaunched Qimchi process.
     assert "-Wait " not in script and "$setup.WaitForExit()" in script
     assert "setup.log" in script
+    # Setup passes this environment on to the Qimchi it starts afterwards.
+    assert "QIMCHI_LAUNCHER_ACTIVE" not in envs[0]
     assert closed == [True]
     assert launcher._update_being_installed(str(tmp_path), lambda pid: pid == 1) == (
         "v0.7.0-rc.9"
@@ -645,3 +652,10 @@ def test_uvicorn_logs_without_its_own_time_or_colours(launcher):
     for formatter in config["formatters"].values():
         assert "asctime" not in formatter["fmt"]
         assert formatter["use_colors"] is False
+
+
+def test_the_qimchi_started_after_an_update_is_not_taken_for_a_child(launcher):
+    active = {"QIMCHI_LAUNCHER_ACTIVE": "1"}
+    assert launcher._is_relaunched_child(["qimchi.exe"], active)
+    assert not launcher._is_relaunched_child(["qimchi.exe", "--after-update"], active)
+    assert not launcher._is_relaunched_child(["qimchi.exe"], {})
