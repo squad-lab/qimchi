@@ -942,7 +942,7 @@ def _windows_install_after_exit_command(installer: str) -> list[str]:
         "Get-Process qimchi | Stop-Process -Force;"
         "Start-Sleep -Seconds 1;"
         f"$setup=Start-Process -FilePath '{quoted}' -PassThru -ArgumentList "
-        f"'/NORESTART','/LOG=\"{setup_log}\"';"
+        f"'/NORESTART','/QIMCHIUPDATE=1','/LOG=\"{setup_log}\"';"
         "$setup.WaitForExit()"
     )
     return [

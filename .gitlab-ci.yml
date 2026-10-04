@@ -268,6 +268,12 @@ tag_preview:
         | sort -n | tail -1)
       NEXT=$(( ${NEXT:-0} + 1 ))
       PREVIEW_TAG="v${CURRENT_VERSION}-rc.${NEXT}"
+      # Every RC needs its own notes; never silently reuse stable notes.
+      PREVIEW_NOTES="md/release-notes/${PREVIEW_TAG}.md"
+      if [ ! -f "$PREVIEW_NOTES" ] || ! awk -v tag="$PREVIEW_TAG" '$1 == "###" && $2 == tag {found=1} END {exit !found}' "$PREVIEW_NOTES"; then
+        echo "Add $PREVIEW_NOTES headed ### $PREVIEW_TAG before tagging."
+        exit 1
+      fi
       echo "Creating preview tag $PREVIEW_TAG"
       git tag -a "$PREVIEW_TAG" -m "Preview release $PREVIEW_TAG"
       git push origin "$PREVIEW_TAG"
@@ -354,7 +360,7 @@ build-windows:
     # executor treats as a failed step.
     - (Get-Command ISCC.exe).Source
   script:
-    - $VERSION = (Select-String -Path "backend/pyproject.toml" -Pattern 'version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
+    - $VERSION = (Select-String -Path "backend/pyproject.toml" -Pattern '^\s*version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
     - echo "Building Qimchi v$VERSION (pywebview desktop) for Windows"
     # build_windows.ps1 handles everything:
     #   1. Frontend build (npm)
@@ -404,8 +410,8 @@ build-windows:
       when: on_success
 
 # Builds the self-contained macOS desktop app (PyInstaller + pywebview) via
-# scripts/build_macos.sh - produces qimchi.app (bundled by create-dmg into
-# qimchi.dmg).  Runs on GitLab's HOSTED SaaS macOS runner
+# scripts/build_macos.sh - produces Qimchi.app (bundled by dmgbuild into
+# qimchi-<tag>.dmg).  Runs on GitLab's HOSTED SaaS macOS runner
 # (saas-macos-large-m2pro, image macos-15-xcode-16) -- no self-hosted Mac
 # needed. Note SaaS macOS minutes bill at a higher multiplier, and `release`
 # declares `needs: build-macos artifacts: true`, so a macOS failure blocks the
@@ -431,14 +437,11 @@ build-macos:
           | tar -xz -C "$HOME"
       export PATH="$HOME/node-v${NODE_VER}-${NODE_ARCH}/bin:$PATH"
 
-      # create-dmg for DMG packaging
-      brew install create-dmg
-
       uv --version
       node --version
       npm --version
   script:
-    - VERSION=$(grep 'version[[:space:]]*=' backend/pyproject.toml | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
+    - VERSION=$(grep '^[[:space:]]*version[[:space:]]*=' backend/pyproject.toml | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
     - echo "Building Qimchi v$VERSION (pywebview desktop) for macOS"
     - bash scripts/build_macos.sh
     - |
@@ -451,7 +454,7 @@ build-macos:
       echo "Successfully built $(basename "$DMG") ($(du -m "$DMG" | cut -f1) MB)"
 
     # --- Code signing (enable once a Developer ID cert is in GitLab secure files) ---
-    # - bash scripts/sign_macos.sh packaging/build/qimchi.app packaging/build/qimchi.dmg
+    # - bash scripts/sign_macos.sh packaging/build/Qimchi.app "$DMG"
   artifacts:
     name: "qimchi-macos"
     paths:
@@ -496,7 +499,7 @@ build-linux:
       node --version
       npm --version
   script:
-    - VERSION=$(grep 'version[[:space:]]*=' backend/pyproject.toml | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
+    - VERSION=$(grep '^[[:space:]]*version[[:space:]]*=' backend/pyproject.toml | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
     - echo "Building Qimchi v$VERSION (pywebview desktop) for Linux"
     - bash scripts/build_linux.sh
     - |
@@ -562,11 +565,28 @@ release:
           PREVIEW_BANNER=""
           ;;
       esac
+      # Stable summaries live in CHANGELOG; previews have a separate history.
+      NOTES_SOURCE="CHANGELOG.md"
+      case "$CI_COMMIT_TAG" in
+        *-rc.*) NOTES_SOURCE="md/release-notes/${CI_COMMIT_TAG}.md" ;;
+      esac
+      # Include exactly this version, not other releases or install guidance.
+      CHANGELOG_NOTES=$(awk -v tag="$CI_COMMIT_TAG" '
+        /^### v/ { if (printing) exit; printing = ($2 == tag); next }
+        printing { print }
+      ' "$NOTES_SOURCE")
+      if [ -z "$CHANGELOG_NOTES" ]; then
+        echo "Missing $NOTES_SOURCE section for $CI_COMMIT_TAG"
+        exit 1
+      fi
       # Release notes (heredoc: $CI_* expand; no backticks present).
       NOTES=$(cat <<EOF
       # Qimchi $CI_COMMIT_TAG
 
       $PREVIEW_BANNER
+
+      ## What's new
+      $CHANGELOG_NOTES
 
       ## Windows
       1. Download qimchi-setup-$CI_COMMIT_TAG.exe below.
@@ -596,7 +616,7 @@ release:
       ## Image export (all platforms)
       For PNG/SVG export, Chrome or Chromium must be installed; if none is found, Qimchi downloads "Chrome for Testing" on first use.
 
-      See the [CHANGELOG](${CI_PROJECT_URL}/-/blob/${CI_COMMIT_TAG}/CHANGELOG.md) and the [commit history](${CI_PROJECT_URL}/-/commits/${CI_COMMIT_TAG}) for what's new.
+      See the [release notes](${CI_PROJECT_URL}/-/blob/${CI_COMMIT_TAG}/${NOTES_SOURCE}) and the [commit history](${CI_PROJECT_URL}/-/commits/${CI_COMMIT_TAG}) for what's new.
       EOF
       )
       # delete-then-create makes re-runs idempotent (a pre-existing release would 409).

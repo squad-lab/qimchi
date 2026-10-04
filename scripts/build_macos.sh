@@ -2,7 +2,6 @@
 # Build script for Qimchi macOS .app bundle and .dmg.
 #
 # Prerequisites (install once):
-#   brew install create-dmg
 #   # uv — https://docs.astral.sh/uv/getting-started/installation/
 #   curl -LsSf https://astral.sh/uv/install.sh | sh
 #
@@ -10,15 +9,16 @@
 #   bash scripts/build_macos.sh
 #
 # Output:
-#   packaging/build/qimchi.app   -- the macOS .app bundle (from PyInstaller)
-#   packaging/build/qimchi.dmg   -- installer disk image (from create-dmg)
+#   packaging/build/Qimchi.app         -- the macOS .app bundle (from PyInstaller)
+#   packaging/build/qimchi-<tag>.dmg   -- branded installer disk image
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-VERSION=$(grep 'version[[:space:]]*=' backend/pyproject.toml \
+# Match the release version key, not Ruff's target-version.
+VERSION=$(grep '^[[:space:]]*version[[:space:]]*=' backend/pyproject.toml \
           | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
 FRONTEND_VERSION="${QIMCHI_VERSION:-${CI_COMMIT_TAG:-}}"
 if [ -z "$FRONTEND_VERSION" ]; then
@@ -44,36 +44,33 @@ cp packaging/qimchi_launcher.py packaging/build/qimchi_launcher.py
 # Copy the .ico for Windows-style icon path used by the spec.
 cp frontend/public/qimchi-logo.ico packaging/build/ 2>/dev/null || true
 
-# Build .icns with sips and iconutil; continue without an icon on failure.
-ICO_SRC="frontend/public/qimchi-logo.ico"
+# Build the required app/volume icon from a 1024px render of the vector mark.
+# A failed conversion must stop packaging instead of shipping a generic icon.
+ICON_SRC="packaging/assets/qimchi-macos-icon.png"
 ICNS_OUT="packaging/build/qimchi-logo.icns"
-if [ -f "$ICO_SRC" ] && command -v sips &>/dev/null && command -v iconutil &>/dev/null; then
-    ICONSET_PARENT="$(mktemp -d)"
-    ICONSET="$ICONSET_PARENT/qimchi.iconset"
-    mkdir -p "$ICONSET"
-    BASE="$ICONSET/base.png"
-    sips -s format png "$ICO_SRC" --out "$BASE" &>/dev/null || true
-    if [ -f "$BASE" ]; then
-        # iconutil requires these exact filenames and sizes.
-        sips -z 16   16   "$BASE" --out "$ICONSET/icon_16x16.png"      &>/dev/null
-        sips -z 32   32   "$BASE" --out "$ICONSET/icon_16x16@2x.png"   &>/dev/null
-        sips -z 32   32   "$BASE" --out "$ICONSET/icon_32x32.png"      &>/dev/null
-        sips -z 64   64   "$BASE" --out "$ICONSET/icon_32x32@2x.png"   &>/dev/null
-        sips -z 128  128  "$BASE" --out "$ICONSET/icon_128x128.png"    &>/dev/null
-        sips -z 256  256  "$BASE" --out "$ICONSET/icon_128x128@2x.png" &>/dev/null
-        sips -z 256  256  "$BASE" --out "$ICONSET/icon_256x256.png"    &>/dev/null
-        sips -z 512  512  "$BASE" --out "$ICONSET/icon_256x256@2x.png" &>/dev/null
-        sips -z 512  512  "$BASE" --out "$ICONSET/icon_512x512.png"    &>/dev/null
-        sips -z 1024 1024 "$BASE" --out "$ICONSET/icon_512x512@2x.png" &>/dev/null
-        rm -f "$ICONSET/base.png"
-        iconutil -c icns "$ICONSET" -o "$ICNS_OUT" \
-            && echo "  Generated $ICNS_OUT" \
-            || echo "  Warning: iconutil failed; app will launch without a dock icon"
-    else
-        echo "  Warning: sips could not convert $ICO_SRC; app will launch without a dock icon"
-    fi
-    rm -rf "$ICONSET_PARENT"
+if [ ! -f "$ICON_SRC" ]; then
+    echo "Error: required macOS icon source is missing: $ICON_SRC" >&2
+    exit 1
 fi
+command -v sips >/dev/null
+command -v iconutil >/dev/null
+ICONSET_PARENT="$(mktemp -d)"
+ICONSET="$ICONSET_PARENT/qimchi.iconset"
+trap 'rm -rf "$ICONSET_PARENT"' EXIT
+mkdir -p "$ICONSET"
+rm -f "$ICNS_OUT"
+# iconutil requires these exact filenames and sizes.
+for entry in '16 16x16' '32 16x16@2x' '32 32x32' '64 32x32@2x' \
+             '128 128x128' '256 128x128@2x' '256 256x256' \
+             '512 256x256@2x' '512 512x512' '1024 512x512@2x'; do
+    read -r size name <<< "$entry"
+    sips -z "$size" "$size" "$ICON_SRC" --out "$ICONSET/icon_$name.png" >/dev/null
+done
+iconutil -c icns "$ICONSET" -o "$ICNS_OUT"
+test -s "$ICNS_OUT"
+rm -rf "$ICONSET_PARENT"
+trap - EXIT
+echo "  Generated $ICNS_OUT"
 
 BACKEND_STAGE="$REPO_ROOT/packaging/build/backend_src"
 rm -rf "$BACKEND_STAGE"
@@ -150,12 +147,14 @@ echo "Installing dependencies (backend + datasets/test extras + build tools)..."
 # Include test dependencies so async tests run during packaging checks.
 uv pip install --python "$PYTHON_EXE" -e "./backend[datasets,test]"
 uv pip install --python "$PYTHON_EXE" pyinstaller pywebview uvicorn
+# dmgbuild writes the Finder layout without AppleScript or a GUI session.
+uv pip install --python "$PYTHON_EXE" "dmgbuild==1.6.7"
 # copy_metadata("qimchi-api") in the spec needs the editable install's metadata.
 "$PYTHON_EXE" -c "import importlib.metadata as m; m.distribution('qimchi-api')"
 
 # ── 5. PyInstaller (.app bundle) ──────────────────────────────────────────────
 echo "Building .app bundle with PyInstaller..."
-APP_BUNDLE="packaging/build/qimchi.app"
+APP_BUNDLE="packaging/build/Qimchi.app"
 # Clear before building so the check below proves THIS run produced the bundle.
 rm -rf "$APP_BUNDLE"
 
@@ -176,45 +175,65 @@ echo "Creating DMG..."
 DMG_OUT="packaging/build/qimchi-${FRONTEND_VERSION}.dmg"
 rm -f packaging/build/qimchi-*.dmg
 
-DMG_SRC="packaging/build/dmg-src"
-rm -rf "$DMG_SRC"
-mkdir -p "$DMG_SRC"
-ditto "$APP_BUNDLE" "$DMG_SRC/qimchi.app"
+# Static, Retina-ready artwork is committed; no browser or Finder is needed
+# during packaging. Regenerate it with node scripts/render_dmg_artwork.mjs.
+"$PYTHON_EXE" -m dmgbuild \
+    -s packaging/dmg-settings.py \
+    -D "app=$REPO_ROOT/$APP_BUNDLE" \
+    -D "assets=$REPO_ROOT/packaging/assets" \
+    "Qimchi" "$DMG_OUT"
 
-if ! create-dmg \
-    --volname "Qimchi $VERSION" \
-    --window-pos 200 120 \
-    --window-size 600 400 \
-    --icon-size 128 \
-    --icon "qimchi.app" 150 185 \
-    --app-drop-link 450 185 \
-    --hide-extension "qimchi.app" \
-    "$DMG_OUT" \
-    "$DMG_SRC"; then
-    echo "create-dmg Finder styling failed; falling back to a plain compressed DMG..."
-    rm -f "$DMG_OUT"
-    # Add the Applications shortcut omitted by the fallback.
-    ln -s /Applications "$DMG_SRC/Applications"
-    hdiutil create \
-        -volname "Qimchi $VERSION" \
-        -srcfolder "$DMG_SRC" \
-        -ov \
-        -format UDZO \
-        "$DMG_OUT"
-fi
-rm -rf "$DMG_SRC"
-
-# Updates expect qimchi.app at the DMG root.
+# Both manual installation and updates use Qimchi.app at the DMG root.
 DMG_CHECK="$(mktemp -d /tmp/qimchi-dmg-check.XXXXXX)"
 hdiutil attach -nobrowse -noautoopen -quiet -mountpoint "$DMG_CHECK" "$DMG_OUT"
-if [ ! -d "$DMG_CHECK/qimchi.app" ]; then
-    ls -la "$DMG_CHECK" >&2
+cleanup_dmg_check() {
     hdiutil detach -quiet "$DMG_CHECK"
-    echo "Error: $DMG_OUT has no qimchi.app at its root" >&2
-    exit 1
-fi
-hdiutil detach -quiet "$DMG_CHECK"
-rmdir "$DMG_CHECK"
+    rmdir "$DMG_CHECK"
+}
+trap cleanup_dmg_check EXIT
+"$PYTHON_EXE" - "$DMG_CHECK" <<'PYEOF'
+import os
+import plistlib
+import subprocess
+import sys
+from pathlib import Path
+
+from ds_store import DSStore
+
+mount = Path(sys.argv[1])
+volume = plistlib.loads(subprocess.check_output(["diskutil", "info", "-plist", str(mount)]))
+assert volume["VolumeName"] == "Qimchi", volume
+app = mount / "Qimchi.app"
+with (app / "Contents/Info.plist").open("rb") as f:
+    info = plistlib.load(f)
+assert info["CFBundleName"] == "Qimchi", info
+assert info["CFBundleDisplayName"] == "Qimchi", info
+app_icon = app / "Contents/Resources" / info["CFBundleIconFile"]
+if not app_icon.suffix:
+    app_icon = app_icon.with_suffix(".icns")
+assert app_icon.read_bytes().startswith(b"icns"), "App icon is missing or invalid"
+volume_icon = mount / ".VolumeIcon.icns"
+assert volume_icon.read_bytes() == Path("packaging/build/qimchi-logo.icns").read_bytes()
+finder_info = bytes.fromhex(
+    "".join(
+        subprocess.check_output(
+            ["xattr", "-px", "com.apple.FinderInfo", str(mount)], text=True
+        ).split()
+    )
+)
+assert int.from_bytes(finder_info[8:10], "big") & 0x0400, "Volume custom-icon flag is missing"
+assert os.readlink(mount / "Applications") == "/Applications"
+assert list(mount.glob(".background.*")), "DMG background is missing"
+with DSStore.open(str(mount / ".DS_Store"), "r") as store:
+    assert store["Qimchi.app"]["Iloc"] == (200, 260)
+    assert store["Applications"]["Iloc"] == (600, 260)
+    view = store["."]["icvp"]
+    assert view["backgroundType"] == 2, "Finder is not using the artwork"
+    assert view["iconSize"] == 128
+print("Verified Qimchi volume name/icon, app icon, Applications link, artwork and Finder layout")
+PYEOF
+cleanup_dmg_check
+trap - EXIT
 
 DMG_MB=$(du -m "$DMG_OUT" | cut -f1)
 echo "Built $REPO_ROOT/$DMG_OUT (${DMG_MB} MB)"

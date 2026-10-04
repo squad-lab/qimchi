@@ -7,7 +7,7 @@
 # below, and remove the early-exit.
 #
 # Usage (from qimchi-react/):
-#   bash scripts/sign_macos.sh packaging/build/qimchi.app packaging/build/qimchi.dmg
+#   bash scripts/sign_macos.sh packaging/build/Qimchi.app packaging/build/qimchi.dmg
 
 echo "Code signing skipped — no Developer ID certificate configured (internal build)."
 echo "See scripts/sign_macos.sh for the commands needed for distribution signing."
@@ -15,8 +15,8 @@ exit 0
 
 # ── Distribution signing (unreachable — shown for reference) ─────────────────
 
-APP="${1:?Usage: sign_macos.sh <path/to/qimchi.app> <path/to/qimchi.dmg>}"
-DMG="${2:?Usage: sign_macos.sh <path/to/qimchi.app> <path/to/qimchi.dmg>}"
+APP="${1:?Usage: sign_macos.sh <path/to/Qimchi.app> <path/to/qimchi.dmg>}"
+DMG="${2:?Usage: sign_macos.sh <path/to/Qimchi.app> <path/to/qimchi.dmg>}"
 
 # Fill these in when a cert is available.
 IDENTITY="Developer ID Application: <Name or Org> (<TEAM_ID>)"

@@ -55,7 +55,12 @@ LZMAUseSeparateProcess=yes
 
 ; UI
 WizardStyle=modern
-DisableWelcomePage=no
+WizardSmallImageFile=assets\qimchi-header.bmp,assets\qimchi-header@2x.bmp
+WizardImageStretch=yes
+DisableWelcomePage=yes
+DisableDirPage=no
+DisableReadyPage=yes
+DisableFinishedPage=yes
 
 ; Minimum: Windows 11 21H2
 MinVersion=10.0.22000
@@ -68,6 +73,10 @@ RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[LangOptions]
+DialogFontName=Segoe UI
+DialogFontSize=10
 
 [Tasks]
 ; Desktop shortcut is opt-in
@@ -95,10 +104,12 @@ Name: "{autodesktop}\Qimchi"; \
     Tasks: desktopicon
 
 [Run]
-; Offer to launch after install
+; The configuration-page launch must bypass the installation marker too.
+; Otherwise an interactive update exits immediately while Setup is still open.
 Filename: "{app}\qimchi.exe"; \
-    Description: "{cm:LaunchProgram,Qimchi}"; \
-    Flags: nowait postinstall skipifsilent
+    Parameters: "--after-update"; \
+    Flags: nowait runasoriginaluser skipifsilent; \
+    Check: ShouldLaunchQimchi
 ; Start Qimchi again after an in-app update (the updater passes /QIMCHIUPDATE=1),
 ; as the user who ran it rather than the elevated installer.
 Filename: "{app}\qimchi.exe"; \
@@ -110,6 +121,119 @@ Filename: "{app}\qimchi.exe"; \
 ; Nothing extra — Inno Setup removes everything under {app} automatically.
 
 [Code]
+
+var
+  DesktopShortcutCheck: TNewCheckBox;
+  LaunchQimchiCheck: TNewCheckBox;
+  ApplyDesktopShortcutPreference: Boolean;
+
+function ShouldLaunchQimchi: Boolean;
+begin
+  Result := LaunchQimchiCheck.Checked;
+end;
+
+procedure InitializeWizard;
+var
+  IntroLabel, FolderLabel, OptionsLabel, ScopeLabel: TNewStaticText;
+begin
+  WizardForm.Caption := 'Qimchi Setup';
+  WizardForm.PageNameLabel.Font.Size := 14;
+  WizardForm.PageNameLabel.Font.Color := $007A5730;
+  WizardForm.PageNameLabel.Height := ScaleY(24);
+  WizardForm.PageDescriptionLabel.SetBounds(
+    WizardForm.PageNameLabel.Left,
+    WizardForm.PageNameLabel.Top + WizardForm.PageNameLabel.Height + ScaleY(3),
+    WizardForm.PageNameLabel.Width, ScaleY(18));
+  WizardForm.SelectDirBitmapImage.Visible := False;
+  WizardForm.SelectDirLabel.Visible := False;
+  WizardForm.SelectDirBrowseLabel.Visible := False;
+
+  IntroLabel := TNewStaticText.Create(WizardForm);
+  IntroLabel.Parent := WizardForm.SelectDirPage;
+  IntroLabel.SetBounds(0, 0, WizardForm.SelectDirPage.ClientWidth, ScaleY(32));
+  IntroLabel.Caption := 'Plot your spicy quantum measurements';
+  IntroLabel.Font.Size := 12;
+
+  FolderLabel := TNewStaticText.Create(WizardForm);
+  FolderLabel.Parent := WizardForm.SelectDirPage;
+  FolderLabel.SetBounds(0, ScaleY(48), WizardForm.SelectDirPage.ClientWidth, ScaleY(20));
+  FolderLabel.Caption := 'Install folder';
+  FolderLabel.Font.Style := [fsBold];
+  WizardForm.DirEdit.Top := ScaleY(74);
+  WizardForm.DirBrowseButton.Top := WizardForm.DirEdit.Top;
+  WizardForm.DirEdit.TabOrder := 0;
+  WizardForm.DirBrowseButton.TabOrder := 1;
+
+  ScopeLabel := TNewStaticText.Create(WizardForm);
+  ScopeLabel.Parent := WizardForm.SelectDirPage;
+  ScopeLabel.SetBounds(0, ScaleY(110), WizardForm.SelectDirPage.ClientWidth, ScaleY(20));
+  if IsAdminInstallMode then
+    ScopeLabel.Caption := 'Available to everyone on this computer.'
+  else
+    ScopeLabel.Caption := 'Installed for your account. No administrator rights needed.';
+  ScopeLabel.Font.Color := $006B6257;
+
+  OptionsLabel := TNewStaticText.Create(WizardForm);
+  OptionsLabel.Parent := WizardForm.SelectDirPage;
+  OptionsLabel.SetBounds(0, ScaleY(150), WizardForm.SelectDirPage.ClientWidth, ScaleY(20));
+  OptionsLabel.Caption := 'Shortcuts and launch';
+  OptionsLabel.Font.Style := [fsBold];
+
+  DesktopShortcutCheck := TNewCheckBox.Create(WizardForm);
+  DesktopShortcutCheck.Parent := WizardForm.SelectDirPage;
+  DesktopShortcutCheck.SetBounds(0, ScaleY(178), WizardForm.SelectDirPage.ClientWidth, ScaleY(24));
+  DesktopShortcutCheck.Caption := 'Create a desktop shortcut';
+  { Inno creates the task controls only when it reaches wpSelectTasks.
+    Keep an existing shortcut selected; new installs remain opt-in. }
+  DesktopShortcutCheck.Checked := FileExists(ExpandConstant('{autodesktop}\Qimchi.lnk'));
+  DesktopShortcutCheck.TabOrder := 2;
+
+  LaunchQimchiCheck := TNewCheckBox.Create(WizardForm);
+  LaunchQimchiCheck.Parent := WizardForm.SelectDirPage;
+  LaunchQimchiCheck.SetBounds(0, ScaleY(208), WizardForm.SelectDirPage.ClientWidth, ScaleY(24));
+  LaunchQimchiCheck.Caption := 'Start Qimchi after installation';
+  LaunchQimchiCheck.Checked := True;
+  LaunchQimchiCheck.TabOrder := 3;
+
+  WizardForm.DiskSpaceLabel.Top := ScaleY(260);
+  WizardForm.DiskSpaceLabel.Font.Color := $006B6257;
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := PageID = wpSelectTasks;
+  { Apply the configuration choice after Inno has created the native tasks.
+    Silent installs keep Inno's previous selection and /TASKS overrides. }
+  if Result and ApplyDesktopShortcutPreference then
+  begin
+    if DesktopShortcutCheck.Checked then
+      WizardSelectTasks('desktopicon')
+    else
+      WizardSelectTasks('!desktopicon');
+  end;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID = wpSelectDir then
+  begin
+    WizardForm.PageNameLabel.Caption := 'Configure Qimchi {#AppFileVersion}';
+    WizardForm.PageDescriptionLabel.Caption := 'Step 1 of 2 - choose your preferences, then install.';
+    WizardForm.NextButton.Caption := '&Install';
+  end
+  else if CurPageID = wpInstalling then
+  begin
+    WizardForm.PageNameLabel.Caption := 'Installing Qimchi {#AppFileVersion}';
+    WizardForm.PageDescriptionLabel.Caption := 'Step 2 of 2 - getting everything ready.';
+  end;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  if (CurPageID = wpSelectDir) and not WizardSilent then
+    ApplyDesktopShortcutPreference := True;
+  Result := True;
+end;
 
 function IsInAppUpdate: Boolean;
 begin

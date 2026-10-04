@@ -29,7 +29,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-VERSION=$(grep 'version[[:space:]]*=' backend/pyproject.toml \
+VERSION=$(grep '^[[:space:]]*version[[:space:]]*=' backend/pyproject.toml \
           | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
 FRONTEND_VERSION="${QIMCHI_VERSION:-${CI_COMMIT_TAG:-}}"
 if [ -z "$FRONTEND_VERSION" ]; then
