@@ -40,7 +40,7 @@ if ($runningQimchi) {
 }
 
 # Extract version from pyproject.toml for use in the installer filename/metadata.
-$VERSION = (Select-String -Path "backend/pyproject.toml" -Pattern 'version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
+$VERSION = (Select-String -Path "backend/pyproject.toml" -Pattern '^\s*version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
 $frontendVersion = $env:QIMCHI_VERSION
 if ([string]::IsNullOrWhiteSpace($frontendVersion)) {
     $frontendVersion = $env:CI_COMMIT_TAG

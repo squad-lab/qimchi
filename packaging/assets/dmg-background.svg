@@ -1,0 +1,76 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="800"
+  height="500"
+  viewBox="0 0 800 500"
+>
+  <defs>
+    <radialGradient id="mint" cx="100%" cy="45%" r="78%">
+      <stop offset="0" stop-color="#bcece8" stop-opacity=".85" />
+      <stop offset="1" stop-color="#f9faf9" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="sage" cx="0" cy="60%" r="65%">
+      <stop offset="0" stop-color="#dcebc5" stop-opacity=".75" />
+      <stop offset="1" stop-color="#f9faf9" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="lime" cx="80%" cy="100%" r="60%">
+      <stop offset="0" stop-color="#e0edc4" stop-opacity=".6" />
+      <stop offset="1" stop-color="#f9faf9" stop-opacity="0" />
+    </radialGradient>
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence
+        type="fractalNoise"
+        baseFrequency=".72"
+        numOctaves="3"
+        seed="7"
+        stitchTiles="stitch"
+      />
+      <feColorMatrix type="saturate" values="0" />
+    </filter>
+  </defs>
+  <path fill="#f9faf9" d="M0 0h800v500H0z" />
+  <path fill="url(#sage)" d="M0 0h800v500H0z" />
+  <path fill="url(#mint)" d="M0 0h800v500H0z" />
+  <path fill="url(#lime)" d="M0 0h800v500H0z" />
+  <path filter="url(#grain)" opacity=".045" d="M0 0h800v500H0z" />
+  <g
+    font-family="Segoe UI, Helvetica Neue, Arial, sans-serif"
+    text-anchor="middle"
+  >
+    <text
+      x="400"
+      y="79"
+      font-size="32"
+      font-weight="600"
+      letter-spacing="-.8"
+      fill="#263c43"
+    >
+      Qimchi
+    </text>
+    <text x="400" y="110" font-size="14" fill="#677c81">
+      Plot your spicy quantum measurements
+    </text>
+    <text x="400" y="426" font-size="16" font-weight="500" fill="#38575f">
+      Drag Qimchi to Applications
+    </text>
+    <text x="400" y="451" font-size="12" fill="#71858a">
+      Then open Qimchi from your Applications folder.
+    </text>
+  </g>
+  <!-- Native Finder icons are centred at (200, 260) and (600, 260). -->
+  <!-- Centre the transfer on y=260, with equal clearance from both icons. -->
+  <!-- Ease the final wave into a horizontal stem; both head strokes meet it. -->
+  <g
+    fill="none"
+    stroke-width="6"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path
+      d="M300 260 C307 248 314 236 322 236 S337 248 344 260 S359 284 366 284 S381 272 388 260 S403 236 410 236 S425 248 432 260 S447 284 454 284 C466 284 470 260 482 260 H500"
+      stroke="#50c3cb"
+    />
+    <path d="M484 276 L500 260" stroke="#50c3cb" />
+    <path d="M484 244 L500 260" stroke="#8cc63f" />
+  </g>
+</svg>

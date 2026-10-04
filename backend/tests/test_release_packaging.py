@@ -3,13 +3,67 @@
 from __future__ import annotations
 
 import re
+import runpy
+import struct
 from pathlib import Path
+
+import pytest
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 # The release job embeds JSON inside a double-quoted shell string, so every
 # quote in it is backslash-escaped in the YAML.
 ESCAPED_QUOTE = '\\"'
+
+
+def test_macos_dmg_artwork_fits_the_native_finder_layout(tmp_path):
+    app = tmp_path / "Qimchi.app"
+    app.mkdir()
+    icon = tmp_path / "qimchi-logo.icns"
+    icon.write_bytes(b"icns")
+    assets = _REPOSITORY_ROOT / "packaging" / "assets"
+    settings_file = _REPOSITORY_ROOT / "packaging" / "dmg-settings.py"
+    settings = runpy.run_path(
+        str(settings_file),
+        init_globals={"defines": {"app": str(app), "assets": str(assets)}},
+    )
+    assert settings["files"] == [str(app)]
+    assert settings["volume_name"] == "Qimchi"
+    assert settings["icon"] == str(icon)
+    assert settings["symlinks"]["Applications"] == "/Applications"
+    width, height = settings["window_rect"][1]
+    radius = settings["icon_size"] / 2
+    for name in (app.name, "Applications"):
+        x, y = settings["icon_locations"][name]
+        assert radius < x < width - radius
+        assert radius < y < height - radius - settings["text_size"]
+    for scale, suffix in ((1, ""), (2, "@2x")):
+        image = (assets / f"dmg-background{suffix}.png").read_bytes()
+        assert image.startswith(b"\x89PNG\r\n\x1a\n")
+        assert struct.unpack(">II", image[16:24]) == (width * scale, height * scale)
+
+    # A missing volume icon must not silently produce the default disk icon.
+    icon.unlink()
+    with pytest.raises(FileNotFoundError, match="Required Qimchi volume icon"):
+        runpy.run_path(
+            str(settings_file),
+            init_globals={"defines": {"app": str(app), "assets": str(assets)}},
+        )
+
+    image = (assets / "qimchi-macos-icon.png").read_bytes()
+    assert image.startswith(b"\x89PNG\r\n\x1a\n")
+    assert struct.unpack(">II", image[16:24]) == (1024, 1024)
+    assert image[25] == 6, "macOS icon must have RGBA transparency"
+
+    # Reject a legacy lower-case bundle before it can ship in a new DMG.
+    legacy_app = tmp_path / "qimchi.app"
+    app.rename(tmp_path / "old-app")
+    legacy_app.mkdir()
+    with pytest.raises(ValueError, match="Expected the built Qimchi.app"):
+        runpy.run_path(
+            str(settings_file),
+            init_globals={"defines": {"app": str(legacy_app), "assets": str(assets)}},
+        )
 
 
 def test_docker_image_uses_the_lock_and_bundles_database_migrations():
@@ -26,6 +80,9 @@ def test_docker_image_uses_the_lock_and_bundles_database_migrations():
     assert "COPY backend/pyproject.toml backend/uv.lock /app/" in dockerfile
     assert "uv sync --locked --no-dev --extra datasets" in dockerfile
     assert "COPY backend/migrations/ /app/migrations/" in dockerfile
+    # frontend/src/utils/changelog.ts imports these from outside frontend/.
+    assert "COPY CHANGELOG.md /CHANGELOG.md" in dockerfile
+    assert "COPY md/release-notes/ /md/release-notes/" in dockerfile
     # The Dockerfile sits in docker/ but builds from the repository root,
     # so its own siblings must be addressed through that prefix.
     assert "COPY docker/nginx.conf " in dockerfile
@@ -131,3 +188,18 @@ def test_release_asset_names_carry_the_tag_and_stay_matchable(monkeypatch):
             ]
             assert len(hits) == 1, (platform, hits)
             assert updater._platform_asset_match(hits[0], "")[0] == expected
+
+
+def test_installer_configuration_launch_bypasses_update_marker():
+    setup = (_REPOSITORY_ROOT / "packaging" / "setup.iss").read_text(encoding="utf-8")
+    run = setup.split("[Run]", 1)[1].split("[UninstallRun]", 1)[0]
+    entries = re.split(r"(?m)^Filename:", run)[1:]
+    assert len(entries) == 2
+    interactive = next(entry for entry in entries if "skipifsilent" in entry)
+    assert 'Parameters: "--after-update"' in interactive
+    assert "runasoriginaluser" in interactive
+    assert "skipifsilent" in interactive
+    assert "Check: ShouldLaunchQimchi" in interactive
+    silent = next(entry for entry in entries if "skipifnotsilent" in entry)
+    assert 'Parameters: "--after-update"' in silent
+    assert "Check: IsInAppUpdate" in silent

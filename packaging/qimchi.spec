@@ -6,7 +6,7 @@ Windows / Linux — produces packaging/build/qimchi/ (COLLECT onedir):
     qimchi.exe          -- the launcher
     _internal/          -- Python runtime, all deps, bundled fd, frontend/backend
 
-macOS — produces packaging/build/qimchi/ (COLLECT) AND packaging/build/qimchi.app
+macOS — produces packaging/build/qimchi/ (COLLECT) AND packaging/build/Qimchi.app
     (BUNDLE wrapping the COLLECT).  Distribute the .app; the bare directory is
     an intermediate artefact used only by DMG packaging.
 
@@ -24,7 +24,7 @@ Build:
 Prerequisites (set up by the build scripts before calling this spec):
     packaging/build/backend_src/       -- staged backend (main.py + api/)
     packaging/build/qimchi-logo.ico    -- Windows/Linux icon
-    packaging/build/qimchi-logo.icns   -- macOS icon (optional; omitted = no icon)
+    packaging/build/qimchi-logo.icns   -- required macOS app and volume icon
     packaging/build/qimchi_launcher.py
     frontend/dist/                     -- built SPA
     vendor/fd-windows/fd.exe           -- Windows fd binary
@@ -48,10 +48,12 @@ _icon_macos    = os.path.join(_build_dir, "qimchi-logo.icns")
 _launcher_path = os.path.join(_build_dir, "qimchi_launcher.py")
 
 # Pick the right icon list for the current platform.
-# macOS uses .icns (optional — omit if not yet created).
+# macOS requires .icns; fail rather than ship the default system icon.
 # Windows/.ico is always passed; Linux ignores the icon arg silently.
 if sys.platform == "darwin":
-    _icons = [_icon_macos] if os.path.isfile(_icon_macos) else []
+    if not os.path.isfile(_icon_macos):
+        raise FileNotFoundError(f"Required macOS icon is missing: {_icon_macos}")
+    _icons = [_icon_macos]
 else:
     _icons = [_icon_path]
 
@@ -188,13 +190,13 @@ if sys.platform == "darwin":
 
     app = BUNDLE(
         coll,
-        name="qimchi.app",
-        icon=_icons[0] if _icons else None,
-        bundle_identifier="ac.niser.qimchi",
+        name="Qimchi.app",
+        icon=_icons[0],
+        bundle_identifier="de.fz-juelich.qimchi",
         info_plist={
             "CFBundleName": "Qimchi",
             "CFBundleDisplayName": "Qimchi",
-            "CFBundleIdentifier": "ac.niser.qimchi",
+            "CFBundleIdentifier": "de.fz-juelich.qimchi",
             "CFBundleVersion": _version,
             "CFBundleShortVersionString": _version,
             "NSHighResolutionCapable": True,

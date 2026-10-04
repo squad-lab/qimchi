@@ -348,6 +348,7 @@ def test_installing_on_windows_runs_the_installer_and_closes(
     # Keep the standard Setup wizard interactive.
     assert "/SILENT" not in script and "/VERYSILENT" not in script
     assert "'/NORESTART'" in script
+    assert "'/QIMCHIUPDATE=1'" in script
     # -Wait would include the relaunched Qimchi process.
     assert "-Wait " not in script and "$setup.WaitForExit()" in script
     assert "setup.log" in script
@@ -358,8 +359,9 @@ def test_installing_on_windows_runs_the_installer_and_closes(
     assert closed == [True]
 
 
+@pytest.mark.parametrize("bundle_name", ["qimchi.app", "Qimchi.app"])
 def test_macos_update_replaces_the_app_once_it_has_quit(
-    launcher, monkeypatch, tmp_path
+    launcher, monkeypatch, tmp_path, bundle_name
 ):
     import subprocess
     import sys
@@ -371,7 +373,7 @@ def test_macos_update_replaces_the_app_once_it_has_quit(
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(launcher.os, "name", "posix")
     monkeypatch.setattr(
-        sys, "executable", "/Applications/qimchi.app/Contents/MacOS/qimchi"
+        sys, "executable", f"/Applications/{bundle_name}/Contents/MacOS/qimchi"
     )
     updates._offer["platform"] = "macos"
     monkeypatch.setattr(
@@ -383,7 +385,7 @@ def test_macos_update_replaces_the_app_once_it_has_quit(
 
     helper = opened[0]
     assert helper[:2] == ["/bin/sh", "-c"]
-    assert helper[5:7] == [updates._offer["path"], "/Applications/qimchi.app"]
+    assert helper[5:7] == [updates._offer["path"], f"/Applications/{bundle_name}"]
     assert "ditto" in helper[2] and 'open "$dmg"' in helper[2]
     assert closed == [True]
 
