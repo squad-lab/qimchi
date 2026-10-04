@@ -160,3 +160,30 @@ test("the browser build has no Updates section", async ({ page }) => {
   await expect(settings.getByRole("button", { name: "General", exact: true })).toBeVisible();
   await expect(settings.getByRole("button", { name: "Updates", exact: true })).toHaveCount(0);
 });
+
+test("the installed changelog is formatted, scrollable and separate from offered notes", async ({
+  page,
+}) => {
+  await fakeDesktopUpdater(page, {
+    current: "v0.7.0",
+    tag: "v0.7.1-rc.2",
+    notes: "Offered candidate notes",
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("button", { name: "Updates", exact: true }).click();
+  await settings.getByRole("button", { name: "Show changelog for the current version" }).click();
+  const notes = settings.getByRole("region", { name: "Changelog for Qimchi v0.7.0" });
+  await expect(notes.locator(".release-notes ul").first()).toBeVisible();
+  await expect(notes).toContainText("Complex variables");
+  await expect(notes).not.toContainText("Offered candidate notes");
+  expect(await notes.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+  await notes.evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  expect(await notes.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+  await page.screenshot({ path: "test-results/installed-changelog.png" });
+  await settings.getByRole("button", { name: "Hide changelog" }).click();
+  await expect(notes).toHaveCount(0);
+});

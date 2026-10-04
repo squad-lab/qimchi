@@ -1,4 +1,8 @@
+import { lazy, Suspense, useState } from "react";
+import { releaseNotes } from "../utils/changelog";
 import { useUpdateStore } from "../stores/updateStore";
+
+const ReleaseNotes = lazy(() => import("./ReleaseNotes"));
 
 const buttonClass =
   "rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50";
@@ -13,6 +17,9 @@ const formatCheckedAt = (checkedAt: string | null) =>
 /** Settings > Updates: the running version, and checking, downloading and installing on demand. */
 const UpdatesPanel = () => {
   const { state, check, download, redownload, install } = useUpdateStore();
+  const [showChangelog, setShowChangelog] = useState(false);
+  const current = state.current ?? __QIMCHI_VERSION__;
+  const notes = releaseNotes(current);
   const busy = ["checking", "downloading", "installing"].includes(state.status);
   const percent = Math.round(state.progress * 100);
   const checkedAt = formatCheckedAt(state.checkedAt);
@@ -48,9 +55,7 @@ const UpdatesPanel = () => {
     <div className="rounded-md border border-gray-200 bg-gray-50 p-4" aria-live="polite">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-sm font-medium text-gray-700">
-            Qimchi {state.current ?? __QIMCHI_VERSION__}
-          </div>
+          <div className="text-sm font-medium text-gray-700">Qimchi {current}</div>
           <div className="mt-0.5 text-xs text-gray-500" role="status">
             {summary}
           </div>
@@ -84,6 +89,32 @@ const UpdatesPanel = () => {
           </button>
         </div>
       </div>
+      <button
+        type="button"
+        onClick={() => setShowChangelog((shown) => !shown)}
+        aria-expanded={showChangelog}
+        aria-controls="current-version-changelog"
+        className={`${secondaryClass} mt-3`}
+      >
+        {showChangelog ? "Hide changelog" : "Show changelog for the current version"}
+      </button>
+      {showChangelog && (
+        <section
+          id="current-version-changelog"
+          aria-label={`Changelog for Qimchi ${current}`}
+          tabIndex={0}
+          className="mt-3 max-h-72 overflow-y-auto rounded-md border border-gray-200 bg-white px-3 py-2"
+        >
+          <h3 className="mb-2 text-sm font-semibold">Qimchi {current}</h3>
+          {notes ? (
+            <Suspense fallback={<p className="whitespace-pre-wrap text-sm">{notes}</p>}>
+              <ReleaseNotes notes={notes} />
+            </Suspense>
+          ) : (
+            <p className="text-sm text-gray-500">No changelog is available for this version.</p>
+          )}
+        </section>
+      )}
       {state.status === "downloading" && (
         <div
           role="progressbar"

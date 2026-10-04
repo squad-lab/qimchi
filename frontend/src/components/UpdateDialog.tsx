@@ -113,7 +113,7 @@ const UpdateDialog = () => {
               </>
             )}
           </p>
-          {state.notes && (
+          {state.notes ? (
             <div>
               <div className="mb-1.5 text-[0.6875rem] font-semibold uppercase tracking-wider text-gray-500">
                 What's new
@@ -130,6 +130,8 @@ const UpdateDialog = () => {
                 </Suspense>
               </div>
             </div>
+          ) : (
+            <p className="text-xs text-gray-500">Changelog unavailable for this release.</p>
           )}
           {state.error && (
             <p

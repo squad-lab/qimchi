@@ -189,6 +189,60 @@ def _parse_ver(tag: str) -> tuple[int, ...]:
         return (0,)
 
 
+def changelog_section(markdown: str, version: str) -> str:
+    """Extract one exact release section, stopping before the next release."""
+    tag = "v" + version.removeprefix("v")
+    headings = list(
+        re.finditer(
+            r"^### (v\d+\.\d+\.\d+(?:-(?:rc|alpha|beta)\.\d+)?)(?=\s|$)[^\n]*$",
+            markdown,
+            re.M,
+        )
+    )
+    for index, heading in enumerate(headings):
+        if heading.group(1) == tag:
+            end = (
+                headings[index + 1].start()
+                if index + 1 < len(headings)
+                else len(markdown)
+            )
+            return markdown[heading.end() : end].strip()
+    return ""
+
+
+def release_changelog(tag: str) -> str:
+    """Read stable or preview notes from the offered tag, never a moving branch."""
+    if not re.fullmatch(r"v?\d+\.\d+\.\d+(?:-(?:rc|alpha|beta)\.\d+)?", tag):
+        return ""
+    paths = ["CHANGELOG.md"]
+    if is_prerelease(tag):
+        filename = "v" + tag.removeprefix("v")
+        paths.insert(0, f"md/release-notes/{filename}.md")
+    for path in paths:
+        request = Request(
+            f"https://gitlab.com/squad-lab/qimchi/-/raw/{tag}/{path}",
+            headers={"User-Agent": "Qimchi-Updater"},
+        )
+        try:
+            with urlopen(request, timeout=10, context=https_context()) as response:  # noqa: S310 - fixed HTTPS host, validated tag
+                markdown = response.read().decode("utf-8")
+        except Exception:
+            _log.info("[updater] could not read %s for %s", path, tag, exc_info=True)
+            continue
+        notes = changelog_section(markdown, tag)
+        if notes:
+            return notes
+        # Published older RC tags keep their notes in CHANGELOG.md.
+        base = tag.split("-", 1)[0]
+        if (
+            path == "CHANGELOG.md"
+            and is_prerelease(tag)
+            and re.search(rf"^### {re.escape(base)} \(Preview\)\s*$", markdown, re.M)
+        ):
+            return changelog_section(markdown, base)
+    return ""
+
+
 def check_for_update(
     include_previews: bool = False,
     log: Callable[[str], None] | None = None,
@@ -279,8 +333,6 @@ def check_for_update(
         trace(f"no update available: {tag} is not newer than {running}")
         return None
 
-    notes: str = latest.get("description", "")
-
     asset_url = ""
     asset_name = ""
     platform = ""
@@ -305,6 +357,7 @@ def check_for_update(
         )
         return None
 
+    notes = release_changelog(tag)
     trace(f"update available: {running} -> {tag} ({asset_name}; {install_mode})")
     return {
         "tag": tag,

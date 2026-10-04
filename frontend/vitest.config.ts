@@ -1,8 +1,10 @@
+import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [react()],
+  server: { fs: { allow: [resolve("..")] } },
   test: {
     // Unit and component tests live beside the source. e2e/ is Playwright's
     // and must stay out of this runner -- both define a global `test`, and

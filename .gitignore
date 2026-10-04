@@ -19,7 +19,8 @@ dist/
 
 # Custom
 .vscode/
-md/
+md/*
+!md/release-notes/
 data/
 qanary/
 .__qimchi.lock
