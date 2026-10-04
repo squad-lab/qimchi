@@ -885,7 +885,7 @@ def _try_replace_running_appimage(tmp: str, log) -> bool:
         os.replace(staged, current)
         log(f"[updater] replaced running AppImage: {current}")
         try:
-            subprocess.Popen([current], close_fds=True)
+            subprocess.Popen([current], close_fds=True, env=_env_for_new_qimchi())
         except Exception as exc:
             log(f"[updater] replaced AppImage but failed to relaunch: {exc!r}")
         return True
@@ -1013,6 +1013,22 @@ def _macos_install_after_exit_command(dmg: str, app_bundle: str, log: str) -> li
         app_bundle,
         log,
     ]
+
+
+_LAUNCHER_ACTIVE = "QIMCHI_LAUNCHER_ACTIVE"
+
+
+def _is_relaunched_child(argv: list[str], environ) -> bool:
+    # Setup inherits the old app's environment through the update helper, so
+    # the Qimchi it starts after an update must not be taken for a child.
+    return environ.get(_LAUNCHER_ACTIVE) == "1" and "--after-update" not in argv
+
+
+def _env_for_new_qimchi() -> dict[str, str]:
+    """Environment for a helper or process that starts a fresh Qimchi."""
+    env = dict(os.environ)
+    env.pop(_LAUNCHER_ACTIVE, None)
+    return env
 
 
 def _install_marker_path(home: str | None = None) -> str:
@@ -1434,6 +1450,7 @@ class _Updates:
                     _windows_install_after_exit_command(installer),
                     creationflags=flags,
                     close_fds=True,
+                    env=_env_for_new_qimchi(),
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -1452,6 +1469,7 @@ class _Updates:
                         _macos_install_after_exit_command(installer, bundle, log),
                         close_fds=True,
                         start_new_session=True,
+                        env=_env_for_new_qimchi(),
                         stdin=subprocess.DEVNULL,
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
@@ -1671,9 +1689,9 @@ def _run_native_smoke(window, dataset_path: str, download_dir: str, log) -> bool
 
 def main() -> int:
     # Stop a re-launched frozen child before it creates another server/window.
-    if os.environ.get("QIMCHI_LAUNCHER_ACTIVE") == "1":
+    if _is_relaunched_child(sys.argv, os.environ):
         return 0
-    os.environ["QIMCHI_LAUNCHER_ACTIVE"] = "1"
+    os.environ[_LAUNCHER_ACTIVE] = "1"
 
     headless_smoke = os.environ.get("QIMCHI_HEADLESS_SMOKE") == "1"
     native_smoke = os.environ.get("QIMCHI_NATIVE_SMOKE") == "1"

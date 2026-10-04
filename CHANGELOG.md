@@ -6,6 +6,7 @@
 - [Feature] The sidebar bug report button now opens reporting instructions, a direct link to a new GitLab issue, and the log-bundle controls.
 - [Feature] Downloaded updates can be downloaded again before installation.
 - [Fix] Selecting "Start Qimchi after installation" during a Windows update now starts the app instead of being blocked by the installation-in-progress marker.
+- [Fix] Qimchi opens again by itself after an in-app update on Windows and Linux. It used to start and then close at once without showing a window.
 - [Fix] Update prompts show the offered version's release notes instead of installation instructions from the GitLab release description.
 - [Fix] Prevented the image-resource memory leak caused by repeated live heat-map redraws in Chromium/WebView2. This could grow memory by several gigabytes and crash the window during a long measurement (see: https://github.com/plotly/plotly.js/issues/8097).
 - [Fix] If the window has to reload, for example after a crash, the Basket and the plots in the Viewer come back as they were.
