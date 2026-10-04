@@ -12,6 +12,9 @@ COPY frontend/postcss.config.js ./
 COPY frontend/index.html ./
 COPY frontend/public/ ./public/
 COPY frontend/src/ ./src/
+# Settings > Updates bundles the release notes (imported from ../CHANGELOG.md).
+COPY CHANGELOG.md /CHANGELOG.md
+COPY md/release-notes/ /md/release-notes/
 
 RUN npm ci \
     && npm run build
