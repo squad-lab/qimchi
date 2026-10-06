@@ -19,7 +19,7 @@ const browser = await chromium.launch();
 try {
   for (const scale of [1, 2]) {
     const page = await browser.newPage({
-      viewport: { width: 800, height: 500 },
+      viewport: { width: 800, height: 420 },
       deviceScaleFactor: scale,
     });
     await page.setContent(
@@ -57,7 +57,7 @@ try {
         <feDropShadow dy="3" stdDeviation="3" flood-color="#50616c" flood-opacity=".2"/>
       </filter>
     </defs>
-    <g filter="url(#shadow)">
+    <g filter="url(#shadow)" transform="translate(0 -60)">
       <image x="136" y="196" width="128" height="128" href="data:image/png;base64,${logo.toString("base64")}"/>
       <path d="M536 216 Q536 205 547 205 H574 L588 216 H653 Q664 216 664 227 V312 Q664 320 656 320 H544 Q536 320 536 312 Z" fill="#45b5e4"/>
       <rect x="541" y="226" width="118" height="82" rx="4" fill="#f8fdff"/>
@@ -65,13 +65,13 @@ try {
       <path d="M582 299 L604 257 M615 299 L593 257 M577 284 H620" fill="none" stroke="#2787ad" stroke-width="6" stroke-linecap="round" opacity=".6"/>
     </g>
     <g font-family="Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="16" text-anchor="middle" fill="#263c43">
-      <text x="200" y="351">Qimchi</text>
-      <text x="600" y="351">Applications</text>
+      <text x="200" y="291">Qimchi</text>
+      <text x="600" y="291">Applications</text>
     </g>`;
   const previewDir = new URL("../packaging/build/", import.meta.url);
   await mkdir(previewDir, { recursive: true });
   const page = await browser.newPage({
-    viewport: { width: 800, height: 500 },
+    viewport: { width: 800, height: 420 },
     deviceScaleFactor: 2,
   });
   await page.setContent(

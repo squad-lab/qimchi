@@ -4,28 +4,7 @@
   height="1024"
   viewBox="0 0 1024 1024"
 >
-  <defs>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
-      <feDropShadow
-        dy="12"
-        stdDeviation="14"
-        flood-color="#263c43"
-        flood-opacity=".18"
-      />
-    </filter>
-  </defs>
-  <!-- The existing two-trapezoid mark, redrawn for Retina icon sizes. -->
-  <rect
-    x="64"
-    y="64"
-    width="896"
-    height="896"
-    rx="200"
-    fill="#fff"
-    stroke="#e3e8ec"
-    stroke-width="2"
-    filter="url(#shadow)"
-  />
-  <path d="M160 160 H864 L629 424 H395 Z" fill="#8ec640" />
-  <path d="M395 600 H629 L864 864 H160 Z" fill="#50c3cb" />
+  <!-- Two-trapezoid logo on a transparent background, aligned to Apple's icon grid. -->
+  <path d="M100 100 H924 L649 409 H375 Z" fill="#8ec640" />
+  <path d="M375 615 H649 L924 924 H100 Z" fill="#50c3cb" />
 </svg>

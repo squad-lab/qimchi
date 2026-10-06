@@ -225,8 +225,8 @@ assert int.from_bytes(finder_info[8:10], "big") & 0x0400, "Volume custom-icon fl
 assert os.readlink(mount / "Applications") == "/Applications"
 assert list(mount.glob(".background.*")), "DMG background is missing"
 with DSStore.open(str(mount / ".DS_Store"), "r") as store:
-    assert store["Qimchi.app"]["Iloc"] == (200, 260)
-    assert store["Applications"]["Iloc"] == (600, 260)
+    assert store["Qimchi.app"]["Iloc"] == (200, 200)
+    assert store["Applications"]["Iloc"] == (600, 200)
     view = store["."]["icvp"]
     assert view["backgroundType"] == 2, "Finder is not using the artwork"
     assert view["iconSize"] == 128
