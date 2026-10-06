@@ -2,6 +2,8 @@
  * Centralized shared interfaces for components
  **/
 
+import type { PlotMarker } from "../utils/plotMarkers";
+
 export interface FilterSettings {
   // 1D and 2D filters
   flip?: boolean;
@@ -119,6 +121,8 @@ export interface PlotPersistentState {
   filter_preset_id?: number;
   slider_settings?: Record<string, SliderConfig>;
   axes_swapped?: boolean;
+  /** LineCut marker sets keyed by axis variables and units. */
+  linecut_markers?: Record<string, PlotMarker[]>;
 }
 
 // Plot configuration used across hooks/components

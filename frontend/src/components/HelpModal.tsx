@@ -816,6 +816,28 @@ const ViewerHelp = memo(() => (
         </li>
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <div>
+            <strong>Markers:</strong> Add vertical lines, horizontal lines or points to the LineCut
+            preview.
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              <li>
+                Choose a tool and click the preview. Hold Shift to place freely instead of snapping
+                to data.
+              </li>
+              <li>
+                Select a marker and use the arrow keys to move it. Shift moves 5 steps by default;
+                change this under Settings &gt; Plots.
+              </li>
+              <li>Press Delete or use the marker list to remove it.</li>
+              <li>
+                Horizontal and vertical cuts keep separate markers until the plot closes. Oblique
+                cuts have none.
+              </li>
+            </ul>
+          </div>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
             On a live heat map, Follow keeps the cut on the row or column currently being measured,
             including its partial values. It moves when the next line starts and changes orientation

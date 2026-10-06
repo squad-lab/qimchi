@@ -39,6 +39,8 @@ export interface UserSettings {
     recreateCustomPlots: boolean;
     /** Initial LineCut direction. */
     lineCutDirection: LineCutDirection;
+    /** Number of data steps a LineCut marker moves with Shift+arrow. */
+    lineCutMarkerStep: number;
     /** Maximum number of closed plots retained for reopening. */
     closedPlotsLimit: number;
   };
@@ -75,6 +77,9 @@ export interface UserSettings {
 /** Closed-plot history limits and the threshold for the Settings warning. */
 export const CLOSED_PLOTS_LIMIT = { min: 1, max: 100, recommended: 25 } as const;
 
+/** Shift+arrow step sizes offered in Settings. */
+export const LINE_CUT_MARKER_STEPS = [2, 3, 5, 10, 20] as const;
+
 export const FACTORY_SETTINGS: UserSettings = {
   general: { theme: "system", zoom: 1, plotWidth: 50, walkthroughSeen: false },
   plots: {
@@ -82,6 +87,7 @@ export const FACTORY_SETTINGS: UserSettings = {
     squarify: false,
     recreateCustomPlots: true,
     lineCutDirection: "horizontal",
+    lineCutMarkerStep: 5,
     closedPlotsLimit: 25,
   },
   explorer: { sortBy: "timestamp" },
@@ -109,6 +115,7 @@ const ENUM_LEAVES: Record<string, readonly unknown[]> = {
   "explorer.sortBy": ["name", "timestamp", "size", "chrono"],
   "plots.plottingBehaviour": ["heatmapOrLine", "both", "none"],
   "plots.lineCutDirection": ["horizontal", "vertical", "oblique"],
+  "plots.lineCutMarkerStep": LINE_CUT_MARKER_STEPS,
   "live.minRefreshMs": LIVE_REFRESH_STEPS,
 };
 

@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 
 // Local imports
 import type { AppliedFilter, SliderConfig, PlotPersistentState } from "../components/interfaces";
+import { withMarkerSet, type PlotMarker } from "../utils/plotMarkers";
 
 interface PlotStoreState {
   plotStates: Record<string, PlotPersistentState>;
@@ -16,6 +17,8 @@ interface PlotStoreState {
   unlinkPreset: (presetId: number) => void;
   setPlotSliders: (plotId: string, sliders: Record<string, SliderConfig>) => void;
   setPlotAxesSwapped: (plotId: string, swapped: boolean) => void;
+  /** Replace one set of LineCut markers; an empty list removes it. */
+  setLineCutMarkers: (plotId: string, key: string, markers: PlotMarker[]) => void;
   getPlotState: (plotId: string) => PlotPersistentState | undefined;
   removePlotState: (plotId: string) => void;
   /** Restore a closed plot's state, clearing any existing state if none was saved. */
@@ -105,6 +108,16 @@ export const usePlotStore = create<PlotStoreState>()(
             },
           },
         }));
+      },
+
+      setLineCutMarkers: (plotId: string, key: string, markers: PlotMarker[]) => {
+        set((state) => {
+          const next: PlotPersistentState = { ...state.plotStates[plotId], id: plotId };
+          const sets = withMarkerSet(next.linecut_markers, key, markers);
+          if (sets) next.linecut_markers = sets;
+          else delete next.linecut_markers;
+          return { plotStates: { ...state.plotStates, [plotId]: next } };
+        });
       },
 
       getPlotState: (plotId: string) => {
