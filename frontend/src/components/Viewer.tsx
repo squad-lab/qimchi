@@ -11,6 +11,8 @@ import {
   RulerDimensionLine,
   Trash2,
 } from "lucide-react";
+import RecentlyClosed from "./RecentlyClosed";
+import { closedPlotLabel, useClosedPlotsStore, type ClosedPlot } from "../stores/closedPlotsStore";
 
 // Local imports
 import Basket, { BasketFieldSelection, BasketItem } from "./Basket";
@@ -37,7 +39,7 @@ import {
   replicatePlots,
   selectReplicationSources,
 } from "../utils/autoPlot";
-import { useGlobalShortcutsInit, useShortcut } from "../hooks/useGlobalShortcuts";
+import { isEditableTarget, useGlobalShortcutsInit, useShortcut } from "../hooks/useGlobalShortcuts";
 import {
   computeSharedFields,
   getEligibleDatasetsForComposer,
@@ -80,6 +82,7 @@ const Viewer = ({
     addPlot,
     addPlots,
     removePlot,
+    restorePlots,
     movePlot,
     setPlotPinned,
     clearPlots,
@@ -128,6 +131,19 @@ const Viewer = ({
     readSessionValue<Record<string, number>>(SESSION_KEYS.plotWidths, {}),
   );
   useEffect(() => writeSessionValue(SESSION_KEYS.plotWidths, perPlotWidthMap), [perPlotWidthMap]);
+  const perPlotWidthMapRef = useRef(perPlotWidthMap);
+  perPlotWidthMapRef.current = perPlotWidthMap;
+  // Closed-plot history retains widths; remove them from the active map.
+  useEffect(() => {
+    const open = new Set(plotConfigs.map((plot) => plot.id));
+    setPerPlotWidthMap((prev) => {
+      const stale = Object.keys(prev).filter((id) => !open.has(id));
+      if (stale.length === 0) return prev;
+      const next = { ...prev };
+      for (const id of stale) delete next[id];
+      return next;
+    });
+  }, [plotConfigs]);
   const [selectedDatasetIds, setSelectedDatasetIds] = useState<Set<string>>(new Set());
   const [selectedPlotId, setSelectedPlotId] = useState<string | null>(null);
   const [viewerHeight, setViewerHeight] = useState<string>("calc(100vh - 200px)");
@@ -545,7 +561,7 @@ const Viewer = ({
   useShortcut("toggle-notes", () => setNotesCollapsed(!notesCollapsed));
   useShortcut("clear-composer", () => composerActionRef.current?.clearComposer());
   useShortcut("clear-basket", () => onClearBasket());
-  useShortcut("clear-viewer", () => clearPlots());
+  useShortcut("clear-viewer", () => closeAllPlots());
 
   useShortcut("select-plot-1", () => setSelectedPlotId(plotConfigs[0]?.id ?? null));
   useShortcut("select-plot-2", () => setSelectedPlotId(plotConfigs[1]?.id ?? null));
@@ -568,12 +584,94 @@ const Viewer = ({
   useShortcut("selected-export-images", () => dispatchSelectedPlotShortcut("export-images"));
   useShortcut("selected-remove-plot", () => {
     if (effectiveSelectedPlotId) {
-      removePlot(effectiveSelectedPlotId);
+      closePlot(effectiveSelectedPlotId);
       return;
     }
 
     showToast("No plot selected to remove.", "warning");
   });
+
+  // Save user-closed plots for undo. App cleanup, such as the walkthrough,
+  // bypasses this history.
+  const snapshotPlots = (ids: string[]): ClosedPlot[] => {
+    const configs = plotConfigsRef.current;
+    const states = usePlotStore.getState().plotStates;
+    const closedAt = Date.now();
+    return ids.flatMap((id) => {
+      const index = configs.findIndex((plot) => plot.id === id);
+      if (index < 0) return [];
+      const width = perPlotWidthMapRef.current[id];
+      return [{ config: configs[index], index, state: states[id], width, closedAt }];
+    });
+  };
+
+  const reopen = (plots: ClosedPlot[]) => {
+    const open = new Set(plotConfigsRef.current.map((plot) => plot.id));
+    const missing = plots.filter((plot) => !open.has(plot.config.id));
+    if (missing.length === 0) return;
+    // Restore saved state before mounting the plots.
+    for (const { config, state } of missing) {
+      usePlotStore.getState().restorePlotState(config.id, state);
+    }
+    const widths = missing.filter((plot) => plot.width !== undefined);
+    if (widths.length) {
+      setPerPlotWidthMap((prev) => ({
+        ...prev,
+        ...Object.fromEntries(widths.map((plot) => [plot.config.id, plot.width!])),
+      }));
+    }
+    restorePlots(missing);
+  };
+
+  const reopenClosed = (actionId?: string) => {
+    const action = useClosedPlotsStore.getState().take(actionId);
+    if (action) reopen(action.plots);
+  };
+
+  const reopenPlot = (plotId: string) => {
+    const plot = useClosedPlotsStore.getState().takePlot(plotId);
+    if (plot) reopen([plot]);
+  };
+
+  const remember = (plots: ClosedPlot[], message: string) => {
+    const actionId = useClosedPlotsStore.getState().record(plots);
+    if (!actionId) return;
+    showToast(message, "info", 6000, "Viewer", undefined, {
+      label: "Undo",
+      onClick: () => reopenClosed(actionId),
+    });
+  };
+
+  const closePlot = (id: string) => {
+    const closed = snapshotPlots([id]);
+    removePlot(id);
+    if (closed.length) remember(closed, `Closed ${closedPlotLabel(closed[0].config)}.`);
+  };
+
+  const closeAllPlots = () => {
+    const closed = snapshotPlots(plotConfigsRef.current.map((plot) => plot.id));
+    clearPlots();
+    if (closed.length) {
+      remember(closed, closed.length === 1 ? "Closed 1 plot." : `Closed ${closed.length} plots.`);
+    }
+  };
+
+  const reopenClosedRef = useRef(reopenClosed);
+  reopenClosedRef.current = reopenClosed;
+  // Ctrl+Z/Cmd+Z undoes the latest close outside text fields and modal dialogs.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+      if (event.key.toLowerCase() !== "z" || event.repeat || event.defaultPrevented) return;
+      if (isEditableTarget(event.target)) return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      if (useClosedPlotsStore.getState().actions.length === 0) return;
+      event.preventDefault();
+      reopenClosedRef.current();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const getSelectionContextLabel = () => {
     if (effectiveSelectedDatasetIds.size === 0) {
@@ -824,7 +922,7 @@ const Viewer = ({
                 <div className="p-2">
                   <PlotContainer
                     plotConfigs={shownPlotConfigs}
-                    onRemovePlot={removePlot}
+                    onRemovePlot={closePlot}
                     onMovePlot={movePlot}
                     onSetPlotPinned={setPlotPinned}
                     onAddPlot={addPlot}
@@ -1001,9 +1099,13 @@ const Viewer = ({
                 </button>
               </Tooltip>
 
+              <div className="h-px w-6 shrink-0 bg-gray-300" role="separator" />
+
+              <RecentlyClosed onReopen={reopenPlot} />
+
               <Tooltip content="Clear All Plots (Alt+Shift+V)" position="left">
                 <button
-                  onClick={clearPlots}
+                  onClick={closeAllPlots}
                   type="button"
                   aria-label="Clear All Plots"
                   className={`${ribbonButtonClass} text-red-600`}

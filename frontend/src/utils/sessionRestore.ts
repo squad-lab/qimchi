@@ -3,6 +3,7 @@ export const SESSION_KEYS = {
   basket: "qimchi-session-basket",
   plots: "qimchi-session-plots",
   plotWidths: "qimchi-session-plot-widths",
+  closedPlots: "qimchi-session-closed-plots",
 } as const;
 
 export function readSessionValue<T>(key: string, fallback: T): T {

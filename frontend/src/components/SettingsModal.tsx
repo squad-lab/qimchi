@@ -38,6 +38,7 @@ import {
   LIVE_REFRESH_MAX_MS,
   LIVE_REFRESH_MIN_MS,
   LIVE_REFRESH_STEP_MS,
+  CLOSED_PLOTS_LIMIT,
   PLOT_WIDTHS,
   ZOOM_STEPS,
   type ExplorerSort,
@@ -139,6 +140,13 @@ const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   },
   { id: "square", sectionId: "plots", sectionLabel: "Plots", label: "Square plots" },
   {
+    id: "closed-plots",
+    sectionId: "plots",
+    sectionLabel: "Plots",
+    label: "Closed plots to keep",
+    keywords: "recently closed undo reopen history ctrl+z",
+  },
+  {
     id: "heatmap-colorscale",
     sectionId: "heatmap.colormap",
     sectionLabel: "HeatMap · Colormap",
@@ -232,28 +240,97 @@ const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   },
 ];
 
+/**
+ * Commit on blur or Enter so partial input cannot lower the limit and discard history.
+ */
+const ClosedPlotsLimitField = ({
+  value,
+  onCommit,
+}: {
+  value: number;
+  onCommit: (limit: number) => void;
+}) => {
+  const [draft, setDraft] = useState(String(value));
+  const [shown, setShown] = useState(value);
+  if (value !== shown) {
+    setShown(value);
+    setDraft(String(value));
+  }
+  const number = Number(draft);
+  const valid =
+    draft.trim() !== "" &&
+    Number.isInteger(number) &&
+    number >= CLOSED_PLOTS_LIMIT.min &&
+    number <= CLOSED_PLOTS_LIMIT.max;
+  const commit = () => {
+    if (valid && number !== value) onCommit(number);
+    else if (!valid) setDraft(String(value));
+  };
+  const footer = !valid ? (
+    <p className="mt-2 text-xs text-red-600">
+      Enter a whole number from {CLOSED_PLOTS_LIMIT.min} to {CLOSED_PLOTS_LIMIT.max}.
+    </p>
+  ) : number > CLOSED_PLOTS_LIMIT.recommended ? (
+    <p
+      role="note"
+      className="mt-2 flex items-start gap-1.5 rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-800"
+    >
+      <AlertTriangle size={14} className="mt-px shrink-0" aria-hidden />
+      Keeping more than {CLOSED_PLOTS_LIMIT.recommended} makes the list long and uses more memory.
+    </p>
+  ) : null;
+  return (
+    <Field
+      label="Closed plots to keep"
+      description="How many closed plots you can reopen. The oldest are dropped first."
+      inline
+      footer={footer}
+    >
+      <input
+        type="number"
+        aria-label="Closed plots to keep"
+        min={CLOSED_PLOTS_LIMIT.min}
+        max={CLOSED_PLOTS_LIMIT.max}
+        step={1}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") commit();
+        }}
+        className="w-24 rounded border border-gray-300 p-1.5 text-sm"
+      />
+    </Field>
+  );
+};
+
 const Field = ({
   label,
   description,
   inline = false,
+  footer,
   children,
 }: {
   label: string;
   description?: string;
   inline?: boolean;
+  footer?: React.ReactNode;
   children: React.ReactNode;
 }) => (
   <div
     data-setting-label={label}
-    className={`border-b border-gray-100 py-3 last:border-b-0 ${
-      inline ? "flex items-center justify-between gap-6" : ""
-    }`}
+    className="border-b border-gray-100 py-3 last:border-b-0 [&:has(+h4)]:border-b-0"
   >
-    <div className="min-w-0">
-      <div className="text-sm font-medium text-gray-700">{label}</div>
-      {description && <div className="mt-0.5 text-xs text-gray-500">{description}</div>}
+    <div className={inline ? "flex flex-wrap items-center justify-between gap-x-6 gap-y-2" : ""}>
+      <div className={inline ? "min-w-0 flex-1 basis-56" : "min-w-0"}>
+        <div className="text-sm font-medium text-gray-700">{label}</div>
+        {description && <div className="mt-0.5 text-xs text-gray-500">{description}</div>}
+      </div>
+      <div className={inline ? "shrink-0" : "mt-2 w-full min-w-0 [&>select]:w-full"}>
+        {children}
+      </div>
     </div>
-    <div className={inline ? "shrink-0" : "mt-2 w-full min-w-0 [&>select]:w-full"}>{children}</div>
+    {footer}
   </div>
 );
 
@@ -716,6 +793,10 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
                 onChange={(on) => update(["plots", "squarify"], on)}
               />
             </Field>
+            <ClosedPlotsLimitField
+              value={settings.plots.closedPlotsLimit}
+              onCommit={(limit) => update(["plots", "closedPlotsLimit"], limit)}
+            />
           </>
         );
       case "explorer":

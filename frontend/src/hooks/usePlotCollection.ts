@@ -21,6 +21,8 @@ export interface UsePlotCollectionReturn {
    */
   addPlots: (configs: Omit<PlotConfiguration, "id">[]) => void;
   removePlot: (id: string) => void;
+  /** Restore closed plots at saved positions, preserving pin order and skipping open IDs. */
+  restorePlots: (plots: { config: PlotConfiguration; index: number }[]) => void;
   /** Move a plot to `toIndex` in the list without it. */
   movePlot: (id: string, toIndex: number) => void;
   /** Pin/unpin a plot so Next/Prev leaves it on its own measurement. */
@@ -133,6 +135,20 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
     // Plot ids are never reused, so keeping the state would grow for as long
     // as the browser profile lives -- it is saved to localStorage.
     usePlotStore.getState().removePlotState(id);
+  }, []);
+
+  const restorePlots = useCallback((plots: { config: PlotConfiguration; index: number }[]) => {
+    if (plots.length === 0) return;
+    setPlotConfigs((prev) => {
+      const present = new Set(prev.map((plot) => plot.id));
+      const next = [...prev];
+      for (const { config, index } of [...plots].sort((a, b) => a.index - b.index)) {
+        if (present.has(config.id)) continue;
+        next.splice(Math.max(0, Math.min(index, next.length)), 0, config);
+        present.add(config.id);
+      }
+      return next.length === prev.length ? prev : pinnedFirst(next);
+    });
   }, []);
 
   const movePlot = useCallback((id: string, toIndex: number) => {
@@ -252,6 +268,7 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
     addPlot,
     addPlots,
     removePlot,
+    restorePlots,
     movePlot,
     setPlotPinned,
     clearPlots,

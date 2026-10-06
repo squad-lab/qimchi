@@ -37,6 +37,19 @@ describe("resolveSettings", () => {
   });
 });
 
+describe("closed plots limit", () => {
+  it("keeps whole numbers within its range, and the default otherwise", () => {
+    const limit = (value: unknown) =>
+      resolveSettings({ plots: { closedPlotsLimit: value } }).plots.closedPlotsLimit;
+
+    expect(FACTORY_SETTINGS.plots.closedPlotsLimit).toBe(25);
+    expect(limit(1)).toBe(1);
+    expect(limit(60)).toBe(60);
+    expect(limit(100)).toBe(100);
+    for (const bad of [0, 101, 12.5, "40", null]) expect(limit(bad)).toBe(25);
+  });
+});
+
 describe("live refresh", () => {
   it("defaults to refreshing at most every 300 ms", () => {
     expect(resolveSettings({}).live.minRefreshMs).toBe(300);

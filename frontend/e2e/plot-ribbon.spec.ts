@@ -210,3 +210,160 @@ test("a reload keeps the Basket, the plots and their widths", async ({ page }) =
   await expect.poll(() => plotLayout(page)).toEqual(before);
   await expect(page.locator("[data-tour='basket']").getByText("live-heat")).toBeVisible();
 });
+
+const closeCard = async (page: Page, index: number) => {
+  const card = page.locator("[data-plot-id]").nth(index);
+  await card.hover();
+  await card.getByRole("button", { name: "Close plot" }).first().click();
+};
+
+test("a closed plot comes back with Ctrl+Z, where it was and as wide as it was", async ({
+  page,
+}) => {
+  await openBothPlots(page);
+  await page.getByRole("button", { name: "Plot width", exact: true }).first().click();
+  await page.getByRole("menuitemradio", { name: "100% width (this plot)" }).click();
+  await expect
+    .poll(() => plotLayout(page))
+    .toEqual(["heatmap calc(100% - 8px)", "scatter calc(50% - 8px)"]);
+
+  // Swap the axes to check that reopening restores saved state.
+  const heatmapCard = page.locator("[data-plot-id]").first();
+  const plotId = await heatmapCard.getAttribute("data-plot-id");
+  await heatmapCard.hover();
+  await heatmapCard.getByRole("button", { name: /^Swap X (&|and) Y axes$/i }).click();
+  const swapped = () =>
+    page.evaluate(
+      (id) =>
+        JSON.parse(localStorage.getItem("plot-states-storage") ?? "{}").state?.plotStates?.[id!]
+          ?.axes_swapped ?? false,
+      plotId,
+    );
+  await expect.poll(swapped).toBe(true);
+
+  await closeCard(page, 0);
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(1);
+  await expect(page.getByText(/^Closed .+ vs .+\.$/)).toBeVisible();
+  await expect.poll(swapped).toBe(false);
+
+  await page.locator("body").press("Control+z");
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(2);
+  await expect(page.locator("[data-plot-id]").first()).toHaveAttribute("data-plot-id", plotId!);
+  await expect.poll(swapped).toBe(true);
+  await expect
+    .poll(() => plotLayout(page))
+    .toEqual(["heatmap calc(100% - 8px)", "scatter calc(50% - 8px)"]);
+
+  // Ctrl+Z has no effect once the closed-plot history is empty.
+  await page.locator("body").press("Control+z");
+  await page.waitForTimeout(300);
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(2);
+});
+
+test("Clear all is undone in one step from the toast", async ({ page }) => {
+  await openBothPlots(page);
+  const before = await plotLayout(page);
+
+  await page.getByRole("button", { name: "Clear All Plots" }).click();
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(0);
+  const toast = page.getByText("Closed 2 plots.");
+  await expect(toast).toBeVisible();
+  await page.getByRole("button", { name: "Undo" }).click();
+
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(2);
+  await expect.poll(() => plotLayout(page)).toEqual(before);
+});
+
+test("the Recently closed list reopens one plot, and Ctrl+Z leaves text fields alone", async ({
+  page,
+}) => {
+  await openBothPlots(page);
+  await closeCard(page, 1);
+  await closeCard(page, 0);
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(0);
+
+  // Ctrl+Z in a text field must not reopen plots.
+  const search = page.getByRole("textbox").first();
+  await search.click();
+  await search.press("Control+z");
+  await page.waitForTimeout(300);
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Recently closed plots" }).click();
+  const list = page.getByRole("menu", { name: "Recently closed plots" });
+  await expect(list.getByRole("menuitem")).toHaveCount(2);
+  await list.getByRole("menuitem").last().click();
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(1);
+  await expect.poll(() => plotLayout(page)).toEqual(["scatter calc(50% - 8px)"]);
+
+  await page.getByRole("button", { name: "Recently closed plots" }).click();
+  await expect(list.getByRole("menuitem")).toHaveCount(1);
+  await list.getByRole("button", { name: "Clear list" }).click();
+  await page.getByRole("button", { name: "Recently closed plots" }).click();
+  await expect(list.getByRole("menuitem")).toHaveCount(0);
+  await expect(list.getByText("Re-open closed plots from here.")).toBeVisible();
+});
+
+test("a closed plot's backend context is released, unless it is reopened in time", async ({
+  page,
+}) => {
+  await page.clock.install();
+  await openBothPlots(page);
+  const released: string[][] = [];
+  await page.route("**/plot-contexts/release", async (route) => {
+    released.push(route.request().postDataJSON().plot_refs);
+    await route.fulfill({ json: { released: 1 } });
+  });
+
+  // Reopening before the release delay keeps the backend context.
+  await closeCard(page, 1);
+  await page.locator("body").press("Control+z");
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(2);
+  await page.clock.fastForward(31_000);
+  await page.waitForTimeout(200);
+  expect(released.flat()).not.toContain("plot-ref-LinePlot");
+
+  // After the delay, only the closed plot's context is released.
+  await closeCard(page, 1);
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(1);
+  await page.clock.fastForward(31_000);
+  await expect.poll(() => released.flat()).toContain("plot-ref-LinePlot");
+  expect(released.flat()).not.toContain("plot-ref-HeatMap");
+});
+
+test("the Recently closed list stays inside a short window", async ({ page }) => {
+  // Seed a full closed-plot history in session storage.
+  await page.addInitScript(() => {
+    const plots = Array.from({ length: 25 }, (_, i) => ({
+      config: {
+        id: `closed-${i}`,
+        fpath: `/data/run${i}.nc`,
+        indeps: ["x"],
+        deps: ["y"],
+        plotType: "LinePlot",
+      },
+      index: 0,
+      closedAt: Date.now(),
+    }));
+    sessionStorage.setItem(
+      "qimchi-session-closed-plots",
+      JSON.stringify([{ id: "seeded", plots }]),
+    );
+  });
+  await openBothPlots(page);
+  await page.setViewportSize({ width: 1200, height: 520 });
+
+  await page.getByRole("button", { name: "Recently closed plots" }).click();
+  const list = page.getByRole("menu", { name: "Recently closed plots" });
+  await expect(list.getByRole("menuitem")).toHaveCount(25);
+  const box = (await list.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(520);
+  expect(box.x).toBeGreaterThanOrEqual(0);
+
+  // The last entry can be scrolled to and reopened.
+  const last = list.getByRole("menuitem").last();
+  await last.scrollIntoViewIfNeeded();
+  await last.click();
+  await expect(page.locator("[data-plot-id='closed-24']")).toHaveCount(1);
+});
