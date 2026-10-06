@@ -19,7 +19,7 @@ const installNote = (platform: UpdateState["platform"]) => {
 };
 
 const buttonClass =
-  "inline-flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors";
+  "inline-flex items-center gap-2 whitespace-nowrap rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors";
 const secondaryClass = `${buttonClass} qimchi-dark-hover-plain border border-gray-300 bg-white text-gray-700 hover:bg-gray-100`;
 const primaryClass = `${buttonClass} bg-[#6ea030] text-white shadow-sm hover:bg-[#5a8526] focus:outline-none focus:ring-2 ${themeClasses.accentFocusRing}`;
 
@@ -63,7 +63,7 @@ const UpdateDialog = () => {
         aria-label={
           ready ? `Qimchi ${state.tag} is ready to install` : `Qimchi ${state.tag} is available`
         }
-        className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-gray-300 bg-white shadow-2xl"
+        className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-gray-300 bg-white shadow-2xl"
       >
         <div
           className={`flex shrink-0 items-center justify-between border-b px-4 py-2 ${themeClasses.accentHeaderBg} ${themeClasses.accentBorderLight}`}
@@ -72,7 +72,7 @@ const UpdateDialog = () => {
             <div
               className={`rounded-lg border p-1.5 shadow-sm ${themeClasses.accentLightBg} ${themeClasses.accentBorderLight}`}
             >
-              <Icon size={16} className={themeClasses.accentIcon} />
+              <Icon size={20} className={themeClasses.accentIcon} />
             </div>
             <h2 className="text-sm font-bold tracking-tight text-gray-800">
               {ready ? "Update ready to install" : "Update available"}
@@ -85,7 +85,7 @@ const UpdateDialog = () => {
             title={ready ? "Remind me at next launch" : "Not now"}
             aria-label="Close"
           >
-            <X size={16} className="text-[#dc2626] dark:text-white" />
+            <X size={18} className="text-[#dc2626] dark:text-white" />
           </button>
         </div>
 
@@ -94,7 +94,7 @@ const UpdateDialog = () => {
             <span className="rounded border border-gray-300 bg-gray-100 px-1.5 py-0.5 text-gray-600">
               {state.current ?? "Current version"}
             </span>
-            <ArrowRight size={14} className="text-gray-400" />
+            <ArrowRight size={16} className="text-gray-400" />
             <span
               className={`rounded border px-1.5 py-0.5 ${themeClasses.accentLightBg} ${themeClasses.accentBorderLight} ${themeClasses.accentText}`}
             >
@@ -143,7 +143,7 @@ const UpdateDialog = () => {
           )}
         </div>
 
-        <div className="flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-gray-50 px-4 py-3">
+        <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-gray-200 bg-gray-50 px-4 py-3">
           {ready ? (
             <>
               <button type="button" onClick={() => void redownload()} className={secondaryClass}>
@@ -153,7 +153,7 @@ const UpdateDialog = () => {
                 Remind me at next launch
               </button>
               <button type="button" onClick={() => void install()} className={primaryClass}>
-                <PackageCheck size={15} />
+                <PackageCheck size={18} />
                 Install now
               </button>
             </>
@@ -163,7 +163,7 @@ const UpdateDialog = () => {
                 Not now
               </button>
               <button type="button" onClick={() => void startDownload()} className={primaryClass}>
-                <Download size={15} />
+                <Download size={18} />
                 Download in background
               </button>
             </>
