@@ -38,6 +38,8 @@ import "./PlotWrapper.css";
 import PlotComponent from "./Plot";
 import LineCutGuide from "./LineCutGuide";
 import LineCutPopup from "./LineCutPopup";
+import { LineCutMarkerBar, LineCutMarkerOverlay } from "./LineCutMarkers";
+import { useLineCutMarkers } from "./useLineCutMarkers";
 import { useLineCutStore } from "../../stores/lineCutStore";
 import { plotToPng } from "../../utils/plotImage";
 import AppearanceModal from "./AppearanceModal";
@@ -105,7 +107,7 @@ const LINE_CUT_MODE_FOR_DIRECTION: Record<LineCutDirection, LineCutMode> = {
   oblique: "oblique",
 };
 
-type QimchiAxesMeta = Partial<Record<"x" | "y", { variable?: string; dependent?: boolean }>>;
+type QimchiAxesMeta = Partial<Record<"x" | "y" | "z", { variable?: string; dependent?: boolean }>>;
 
 class SupersededTransformError extends Error {}
 
@@ -777,6 +779,22 @@ const PlotWrapper: React.FC<Props> = ({
     [lineCutOwnerId],
   );
 
+  // Reuse curve samples across pointer updates until the preview changes.
+  const lineCutSamples = useMemo(
+    () => ({
+      x: toNumericArray(lineCutPreviewJson?.data?.[0]?.x),
+      y: toNumericArray(lineCutPreviewJson?.data?.[0]?.y),
+    }),
+    [lineCutPreviewJson],
+  );
+  const lineCutMarkers = useLineCutMarkers({
+    plotId: lineCutOwnerId,
+    preview: lineCutPreviewJson,
+    active: isLineCutActive,
+    enabled: resolvedLineCutAxis !== "oblique",
+    notify: showToast,
+  });
+
   // Ref to track isApplyingFilters for effects that shouldn't re-run when this flag changes
   const isApplyingFiltersRef = useRef<boolean>(isApplyingFilters);
 
@@ -890,6 +908,9 @@ const PlotWrapper: React.FC<Props> = ({
       };
 
       const units = unitMetaFromLayout(customizedPlotJson.layout);
+      const heatmapAxes =
+        (customizedPlotJson.layout as { meta?: { qimchi_axes?: QimchiAxesMeta } })?.meta
+          ?.qimchi_axes ?? {};
       const axisName = (axis: "x" | "y") =>
         (units[axis] as { label?: string } | undefined)?.label || axis.toUpperCase();
       const axisValue = (axis: "x" | "y", value: number) =>
@@ -959,7 +980,11 @@ const PlotWrapper: React.FC<Props> = ({
           },
         ],
         layout: {
-          meta: { qimchi_units: { x: units[alongAxis], y: units.z } },
+          meta: {
+            qimchi_units: { x: units[alongAxis], y: units.z },
+            // Associate markers with the preview's axis variables.
+            qimchi_axes: { x: heatmapAxes[alongAxis], y: heatmapAxes.z },
+          },
           title: { text: title, font: { size: 16 * interfaceZoom } },
           uirevision: title,
           margin: { t: 48, r: 20, b: 52, l: 70 },
@@ -3520,9 +3545,14 @@ const PlotWrapper: React.FC<Props> = ({
         ) : null}
       </div>
 
-      <div className="flex-1 min-h-0 p-2 relative">
+      <div className="flex-1 min-h-0 p-2 relative" data-linecut-panel>
         {lineCutPreviewJson ? (
-          <PlotComponent plotJson={lineCutPreviewJson} compact={view === "popup"} />
+          <>
+            <PlotComponent plotJson={lineCutPreviewJson} compact={view === "popup"} />
+            {lineCutMarkers.available && (
+              <LineCutMarkerOverlay state={lineCutMarkers} samples={lineCutSamples} />
+            )}
+          </>
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
             <div className="rounded-full bg-blue-50 p-3">
@@ -3557,6 +3587,7 @@ const PlotWrapper: React.FC<Props> = ({
           </div>
         )}
       </div>
+      <LineCutMarkerBar state={lineCutMarkers} />
     </>
   );
 

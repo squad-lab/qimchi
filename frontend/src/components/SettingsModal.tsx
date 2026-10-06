@@ -38,6 +38,7 @@ import {
   LIVE_REFRESH_MAX_MS,
   LIVE_REFRESH_MIN_MS,
   LIVE_REFRESH_STEP_MS,
+  LINE_CUT_MARKER_STEPS,
   CLOSED_PLOTS_LIMIT,
   PLOT_WIDTHS,
   ZOOM_STEPS,
@@ -137,6 +138,13 @@ const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
     sectionLabel: "Plots",
     label: "Default LineCut direction",
     keywords: "horizontal vertical oblique",
+  },
+  {
+    id: "linecut-marker-step",
+    sectionId: "plots",
+    sectionLabel: "Plots",
+    label: "Marker step with Shift",
+    keywords: "markers arrow keys nudge",
   },
   { id: "square", sectionId: "plots", sectionLabel: "Plots", label: "Square plots" },
   {
@@ -792,6 +800,23 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
                 checked={settings.plots.squarify}
                 onChange={(on) => update(["plots", "squarify"], on)}
               />
+            </Field>
+            <Field
+              label="Marker step with Shift"
+              description="How far Shift with an arrow key moves the selected marker."
+            >
+              <select
+                aria-label="Marker step with Shift"
+                value={settings.plots.lineCutMarkerStep}
+                onChange={(e) => update(["plots", "lineCutMarkerStep"], Number(e.target.value))}
+                className="rounded border border-gray-300 p-1.5 text-sm"
+              >
+                {LINE_CUT_MARKER_STEPS.map((step) => (
+                  <option key={step} value={step}>
+                    {step} steps
+                  </option>
+                ))}
+              </select>
             </Field>
             <ClosedPlotsLimitField
               value={settings.plots.closedPlotsLimit}

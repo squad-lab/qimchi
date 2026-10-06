@@ -762,3 +762,287 @@ test("a LineCut card placed by hand stays inside a window that has become smalle
   await page.setViewportSize({ width: 820, height: 560 });
   await expect.poll(() => inside(820, 560)).toBe(true);
 });
+
+/** Convert preview data coordinates to page coordinates after the layout settles. */
+async function previewPoint(page: Page, x: number, y: number) {
+  const locate = () =>
+    page.evaluate(
+      ([dataX, dataY]) => {
+        const gd = (Array.from(document.querySelectorAll(".js-plotly-plot")) as any[]).find(
+          (plot) => plot.data?.[0]?.name === "LineCut Preview",
+        );
+        const { xaxis, yaxis } = gd._fullLayout;
+        const box = gd.getBoundingClientRect();
+        return {
+          x: box.left + xaxis._offset + xaxis.l2p(dataX),
+          y: box.top + yaxis._offset + yaxis.l2p(dataY),
+        };
+      },
+      [x, y],
+    );
+  // Marker list changes can resize the preview, so wait for stable coordinates.
+  let point = await locate();
+  await expect(async () => {
+    await page.waitForTimeout(150);
+    const again = await locate();
+    const settled = again.x === point.x && again.y === point.y;
+    point = again;
+    expect(settled).toBe(true);
+  }).toPass({ timeout: 5_000 });
+  return point;
+}
+
+/** Click the LineCut preview at the given data coordinates. */
+async function clickPreviewAt(page: Page, x: number, y: number, modifiers: "Shift"[] = []) {
+  const point = await previewPoint(page, x, y);
+  for (const key of modifiers) await page.keyboard.down(key);
+  await page.mouse.click(point.x, point.y);
+  for (const key of modifiers) await page.keyboard.up(key);
+}
+
+/** Hover a row of the grid heat map until the preview shows it. */
+async function previewRow(page: Page, y: number, values: number[]) {
+  await expect(async () => {
+    await page.mouse.move(0, 0);
+    await hoverHeatmapAt(page, 1, y);
+    await expect
+      .poll(async () => (await heatmapState(page))?.previewY, { timeout: 1_000 })
+      .toEqual(values);
+  }).toPass({ timeout: 10_000 });
+}
+
+async function pickMarkerTool(page: Page, name: "vertical line" | "horizontal line" | "point") {
+  const button = page.getByRole("dialog", { name: "LineCut" }).getByRole("button", {
+    name: `Add a ${name}`,
+  });
+  await button.click();
+  await expect(button).toHaveAttribute("aria-pressed", "true");
+}
+
+const drawnMarkers = (page: Page) =>
+  page.evaluate(() =>
+    Array.from(document.querySelectorAll("[data-linecut-marker]")).map((marker) =>
+      marker.getAttribute("data-kind"),
+    ),
+  );
+
+test("markers can be placed on the preview, selected and removed", async ({ page }) => {
+  await mockLiveHeatmapApi(page);
+  await mockGridHeatmap(page);
+  await openLiveHeatmap(page);
+  await page.getByRole("button", { name: "LineCut Tool" }).first().click();
+  const popup = page.getByRole("dialog", { name: "LineCut" });
+  const markers = popup.getByRole("list", { name: "Placed markers" }).getByRole("listitem");
+
+  await previewRow(page, 20, [10, 11, 12, 13, 14]);
+
+  // A vertical line snaps to the nearest sample.
+  await pickMarkerTool(page, "vertical line");
+  await expect(popup.getByRole("button", { name: "Add a vertical line" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await clickPreviewAt(page, 2.3, 12.5);
+  await expect(markers).toHaveCount(1);
+  await expect(markers.first()).toHaveText("2");
+
+  // Points snap to the nearest curve sample; horizontal lines use its y value.
+  await pickMarkerTool(page, "point");
+  await clickPreviewAt(page, 3.2, 13.1);
+  await pickMarkerTool(page, "horizontal line");
+  await clickPreviewAt(page, 1.2, 11.4);
+  // Shift disables snapping; pixel rounding makes the result close to 11.5.
+  await clickPreviewAt(page, 0.5, 11.5, ["Shift"]);
+  // Lines are listed first, then points.
+  await expect(markers).toHaveText(["2", "11", /^11\.5\d*$/, "3, 13"]);
+  expect(await drawnMarkers(page)).toEqual(["vline", "point", "hline", "hline"]);
+
+  // Escape deactivates the marker tool without closing LineCut.
+  await page.keyboard.press("Escape");
+  await expect(popup.getByRole("button", { name: "Add a horizontal line" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+  await expect(popup).toBeVisible();
+
+  // Changing the cut preserves marker coordinates.
+  await previewRow(page, 30, [20, 21, 22, 23, 24]);
+  await expect(markers).toHaveCount(4);
+
+  // Delete removes the selected marker while keeping the plot open.
+  await clickPreviewAt(page, 2, 22);
+  await expect(
+    popup.getByRole("button", { name: "Vertical line at 2", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Delete");
+  await expect(markers).toHaveText(["11", /^11\.5/, "3, 13"]);
+  await expect(page.locator(".js-plotly-plot").first()).toBeVisible();
+
+  // The chip's remove button also removes the marker.
+  await popup.getByRole("button", { name: "Remove the point at 3, 13" }).click();
+  await expect(markers).toHaveText(["11", /^11\.5/]);
+  expect(await drawnMarkers(page)).toEqual(["hline", "hline"]);
+
+  // Escape closes LineCut when no tool or marker is active; reopening restores markers.
+  await page.keyboard.press("Escape");
+  await expect(popup).toHaveCount(0);
+  await page.getByRole("button", { name: "LineCut Tool" }).first().click();
+  await previewRow(page, 20, [10, 11, 12, 13, 14]);
+  await expect(markers).toHaveText(["11", /^11\.5/]);
+});
+
+test("oblique cuts have no markers, and the others come back afterwards", async ({ page }) => {
+  await mockLiveHeatmapApi(page);
+  await mockGridHeatmap(page);
+  await openLiveHeatmap(page);
+  await page.getByRole("button", { name: "LineCut Tool" }).first().click();
+  const popup = page.getByRole("dialog", { name: "LineCut" });
+  const markers = popup.getByRole("list", { name: "Placed markers" }).getByRole("listitem");
+
+  await previewRow(page, 20, [10, 11, 12, 13, 14]);
+  await pickMarkerTool(page, "vertical line");
+  await clickPreviewAt(page, 1, 11);
+  await expect(markers).toHaveCount(1);
+
+  await page.keyboard.press("o");
+  await expect(popup.getByRole("button", { name: "Add a vertical line" })).toBeDisabled();
+  await expect(markers).toHaveCount(0);
+  await expect(popup.getByText("Not available for oblique cuts")).toBeVisible();
+
+  await page.keyboard.press("x");
+  await previewRow(page, 20, [10, 11, 12, 13, 14]);
+  await expect(markers).toHaveText(["1"]);
+  expect(await drawnMarkers(page)).toEqual(["vline"]);
+});
+
+test("closing a plot forgets its markers", async ({ page }) => {
+  await mockLiveHeatmapApi(page);
+  await mockGridHeatmap(page);
+  await openLiveHeatmap(page);
+  await page.getByRole("button", { name: "LineCut Tool" }).first().click();
+  await previewRow(page, 20, [10, 11, 12, 13, 14]);
+  await pickMarkerTool(page, "vertical line");
+  await clickPreviewAt(page, 1, 11);
+
+  const storedMarkers = () =>
+    page.evaluate(() => {
+      const saved = JSON.parse(localStorage.getItem("plot-states-storage") ?? "{}");
+      return Object.values(saved.state?.plotStates ?? {}).filter(
+        (plot: any) => plot.linecut_markers,
+      ).length;
+    });
+  await expect.poll(storedMarkers).toBe(1);
+
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Close plot" }).first().click();
+  await expect.poll(storedMarkers).toBe(0);
+});
+
+test("markers do not pile up drawing nodes while a live preview refreshes", async ({ page }) => {
+  const state = await mockLiveHeatmapApi(page);
+  await openLiveHeatmap(page);
+  await enterLineCut(page);
+  await hoverHeatmapAt(page, -1.6, 197_500_000);
+  await expect.poll(async () => (await heatmapState(page))?.previewY?.length ?? 0).toBe(7);
+
+  const preview = (await heatmapState(page))!;
+  await pickMarkerTool(page, "vertical line");
+  await clickPreviewAt(page, preview.previewX![2], preview.previewY![2]);
+  await pickMarkerTool(page, "point");
+  await clickPreviewAt(page, preview.previewX![4], preview.previewY![4]);
+  await page.keyboard.press("Escape");
+  const nodes = () =>
+    page.evaluate(() => document.querySelectorAll("[data-linecut-markers] *").length);
+  await expect.poll(drawnMarkers.bind(null, page)).toEqual(["vline", "point"]);
+  const before = await nodes();
+
+  state.frame = "later";
+  await expect
+    .poll(async () => (await heatmapState(page))?.previewY, { timeout: 5_000 })
+    .not.toEqual(preview.previewY);
+  // Live refreshes preserve markers without adding drawing nodes.
+  await page.waitForTimeout(2_500);
+  expect(await drawnMarkers(page)).toEqual(["vline", "point"]);
+  expect(await nodes()).toBe(before);
+  expect(await page.locator("[data-linecut-markers]").count()).toBe(1);
+});
+
+test("the arrow keys nudge the selected marker through the data", async ({ page }) => {
+  await mockLiveHeatmapApi(page);
+  await mockGridHeatmap(page);
+  await mockSettingsApi(page, { plots: { lineCutMarkerStep: 2 } });
+  await openLiveHeatmap(page);
+  await page.getByRole("button", { name: "LineCut Tool" }).first().click();
+  const popup = page.getByRole("dialog", { name: "LineCut" });
+  const markers = popup.getByRole("list", { name: "Placed markers" }).getByRole("listitem");
+
+  await previewRow(page, 20, [10, 11, 12, 13, 14]);
+  await pickMarkerTool(page, "point");
+  await clickPreviewAt(page, 2, 12);
+  await page.keyboard.press("Escape");
+  await expect(markers).toHaveText(["2, 12"]);
+
+  // Arrow keys move points by one sample; Shift uses the configured step size.
+  await page.locator("body").press("ArrowRight");
+  await expect(markers).toHaveText(["3, 13"]);
+  await page.locator("body").press("Shift+ArrowLeft");
+  await expect(markers).toHaveText(["1, 11"]);
+  await page.locator("body").press("Shift+ArrowLeft");
+  await expect(markers).toHaveText(["0, 10"]);
+  // Up and down do not move a point.
+  await page.locator("body").press("ArrowUp");
+  await expect(markers).toHaveText(["0, 10"]);
+
+  // Horizontal lines step through the curve's sorted y values.
+  await pickMarkerTool(page, "horizontal line");
+  await clickPreviewAt(page, 1, 11);
+  await page.keyboard.press("Escape");
+  const line = markers.nth(0);
+  await expect(line).toHaveText("11");
+  await page.locator("body").press("ArrowUp");
+  await expect(line).toHaveText("12");
+  await page.locator("body").press("Shift+ArrowUp");
+  await expect(line).toHaveText("14");
+
+  // Arrow keys leave markers unchanged when none is selected.
+  await page.keyboard.press("Escape");
+  const unchanged = await markers.allTextContents();
+  await page.locator("body").press("ArrowRight");
+  await expect(markers).toHaveText(unchanged);
+});
+
+test("each spot holds one marker of a kind, and nudging steps past taken spots", async ({
+  page,
+}) => {
+  await mockLiveHeatmapApi(page);
+  await mockGridHeatmap(page);
+  await openLiveHeatmap(page);
+  await page.getByRole("button", { name: "LineCut Tool" }).first().click();
+  const popup = page.getByRole("dialog", { name: "LineCut" });
+  const markers = popup.getByRole("list", { name: "Placed markers" }).getByRole("listitem");
+
+  await previewRow(page, 20, [10, 11, 12, 13, 14]);
+  await pickMarkerTool(page, "point");
+  await clickPreviewAt(page, 2, 12);
+  await clickPreviewAt(page, 3, 13);
+  // Placing a duplicate selects the existing point.
+  await clickPreviewAt(page, 2.1, 12.1);
+  await expect(page.getByText("There is already a point there.")).toBeVisible();
+  await expect(markers).toHaveText(["2, 12", "3, 13"]);
+  await expect(popup.getByRole("button", { name: "Point at 2, 12", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+
+  // Different marker kinds can share a position.
+  await pickMarkerTool(page, "vertical line");
+  await clickPreviewAt(page, 2, 12);
+  await expect(markers).toHaveText(["2", "2, 12", "3, 13"]);
+
+  // Nudging the point at 2 to the right skips the point at 3.
+  await page.keyboard.press("Escape");
+  await popup.getByRole("button", { name: "Point at 2, 12", exact: true }).click();
+  await page.locator("body").press("ArrowRight");
+  await expect(markers).toHaveText(["2", "3, 13", "4, 14"]);
+});
