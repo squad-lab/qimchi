@@ -370,31 +370,77 @@ def test_installing_on_windows_runs_the_installer_and_closes(
 def test_macos_update_replaces_the_app_once_it_has_quit(
     launcher, monkeypatch, tmp_path, bundle_name
 ):
+    import plistlib
     import subprocess
     import sys
 
-    messages, opened, closed = [], [], []
+    messages, ran, closed = [], [], []
     updates, _ = _updates_with_offer(launcher, monkeypatch, tmp_path, messages)
     updates.check(include_previews=False)
     updates.download()
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(launcher.os, "name", "posix")
+    monkeypatch.setattr(launcher.os, "getuid", lambda: 501, raising=False)
     monkeypatch.setattr(
         sys, "executable", f"/Applications/{bundle_name}/Contents/MacOS/qimchi"
     )
     updates._offer["platform"] = "macos"
     monkeypatch.setattr(
-        subprocess, "Popen", lambda args, **_kwargs: opened.append(args)
+        subprocess,
+        "run",
+        lambda args, **_kwargs: ran.append(args) or SimpleNamespace(returncode=0),
     )
     monkeypatch.setattr(launcher, "_close_windows", lambda log: closed.append(True))
 
     updates.install()
 
-    helper = opened[0]
+    # A separate launchd job lets the helper survive Qimchi's exit.
+    job = "de.fz-juelich.qimchi.update"
+    assert ran[0] == ["launchctl", "bootout", f"gui/501/{job}"]
+    assert ran[1][:3] == ["launchctl", "bootstrap", "gui/501"]
+    with open(ran[1][3], "rb") as fh:
+        plist = plistlib.load(fh)
+    assert plist["Label"] == job and plist["RunAtLoad"]
+    helper = plist["ProgramArguments"]
     assert helper[:2] == ["/bin/sh", "-c"]
     assert helper[5:7] == [updates._offer["path"], f"/Applications/{bundle_name}"]
     assert "ditto" in helper[2] and 'open "$dmg"' in helper[2]
+    assert any(f"launchd job {job}" in message for message in messages)
     assert closed == [True]
+
+
+def test_macos_update_starts_the_helper_directly_if_launchd_refuses(
+    launcher, monkeypatch, tmp_path
+):
+    import subprocess
+    import sys
+
+    messages, opened = [], []
+    updates, _ = _updates_with_offer(launcher, monkeypatch, tmp_path, messages)
+    updates.check(include_previews=False)
+    updates.download()
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(launcher.os, "name", "posix")
+    monkeypatch.setattr(launcher.os, "getuid", lambda: 501, raising=False)
+    monkeypatch.setattr(sys, "executable", "/Applications/Qimchi.app/Contents/MacOS/q")
+    updates._offer["platform"] = "macos"
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **_kwargs: SimpleNamespace(returncode=5, stderr="denied"),
+    )
+    monkeypatch.setattr(
+        subprocess,
+        "Popen",
+        lambda args, **_kwargs: opened.append(args) or SimpleNamespace(pid=2),
+    )
+    monkeypatch.setattr(launcher, "_close_windows", lambda log: None)
+
+    updates.install()
+
+    assert opened[0][:2] == ["/bin/sh", "-c"]
+    assert any("bootstrap failed (5: denied)" in message for message in messages)
+    assert any("helper pid 2" in message for message in messages)
 
 
 def test_macos_update_opens_the_dmg_outside_an_app_bundle(
@@ -659,3 +705,29 @@ def test_the_qimchi_started_after_an_update_is_not_taken_for_a_child(launcher):
     assert launcher._is_relaunched_child(["qimchi.exe"], active)
     assert not launcher._is_relaunched_child(["qimchi.exe", "--after-update"], active)
     assert not launcher._is_relaunched_child(["qimchi.exe"], {})
+
+
+def test_update_logs_rotate_like_the_app_logs(launcher, tmp_path):
+    log = tmp_path / "install.log"
+
+    log.write_text("small", encoding="utf-8")
+    launcher._rotate_update_log(str(log), max_bytes=100, backups=3)
+    assert log.read_text(encoding="utf-8") == "small"
+
+    for run in range(5):
+        log.write_text(f"run {run}" + "x" * 100, encoding="utf-8")
+        launcher._rotate_update_log(str(log), max_bytes=100, backups=3)
+
+    # Keep three backups, with the newest at .1.
+    assert not log.exists()
+    kept = sorted(p.name for p in tmp_path.iterdir())
+    assert kept == ["install.log.1", "install.log.2", "install.log.3"]
+    assert (tmp_path / "install.log.1").read_text(encoding="utf-8").startswith("run 4")
+    assert (tmp_path / "install.log.3").read_text(encoding="utf-8").startswith("run 2")
+
+    # max_bytes=0 rotates whenever the log exists (Setup rewrites setup.log).
+    setup = tmp_path / "setup.log"
+    launcher._rotate_update_log(str(setup), max_bytes=0)
+    setup.write_text("first install", encoding="utf-8")
+    launcher._rotate_update_log(str(setup), max_bytes=0)
+    assert (tmp_path / "setup.log.1").read_text(encoding="utf-8") == "first install"

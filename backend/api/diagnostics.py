@@ -476,6 +476,15 @@ def _log_files() -> list[Path]:
     found = {
         path for pattern in names for path in folder.glob(pattern) if path.is_file()
     }
+    # Include update logs and state files, excluding downloaded installers.
+    updates = _home() / "updates"
+    if updates.is_dir():
+        found |= {
+            path
+            for pattern in ("*.log", "*.log.*", "*.json")
+            for path in updates.glob(pattern)
+            if path.is_file()
+        }
     return sorted(found)
 
 
@@ -533,7 +542,8 @@ def build_bundle(destination: Path, include_crash_reports: bool) -> dict[str, An
     with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as bundle:
         for path in _log_files():
             try:
-                bundle.write(path, f"logs/{path.name}")
+                folder = "logs/updates" if path.parent.name == "updates" else "logs"
+                bundle.write(path, f"{folder}/{path.name}")
                 manifest["logs"].append(path.name)
             except OSError as exc:
                 manifest["skipped"].append(f"{path.name}: {exc}")

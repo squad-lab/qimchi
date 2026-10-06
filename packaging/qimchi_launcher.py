@@ -930,6 +930,28 @@ def _asset_file_name(asset_url: str, platform: str) -> str:
     }.get(platform, "qimchi-update")
 
 
+# Retain numbered update-log backups, with the newest at .1.
+_UPDATE_LOG_BACKUPS = 5
+# macOS updates append to install.log; rotate it at this size limit.
+_INSTALL_LOG_MAX_BYTES = 1024 * 1024
+
+
+def _rotate_update_log(
+    path: str, max_bytes: int, backups: int = _UPDATE_LOG_BACKUPS
+) -> None:
+    """Rotate a log at max_bytes, keeping up to backups numbered copies."""
+    try:
+        if not os.path.isfile(path) or os.path.getsize(path) < max_bytes:
+            return
+        for index in range(backups - 1, 0, -1):
+            older = f"{path}.{index}"
+            if os.path.exists(older):
+                os.replace(older, f"{path}.{index + 1}")
+        os.replace(path, f"{path}.1")
+    except OSError:
+        pass
+
+
 def _windows_install_after_exit_command(installer: str) -> list[str]:
     """Build a detached command that waits for Qimchi before running Setup."""
     quoted = installer.replace("'", "''")
@@ -960,8 +982,26 @@ def _windows_install_after_exit_command(installer: str) -> list[str]:
 _MACOS_INSTALL_SCRIPT = r"""
 pid="$1"; dmg="$2"; target="$3"; log="$4"
 exec >>"$log" 2>&1
-echo "$(date) installing $dmg over $target"
-while kill -0 "$pid" 2>/dev/null; do sleep 0.5; done
+echo "$(date) installing $dmg over $target (helper $$, waiting for Qimchi $pid to exit)"
+trap 'echo "$(date) the update helper was stopped by a signal"; exit 1' HUP INT TERM
+waited=0
+while kill -0 "$pid" 2>/dev/null; do
+  sleep 0.5
+  waited=$((waited + 1))
+  if [ "$waited" -ge 20 ]; then
+    echo "$(date) Qimchi $pid is still running after 10s; installing anyway"
+    break
+  fi
+done
+if ! kill -0 "$pid" 2>/dev/null; then
+  echo "$(date) Qimchi $pid has exited (waited about $((waited / 2))s); mounting the disk image"
+fi
+# An interrupted update can leave its disk image mounted.
+for stale in /tmp/qimchi-update.*; do
+  [ -d "$stale" ] || continue
+  hdiutil detach -quiet "$stale" 2>/dev/null || hdiutil detach -force -quiet "$stale" 2>/dev/null
+  rmdir "$stale" 2>/dev/null && echo "$(date) removed a leftover mount at $stale"
+done
 mount="$(mktemp -d /tmp/qimchi-update.XXXXXX)"
 staged="$(dirname "$target")/.qimchi-update.app"
 old="$(dirname "$target")/.qimchi-previous.app"
@@ -969,18 +1009,23 @@ installed=0
 if hdiutil attach -nobrowse -noautoopen -quiet -mountpoint "$mount" "$dmg"; then
   source_app="$(ls -d "$mount"/[Qq]imchi.app 2>/dev/null | head -n 1)"
   rm -rf "$staged" "$old"
-  if [ -n "$source_app" ] && ditto "$source_app" "$staged"; then
-    if mv "$target" "$old"; then
-      if mv "$staged" "$target"; then
-        installed=1
-        rm -rf "$old"
-      else
-        mv "$old" "$target"
-      fi
-    fi
+  if [ -z "$source_app" ]; then
+    echo "$(date) the disk image has no Qimchi.app"
+  elif ! ditto "$source_app" "$staged"; then
+    echo "$(date) could not copy $source_app to $staged"
+  elif ! mv "$target" "$old"; then
+    echo "$(date) could not move $target aside (Qimchi may need App Management permission)"
+  elif mv "$staged" "$target"; then
+    installed=1
+    rm -rf "$old"
+  else
+    echo "$(date) could not move the new app into place; restoring the old one"
+    mv "$old" "$target"
   fi
   rm -rf "$staged"
   hdiutil detach -quiet "$mount" || hdiutil detach -force -quiet "$mount"
+else
+  echo "$(date) could not mount $dmg"
 fi
 rmdir "$mount" 2>/dev/null
 if [ "$installed" = 1 ]; then
@@ -988,11 +1033,58 @@ if [ "$installed" = 1 ]; then
   xattr -dr com.apple.quarantine "$target" 2>/dev/null
   open "$target"
 else
-  echo "$(date) could not replace $target; opening the disk image"
-  open "$dmg"
+  echo "$(date) could not replace $target; showing the disk image"
+  # Open the mounted volume to ensure Finder shows a window.
+  volume="$(hdiutil attach -noautoopen "$dmg" | awk -F '\t' '/\/Volumes\// {print $NF}' | tail -n 1)"
+  if [ -n "$volume" ]; then open "$volume"; else open "$dmg"; fi
   open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AppBundles"
 fi
 """
+
+
+_MACOS_UPDATE_JOB = "de.fz-juelich.qimchi.update"
+
+
+def _start_macos_update_helper(command: list[str], folder: str, log) -> str:
+    """Start the update helper via launchd, falling back to a detached process."""
+    import plistlib
+    import subprocess
+
+    # macOS can terminate child processes when Qimchi exits during installation.
+    domain = f"gui/{os.getuid()}"
+    plist = os.path.join(folder, f"{_MACOS_UPDATE_JOB}.plist")
+    with open(plist, "wb") as fh:
+        plistlib.dump(
+            {
+                "Label": _MACOS_UPDATE_JOB,
+                "ProgramArguments": command,
+                "RunAtLoad": True,
+                "AbandonProcessGroup": True,
+            },
+            fh,
+        )
+    subprocess.run(
+        ["launchctl", "bootout", f"{domain}/{_MACOS_UPDATE_JOB}"], capture_output=True
+    )
+    result = subprocess.run(
+        ["launchctl", "bootstrap", domain, plist], capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        return f"launchd job {_MACOS_UPDATE_JOB}"
+    log(
+        f"[updater] launchctl bootstrap failed ({result.returncode}: "
+        f"{result.stderr.strip()}); starting the helper directly"
+    )
+    helper = subprocess.Popen(
+        command,
+        close_fds=True,
+        start_new_session=True,
+        env=_env_for_new_qimchi(),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return f"helper pid {helper.pid}"
 
 
 def _running_app_bundle() -> str | None:
@@ -1442,6 +1534,10 @@ class _Updates:
         self._set(status="installing", prompt=None)
         try:
             if platform == "windows" or os.name == "nt":
+                # Preserve the previous setup.log before the Windows installer overwrites it.
+                _rotate_update_log(
+                    os.path.join(os.path.dirname(installer), "setup.log"), max_bytes=0
+                )
                 # DETACHED_PROCESS makes PowerShell exit before running this script.
                 flags = (
                     subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
@@ -1465,18 +1561,15 @@ class _Updates:
                 bundle = _running_app_bundle()
                 if bundle:
                     log = os.path.join(os.path.dirname(installer), "install.log")
-                    subprocess.Popen(
+                    _rotate_update_log(log, _INSTALL_LOG_MAX_BYTES)
+                    helper = _start_macos_update_helper(
                         _macos_install_after_exit_command(installer, bundle, log),
-                        close_fds=True,
-                        start_new_session=True,
-                        env=_env_for_new_qimchi(),
-                        stdin=subprocess.DEVNULL,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
+                        os.path.dirname(installer),
+                        self._log,
                     )
                     self._log(
-                        f"[updater] {bundle} will be replaced once this app has "
-                        f"closed (log: {log})"
+                        f"[updater] {bundle} will be replaced once this app "
+                        f"(pid {os.getpid()}) has closed ({helper}, log: {log})"
                     )
                 else:
                     subprocess.Popen(["open", installer], close_fds=True)
