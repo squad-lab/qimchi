@@ -41,7 +41,7 @@ import LineCutPopup from "./LineCutPopup";
 import { LineCutMarkerBar, LineCutMarkerOverlay } from "./LineCutMarkers";
 import { useLineCutMarkers } from "./useLineCutMarkers";
 import { useLineCutStore } from "../../stores/lineCutStore";
-import { plotToPng } from "../../utils/plotImage";
+import { plotToPng, withDrawnSize } from "../../utils/plotImage";
 import AppearanceModal from "./AppearanceModal";
 import FiltersModal from "./FiltersModal";
 import type { AppliedFilter } from "../../components/interfaces";
@@ -50,6 +50,7 @@ import type { AttrData, PlotConfiguration, SliderConfig } from "../../components
 import { useToast } from "../../hooks/useToast";
 import { usePlotStore } from "../../stores/plotStore";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useThemeStore } from "../../stores/themeStore";
 import { appearanceDefaultsFor } from "../../settings/userSettings";
 import {
   appearanceOverrides as diffAppearance,
@@ -485,7 +486,7 @@ const PlotWrapper: React.FC<Props> = ({
   const exportPayload = useStableCallback((): PlotExportPayload | null =>
     plotConfig && customizedPlotJson
       ? {
-          plot_json: exportPlotJson,
+          plot_json: withDrawnSize(exportPlotJson, plotContainerRef.current),
           fpath: plotConfig.fpath,
           relayout_data: relayoutData,
           applied_filters: appliedFilters,
@@ -535,7 +536,8 @@ const PlotWrapper: React.FC<Props> = ({
       showToast("This browser does not allow copying images to the clipboard.", "error");
       return;
     }
-    const image = plotToPng(graph, exportScale ?? 2);
+    const dark = useThemeStore.getState().theme === "dark";
+    const image = plotToPng(graph, exportScale ?? 2, dark);
     // Start the clipboard write within the click's user-activation window.
     navigator.clipboard
       .write([new ClipboardItem({ "image/png": image })])
@@ -559,7 +561,7 @@ const PlotWrapper: React.FC<Props> = ({
       const axiosResponse = await axios.post(
         `${PROD_BACKEND_URL}/export-plot-images/send-to-notes`,
         {
-          plot_json: exportPlotJson,
+          plot_json: withDrawnSize(exportPlotJson, plotContainerRef.current),
           fpath: plotConfig.fpath,
           relayout_data: relayoutData,
           applied_filters: appliedFilters,

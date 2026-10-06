@@ -164,7 +164,11 @@ test("plots are rearranged by dragging their handle, and keep their own widths",
 
 test("the Viewer exports every plot at once, each as it is shown", async ({ page }) => {
   await openBothPlots(page);
-  let batch: { plots: { fpath: string; relayout_data: unknown; plot_json: unknown }[] } | null =
+  // Export dimensions should match each plot's displayed size.
+  await page.getByRole("button", { name: "Plot width", exact: true }).first().click();
+  await page.getByRole("menuitemradio", { name: "100% width (this plot)" }).click();
+  type Exported = { layout: { width?: number; height?: number }; data: { type: string }[] };
+  let batch: { plots: { fpath: string; relayout_data: unknown; plot_json: Exported }[] } | null =
     null;
   await page.route("**/export-plot-images**", async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -182,6 +186,19 @@ test("the Viewer exports every plot at once, each as it is shown", async ({ page
   await expect(page.getByText("Saved to C:/exports/all.zip")).toBeVisible();
   expect(batch!.plots).toHaveLength(2);
   expect(batch!.plots.every((plot) => plot.plot_json && plot.fpath)).toBe(true);
+  const drawn = await page.evaluate(() =>
+    Object.fromEntries(
+      (Array.from(document.querySelectorAll(".js-plotly-plot")) as any[]).map((plot) => [
+        plot.data?.[0]?.type,
+        [plot.clientWidth, plot.clientHeight],
+      ]),
+    ),
+  );
+  for (const { plot_json } of batch!.plots) {
+    const [width, height] = drawn[plot_json.data[0].type];
+    expect([plot_json.layout.width, plot_json.layout.height]).toEqual([width, height]);
+  }
+  expect(drawn.heatmap[0]).toBeGreaterThan(drawn.scatter[0]);
 });
 
 test("a plot can be copied to the clipboard as an image", async ({ page, context }) => {
