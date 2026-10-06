@@ -1,8 +1,8 @@
 <svg
   xmlns="http://www.w3.org/2000/svg"
   width="800"
-  height="500"
-  viewBox="0 0 800 500"
+  height="420"
+  viewBox="0 0 800 420"
 >
   <defs>
     <radialGradient id="mint" cx="100%" cy="45%" r="78%">
@@ -28,39 +28,16 @@
       <feColorMatrix type="saturate" values="0" />
     </filter>
   </defs>
-  <path fill="#f9faf9" d="M0 0h800v500H0z" />
-  <path fill="url(#sage)" d="M0 0h800v500H0z" />
-  <path fill="url(#mint)" d="M0 0h800v500H0z" />
-  <path fill="url(#lime)" d="M0 0h800v500H0z" />
-  <path filter="url(#grain)" opacity=".045" d="M0 0h800v500H0z" />
-  <g
-    font-family="Segoe UI, Helvetica Neue, Arial, sans-serif"
-    text-anchor="middle"
-  >
-    <text
-      x="400"
-      y="79"
-      font-size="32"
-      font-weight="600"
-      letter-spacing="-.8"
-      fill="#263c43"
-    >
-      Qimchi
-    </text>
-    <text x="400" y="110" font-size="14" fill="#677c81">
-      Plot your spicy quantum measurements
-    </text>
-    <text x="400" y="426" font-size="16" font-weight="500" fill="#38575f">
-      Drag Qimchi to Applications
-    </text>
-    <text x="400" y="451" font-size="12" fill="#71858a">
-      Then open Qimchi from your Applications folder.
-    </text>
-  </g>
-  <!-- Native Finder icons are centred at (200, 260) and (600, 260). -->
-  <!-- Centre the transfer on y=260, with equal clearance from both icons. -->
+  <path fill="#f9faf9" d="M0 0h800v420H0z" />
+  <path fill="url(#sage)" d="M0 0h800v420H0z" />
+  <path fill="url(#mint)" d="M0 0h800v420H0z" />
+  <path fill="url(#lime)" d="M0 0h800v420H0z" />
+  <path filter="url(#grain)" opacity=".045" d="M0 0h800v420H0z" />
+  <!-- Native Finder icons are centred at (200, 200) and (600, 200). -->
+  <!-- Keep the transfer arrow centred between the icons. -->
   <!-- Ease the final wave into a horizontal stem; both head strokes meet it. -->
   <g
+    transform="translate(0 -60)"
     fill="none"
     stroke-width="6"
     stroke-linecap="round"
