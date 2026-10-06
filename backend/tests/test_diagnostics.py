@@ -151,6 +151,13 @@ def home(tmp_path, monkeypatch):
 
 def test_the_bundle_holds_the_logs_and_the_system_details(home, tmp_path):
     target = tmp_path / "bundle.zip"
+    (home / "updates").mkdir()
+    (home / "updates" / "install.log").write_text("installing", encoding="utf-8")
+    (home / "updates" / "qimchi-setup.exe").write_bytes(b"MZ")
+    (home / "updates" / "setup.log").write_text("setup", encoding="utf-8")
+    (home / "updates" / "setup.log.1").write_text("previous setup", encoding="utf-8")
+    (home / "updates" / "pending.json").write_text("{}", encoding="utf-8")
+    (home / "updates" / "qimchi-v1.dmg").write_bytes(b"dmg")
 
     manifest = diagnostics.build_bundle(target, include_crash_reports=False)
 
@@ -159,6 +166,13 @@ def test_the_bundle_holds_the_logs_and_the_system_details(home, tmp_path):
         info = json.loads(bundle.read("system-info.json"))
     assert {"logs/qimchi.log", "logs/qimchi.log.1", "logs/qimchi_debug.log"} <= names
     assert "logs/unrelated.txt" not in names
+    assert {
+        "logs/updates/install.log",
+        "logs/updates/setup.log",
+        "logs/updates/setup.log.1",
+        "logs/updates/pending.json",
+    } <= names
+    assert not any(name.endswith((".exe", ".dmg")) for name in names)
     assert info["bundle"]["logs"] == manifest["logs"]
     assert "platform" in info
 
