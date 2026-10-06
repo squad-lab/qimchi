@@ -2292,7 +2292,7 @@ const TreeItemComponent = ({
             }}
             className="qimchi-dark-hover-plain rounded px-2 py-1 text-xs text-gray-700 hover:bg-gray-100"
           >
-            {kind === "filename" ? "Filename" : "Folder name"}
+            {kind === "filename" ? "Filename" : "Name"}
           </button>
           <button
             type="button"

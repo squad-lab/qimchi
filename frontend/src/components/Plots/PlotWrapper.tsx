@@ -4006,7 +4006,7 @@ const PlotWrapper: React.FC<Props> = ({
           <div className="flex justify-center">
             <div className="flex flex-col gap-1 items-center">
               {onClose && (
-                <Tooltip content="Close (Delete)" position="left">
+                <Tooltip content="Close (Del)" position="left">
                   <button
                     onClick={onClose}
                     className="qimchi-dark-hover-plain p-1.5 rounded hover:bg-gray-300 transition-colors"

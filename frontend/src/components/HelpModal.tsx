@@ -1053,13 +1053,14 @@ const SettingsHelp = memo(() => (
       </p>
       <ul className="list-disc space-y-2 pl-5 leading-relaxed">
         <li>
-          <strong>General</strong>: choose the theme, interface zoom and default plot width. The
-          System theme follows your operating system
+          <strong>General</strong>: choose the theme and interface zoom, or restore every setting to
+          its default. The System theme follows your operating system
         </li>
         <li>
           <strong>Plots</strong>: choose which plots are created for a new measurement, whether
-          custom plots are recreated, whether plots use a square aspect ratio and which direction
-          LineCut starts in
+          custom plots are recreated, how wide plots are and whether they use a square aspect ratio,
+          which direction LineCut starts in, how far Shift with an arrow key moves a LineCut marker,
+          and how many closed plots to keep
         </li>
         <li>
           <strong>Explorer</strong>, <strong>Live</strong> and <strong>Export</strong>: set the sort
