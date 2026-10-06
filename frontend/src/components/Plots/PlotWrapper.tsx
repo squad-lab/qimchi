@@ -32,6 +32,7 @@ import type { AxisType, Dash } from "plotly.js";
 import plotlyColorscales from "./plotly_colorscales_plotlyjs.json";
 import { applyThemeToLayout, lightTheme } from "./themes";
 import { PlotAPI, type TransformPlotRequest } from "../../services/plotAPI";
+import { holdPlotContext } from "../../services/plotContexts";
 import { PROD_BACKEND_URL } from "../../config";
 import "./PlotWrapper.css";
 import PlotComponent from "./Plot";
@@ -368,6 +369,8 @@ const PlotWrapper: React.FC<Props> = ({
   useEffect(() => {
     setActivePlotRef(plotRef);
   }, [plotRef]);
+  // Defer context release while this plot uses the reference.
+  useEffect(() => (activePlotRef ? holdPlotContext(activePlotRef) : undefined), [activePlotRef]);
 
   const handleRelayout = useCallback((data: Record<string, unknown>) => {
     const nativeTitleKey = "coloraxis.colorbar.title.text";

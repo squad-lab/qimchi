@@ -5,6 +5,7 @@ import { Data, Layout, Config } from "plotly.js";
 // Local imports
 import { PROD_BACKEND_URL } from "../config";
 import type { LineCut, SliderConfig } from "../components/interfaces";
+import { plotContextFor, rememberPlotContext, type PlotContext } from "./plotContexts";
 
 const API_BASE_URL = PROD_BACKEND_URL;
 
@@ -27,6 +28,8 @@ export interface PlotRequest {
 export interface PlotData {
   id: string;
   plot_ref?: string;
+  /** Plot parameters sent with transforms so the server can restore a missing context. */
+  plot_context?: PlotContext;
   clientId?: string; // Client-side unique identifier as backup
   resolved_fpath?: string; // Canonical dataset path used by backend (disk path when live has ended)
   plotJson: {
@@ -55,6 +58,7 @@ export interface TransformPlotRequest {
   filters_opts: Record<string, unknown>;
   slider?: Record<string, SliderConfig>;
   swap_xy?: boolean;
+  context?: PlotContext;
 }
 
 export interface TransformPlotResponse {
@@ -78,7 +82,11 @@ export class PlotAPI {
         signal: signal,
       });
 
-      return resp.data as PlotResponse;
+      const data = resp.data as PlotResponse;
+      for (const plot of data.plots ?? []) {
+        if (plot.plot_ref) rememberPlotContext(plot.plot_ref, plot.plot_context);
+      }
+      return data;
     } catch (error) {
       // Handle abort errors gracefully
       if (axios.isCancel(error) || (error as any).name === "AbortError") {
@@ -96,7 +104,9 @@ export class PlotAPI {
 
   static async transformPlot(request: TransformPlotRequest): Promise<TransformPlotResponse> {
     try {
-      const resp = await axios.post(`${API_BASE_URL}/transform-plot`, request, {
+      const context = request.context ?? plotContextFor(request.plot_ref);
+      const body = context ? { ...request, context } : request;
+      const resp = await axios.post(`${API_BASE_URL}/transform-plot`, body, {
         headers: { "Content-Type": "application/json" },
         responseType: "json",
       });

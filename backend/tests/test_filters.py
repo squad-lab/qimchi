@@ -656,6 +656,65 @@ async def test_transform_endpoint_success_missing_context_and_failure(
     assert failed.value.status_code == 500
 
 
+@pytest.mark.asyncio
+async def test_transform_takes_back_a_released_context_from_the_request(
+    monkeypatch, line_figure
+):
+    from api.models import PlotContext
+
+    plots._PLOT_CONTEXTS.clear()
+    seen = {}
+
+    def render(**kwargs):
+        seen.update(kwargs)
+        return line_figure, []
+
+    monkeypatch.setattr(filters, "_generate_plot_json_for_transform", render)
+    request = TransformPlotRequest(
+        plot_ref="released",
+        context=PlotContext(
+            fpath="run.nc", indeps=["x"], deps=["y"], plotType="LinePlot"
+        ),
+    )
+
+    response = await filters.transform_plot_endpoint(request)
+
+    assert response.plot_ref == "released"
+    assert seen["fpath"] == "run.nc" and seen["deps"] == ["y"]
+    # Later requests can use the restored server context.
+    assert plots.get_plot_context("released")["fpath"] == "run.nc"
+    plots._PLOT_CONTEXTS.clear()
+
+
+@pytest.mark.asyncio
+async def test_transform_prefers_the_servers_own_context(monkeypatch, line_figure):
+    from api.models import PlotContext
+
+    plots._PLOT_CONTEXTS.clear()
+    plots.register_plot_context(
+        "known",
+        {"fpath": "server.nc", "indeps": ["x"], "deps": ["y"], "plotType": "LinePlot"},
+    )
+    seen = {}
+
+    def render(**kwargs):
+        seen.update(kwargs)
+        return line_figure, []
+
+    monkeypatch.setattr(filters, "_generate_plot_json_for_transform", render)
+    await filters.transform_plot_endpoint(
+        TransformPlotRequest(
+            plot_ref="known",
+            context=PlotContext(
+                fpath="client.nc", indeps=["x"], deps=["y"], plotType="LinePlot"
+            ),
+        )
+    )
+
+    assert seen["fpath"] == "server.nc"
+    plots._PLOT_CONTEXTS.clear()
+
+
 def test_filtered_colorbar_title_is_enlarged(heat_figure):
     """MathJax shrinks a fraction, so a derivative colorbar title sizes up."""
     plain = units.colorbar_title_annotation(

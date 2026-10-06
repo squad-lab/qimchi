@@ -1701,6 +1701,12 @@ async def transform_plot_endpoint(
         from .plots import get_plot_context
 
         ctx = get_plot_context(request.plot_ref)
+        if not ctx and request.context is not None:
+            # Restore a released or evicted context from the client's copy.
+            from .plots import register_plot_context
+
+            ctx = request.context.model_dump(exclude_none=True)
+            register_plot_context(request.plot_ref, ctx)
         if not ctx:
             raise HTTPException(status_code=404, detail="Unknown plot_ref")
 
