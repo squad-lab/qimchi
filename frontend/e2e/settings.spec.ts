@@ -121,8 +121,8 @@ test("wide Settings sections stay in one column", async ({ page }) => {
   expect(tipBox!.y).toBeGreaterThan(colorscaleBox!.y + colorscaleBox!.height);
 
   await dialog.getByRole("button", { name: "X axis" }).first().click();
-  const major = await dialog.getByRole("heading", { name: "Major Grid & Ticks" }).boundingBox();
-  const minor = await dialog.getByRole("heading", { name: "Minor Grid & Ticks" }).boundingBox();
+  const major = await dialog.getByRole("heading", { name: "Major grid & ticks" }).boundingBox();
+  const minor = await dialog.getByRole("heading", { name: "Minor grid & ticks" }).boundingBox();
   expect(major).not.toBeNull();
   expect(minor).not.toBeNull();
   expect(minor!.y).toBeGreaterThan(major!.y);
@@ -172,6 +172,8 @@ test("rail buttons and Settings edit the same saved values", async ({ page }) =>
     "aria-checked",
     "true",
   );
+  // Plot width is under Plots.
+  await settingsDialog(page).getByRole("button", { name: "Plots", exact: true }).click();
   await expect(settingsDialog(page).getByRole("radio", { name: "66%" })).toHaveAttribute(
     "aria-checked",
     "true",

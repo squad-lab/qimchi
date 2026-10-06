@@ -103,7 +103,7 @@ interface SettingsSearchEntry {
 const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   { id: "theme", sectionId: "general", sectionLabel: "General", label: "Theme" },
   { id: "zoom", sectionId: "general", sectionLabel: "General", label: "Zoom" },
-  { id: "plot-width", sectionId: "general", sectionLabel: "General", label: "Plot width" },
+  { id: "plot-width", sectionId: "plots", sectionLabel: "Plots", label: "Plot width" },
   { id: "sort", sectionId: "explorer", sectionLabel: "Explorer", label: "Sort by" },
   {
     id: "auto-add",
@@ -176,14 +176,14 @@ const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
         id: `${sectionId}-major`,
         sectionId,
         sectionLabel,
-        label: "Major Grid & Ticks",
+        label: "Major grid & ticks",
         keywords: `${axis} grid color dash width number tick angle length`,
       },
       {
         id: `${sectionId}-minor`,
         sectionId,
         sectionLabel,
-        label: "Minor Grid & Ticks",
+        label: "Minor grid & ticks",
         keywords: `${axis} grid color dash width number tick length`,
       },
     ];
@@ -199,14 +199,14 @@ const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
     id: "line-settings",
     sectionId: "line.style",
     sectionLabel: "LinePlot · Line & markers",
-    label: "Line Settings",
+    label: "Line",
     keywords: "color width opacity dash shape smoothing",
   },
   {
     id: "marker-settings",
     sectionId: "line.style",
     sectionLabel: "LinePlot · Line & markers",
-    label: "Marker Settings",
+    label: "Markers",
     keywords: "symbol color size opacity",
   },
   { id: "formats", sectionId: "export", sectionLabel: "Export", label: "Formats" },
@@ -496,6 +496,17 @@ const Checkboxes = <T extends string>({
   </div>
 );
 
+/** Subheading for related settings, with a divider except for the first group. */
+const GroupHeading = ({ title, first = false }: { title: string; first?: boolean }) => (
+  <h4
+    className={`pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 ${
+      first ? "" : "mt-4 border-t border-gray-200 pt-4"
+    }`}
+  >
+    {title}
+  </h4>
+);
+
 const SectionHeader = ({ title, onReset }: { title: string; onReset: () => void }) => (
   <div className="mb-4 flex items-center justify-between col-span-full">
     <h3 className="text-lg font-semibold text-gray-800">{title}</h3>
@@ -664,45 +675,19 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
       case "general":
         return (
           <>
-            <SectionHeader title="General" onReset={() => resetSection(["general"])} />
-            <Field label="Theme" description="System follows your operating system.">
-              <Segmented
-                label="Theme"
-                value={settings.general.theme}
-                options={[
-                  { value: "system", label: "System" },
-                  { value: "light", label: "Light" },
-                  { value: "dark", label: "Dark" },
-                ]}
-                onChange={(theme) => update(["general", "theme"], theme)}
-              />
-            </Field>
-            <Field label="Zoom" description="The size of the whole interface.">
-              <select
-                aria-label="Zoom"
-                value={settings.general.zoom}
-                onChange={(e) => update(["general", "zoom"], Number(e.target.value))}
-                className="rounded border border-gray-300 p-1.5 text-sm"
-              >
-                {ZOOM_STEPS.map((step) => (
-                  <option key={step} value={step}>
-                    {Math.round(step * 100)}%
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Plot width" description="How much of the Viewer's width each plot takes.">
-              <Segmented
-                label="Plot width"
-                value={settings.general.plotWidth}
-                options={PLOT_WIDTHS.map((width) => ({ value: width, label: `${width}%` }))}
-                onChange={(width) => update(["general", "plotWidth"], width)}
-              />
-            </Field>
+            <SectionHeader
+              title="General"
+              onReset={() => {
+                // Plot width resets with the Plots section.
+                resetSection(["general", "theme"]);
+                resetSection(["general", "zoom"]);
+                resetSection(["general", "walkthroughSeen"]);
+              }}
+            />
             {/* Confirmed in place rather than with window.confirm, whose native
                 dialog is titled with the server address and ignores the theme. */}
             <div
-              className={`mt-6 rounded-md border p-3 ${
+              className={`mb-2 rounded-md border p-3 ${
                 confirmingResetAll ? "border-red-200 bg-red-50" : "border-gray-200"
               }`}
             >
@@ -747,15 +732,49 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
                 </div>
               )}
             </div>
+            <GroupHeading title="Interface" />
+            <Field label="Theme" description="System follows your operating system.">
+              <Segmented
+                label="Theme"
+                value={settings.general.theme}
+                options={[
+                  { value: "system", label: "System" },
+                  { value: "light", label: "Light" },
+                  { value: "dark", label: "Dark" },
+                ]}
+                onChange={(theme) => update(["general", "theme"], theme)}
+              />
+            </Field>
+            <Field label="Zoom" description="The size of the whole interface.">
+              <select
+                aria-label="Zoom"
+                value={settings.general.zoom}
+                onChange={(e) => update(["general", "zoom"], Number(e.target.value))}
+                className="rounded border border-gray-300 p-1.5 text-sm"
+              >
+                {ZOOM_STEPS.map((step) => (
+                  <option key={step} value={step}>
+                    {Math.round(step * 100)}%
+                  </option>
+                ))}
+              </select>
+            </Field>
           </>
         );
       case "plots":
         return (
           <>
-            <SectionHeader title="Plots" onReset={() => resetSection(["plots"])} />
+            <SectionHeader
+              title="Plots"
+              onReset={() => {
+                resetSection(["plots"]);
+                resetSection(["general", "plotWidth"]);
+              }}
+            />
+            <GroupHeading title="New measurements" first />
             <Field
               label="Plotting behaviour"
-              description="Which plots to create when a measurement is added to the basket. Plots are only made when the measurement's variables allow them."
+              description="Which plots to create when you add a measurement to the Basket."
             >
               <select
                 aria-label="Plotting behaviour"
@@ -770,7 +789,7 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
             </Field>
             <Field
               label="Recreate custom plots"
-              description="Adding a measurement recreates the plots already in the Viewer. Turn this off to recreate only its default plots, not Composer plots or LineCuts."
+              description="Give new measurements the plots already in the Viewer. When off, they get only their default plots."
               inline
             >
               <Toggle
@@ -779,9 +798,28 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
                 onChange={(on) => update(["plots", "recreateCustomPlots"], on)}
               />
             </Field>
+
+            <GroupHeading title="Layout" />
+            <Field label="Plot width" description="How much of the Viewer's width each plot takes.">
+              <Segmented
+                label="Plot width"
+                value={settings.general.plotWidth}
+                options={PLOT_WIDTHS.map((width) => ({ value: width, label: `${width}%` }))}
+                onChange={(width) => update(["general", "plotWidth"], width)}
+              />
+            </Field>
+            <Field label="Square plots" description="Keep every plot at a 1:1 aspect ratio." inline>
+              <Toggle
+                label="Square plots"
+                checked={settings.plots.squarify}
+                onChange={(on) => update(["plots", "squarify"], on)}
+              />
+            </Field>
+
+            <GroupHeading title="LineCut" />
             <Field
               label="Default LineCut direction"
-              description="Initial direction. While active, press X, Y, or O to switch. Measured axes do not support Oblique."
+              description="Switch with X, Y or O while LineCut is on. Oblique needs two swept axes."
             >
               <select
                 aria-label="LineCut direction"
@@ -793,13 +831,6 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
                 <option value="vertical">Vertical (Y)</option>
                 <option value="oblique">Oblique (O)</option>
               </select>
-            </Field>
-            <Field label="Square plots" description="Keep every plot at a 1:1 aspect ratio." inline>
-              <Toggle
-                label="Square plots"
-                checked={settings.plots.squarify}
-                onChange={(on) => update(["plots", "squarify"], on)}
-              />
             </Field>
             <Field
               label="Marker step with Shift"
@@ -818,6 +849,8 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
                 ))}
               </select>
             </Field>
+
+            <GroupHeading title="Closed plots" />
             <ClosedPlotsLimitField
               value={settings.plots.closedPlotsLimit}
               onCommit={(limit) => update(["plots", "closedPlotsLimit"], limit)}
@@ -1008,7 +1041,7 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
               title={`${plotLabel} defaults`}
               onReset={() => resetSection(["appearance", type])}
             />
-            <p className="mb-4 text-xs text-gray-500">
+            <p className="mb-4 border-b border-gray-200 pb-4 text-xs text-gray-500">
               Applies to every {plotLabel} straight away, except where a plot has its own setting.
             </p>
             {part === "colormap" && <ColormapSection {...props} showColorRange={false} />}

@@ -304,6 +304,11 @@ const splitColorscale = (value: string) => ({
   reversed: /_r$/.test(value),
 });
 
+/** Subheading for a group of appearance controls. */
+const GroupTitle = ({ children }: { children: React.ReactNode }) => (
+  <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">{children}</h4>
+);
+
 export const LineStyleSection: React.FC<SectionProps> = ({ settings, updateSetting }) => (
   <div className="w-full [&>*:not(:last-child)]:mb-4">
     <div>
@@ -322,7 +327,7 @@ export const LineStyleSection: React.FC<SectionProps> = ({ settings, updateSetti
     {(settings.line.mode === "lines" || settings.line.mode === "lines+markers") && (
       <>
         <div className="border-t border-gray-200 pt-4">
-          <h4 className="text-md font-medium text-gray-800 mb-3">Line Settings</h4>
+          <GroupTitle>Line</GroupTitle>
         </div>
 
         <div>
@@ -435,7 +440,7 @@ export const LineStyleSection: React.FC<SectionProps> = ({ settings, updateSetti
     {(settings.line.mode === "markers" || settings.line.mode === "lines+markers") && (
       <>
         <div className="border-t border-gray-200 pt-4">
-          <h4 className="text-md font-medium text-gray-800 mb-3">Marker Settings</h4>
+          <GroupTitle>Markers</GroupTitle>
         </div>
 
         <div>
@@ -722,7 +727,7 @@ export const AxisSection: React.FC<AxisSectionProps> = ({
     <div className="w-full [&>*:not(:last-child)]:mb-6">
       {/* Major Grid & Ticks */}
       <div>
-        <h3 className="text-lg font-medium text-gray-800 mb-4">Major Grid & Ticks</h3>
+        <GroupTitle>Major grid & ticks</GroupTitle>
 
         {/* Show Major Grid Toggle */}
         <div className="mb-4">
@@ -899,7 +904,7 @@ export const AxisSection: React.FC<AxisSectionProps> = ({
 
       {/* Minor Grid & Ticks */}
       <div>
-        <h3 className="text-lg font-medium text-gray-800 mb-4">Minor Grid & Ticks</h3>
+        <GroupTitle>Minor grid & ticks</GroupTitle>
 
         {/* Show Minor Grid Toggle */}
         <div className="mb-4">
