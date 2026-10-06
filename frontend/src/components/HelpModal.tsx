@@ -924,6 +924,16 @@ const ViewerHelp = memo(() => (
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>Clear All Plots, or press Alt+Shift+V, to remove every plot</span>
         </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Closed a plot by mistake? Press Ctrl+Z (Cmd+Z on a Mac), or Undo in the message that
+            appears, to bring it back where it was, with its filters, settings and width. After
+            Clear All Plots, one Ctrl+Z brings them all back. The Recently closed button in the
+            Viewer&apos;s ribbon lists the last closed plots, 25 unless you change it under Settings
+            &gt; Plots, so you can reopen any one of them
+          </span>
+        </li>
       </ul>
     </div>
   </div>
@@ -1315,6 +1325,7 @@ const KeyboardHelp = memo(() => (
           ["Alt+Shift+C", "Clear Composer"],
           ["Alt+Shift+B", "Clear Basket"],
           ["Alt+Shift+V", "Clear Viewer (all plots)"],
+          ["Ctrl+Z", "Reopen the last closed plot(s)"],
           ["Alt+Shift+H", "Heart selected datasets (Explorer)"],
           ["Alt+Shift+T", "Trash selected datasets (Explorer)"],
           ["Alt+1", "Open Explorer pane"],

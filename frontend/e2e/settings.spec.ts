@@ -380,3 +380,35 @@ test("Shift+S toggles Settings, like Shift+H does Help", async ({ page }) => {
   await page.keyboard.press("Shift+S");
   await expect(settingsDialog(page)).toHaveCount(0);
 });
+
+test("the number of closed plots to keep is saved when you leave the box, with a warning above 25", async ({
+  page,
+}) => {
+  await mockLiveHeatmapApi(page);
+  const settings = await mockSettingsApi(page);
+  await page.goto("/");
+  await openSettings(page, "Plots");
+
+  const input = settingsDialog(page).getByLabel("Closed plots to keep");
+  const warning = settingsDialog(page).getByRole("note");
+  await expect(input).toHaveValue("25");
+  await expect(warning).toHaveCount(0);
+
+  // Keep edits local until Enter or blur commits the value.
+  await input.fill("40");
+  await expect(warning).toContainText("more than 25");
+  expect(settings.patches).toHaveLength(0);
+  await input.press("Enter");
+  await expect.poll(() => settings.document).toMatchObject({ plots: { closedPlotsLimit: 40 } });
+
+  // Blur discards an invalid value and restores the saved limit.
+  await input.fill("500");
+  await expect(settingsDialog(page).getByText("Enter a whole number from 1 to 100.")).toBeVisible();
+  await input.blur();
+  await expect(input).toHaveValue("40");
+
+  await input.fill("10");
+  await input.blur();
+  await expect(warning).toHaveCount(0);
+  await expect.poll(() => settings.document).toMatchObject({ plots: { closedPlotsLimit: 10 } });
+});
