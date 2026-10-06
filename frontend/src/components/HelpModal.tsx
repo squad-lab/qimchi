@@ -864,14 +864,16 @@ const ViewerHelp = memo(() => (
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            <strong>Export → Disk (E):</strong> Save the plot as PNG/SVG
+            <strong>Export → Disk (E):</strong> Save the plot as PNG/SVG, at the size and shape it
+            has in the Viewer, so a full-width plot is saved wide. Send to Notes does the same
           </span>
         </li>
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            <strong>Export → Copy:</strong> Copy the plot to the clipboard as a PNG, exactly as it
-            is shown
+            <strong>Export → Copy:</strong> Copy the plot to the clipboard as a transparent PNG,
+            exactly as it is shown. In dark mode you get the dark version of the disk export, with
+            white text and lines
           </span>
         </li>
         <li className="flex gap-2 leading-relaxed">

@@ -71,7 +71,7 @@ test("resets the zoom when the axes are swapped", async ({ page }) => {
   expect((await heatmapState(page))!.xRange[0]).toBeLessThan(190e6);
 });
 
-test("Copy puts a transparent, light-theme plot on the clipboard, even in dark mode", async ({
+test("Copy in dark mode puts the transparent dark variant on the clipboard", async ({
   page,
   context,
 }) => {
@@ -92,7 +92,7 @@ test("Copy puts a transparent, light-theme plot on the clipboard, even in dark m
     const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
     const context = canvas.getContext("2d")!;
     context.drawImage(bitmap, 0, 0);
-    // The title sits along the top: its text should be dark, as in the light theme.
+    // Check the title region for white text, matching the dark disk export.
     const top = context.getImageData(0, 0, bitmap.width, Math.round(bitmap.height * 0.1)).data;
     let inked = 0;
     let brightness = 0;
@@ -108,7 +108,7 @@ test("Copy puts a transparent, light-theme plot on the clipboard, even in dark m
   });
   expect(image.cornerAlpha).toBe(0);
   expect(image.titleBrightness).not.toBeNull();
-  expect(image.titleBrightness!).toBeLessThan(100);
+  expect(image.titleBrightness!).toBeGreaterThan(200);
 });
 
 test("the side ribbon stays open after swapping the axes", async ({ page }) => {
