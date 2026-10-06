@@ -2,9 +2,14 @@
 
 ### v0.7.1 - 2026-10-03
 
+- [Feature] Reopen closed plots with Ctrl+Z (Cmd+Z on Mac), Undo, or Recently closed, preserving their position, filters, settings and width. Clear All Plots can also be undone.
+- [Feature] Add vertical lines, horizontal lines or points to LineCut previews. Markers snap to data and can be moved with arrow keys or removed with Delete.
 - [Feature] Settings > Updates shows the running version's formatted, scrollable changelog, including offline.
 - [Feature] The sidebar bug report button now opens reporting instructions, a direct link to a new GitLab issue, and the log-bundle controls.
 - [Feature] Downloaded updates can be downloaded again before installation.
+- [Fix] Copying a plot in dark mode now produces a transparent PNG with white text and lines, matching the dark disk export. Previously, copying always used the light style.
+- [Fix] Images saved to disk or sent to Notes now match the plot's displayed dimensions in the Viewer instead of using a fixed 700 × 500 size.
+- [Fix] macOS in-app updates now finish after Qimchi closes. This fix takes effect when updating from this version.
 - [Fix] Selecting "Start Qimchi after installation" during a Windows update now starts the app instead of being blocked by the installation-in-progress marker.
 - [Fix] Qimchi opens again by itself after an in-app update on Windows and Linux. It used to start and then close at once without showing a window.
 - [Fix] Update prompts show the offered version's release notes instead of installation instructions from the GitLab release description.
@@ -15,6 +20,9 @@
 - [Fix] The LineCut card no longer goes missing after the window gets smaller. A card you had moved could end up outside the window and stay there until Qimchi was restarted; it is now kept inside the window.
 - [Fix] The Filters, Appearance, Help, Settings and notification panels, and the pinned parameters card, now stay inside the window. In a small window they used to open with their title bar above the top edge, where they could not be moved or closed, and shrinking the window could leave them out of view.
 - [Fix] Interface zoom now applies consistently to compact labels, walkthroughs, notes, release notes, and docked LineCut text.
+- [Misc] Settings > Plots now groups controls by purpose and includes Plot width. General puts Restore all defaults first, and appearance controls have clearer headings.
+- [Misc] Bug-report bundles now include updater logs, which rotate to limit their size.
+- [Misc] Closing plots now releases their server contexts after a short delay to reduce memory use.
 - [Misc] The macOS disk image has a branded, Retina-ready drag-to-Applications layout and Qimchi icons for the app and mounted disk. The app bundle is named Qimchi.app with a capital Q; the Finder window and mounted disk use the short name Qimchi.
 - [Misc] Windows setup uses Qimchi branding and two pages: configure the install folder, desktop shortcut and launch preference, then install.
 - [Misc] Plot-control tooltips now show their keyboard shortcuts and use the same styled tooltips throughout the plot ribbons.
