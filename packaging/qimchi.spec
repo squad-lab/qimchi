@@ -150,6 +150,39 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
+if sys.platform == "linux":
+    # Based on the AppImageCommunity/pkg2appimage excludelist.
+    # Omit glibc entries because PyInstaller already excludes them.
+    _appimage_excludelist = {
+        "libstdc++.so.6", "libgcc_s.so.1", "libGL.so.1", "libEGL.so.1",
+        "libGLdispatch.so.0", "libGLX.so.0", "libOpenGL.so.0", "libdrm.so.2",
+        "libglapi.so.0", "libgbm.so.1", "libxcb.so.1", "libxcb-dri2.so.0",
+        "libxcb-dri3.so.0", "libX11.so.6", "libX11-xcb.so.1",
+        "libwayland-client.so.0", "libasound.so.2", "libfontconfig.so.1",
+        "libfreetype.so.6", "libharfbuzz.so.0", "libcom_err.so.2",
+        "libexpat.so.1", "libgpg-error.so.0", "libICE.so.6", "libSM.so.6",
+        "libusb-1.0.so.0", "libuuid.so.1", "libz.so.1", "libjack.so.0",
+        "libpipewire-0.3.so.0", "libfribidi.so.0", "libgmp.so.10",
+    }
+    # Libraries collected from these paths come from PyGObject and pycairo;
+    # wheels and uv's Python provide their own libraries elsewhere.
+    # Use the system's GTK dependencies to match its WebKitGTK and avoid
+    # GLib/libmount version conflicts. Keep libgirepository 1.0: newer
+    # distributions may ship only 2.0, but 1.0 works with newer GLib.
+    _system_dirs = ("/lib/", "/lib64/", "/usr/lib/", "/usr/lib64/")
+    _keep = {"libgirepository-1.0.so.1"}
+
+    def _left_to_system(entry):
+        name = os.path.basename(entry[0])
+        if name in _keep:
+            return False
+        return name in _appimage_excludelist or os.path.realpath(entry[1]).startswith(_system_dirs)
+
+    _dropped = sorted(os.path.basename(b[0]) for b in a.binaries if _left_to_system(b))
+    a.binaries = [b for b in a.binaries if not _left_to_system(b)]
+    print(f"Leaving to the system: {', '.join(_dropped) or 'nothing'}")
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
