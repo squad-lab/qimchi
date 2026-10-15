@@ -62,8 +62,9 @@ DisableDirPage=no
 DisableReadyPage=yes
 DisableFinishedPage=yes
 
-; Minimum: Windows 11 21H2
-MinVersion=10.0.22000
+; Windows 11 is only officially supported Windows target; also allow installation on
+; Windows 10 1809+. WebView2 and the .NET 4.7.2 required by pywebview are available there.
+MinVersion=10.0.17763
 
 ; Close a running (or stuck) Qimchi instead of failing on files in use. The
 ; bundle's Python extension modules (.pyd) are held open too.
