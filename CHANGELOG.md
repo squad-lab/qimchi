@@ -9,7 +9,6 @@
 - [Feature] Downloaded updates can be downloaded again before installation.
 - [Fix] Copying a plot in dark mode now produces a transparent PNG with white text and lines, matching the dark disk export. Previously, copying always used the light style.
 - [Fix] Images saved to disk or sent to Notes now match the plot's displayed dimensions in the Viewer instead of using a fixed 700 × 500 size.
-- [Fix] macOS in-app updates now finish after Qimchi closes. This fix takes effect when updating from this version.
 - [Fix] Selecting "Start Qimchi after installation" during a Windows update now starts the app instead of being blocked by the installation-in-progress marker.
 - [Fix] Qimchi opens again by itself after an in-app update on Windows and Linux. It used to start and then close at once without showing a window.
 - [Fix] Update prompts show the offered version's release notes instead of installation instructions from the GitLab release description.
@@ -20,13 +19,14 @@
 - [Fix] The LineCut card no longer goes missing after the window gets smaller. A card you had moved could end up outside the window and stay there until Qimchi was restarted; it is now kept inside the window.
 - [Fix] The Filters, Appearance, Help, Settings and notification panels, and the pinned parameters card, now stay inside the window. In a small window they used to open with their title bar above the top edge, where they could not be moved or closed, and shrinking the window could leave them out of view.
 - [Fix] Searching Metadata now finds a dataset's own attributes, such as Sample Name or Cryostat, by name or value. It used to find only fields nested inside them, like those in a Parameters Snapshot.
-- [Fix] The Linux AppImage starts on newer distributions such as Arch Linux. It used to fail at launch with "CXXABI_1.3.15 not found" because it carried older copies of system libraries that the installed WebKitGTK cannot use.
+- [Fix] The Linux AppImage starts on newer distributions. On Arch Linux it failed at launch with "CXXABI_1.3.15 not found" or "undefined symbol" errors, and on Fedora it could not find WebKit. It now uses the system's own GTK and WebKit libraries, and is tested on Ubuntu, Debian, Fedora and Arch before each release.
 - [Fix] Interface zoom now applies consistently to compact labels, walkthroughs, notes, release notes, and docked LineCut text.
 - [Misc] The Windows installer runs on Windows 10 (version 1809 or later) again. Windows 11 remains the supported version, but the installer no longer refuses to start on Windows 10.
 - [Misc] Settings > Plots now groups controls by purpose and includes Plot width. General puts Restore all defaults first, and appearance controls have clearer headings.
 - [Misc] Bug-report bundles now include updater logs, which rotate to limit their size.
 - [Misc] Closing plots now releases their server contexts after a short delay to reduce memory use.
-- [Misc] The macOS disk image has a branded, Retina-ready drag-to-Applications layout and Qimchi icons for the app and mounted disk. The app bundle is named Qimchi.app with a capital Q; the Finder window and mounted disk use the short name Qimchi.
+- [Misc] The macOS disk image has a branded, Retina-ready drag-to-Applications layout and Qimchi icons for the app and mounted disk, matching the Windows icon. The app bundle is named Qimchi.app with a capital Q; the Finder window and mounted disk use the short name Qimchi.
+- [Misc] On macOS, installing an update closes Qimchi and opens the new disk image. Drag Qimchi to Applications to replace the old version, then open it again.
 - [Misc] Windows setup uses Qimchi branding and two pages: configure the install folder, desktop shortcut and launch preference, then install.
 - [Misc] Plot-control tooltips now show their keyboard shortcuts and use the same styled tooltips throughout the plot ribbons.
 - [Misc] Large live heat maps do much less work on each refresh, so they update more often and use less memory.
