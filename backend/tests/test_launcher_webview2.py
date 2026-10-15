@@ -692,3 +692,24 @@ def test_update_logs_rotate_like_the_app_logs(launcher, tmp_path):
     setup.write_text("first install", encoding="utf-8")
     launcher._rotate_update_log(str(setup), max_bytes=0)
     assert (tmp_path / "setup.log.1").read_text(encoding="utf-8") == "first install"
+
+
+def test_linux_uses_the_system_gtk_and_typelibs(launcher):
+    environ = {
+        "GI_TYPELIB_PATH": "/app/_internal/gi_typelibs",
+        "GTK_PATH": "/app/_internal",
+        "GDK_PIXBUF_MODULE_FILE": "/tmp/loaders.cache",
+        "GIO_MODULE_DIR": "/app/_internal/gio_modules",
+        "HOME": "/home/user",
+    }
+    present = {"/usr/lib64/girepository-1.0", "/usr/lib/girepository-1.0"}
+
+    found = launcher._use_system_gtk(environ, "x86_64", isdir=present.__contains__)
+
+    assert found == ["/usr/lib64/girepository-1.0", "/usr/lib/girepository-1.0"]
+    assert environ["GI_TYPELIB_PATH"].split(launcher.os.pathsep) == [
+        *found,
+        "/app/_internal/gi_typelibs",
+    ]
+    assert not any(name in environ for name in launcher._BUNDLED_GTK_ENV)
+    assert environ["HOME"] == "/home/user"
