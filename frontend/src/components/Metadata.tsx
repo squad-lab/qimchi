@@ -22,6 +22,7 @@ import { useThemeStore } from "../stores/themeStore";
 import Tooltip from "./Tooltip";
 import { useToast } from "../hooks/useToast";
 import { parseMetadataValue } from "../utils/parseMetadataValue";
+import { searchMetadata, type MetadataMatch } from "../utils/metadataSearch";
 
 // Dataset-defined metadata sections, ordered by the backend.
 type Metadata = Record<string, unknown>;
@@ -150,49 +151,6 @@ const retryRequest = async function <T>(
   throw lastError!;
 };
 
-// Helper function to recursively search through metadata objects
-const searchInObject = (
-  obj: unknown,
-  query: string,
-  path: string[] = [],
-): Array<{ key: string; value: string; path: string[] }> => {
-  const results: Array<{ key: string; value: string; path: string[] }> = [];
-  const lowerQuery = query.toLowerCase();
-
-  if (typeof obj === "object" && obj !== null) {
-    for (const [key, value] of Object.entries(obj)) {
-      const currentPath = [...path, key];
-
-      // Check if key matches
-      if (key.toLowerCase().includes(lowerQuery)) {
-        results.push({
-          key,
-          value: String(value),
-          path: currentPath,
-        });
-      }
-
-      // Check if value matches (for primitive values)
-      if (typeof value === "string" || typeof value === "number") {
-        if (String(value).toLowerCase().includes(lowerQuery)) {
-          results.push({
-            key,
-            value: String(value),
-            path: currentPath,
-          });
-        }
-      }
-
-      // Recursively search in nested objects
-      if (typeof value === "object" && value !== null) {
-        results.push(...searchInObject(value, query, currentPath));
-      }
-    }
-  }
-
-  return results;
-};
-
 interface MetadataProps {
   basketItems: BasketItem[];
 }
@@ -265,7 +223,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
     const results = new Map<
       string,
       {
-        matches: Array<{ key: string; value: string; path: string[] }>;
+        matches: MetadataMatch[];
         itemName: string;
       }
     >();
@@ -275,13 +233,7 @@ const Metadata = ({ basketItems }: MetadataProps) => {
       const item = basketItems.find((item) => item.id === itemId);
       if (!item) continue;
 
-      const allMatches: Array<{ key: string; value: string; path: string[] }> = [];
-
-      // Search through each metadata section
-      for (const [sectionKey, sectionValue] of Object.entries(parsedMetadata)) {
-        const matches = searchInObject(sectionValue, searchQuery, [sectionKey]);
-        allMatches.push(...matches);
-      }
+      const allMatches = searchMetadata(parsedMetadata, searchQuery);
 
       if (allMatches.length > 0) {
         results.set(itemId, {
