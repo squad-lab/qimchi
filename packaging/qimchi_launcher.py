@@ -445,6 +445,39 @@ def _use_bundled_certificates(log) -> None:
     log(f"[ssl] using CA bundle {bundle}")
 
 
+_BUNDLED_GTK_ENV = (
+    "GDK_PIXBUF_MODULE_FILE",
+    "GIO_MODULE_DIR",
+    "GTK_DATA_PREFIX",
+    "GTK_EXE_PREFIX",
+    "GTK_PATH",
+    "PANGO_LIBDIR",
+    "PANGO_SYSCONFDIR",
+)
+
+
+def _use_system_gtk(environ, machine: str, isdir=os.path.isdir) -> list[str]:
+    """
+    Use system GTK resources and prefer system introspection typelibs.
+
+    Clear GTK paths set by PyInstaller and prepend system typelib directories,
+    keeping bundled typelibs as a fallback. This lets libgirepository find
+    WebKit2 on distributions with different library layouts, such as Fedora.
+
+    """
+    for name in _BUNDLED_GTK_ENV:
+        environ.pop(name, None)
+    candidates = (
+        "/usr/lib64/girepository-1.0",
+        f"/usr/lib/{machine}-linux-gnu/girepository-1.0",
+        "/usr/lib/girepository-1.0",
+    )
+    system_dirs = [d for d in candidates if isdir(d)]
+    bundled = [p for p in environ.get("GI_TYPELIB_PATH", "").split(os.pathsep) if p]
+    environ["GI_TYPELIB_PATH"] = os.pathsep.join(system_dirs + bundled)
+    return system_dirs
+
+
 def _persistent_chrome_dir() -> str:
     """Return the persistent directory for downloaded Chrome builds."""
     return os.path.join(_qimchi_home(), "chrome")
@@ -1739,6 +1772,12 @@ def main() -> int:
 
     # Configure HTTPS before the backend and its workers start.
     _use_bundled_certificates(log)
+
+    if getattr(sys, "frozen", False) and sys.platform.startswith("linux"):
+        import platform
+
+        typelib_dirs = _use_system_gtk(os.environ, platform.machine())
+        log(f"[gtk] system typelib folders: {', '.join(typelib_dirs) or 'none found'}")
 
     if not (headless_smoke or native_smoke):
         _ensure_chrome_for_kaleido(log)
