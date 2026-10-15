@@ -20,6 +20,7 @@
 - [Fix] The LineCut card no longer goes missing after the window gets smaller. A card you had moved could end up outside the window and stay there until Qimchi was restarted; it is now kept inside the window.
 - [Fix] The Filters, Appearance, Help, Settings and notification panels, and the pinned parameters card, now stay inside the window. In a small window they used to open with their title bar above the top edge, where they could not be moved or closed, and shrinking the window could leave them out of view.
 - [Fix] Searching Metadata now finds a dataset's own attributes, such as Sample Name or Cryostat, by name or value. It used to find only fields nested inside them, like those in a Parameters Snapshot.
+- [Fix] The Linux AppImage starts on newer distributions such as Arch Linux. It used to fail at launch with "CXXABI_1.3.15 not found" because it carried older copies of system libraries that the installed WebKitGTK cannot use.
 - [Fix] Interface zoom now applies consistently to compact labels, walkthroughs, notes, release notes, and docked LineCut text.
 - [Misc] Settings > Plots now groups controls by purpose and includes Plot width. General puts Restore all defaults first, and appearance controls have clearer headings.
 - [Misc] Bug-report bundles now include updater logs, which rotate to limit their size.

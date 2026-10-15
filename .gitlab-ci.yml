@@ -25,6 +25,7 @@ stages:
   - test
   - auto_tag_version
   - build
+  - verify
   - release
 
 # Applies the formatters and pushes the result back to the branch, so a merge
@@ -531,6 +532,53 @@ build-linux:
     - if: '$CI_COMMIT_BRANCH == "preview" && $CI_PIPELINE_SOURCE == "web" && $AD_HOC_DESKTOP_BUILD =~ /^(linux|all)$/'
       when: on_success
 
+# Test the Ubuntu 22.04 AppImage on other distributions, including newer ones.
+# Bundled libraries can conflict with the system's WebKitGTK and GLib, as seen
+# on Arch Linux in October 2026.
+test-linux-distros:
+  stage: verify
+  image: $DISTRO_IMAGE
+  needs:
+    - job: build-linux
+      artifacts: true
+  parallel:
+    matrix:
+      - DISTRO_IMAGE:
+          - ubuntu:24.04
+          - debian:stable
+          - fedora:latest
+          - archlinux:latest
+  before_script:
+    - |
+      case "$DISTRO_IMAGE" in
+        ubuntu:*|debian:*)
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+              python3 libwebkit2gtk-4.1-0 gir1.2-webkit2-4.1 \
+              libgirepository-1.0-1 xvfb xauth dbus-x11 ;;
+        fedora:*)
+          dnf install -y -q python3 webkit2gtk4.1 gobject-introspection \
+              xorg-x11-server-Xvfb xorg-x11-xauth dbus-daemon dbus-x11 ;;
+        archlinux:*)
+          pacman -Syu --noconfirm --needed python webkit2gtk-4.1 \
+              gobject-introspection-runtime xorg-server-xvfb xorg-xauth dbus ;;
+      esac
+  script:
+    - |
+      APPIMAGE=$(ls packaging/build/qimchi-x86_64-*.AppImage | head -1)
+      chmod +x "$APPIMAGE"
+      python3 scripts/run_packaged_smoke.py "$APPIMAGE" --mode headless
+      WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 dbus-run-session -- \
+        xvfb-run -a python3 scripts/run_packaged_smoke.py \
+          "$APPIMAGE" --mode native --timeout 240
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: on_success
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-rc\.\d+$/
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH == "preview" && $CI_PIPELINE_SOURCE == "web" && $AD_HOC_DESKTOP_BUILD =~ /^(linux|all)$/'
+      when: on_success
+
 # Single release job: depends on every platform build and attaches all assets to
 # ONE GitLab Release. Three separate release jobs each ran `release-cli create`
 # for the same tag, which collides ("release already exists"); one job avoids that.
@@ -545,6 +593,8 @@ release:
       artifacts: true
     - job: build-linux
       artifacts: true
+    - job: test-linux-distros
+      artifacts: false
     - job: build-macos
       artifacts: true
   # No `release:` keyword: runner 19.0-pre's keyword generation drops --assets-link
