@@ -45,7 +45,7 @@ $frontendVersion = $env:QIMCHI_VERSION
 if ([string]::IsNullOrWhiteSpace($frontendVersion)) {
     $frontendVersion = $env:CI_COMMIT_TAG
 }
-if ([string]::IsNullOrWhiteSpace($frontendVersion)) {
+if ([string]::IsNullOrWhiteSpace($frontendVersion) -and (Get-Command git -ErrorAction SilentlyContinue)) {
     $frontendVersion = git tag --points-at HEAD --list "v*" | Select-Object -First 1
 }
 if ([string]::IsNullOrWhiteSpace($frontendVersion)) {
