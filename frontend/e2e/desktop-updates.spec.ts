@@ -187,3 +187,20 @@ test("the installed changelog is formatted, scrollable and separate from offered
   await settings.getByRole("button", { name: "Hide changelog" }).click();
   await expect(notes).toHaveCount(0);
 });
+
+test("on macOS the ready dialog asks you to drag Qimchi to Applications", async ({ page }) => {
+  await fakeDesktopUpdater(page, {
+    status: "downloaded",
+    platform: "macos",
+    tag: "v0.7.0-rc.9",
+    progress: 1,
+    prompt: "ready",
+  });
+  await page.goto("/");
+
+  const ready = page.getByRole("dialog", { name: "Qimchi v0.7.0-rc.9 is ready to install" });
+  await expect(ready).toContainText("Drag Qimchi to Applications");
+
+  await push(page, { platform: "windows" });
+  await expect(ready).toContainText("open the installer");
+});

@@ -366,50 +366,40 @@ def test_installing_on_windows_runs_the_installer_and_closes(
     assert closed == [True]
 
 
-@pytest.mark.parametrize("bundle_name", ["qimchi.app", "Qimchi.app"])
-def test_macos_update_replaces_the_app_once_it_has_quit(
-    launcher, monkeypatch, tmp_path, bundle_name
-):
-    import plistlib
+def test_macos_update_shows_the_disk_image_and_closes(launcher, monkeypatch, tmp_path):
     import subprocess
     import sys
 
-    messages, ran, closed = [], [], []
+    messages, ran, opened, closed = [], [], [], []
     updates, _ = _updates_with_offer(launcher, monkeypatch, tmp_path, messages)
     updates.check(include_previews=False)
     updates.download()
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(launcher.os, "name", "posix")
-    monkeypatch.setattr(launcher.os, "getuid", lambda: 501, raising=False)
-    monkeypatch.setattr(
-        sys, "executable", f"/Applications/{bundle_name}/Contents/MacOS/qimchi"
-    )
     updates._offer["platform"] = "macos"
+    attached = "/dev/disk4\tGUID_partition_scheme\t\n/dev/disk4s1\tApple_HFS\t/Volumes/Qimchi\n"
     monkeypatch.setattr(
         subprocess,
         "run",
-        lambda args, **_kwargs: ran.append(args) or SimpleNamespace(returncode=0),
+        lambda args, **_kwargs: (
+            ran.append(args)
+            or SimpleNamespace(returncode=0, stdout=attached, stderr="")
+        ),
+    )
+    monkeypatch.setattr(
+        subprocess, "Popen", lambda args, **_kwargs: opened.append(args)
     )
     monkeypatch.setattr(launcher, "_close_windows", lambda log: closed.append(True))
 
     updates.install()
 
-    # A separate launchd job lets the helper survive Qimchi's exit.
-    job = "de.fz-juelich.qimchi.update"
-    assert ran[0] == ["launchctl", "bootout", f"gui/501/{job}"]
-    assert ran[1][:3] == ["launchctl", "bootstrap", "gui/501"]
-    with open(ran[1][3], "rb") as fh:
-        plist = plistlib.load(fh)
-    assert plist["Label"] == job and plist["RunAtLoad"]
-    helper = plist["ProgramArguments"]
-    assert helper[:2] == ["/bin/sh", "-c"]
-    assert helper[5:7] == [updates._offer["path"], f"/Applications/{bundle_name}"]
-    assert "ditto" in helper[2] and 'open "$dmg"' in helper[2]
-    assert any(f"launchd job {job}" in message for message in messages)
+    # Mount and show the disk image for manual installation.
+    assert ran == [["hdiutil", "attach", "-noautoopen", updates._offer["path"]]]
+    assert opened == [["open", "/Volumes/Qimchi"]]
     assert closed == [True]
 
 
-def test_macos_update_starts_the_helper_directly_if_launchd_refuses(
+def test_macos_update_opens_the_image_file_if_mounting_fails(
     launcher, monkeypatch, tmp_path
 ):
     import subprocess
@@ -421,42 +411,12 @@ def test_macos_update_starts_the_helper_directly_if_launchd_refuses(
     updates.download()
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(launcher.os, "name", "posix")
-    monkeypatch.setattr(launcher.os, "getuid", lambda: 501, raising=False)
-    monkeypatch.setattr(sys, "executable", "/Applications/Qimchi.app/Contents/MacOS/q")
     updates._offer["platform"] = "macos"
     monkeypatch.setattr(
         subprocess,
         "run",
-        lambda args, **_kwargs: SimpleNamespace(returncode=5, stderr="denied"),
+        lambda args, **_kwargs: SimpleNamespace(returncode=1, stdout="", stderr="no"),
     )
-    monkeypatch.setattr(
-        subprocess,
-        "Popen",
-        lambda args, **_kwargs: opened.append(args) or SimpleNamespace(pid=2),
-    )
-    monkeypatch.setattr(launcher, "_close_windows", lambda log: None)
-
-    updates.install()
-
-    assert opened[0][:2] == ["/bin/sh", "-c"]
-    assert any("bootstrap failed (5: denied)" in message for message in messages)
-    assert any("helper pid 2" in message for message in messages)
-
-
-def test_macos_update_opens_the_dmg_outside_an_app_bundle(
-    launcher, monkeypatch, tmp_path
-):
-    import subprocess
-    import sys
-
-    messages, opened = [], []
-    updates, _ = _updates_with_offer(launcher, monkeypatch, tmp_path, messages)
-    updates.check(include_previews=False)
-    updates.download()
-    monkeypatch.setattr(sys, "platform", "darwin")
-    monkeypatch.setattr(launcher.os, "name", "posix")
-    monkeypatch.setattr(sys, "executable", "/usr/local/bin/python3")
-    updates._offer["platform"] = "macos"
     monkeypatch.setattr(
         subprocess, "Popen", lambda args, **_kwargs: opened.append(args)
     )
@@ -464,7 +424,8 @@ def test_macos_update_opens_the_dmg_outside_an_app_bundle(
 
     updates.install()
 
-    assert opened[0][0] == "open"
+    assert opened == [["open", updates._offer["path"]]]
+    assert any("could not mount" in message for message in messages)
 
 
 def test_update_events_never_wait_on_the_page(launcher, monkeypatch, tmp_path):

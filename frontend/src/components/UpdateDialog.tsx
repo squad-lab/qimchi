@@ -10,7 +10,7 @@ const ReleaseNotes = lazy(() => import("./ReleaseNotes"));
 const installNote = (platform: UpdateState["platform"]) => {
   switch (platform) {
     case "macos":
-      return "Qimchi will close, install the update, and reopen. If installation fails, the disk image and App Management settings will open.";
+      return "Qimchi will close and open the disk image. Drag Qimchi to Applications to replace the old version, then open it again.";
     case "linux":
       return "Qimchi will update and restart. If it cannot replace the AppImage, it will save the new one to Downloads.";
     default:
