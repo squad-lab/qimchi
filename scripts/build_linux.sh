@@ -33,7 +33,7 @@ VERSION=$(grep '^[[:space:]]*version[[:space:]]*=' backend/pyproject.toml \
           | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
 FRONTEND_VERSION="${QIMCHI_VERSION:-${CI_COMMIT_TAG:-}}"
 if [ -z "$FRONTEND_VERSION" ]; then
-    FRONTEND_VERSION=$(git tag --points-at HEAD --list 'v*' | head -1)
+    FRONTEND_VERSION=$(git tag --points-at HEAD --list 'v*' 2>/dev/null | head -1 || true)
 fi
 FRONTEND_VERSION="${FRONTEND_VERSION:-$VERSION}"
 echo "Building Qimchi v$VERSION for Linux (footer version: $FRONTEND_VERSION)..."
