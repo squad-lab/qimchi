@@ -22,6 +22,7 @@
 - [Fix] Searching Metadata now finds a dataset's own attributes, such as Sample Name or Cryostat, by name or value. It used to find only fields nested inside them, like those in a Parameters Snapshot.
 - [Fix] The Linux AppImage starts on newer distributions such as Arch Linux. It used to fail at launch with "CXXABI_1.3.15 not found" because it carried older copies of system libraries that the installed WebKitGTK cannot use.
 - [Fix] Interface zoom now applies consistently to compact labels, walkthroughs, notes, release notes, and docked LineCut text.
+- [Misc] The Windows installer runs on Windows 10 (version 1809 or later) again. Windows 11 remains the supported version, but the installer no longer refuses to start on Windows 10.
 - [Misc] Settings > Plots now groups controls by purpose and includes Plot width. General puts Restore all defaults first, and appearance controls have clearer headings.
 - [Misc] Bug-report bundles now include updater logs, which rotate to limit their size.
 - [Misc] Closing plots now releases their server contexts after a short delay to reduce memory use.

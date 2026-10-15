@@ -63,7 +63,7 @@ Download `qimchi-setup-<version>.exe` from the [Releases page](https://gitlab.co
 
 Windows SmartScreen will warn that the publisher is unrecognised: click **More info**, then **Run anyway**. Qimchi is not code-signed yet, so this appears once per version you install.
 
-Requires Windows 11 (x64) with the Edge WebView2 runtime (preinstalled).
+Requires Windows 11 (x64) with the Edge WebView2 runtime (preinstalled). It can also be installed on Windows 10 (version 1809 or later), but is not officially supported. If Qimchi does not open there, install the [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/).
 
 `qanary` is not installed with Qimchi. If you need it, install it from its [repository](https://gitlab.com/squad-lab/qanary).
 
