@@ -4,7 +4,16 @@
   height="1024"
   viewBox="0 0 1024 1024"
 >
-  <!-- Two-trapezoid logo on a transparent background, aligned to Apple's icon grid. -->
-  <path d="M100 100 H924 L649 409 H375 Z" fill="#8ec640" />
-  <path d="M375 615 H649 L924 924 H100 Z" fill="#50c3cb" />
+  <!-- Use the Windows icon design within an 824px rounded square
+       aligned to Apple's macOS icon grid. -->
+  <defs>
+    <clipPath id="tile">
+      <rect x="100" y="100" width="824" height="824" rx="185" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect x="100" y="100" width="824" height="824" fill="#fff" />
+    <path d="M100 100 H924 L723 392 H301 Z" fill="#8ec640" />
+    <path d="M333 602 H683 L924 924 H100 Z" fill="#52c5d0" />
+  </g>
 </svg>
