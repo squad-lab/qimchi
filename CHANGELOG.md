@@ -30,6 +30,7 @@
 - [Misc] On macOS, installing an update closes Qimchi and opens the new disk image. Drag Qimchi to Applications to replace the old version, then open it again.
 - [Misc] Windows setup uses Qimchi branding and two pages: configure the install folder, desktop shortcut and launch preference, then install.
 - [Misc] Plot-control tooltips now show their keyboard shortcuts and use the same styled tooltips throughout the plot ribbons.
+- [Misc] Bug-report logs now show which part of the window (page, graphics, network) is using its memory.
 - [Misc] Large live heat maps do much less work on each refresh, so they update more often and use less memory.
 
 ### v0.7.0 - 2026-10-01
