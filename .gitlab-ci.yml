@@ -579,6 +579,37 @@ test-linux-distros:
     - if: '$CI_COMMIT_BRANCH == "preview" && $CI_PIPELINE_SOURCE == "web" && $AD_HOC_DESKTOP_BUILD =~ /^(linux|all)$/'
       when: on_success
 
+# Publish installers to the Generic Package Registry so release downloads
+# remain available after build artifacts expire.
+publish-packages:
+  stage: release
+  image: curlimages/curl:8.11.1
+  needs:
+    - job: build-windows
+      artifacts: true
+    - job: build-linux
+      artifacts: true
+    - job: test-linux-distros
+      artifacts: false
+    - job: build-macos
+      artifacts: true
+  script:
+    - |
+      set -eu
+      PACKAGES="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/qimchi/${CI_COMMIT_TAG}"
+      for FILE in \
+        "qimchi-setup-${CI_COMMIT_TAG}.exe" \
+        "qimchi-x86_64-${CI_COMMIT_TAG}.AppImage" \
+        "qimchi-${CI_COMMIT_TAG}.dmg"; do
+        echo "Uploading $FILE"
+        curl --fail --show-error --retry 3 \
+          --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+          --upload-file "packaging/build/${FILE}" \
+          "${PACKAGES}/${FILE}"
+      done
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+(-rc\.\d+)?$/
+
 # Single release job: depends on every platform build and attaches all assets to
 # ONE GitLab Release. Three separate release jobs each ran `release-cli create`
 # for the same tag, which collides ("release already exists"); one job avoids that.
@@ -589,14 +620,8 @@ release:
   # the runner falls back to the classic release-cli binary.
   image: registry.gitlab.com/gitlab-org/release-cli:v0.16.0
   needs:
-    - job: build-windows
-      artifacts: true
-    - job: build-linux
-      artifacts: true
-    - job: test-linux-distros
+    - job: publish-packages
       artifacts: false
-    - job: build-macos
-      artifacts: true
   # No `release:` keyword: runner 19.0-pre's keyword generation drops --assets-link
   # (and/or routes through the broken glab wrapper). We call release-cli directly so
   # the asset links actually attach.
@@ -669,6 +694,8 @@ release:
       See the [release notes](${CI_PROJECT_URL}/-/blob/${CI_COMMIT_TAG}/${NOTES_SOURCE}) and the [commit history](${CI_PROJECT_URL}/-/commits/${CI_COMMIT_TAG}) for what's new.
       EOF
       )
+      # Uploaded by publish-packages.
+      PACKAGES="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/qimchi/${CI_COMMIT_TAG}"
       # delete-then-create makes re-runs idempotent (a pre-existing release would 409).
       release-cli delete --tag-name "$CI_COMMIT_TAG" 2>/dev/null || true
       # Every artefact carries the tag in its own filename, so these paths and
@@ -679,9 +706,9 @@ release:
         --name "$RELEASE_NAME" \
         --tag-name "$CI_COMMIT_TAG" \
         --description "$NOTES" \
-        --assets-link "{\"name\":\"qimchi-x86_64-${CI_COMMIT_TAG}.AppImage (Linux)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-x86_64-${CI_COMMIT_TAG}.AppImage?job=build-linux\",\"link_type\":\"package\"}" \
-        --assets-link "{\"name\":\"qimchi-setup-${CI_COMMIT_TAG}.exe (Windows installer)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-setup-${CI_COMMIT_TAG}.exe?job=build-windows\",\"link_type\":\"package\"}" \
-        --assets-link "{\"name\":\"qimchi-${CI_COMMIT_TAG}.dmg (macOS)\",\"url\":\"${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/packaging/build/qimchi-${CI_COMMIT_TAG}.dmg?job=build-macos\",\"link_type\":\"package\"}"
+        --assets-link "{\"name\":\"qimchi-x86_64-${CI_COMMIT_TAG}.AppImage (Linux)\",\"url\":\"${PACKAGES}/qimchi-x86_64-${CI_COMMIT_TAG}.AppImage\",\"link_type\":\"package\"}" \
+        --assets-link "{\"name\":\"qimchi-setup-${CI_COMMIT_TAG}.exe (Windows installer)\",\"url\":\"${PACKAGES}/qimchi-setup-${CI_COMMIT_TAG}.exe\",\"link_type\":\"package\"}" \
+        --assets-link "{\"name\":\"qimchi-${CI_COMMIT_TAG}.dmg (macOS)\",\"url\":\"${PACKAGES}/qimchi-${CI_COMMIT_TAG}.dmg\",\"link_type\":\"package\"}"
   rules:
     # Stable release.
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
