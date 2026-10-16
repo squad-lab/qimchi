@@ -23,6 +23,7 @@
 - [Fix] Interface zoom now applies consistently to compact labels, walkthroughs, notes, release notes, and docked LineCut text.
 - [Fix] Qimchi no longer keeps a copy of every live measurement you have watched in memory for the rest of the session.
 - [Fix] Settings → Updates no longer squeezes the version text into the buttons when a downloaded update is waiting; the buttons move below the text when there is not enough room.
+- [Fix] Derivative filters on live data now show a note and wait until the selected axis has at least two points.
 - [Misc] The Windows installer runs on Windows 10 (version 1809 or later) again. Windows 11 remains the supported version, but the installer no longer refuses to start on Windows 10.
 - [Misc] Settings > Plots now groups controls by purpose and includes Plot width. General puts Restore all defaults first, and appearance controls have clearer headings.
 - [Misc] Bug-report bundles now include updater logs, which rotate to limit their size.
@@ -33,6 +34,7 @@
 - [Misc] Plot-control tooltips now show their keyboard shortcuts and use the same styled tooltips throughout the plot ribbons.
 - [Misc] Bug-report logs now show which part of the window (page, graphics, network) is using its memory.
 - [Misc] Large live heat maps do much less work on each refresh, so they update more often and use less memory.
+- [Misc] Release installers are now stored in GitLab's package registry so download links remain available after build artifacts expire.
 
 ### v0.7.0 - 2026-10-01
 
