@@ -219,6 +219,29 @@ def test_heatmap_differentiation_keeps_a_compact_colorbar_title(heat_figure):
     assert coloraxis["cmin"] <= coloraxis["cmax"]
 
 
+@pytest.mark.parametrize("name", ["diff_x", "diff_y"])
+def test_heatmap_differentiation_waits_for_a_second_line(heat_figure, name, caplog):
+    heat_figure["data"][0].update(y=[0], z=[[1.0, 2.0, 3.0]])
+    if name == "diff_y":
+        heat_figure["data"][0].update(x=[0], y=[0, 1, 2], z=[[1.0], [2.0], [3.0]])
+
+    with caplog.at_level("ERROR", logger="qimchi"):
+        result, warnings = filters.apply_filters([name], {name: {}}, heat_figure, 2)
+
+    assert not caplog.records
+    assert len(warnings) == 1 and "at least two points" in warnings[0]
+    assert np.array_equal(_axis(result, "z").ravel(), _axis(heat_figure, "z").ravel())
+
+
+def test_line_differentiation_waits_for_a_second_point(line_figure):
+    line_figure["data"][0].update(x=[0], y=[1])
+
+    result, warnings = filters.apply_filters(["diff"], {"diff": {}}, line_figure, 1)
+
+    assert "at least two points" in warnings[0]
+    assert list(_axis(result, "y")) == [1]
+
+
 def test_differentiation_keeps_fraction_when_engineering_prefix_changes(line_figure):
     line_figure["layout"]["xaxis"]["title"]["text"] = "Plunger Gate 2 (V)"
     line_figure["layout"]["yaxis"]["title"]["text"] = "Top Gate Leakage (A)"
