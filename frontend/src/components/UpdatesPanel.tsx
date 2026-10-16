@@ -53,8 +53,8 @@ const UpdatesPanel = () => {
 
   return (
     <div className="rounded-md border border-gray-200 bg-gray-50 p-4" aria-live="polite">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+        <div className="min-w-48 flex-1">
           <div className="text-sm font-medium text-gray-700">Qimchi {current}</div>
           <div className="mt-0.5 text-xs text-gray-500" role="status">
             {summary}
@@ -63,7 +63,7 @@ const UpdatesPanel = () => {
             <div className="mt-0.5 text-[0.6875rem] text-gray-400">Last checked {checkedAt}</div>
           )}
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="flex flex-wrap gap-2">
           {state.status === "available" && (
             <button type="button" onClick={() => void download()} className={primaryClass}>
               Download
