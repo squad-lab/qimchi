@@ -837,6 +837,25 @@ async def test_plots_of_one_measurement_share_a_single_live_fetch(monkeypatch):
     assert loaded[1].obj.attrs["path"] == "memory://m-share"
 
 
+@pytest.mark.asyncio
+async def test_finished_live_fetches_are_not_kept(monkeypatch):
+    async def _async_ws(*_args, **_kwargs):
+        return xr.Dataset(data_vars={"value": (("x",), [1.0])}, coords={"x": [0]})
+
+    monkeypatch.setattr(data_loader, "resolve_live_dataset", lambda _m: _live_row())
+    monkeypatch.setattr(data_loader.live_client, "open_live_measurement", _async_ws)
+    monkeypatch.setenv("QIMCHI_LIVE_POLL_WINDOW", "0.05")
+
+    await data_loader.load_data_async("memory://m-old")
+    await asyncio.sleep(0)
+    assert "m-old" not in data_loader._live_polls
+    assert "m-old" in data_loader._live_poll_results
+
+    await asyncio.sleep(0.06)
+    await data_loader.load_data_async("memory://m-new")
+    assert "m-old" not in data_loader._live_poll_results
+
+
 def test_a_qcodes_database_is_read_without_taking_write_locks(tmp_path, monkeypatch):
     db = tmp_path / "runs.db"
     connection = sqlite3.connect(db)

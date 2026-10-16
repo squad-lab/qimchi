@@ -21,6 +21,7 @@
 - [Fix] Searching Metadata now finds a dataset's own attributes, such as Sample Name or Cryostat, by name or value. It used to find only fields nested inside them, like those in a Parameters Snapshot.
 - [Fix] The Linux AppImage starts on newer distributions. On Arch Linux it failed at launch with "CXXABI_1.3.15 not found" or "undefined symbol" errors, and on Fedora it could not find WebKit. It now uses the system's own GTK and WebKit libraries, and is tested on Ubuntu, Debian, Fedora and Arch before each release.
 - [Fix] Interface zoom now applies consistently to compact labels, walkthroughs, notes, release notes, and docked LineCut text.
+- [Fix] Qimchi no longer keeps a copy of every live measurement you have watched in memory for the rest of the session.
 - [Misc] The Windows installer runs on Windows 10 (version 1809 or later) again. Windows 11 remains the supported version, but the installer no longer refuses to start on Windows 10.
 - [Misc] Settings > Plots now groups controls by purpose and includes Plot width. General puts Restore all defaults first, and appearance controls have clearer headings.
 - [Misc] Bug-report bundles now include updater logs, which rotate to limit their size.
