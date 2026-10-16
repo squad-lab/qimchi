@@ -25,6 +25,7 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional, Protocol
 
@@ -135,6 +136,12 @@ _maintenance_lock = threading.Lock()
 _live_polls: Dict[str, "asyncio.Task[LoadedData]"] = {}
 _live_poll_results: Dict[str, tuple] = {}
 register_gauge("live polls", lambda: len(_live_polls))
+register_gauge("live poll results", lambda: len(_live_poll_results))
+
+
+def _forget_live_poll(measurement_id: str, poll: "asyncio.Task[LoadedData]") -> None:
+    if _live_polls.get(measurement_id) is poll:
+        del _live_polls[measurement_id]
 
 
 def _live_poll_window() -> float:
@@ -1474,14 +1481,22 @@ class LiveMemoryProvider:
         if not measurement_id:
             return await self._fetch(ref)
 
+        # Drop expired cached datasets, including those no longer polled.
+        now = time.monotonic()
+        window = _live_poll_window()
+        for key, (fetched_at, _loaded) in list(_live_poll_results.items()):
+            if now - fetched_at >= window:
+                del _live_poll_results[key]
+
         cached = _live_poll_results.get(measurement_id)
-        if cached and time.monotonic() - cached[0] < _live_poll_window():
+        if cached:
             return _with_own_attrs(cached[1])
 
         poll = _live_polls.get(measurement_id)
         if poll is None or poll.done():
             poll = asyncio.create_task(self._fetch(ref))
             _live_polls[measurement_id] = poll
+            poll.add_done_callback(partial(_forget_live_poll, measurement_id))
 
         # One cancelled caller must not cancel the shared fetch.
         loaded = await asyncio.shield(poll)
