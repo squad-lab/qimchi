@@ -1,6 +1,6 @@
 ## Qimchi Changelog
 
-### v0.7.1 - 2026-10-03
+### v0.7.1 - 2026-10-17
 
 - [Feature] Reopen closed plots with Ctrl+Z (Cmd+Z on Mac), Undo, or Recently closed, preserving their position, filters, settings and width. Clear All Plots can also be undone.
 - [Feature] Add vertical lines, horizontal lines or points to LineCut previews. Markers snap to data and can be moved with arrow keys or removed with Delete.

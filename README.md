@@ -9,15 +9,18 @@ This repository contains a unified FastAPI application that serves a React-based
 > [!TIP]
 > 🖥️ **Desktop app:** a self-contained build of Qimchi that runs in its own window, with no separate Git, Python or Node installation required. Installers for Windows (`.exe`), Linux (`.AppImage`) and macOS (`.dmg`) are available on the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases). The app checks for updates on startup and can install them with one click.
 
+- **Undo closed plots:** reopen plots with Ctrl+Z (Cmd+Z on Mac), Undo or Recently closed, restoring their position, filters, settings and width. Clear All Plots can also be undone.
+- **LineCut markers:** add vertical lines, horizontal lines or points to a LineCut preview. They snap to the data and can be nudged with the arrow keys.
 - **Lower live heat-map memory use:** prevents the image-resource leak caused by repeated heat-map redraws, and reduces the work done on each live refresh.
 - **Smaller background exporters:** image-export workers use about 90% less memory while idle.
 - **Workspace recovery:** the Basket and Viewer plots are restored after a window reload, including recovery from a crash.
 - **Reliable LineCuts and panels:** live frontier LineCuts reach the final row or column, and floating cards and panels stay inside the window when it is resized.
 - **Clearer controls:** interface zoom applies consistently, and plot-control tooltips show their keyboard shortcuts.
 - **Version-specific changelogs:** Settings > Updates shows the running version's formatted changelog offline, and update prompts show the offered stable or RC version's changes. Windows updates restart Qimchi when "Start Qimchi after installation" is checked.
+- **Linux on newer distributions:** the AppImage now starts on Arch and Fedora. Each release is tested on Ubuntu, Debian, Fedora and Arch.
 - **Easier bug reports and updates:** the sidebar bug-report button opens reporting instructions, a new-issue link, and log-bundle controls; downloaded updates can be downloaded again before installation.
 
-Everything in this release is listed in the [changelog](CHANGELOG.md#v071---2026-10-03).
+Everything in this release is listed in the [changelog](CHANGELOG.md#v071---2026-10-17).
 
 <!-- TODO: -->
 <!-- Full API documentation and more can be found [here](https://qimchi.squad-lab.org) -->
