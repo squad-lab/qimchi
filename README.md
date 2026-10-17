@@ -45,8 +45,8 @@ Everything in this release is listed in the [changelog](CHANGELOG.md#v071---2026
   - [Environment Variables](#environment-variables)
   - [Supported Dataset Types](#supported-dataset-types)
   - [Measurements](#measurements)
+  - [Contributing](#contributing)
   - [Authors](#authors)
-  - [Release notes](#release-notes)
 
 ---
 
@@ -488,14 +488,11 @@ Measurement examples referencing `qanary` can be found in its own repository. Re
 
 To plot measurements from your own code while they run, use [`qimchi-connect`](https://gitlab.com/squad-lab/qimchi-connect). It works with any measurement code and has ready-made support for QCoDeS and Quantify.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, checks and release-note instructions.
 
 ## Authors
 
 - Spandan Anupam: [s.anupam@fz-juelich.de](mailto:s.anupam@fz-juelich.de)
 - Jyotirmaya Shivottam: [shivottam@proton.me](mailto:shivottam@proton.me)
-
-## Release notes
-
-Keep stable release summaries in `CHANGELOG.md`, with one `### vX.Y.Z - YYYY-MM-DD` section per release. Preview notes live separately in `md/release-notes/vX.Y.Z-rc.N.md`, headed `### vX.Y.Z-rc.N - YYYY-MM-DD`, and describe changes since the previous candidate (the first candidate compares with the previous stable release). Preserve published candidate notes. The current preview history starts with [v0.7.1-rc.1](md/release-notes/v0.7.1-rc.1.md).
-
-Before running the manual `tag_preview` CI job, add the file for the next unused RC number. CI refuses to tag a preview without its notes. Release descriptions and update prompts use the appropriate source at the offered tag; Settings > Updates uses the same sources bundled with the running build, including offline.
