@@ -1,13 +1,17 @@
 # <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.7.1
 
+[![Website](https://img.shields.io/badge/website-qimchi.squad--lab.org-8cc63e)](https://qimchi.squad-lab.org)
+
 Plotly based data visualization tool for `xarray` data. Optimized to work with the optional [`qanary`](https://gitlab.com/squad-lab/qanary) package. Qimchi supports any dataset format convertible to `xarray` (see [Supported Dataset Types](#supported-dataset-types) below). Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html).
 
 This repository contains a unified FastAPI application that serves a React-based frontend for the Qimchi plotter.
 
-## What's new in 0.7.1
-
 > [!TIP]
+> 🌐 **Website:** [qimchi.squad-lab.org](https://qimchi.squad-lab.org) has short videos of every feature and the download links for each platform.
+>
 > 🖥️ **Desktop app:** a self-contained build of Qimchi that runs in its own window, with no separate Git, Python or Node installation required. Installers for Windows (`.exe`), Linux (`.AppImage`) and macOS (`.dmg`) are available on the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases). The app checks for updates on startup and can install them with one click.
+
+## What's new in 0.7.1
 
 - **Undo closed plots:** reopen plots with Ctrl+Z (Cmd+Z on Mac), Undo or Recently closed, restoring their position, filters, settings and width. Clear All Plots can also be undone.
 - **LineCut markers:** add vertical lines, horizontal lines or points to a LineCut preview. They snap to the data and can be nudged with the arrow keys.
@@ -21,9 +25,6 @@ This repository contains a unified FastAPI application that serves a React-based
 - **Easier bug reports and updates:** the sidebar bug-report button opens reporting instructions, a new-issue link, and log-bundle controls; downloaded updates can be downloaded again before installation.
 
 Everything in this release is listed in the [changelog](CHANGELOG.md#v071---2026-10-17).
-
-<!-- TODO: -->
-<!-- Full API documentation and more can be found [here](https://qimchi.squad-lab.org) -->
 
 ---
 
