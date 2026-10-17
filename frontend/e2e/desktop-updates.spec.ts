@@ -43,6 +43,10 @@ async function fakeDesktopUpdater(page: Page, initial: Record<string, unknown>) 
           calls.push("download");
           return push({ status: "downloading", progress: 0, prompt: null });
         },
+        redownload_update: async () => {
+          calls.push("redownload");
+          return push({ status: "downloading", progress: 0, prompt: null });
+        },
         install_update: async () => {
           calls.push("install");
           return push({ status: "installing", prompt: null });
@@ -141,8 +145,11 @@ test("Settings > Updates checks, downloads and installs on demand", async ({ pag
   );
 
   await push(page, { status: "downloaded", progress: 1 });
+  await expect(settings.getByText("Qimchi v0.7.0-rc.9 is already downloaded.")).toBeVisible();
+  await settings.getByRole("button", { name: "Download again" }).click();
+  await push(page, { status: "downloaded", progress: 1 });
   await settings.getByRole("button", { name: "Install now" }).click();
-  await expect.poll(() => calls(page)).toEqual(["check", "download", "install"]);
+  await expect.poll(() => calls(page)).toEqual(["check", "download", "redownload", "install"]);
   await expect(settings.getByLabel("Check for updates at startup")).toBeChecked();
 });
 
@@ -152,4 +159,48 @@ test("the browser build has no Updates section", async ({ page }) => {
   const settings = page.getByRole("dialog", { name: "Settings" });
   await expect(settings.getByRole("button", { name: "General", exact: true })).toBeVisible();
   await expect(settings.getByRole("button", { name: "Updates", exact: true })).toHaveCount(0);
+});
+
+test("the installed changelog is formatted, scrollable and separate from offered notes", async ({
+  page,
+}) => {
+  await fakeDesktopUpdater(page, {
+    current: "v0.7.0",
+    tag: "v0.7.1-rc.2",
+    notes: "Offered candidate notes",
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("button", { name: "Updates", exact: true }).click();
+  await settings.getByRole("button", { name: "Show changelog for the current version" }).click();
+  const notes = settings.getByRole("region", { name: "Changelog for Qimchi v0.7.0" });
+  await expect(notes.locator(".release-notes ul").first()).toBeVisible();
+  await expect(notes).toContainText("Complex variables");
+  await expect(notes).not.toContainText("Offered candidate notes");
+  expect(await notes.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+  await notes.evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  expect(await notes.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+  await page.screenshot({ path: "test-results/installed-changelog.png" });
+  await settings.getByRole("button", { name: "Hide changelog" }).click();
+  await expect(notes).toHaveCount(0);
+});
+
+test("on macOS the ready dialog asks you to drag Qimchi to Applications", async ({ page }) => {
+  await fakeDesktopUpdater(page, {
+    status: "downloaded",
+    platform: "macos",
+    tag: "v0.7.0-rc.9",
+    progress: 1,
+    prompt: "ready",
+  });
+  await page.goto("/");
+
+  const ready = page.getByRole("dialog", { name: "Qimchi v0.7.0-rc.9 is ready to install" });
+  await expect(ready).toContainText("Drag Qimchi to Applications");
+
+  await push(page, { platform: "windows" });
+  await expect(ready).toContainText("open the installer");
 });

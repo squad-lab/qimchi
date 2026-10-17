@@ -495,3 +495,106 @@ def test_a_versioned_installer_name_still_selects_the_windows_asset(monkeypatch)
         "run-installer",
     )
     assert updater._platform_asset_match("qimchi-x86_64-v0.7.0.AppImage", "") is None
+
+
+def test_changelog_selects_exact_stable_and_rc_sections():
+    markdown = """## Changelog
+### v0.7.1 - 2026-10-03
+- Stable changes
+#### Details
+Still part of this release.
+### v0.7.1-rc.2 - 2026-10-03
+- Second candidate
+### v0.7.1-rc.1 - 2026-10-02
+- First candidate
+"""
+    assert updater.changelog_section(markdown, "0.7.1") == (
+        "- Stable changes\n#### Details\nStill part of this release."
+    )
+    assert updater.changelog_section(markdown, "v0.7.1-rc.2") == "- Second candidate"
+    assert updater.changelog_section(markdown, "v0.7.1-rc.3") == ""
+
+
+def test_update_notes_come_from_tagged_changelog_not_release_description(monkeypatch):
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+    monkeypatch.setattr(updater, "current_version", lambda: "0.6.1")
+    requests = []
+
+    def fetch(request, **_kwargs):
+        requests.append(request.full_url)
+        if request.full_url == updater._RELEASES_URL:
+            return _Response(
+                _release_with_links(
+                    {
+                        "name": "qimchi-setup.exe",
+                        "url": "https://example.invalid/setup.exe",
+                    }
+                )
+            )
+        response = _Response(None)
+        response._body = b"### v0.6.2 - 2026-10-03\n- Fixed launch\n### v0.6.1\n- Older"
+        return response
+
+    monkeypatch.setattr(updater, "urlopen", fetch)
+    result = updater.check_for_update()
+    assert result["notes"] == "- Fixed launch"
+    assert (
+        requests[-1] == "https://gitlab.com/squad-lab/qimchi/-/raw/v0.6.2/CHANGELOG.md"
+    )
+
+
+def test_legacy_preview_heading_and_missing_exact_rc(monkeypatch):
+    from urllib.error import HTTPError
+
+    body = b"### v0.7.1 (Preview)\n- Legacy candidate\n### v0.7.0\n- Old"
+
+    def fetch(request, **_kwargs):
+        if "/md/release-notes/" in request.full_url:
+            raise HTTPError(request.full_url, 404, "Not Found", {}, None)
+        response = _Response(None)
+        response._body = body
+        return response
+
+    monkeypatch.setattr(updater, "urlopen", fetch)
+    assert updater.release_changelog("v0.7.1-rc.1") == "- Legacy candidate"
+    body = b"### v0.7.1 - 2026-10-03\n- Stable only"
+    assert updater.release_changelog("v0.7.1-rc.2") == ""
+
+
+def test_preview_notes_use_separate_file_at_offered_tag(monkeypatch):
+    requests = []
+
+    def fetch(request, **_kwargs):
+        requests.append(request.full_url)
+        response = _Response(None)
+        response._body = b"### v0.7.1-rc.1 - 2026-10-02\n- Candidate changes"
+        return response
+
+    monkeypatch.setattr(updater, "urlopen", fetch)
+    assert updater.release_changelog("v0.7.1-rc.1") == "- Candidate changes"
+    assert requests == [
+        "https://gitlab.com/squad-lab/qimchi/-/raw/v0.7.1-rc.1/md/release-notes/v0.7.1-rc.1.md"
+    ]
+
+
+def test_published_preview_notes_in_legacy_changelog_still_work(monkeypatch):
+    from urllib.error import HTTPError
+
+    def fetch(request, **_kwargs):
+        if "/md/release-notes/" in request.full_url:
+            raise HTTPError(request.full_url, 404, "Not Found", {}, None)
+        response = _Response(None)
+        response._body = b"### v0.7.1\n- Stable\n### v0.7.1-rc.1\n- Original candidate"
+        return response
+
+    monkeypatch.setattr(updater, "urlopen", fetch)
+    assert updater.release_changelog("v0.7.1-rc.1") == "- Original candidate"
+
+
+def test_changelog_network_failure_does_not_offer_install_instructions(monkeypatch):
+    def fail(*_args, **_kwargs):
+        raise OSError("offline")
+
+    monkeypatch.setattr(updater, "urlopen", fail)
+    assert updater.release_changelog("v0.7.1") == ""
+    assert updater.release_changelog("../../main") == ""

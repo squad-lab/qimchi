@@ -40,7 +40,7 @@ const TONES: Record<Tone, string> = {
 
 const Chip = ({ tone, children }: { tone: Tone; children: React.ReactNode }) => (
   <span
-    className={`shrink-0 rounded border px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide ${TONES[tone]}`}
+    className={`shrink-0 rounded border px-1.5 py-px text-[0.625rem] font-semibold uppercase tracking-wide ${TONES[tone]}`}
   >
     {children}
   </span>
@@ -533,7 +533,7 @@ export const SavedPresets = ({
 
                 {mode === null && !(linked && matches) && (
                   <div className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 text-[11px] text-amber-700">{reason}</span>
+                    <span className="min-w-0 text-[0.6875rem] text-amber-700">{reason}</span>
                     <button
                       type="button"
                       disabled={Boolean(reason)}

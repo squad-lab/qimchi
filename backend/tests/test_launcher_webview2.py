@@ -256,6 +256,45 @@ def test_remind_at_next_launch_offers_the_download_again_without_fetching(
     assert next_launch.check(include_previews=False)["status"] == "downloaded"
 
 
+def test_a_downloaded_update_can_be_replaced_with_a_fresh_copy(
+    launcher, monkeypatch, tmp_path
+):
+    messages = []
+    updates, _ = _updates_with_offer(launcher, monkeypatch, tmp_path, messages)
+    updates.check(include_previews=False)
+    updates.download()
+    installer = tmp_path / "updates" / "qimchi-setup-v0.7.0-rc.9.exe"
+    installer.write_bytes(b"stale")
+
+    state = updates.redownload()
+
+    assert state["status"] == "downloaded"
+    assert state["prompt"] == "ready"
+    assert installer.read_bytes() == b"installer"
+    assert any("redownloading v0.7.0-rc.9" in message for message in messages)
+
+
+def test_redownload_refreshes_old_pending_metadata(launcher, monkeypatch, tmp_path):
+    import json
+
+    from api import settings
+
+    messages = []
+    monkeypatch.setattr(
+        settings, "desktop_settings", lambda: SimpleNamespace(previewReleases=False)
+    )
+    updates, _ = _updates_with_offer(launcher, monkeypatch, tmp_path, messages)
+    updates.check(include_previews=False)
+    updates.download()
+    updates._offer.pop("asset_url")
+    pending_path = tmp_path / "updates" / "pending.json"
+    pending = json.loads(pending_path.read_text(encoding="utf-8"))
+    pending.pop("asset_url")
+    pending_path.write_text(json.dumps(pending), encoding="utf-8")
+
+    assert updates.redownload()["status"] == "downloaded"
+
+
 def test_a_downloaded_update_is_forgotten_once_installed(
     launcher, monkeypatch, tmp_path
 ):
@@ -286,12 +325,17 @@ def test_installing_on_windows_runs_the_installer_and_closes(
     monkeypatch.setattr(launcher.os, "name", "nt")
     monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     monkeypatch.setattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 512, raising=False)
-    flags = []
+    flags, envs = [], []
+    monkeypatch.setenv("QIMCHI_LAUNCHER_ACTIVE", "1")
     monkeypatch.setattr(
         subprocess,
         "Popen",
         lambda args, **kwargs: (
-            (started.append(args) or flags.append(kwargs["creationflags"]))
+            (
+                started.append(args)
+                or flags.append(kwargs["creationflags"])
+                or envs.append(kwargs["env"])
+            )
             or SimpleNamespace(pid=1)
         ),
     )
@@ -309,9 +353,12 @@ def test_installing_on_windows_runs_the_installer_and_closes(
     # Keep the standard Setup wizard interactive.
     assert "/SILENT" not in script and "/VERYSILENT" not in script
     assert "'/NORESTART'" in script
+    assert "'/QIMCHIUPDATE=1'" in script
     # -Wait would include the relaunched Qimchi process.
     assert "-Wait " not in script and "$setup.WaitForExit()" in script
     assert "setup.log" in script
+    # Setup passes this environment on to the Qimchi it starts afterwards.
+    assert "QIMCHI_LAUNCHER_ACTIVE" not in envs[0]
     assert closed == [True]
     assert launcher._update_being_installed(str(tmp_path), lambda pid: pid == 1) == (
         "v0.7.0-rc.9"
@@ -319,22 +366,26 @@ def test_installing_on_windows_runs_the_installer_and_closes(
     assert closed == [True]
 
 
-def test_macos_update_replaces_the_app_once_it_has_quit(
-    launcher, monkeypatch, tmp_path
-):
+def test_macos_update_shows_the_disk_image_and_closes(launcher, monkeypatch, tmp_path):
     import subprocess
     import sys
 
-    messages, opened, closed = [], [], []
+    messages, ran, opened, closed = [], [], [], []
     updates, _ = _updates_with_offer(launcher, monkeypatch, tmp_path, messages)
     updates.check(include_previews=False)
     updates.download()
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(launcher.os, "name", "posix")
-    monkeypatch.setattr(
-        sys, "executable", "/Applications/qimchi.app/Contents/MacOS/qimchi"
-    )
     updates._offer["platform"] = "macos"
+    attached = "/dev/disk4\tGUID_partition_scheme\t\n/dev/disk4s1\tApple_HFS\t/Volumes/Qimchi\n"
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **_kwargs: (
+            ran.append(args)
+            or SimpleNamespace(returncode=0, stdout=attached, stderr="")
+        ),
+    )
     monkeypatch.setattr(
         subprocess, "Popen", lambda args, **_kwargs: opened.append(args)
     )
@@ -342,14 +393,13 @@ def test_macos_update_replaces_the_app_once_it_has_quit(
 
     updates.install()
 
-    helper = opened[0]
-    assert helper[:2] == ["/bin/sh", "-c"]
-    assert helper[5:7] == [updates._offer["path"], "/Applications/qimchi.app"]
-    assert "ditto" in helper[2] and 'open "$dmg"' in helper[2]
+    # Mount and show the disk image for manual installation.
+    assert ran == [["hdiutil", "attach", "-noautoopen", updates._offer["path"]]]
+    assert opened == [["open", "/Volumes/Qimchi"]]
     assert closed == [True]
 
 
-def test_macos_update_opens_the_dmg_outside_an_app_bundle(
+def test_macos_update_opens_the_image_file_if_mounting_fails(
     launcher, monkeypatch, tmp_path
 ):
     import subprocess
@@ -361,8 +411,12 @@ def test_macos_update_opens_the_dmg_outside_an_app_bundle(
     updates.download()
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(launcher.os, "name", "posix")
-    monkeypatch.setattr(sys, "executable", "/usr/local/bin/python3")
     updates._offer["platform"] = "macos"
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **_kwargs: SimpleNamespace(returncode=1, stdout="", stderr="no"),
+    )
     monkeypatch.setattr(
         subprocess, "Popen", lambda args, **_kwargs: opened.append(args)
     )
@@ -370,7 +424,8 @@ def test_macos_update_opens_the_dmg_outside_an_app_bundle(
 
     updates.install()
 
-    assert opened[0][0] == "open"
+    assert opened == [["open", updates._offer["path"]]]
+    assert any("could not mount" in message for message in messages)
 
 
 def test_update_events_never_wait_on_the_page(launcher, monkeypatch, tmp_path):
@@ -604,3 +659,57 @@ def test_uvicorn_logs_without_its_own_time_or_colours(launcher):
     for formatter in config["formatters"].values():
         assert "asctime" not in formatter["fmt"]
         assert formatter["use_colors"] is False
+
+
+def test_the_qimchi_started_after_an_update_is_not_taken_for_a_child(launcher):
+    active = {"QIMCHI_LAUNCHER_ACTIVE": "1"}
+    assert launcher._is_relaunched_child(["qimchi.exe"], active)
+    assert not launcher._is_relaunched_child(["qimchi.exe", "--after-update"], active)
+    assert not launcher._is_relaunched_child(["qimchi.exe"], {})
+
+
+def test_update_logs_rotate_like_the_app_logs(launcher, tmp_path):
+    log = tmp_path / "install.log"
+
+    log.write_text("small", encoding="utf-8")
+    launcher._rotate_update_log(str(log), max_bytes=100, backups=3)
+    assert log.read_text(encoding="utf-8") == "small"
+
+    for run in range(5):
+        log.write_text(f"run {run}" + "x" * 100, encoding="utf-8")
+        launcher._rotate_update_log(str(log), max_bytes=100, backups=3)
+
+    # Keep three backups, with the newest at .1.
+    assert not log.exists()
+    kept = sorted(p.name for p in tmp_path.iterdir())
+    assert kept == ["install.log.1", "install.log.2", "install.log.3"]
+    assert (tmp_path / "install.log.1").read_text(encoding="utf-8").startswith("run 4")
+    assert (tmp_path / "install.log.3").read_text(encoding="utf-8").startswith("run 2")
+
+    # max_bytes=0 rotates whenever the log exists (Setup rewrites setup.log).
+    setup = tmp_path / "setup.log"
+    launcher._rotate_update_log(str(setup), max_bytes=0)
+    setup.write_text("first install", encoding="utf-8")
+    launcher._rotate_update_log(str(setup), max_bytes=0)
+    assert (tmp_path / "setup.log.1").read_text(encoding="utf-8") == "first install"
+
+
+def test_linux_uses_the_system_gtk_and_typelibs(launcher):
+    environ = {
+        "GI_TYPELIB_PATH": "/app/_internal/gi_typelibs",
+        "GTK_PATH": "/app/_internal",
+        "GDK_PIXBUF_MODULE_FILE": "/tmp/loaders.cache",
+        "GIO_MODULE_DIR": "/app/_internal/gio_modules",
+        "HOME": "/home/user",
+    }
+    present = {"/usr/lib64/girepository-1.0", "/usr/lib/girepository-1.0"}
+
+    found = launcher._use_system_gtk(environ, "x86_64", isdir=present.__contains__)
+
+    assert found == ["/usr/lib64/girepository-1.0", "/usr/lib/girepository-1.0"]
+    assert environ["GI_TYPELIB_PATH"].split(launcher.os.pathsep) == [
+        *found,
+        "/app/_internal/gi_typelibs",
+    ]
+    assert not any(name in environ for name in launcher._BUNDLED_GTK_ENV)
+    assert environ["HOME"] == "/home/user"

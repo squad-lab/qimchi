@@ -5,6 +5,8 @@ import Tooltip from "../Tooltip";
 interface RibbonFlyoutProps {
   /** Names the button and its menu for screen readers and the tooltip. */
   label: string;
+  /** Tooltip text when it differs from the accessible label. */
+  tooltip?: React.ReactNode;
   icon: React.ReactNode;
   placement?: "left" | "bottom";
   orientation?: "horizontal" | "vertical";
@@ -19,6 +21,7 @@ interface RibbonFlyoutProps {
  */
 const RibbonFlyout = ({
   label,
+  tooltip,
   icon,
   placement = "left",
   orientation = "horizontal",
@@ -65,7 +68,7 @@ const RibbonFlyout = ({
       {open ? (
         button
       ) : (
-        <Tooltip content={label} position={placement === "left" ? "left" : "top"}>
+        <Tooltip content={tooltip ?? label} position={placement === "left" ? "left" : "top"}>
           {button}
         </Tooltip>
       )}

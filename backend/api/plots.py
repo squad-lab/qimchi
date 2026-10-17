@@ -7,6 +7,8 @@ import asyncio
 import hashlib
 import json
 import logging
+import threading
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -31,13 +33,22 @@ from .figures import (
 from .filters import apply_filters
 from .json_utils import sanitize_for_json
 from .logger import logger
-from .models import LiveRefreshSummary, PlotRequest, PlotResponse
+from .models import (
+    LiveRefreshSummary,
+    PlotRequest,
+    PlotResponse,
+    ReleasePlotContextsRequest,
+)
 
 # FastAPI router for plot endpoints
 router = APIRouter()
 
-# Runtime plot context registry used by unified transform endpoint.
-_PLOT_CONTEXTS: Dict[str, Dict] = {}
+# Bounded LRU cache for plot transforms. The client releases unused contexts
+# and resends any context the server no longer has.
+_PLOT_CONTEXTS: "OrderedDict[str, Dict]" = OrderedDict()
+_MAX_PLOT_CONTEXTS = 512
+# Worker threads register contexts while transforms access them on the event loop.
+_PLOT_CONTEXTS_LOCK = threading.Lock()
 register_gauge("plot contexts", lambda: len(_PLOT_CONTEXTS))
 
 
@@ -82,11 +93,25 @@ def _build_plot_ref(context: Dict) -> str:
 
 
 def register_plot_context(plot_ref: str, context: Dict) -> None:
-    _PLOT_CONTEXTS[plot_ref] = context
+    with _PLOT_CONTEXTS_LOCK:
+        _PLOT_CONTEXTS[plot_ref] = context
+        _PLOT_CONTEXTS.move_to_end(plot_ref)
+        while len(_PLOT_CONTEXTS) > _MAX_PLOT_CONTEXTS:
+            _PLOT_CONTEXTS.popitem(last=False)
 
 
 def get_plot_context(plot_ref: str) -> Dict | None:
-    return _PLOT_CONTEXTS.get(plot_ref)
+    with _PLOT_CONTEXTS_LOCK:
+        context = _PLOT_CONTEXTS.get(plot_ref)
+        if context is not None:
+            _PLOT_CONTEXTS.move_to_end(plot_ref)
+        return context
+
+
+def release_plot_contexts(plot_refs: List[str]) -> int:
+    """Remove the requested contexts and return the number removed."""
+    with _PLOT_CONTEXTS_LOCK:
+        return sum(_PLOT_CONTEXTS.pop(ref, None) is not None for ref in plot_refs)
 
 
 def _resolve_context_fpath(
@@ -605,6 +630,7 @@ def create_line_plots(
                     {
                         "id": f"line_plot_{i}_{dataset_name}_{dep}",
                         "plot_ref": plot_ref,
+                        "plot_context": context,
                         "plotJson": plot_json,
                         "title": f"Line Plot - {dataset_name}: {dep} vs {', '.join(indeps)}",
                         "type": "LinePlot",
@@ -733,6 +759,7 @@ def create_heat_maps(
                     {
                         "id": f"heat_map_{i}_{dataset_name}_{dep}",
                         "plot_ref": plot_ref,
+                        "plot_context": context,
                         "plotJson": plot_json,
                         "title": f"Heat Map - {dataset_name}: {dep} vs {x_var}, {y_var}",
                         "type": "HeatMap",
@@ -945,6 +972,14 @@ async def _create_plots(request: PlotRequest) -> PlotResponse:
     except Exception as e:
         logger.error(f"Unexpected error in create_plots: {e}")
         return PlotResponse(plots=[], success=False, message=f"Unexpected error: {e}")
+
+
+@router.post("/plot-contexts/release")
+async def release_plot_contexts_endpoint(request: ReleasePlotContextsRequest) -> dict:
+    """Release plot contexts requested by the client."""
+    released = release_plot_contexts(request.plot_refs)
+    logger.debug("Released %d of %d plot contexts", released, len(request.plot_refs))
+    return {"released": released}
 
 
 @router.post("/telemetry/live-refresh")

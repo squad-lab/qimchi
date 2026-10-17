@@ -445,6 +445,39 @@ def _use_bundled_certificates(log) -> None:
     log(f"[ssl] using CA bundle {bundle}")
 
 
+_BUNDLED_GTK_ENV = (
+    "GDK_PIXBUF_MODULE_FILE",
+    "GIO_MODULE_DIR",
+    "GTK_DATA_PREFIX",
+    "GTK_EXE_PREFIX",
+    "GTK_PATH",
+    "PANGO_LIBDIR",
+    "PANGO_SYSCONFDIR",
+)
+
+
+def _use_system_gtk(environ, machine: str, isdir=os.path.isdir) -> list[str]:
+    """
+    Use system GTK resources and prefer system introspection typelibs.
+
+    Clear GTK paths set by PyInstaller and prepend system typelib directories,
+    keeping bundled typelibs as a fallback. This lets libgirepository find
+    WebKit2 on distributions with different library layouts, such as Fedora.
+
+    """
+    for name in _BUNDLED_GTK_ENV:
+        environ.pop(name, None)
+    candidates = (
+        "/usr/lib64/girepository-1.0",
+        f"/usr/lib/{machine}-linux-gnu/girepository-1.0",
+        "/usr/lib/girepository-1.0",
+    )
+    system_dirs = [d for d in candidates if isdir(d)]
+    bundled = [p for p in environ.get("GI_TYPELIB_PATH", "").split(os.pathsep) if p]
+    environ["GI_TYPELIB_PATH"] = os.pathsep.join(system_dirs + bundled)
+    return system_dirs
+
+
 def _persistent_chrome_dir() -> str:
     """Return the persistent directory for downloaded Chrome builds."""
     return os.path.join(_qimchi_home(), "chrome")
@@ -701,6 +734,10 @@ class _Api:
         """Start downloading the offered update in the background."""
         return self._updates.download()
 
+    def redownload_update(self) -> dict:
+        """Replace the downloaded installer with a fresh copy."""
+        return self._updates.redownload()
+
     def install_update(self) -> dict:
         """Install the downloaded update; the app closes to let it."""
         return self._updates.install()
@@ -881,7 +918,7 @@ def _try_replace_running_appimage(tmp: str, log) -> bool:
         os.replace(staged, current)
         log(f"[updater] replaced running AppImage: {current}")
         try:
-            subprocess.Popen([current], close_fds=True)
+            subprocess.Popen([current], close_fds=True, env=_env_for_new_qimchi())
         except Exception as exc:
             log(f"[updater] replaced AppImage but failed to relaunch: {exc!r}")
         return True
@@ -926,6 +963,26 @@ def _asset_file_name(asset_url: str, platform: str) -> str:
     }.get(platform, "qimchi-update")
 
 
+# Retain numbered update-log backups, with the newest at .1.
+_UPDATE_LOG_BACKUPS = 5
+
+
+def _rotate_update_log(
+    path: str, max_bytes: int, backups: int = _UPDATE_LOG_BACKUPS
+) -> None:
+    """Rotate a log at max_bytes, keeping up to backups numbered copies."""
+    try:
+        if not os.path.isfile(path) or os.path.getsize(path) < max_bytes:
+            return
+        for index in range(backups - 1, 0, -1):
+            older = f"{path}.{index}"
+            if os.path.exists(older):
+                os.replace(older, f"{path}.{index + 1}")
+        os.replace(path, f"{path}.1")
+    except OSError:
+        pass
+
+
 def _windows_install_after_exit_command(installer: str) -> list[str]:
     """Build a detached command that waits for Qimchi before running Setup."""
     quoted = installer.replace("'", "''")
@@ -938,7 +995,7 @@ def _windows_install_after_exit_command(installer: str) -> list[str]:
         "Get-Process qimchi | Stop-Process -Force;"
         "Start-Sleep -Seconds 1;"
         f"$setup=Start-Process -FilePath '{quoted}' -PassThru -ArgumentList "
-        f"'/NORESTART','/LOG=\"{setup_log}\"';"
+        f"'/NORESTART','/QIMCHIUPDATE=1','/LOG=\"{setup_log}\"';"
         "$setup.WaitForExit()"
     )
     return [
@@ -952,63 +1009,51 @@ def _windows_install_after_exit_command(installer: str) -> list[str]:
     ]
 
 
-# Replace the app after exit. Restore it on failure, then offer manual install.
-_MACOS_INSTALL_SCRIPT = r"""
-pid="$1"; dmg="$2"; target="$3"; log="$4"
-exec >>"$log" 2>&1
-echo "$(date) installing $dmg over $target"
-while kill -0 "$pid" 2>/dev/null; do sleep 0.5; done
-mount="$(mktemp -d /tmp/qimchi-update.XXXXXX)"
-staged="$(dirname "$target")/.qimchi-update.app"
-old="$(dirname "$target")/.qimchi-previous.app"
-installed=0
-if hdiutil attach -nobrowse -noautoopen -quiet -mountpoint "$mount" "$dmg"; then
-  source_app="$(ls -d "$mount"/[Qq]imchi.app 2>/dev/null | head -n 1)"
-  rm -rf "$staged" "$old"
-  if [ -n "$source_app" ] && ditto "$source_app" "$staged"; then
-    if mv "$target" "$old"; then
-      if mv "$staged" "$target"; then
-        installed=1
-        rm -rf "$old"
-      else
-        mv "$old" "$target"
-      fi
-    fi
-  fi
-  rm -rf "$staged"
-  hdiutil detach -quiet "$mount" || hdiutil detach -force -quiet "$mount"
-fi
-rmdir "$mount" 2>/dev/null
-if [ "$installed" = 1 ]; then
-  echo "$(date) installed; opening $target"
-  xattr -dr com.apple.quarantine "$target" 2>/dev/null
-  open "$target"
-else
-  echo "$(date) could not replace $target; opening the disk image"
-  open "$dmg"
-  open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AppBundles"
-fi
-"""
+def _show_disk_image(dmg: str, log) -> None:
+    """Mount the update disk image and open its volume in Finder."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["hdiutil", "attach", "-noautoopen", dmg],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        mounts = [
+            line.split("\t")[-1].strip()
+            for line in result.stdout.splitlines()
+            if "/Volumes/" in line
+        ]
+        if result.returncode == 0 and mounts:
+            subprocess.Popen(["open", mounts[-1]], close_fds=True)
+            log(f"[updater] opened the disk image at {mounts[-1]}")
+            return
+        log(
+            f"[updater] could not mount the disk image ({result.returncode}): "
+            f"{result.stderr.strip()}"
+        )
+    except Exception as exc:
+        log(f"[updater] could not mount the disk image: {exc!r}")
+    # Let macOS mount the image as a fallback; Finder may not open a window.
+    subprocess.Popen(["open", dmg], close_fds=True)
+    log("[updater] opened the disk image")
 
 
-def _running_app_bundle() -> str | None:
-    """Return the current macOS app bundle, if any."""
-    bundle = os.path.dirname(os.path.dirname(os.path.dirname(sys.executable)))
-    return bundle if bundle.endswith(".app") else None
+_LAUNCHER_ACTIVE = "QIMCHI_LAUNCHER_ACTIVE"
 
 
-def _macos_install_after_exit_command(dmg: str, app_bundle: str, log: str) -> list[str]:
-    """Build the detached macOS update command."""
-    return [
-        "/bin/sh",
-        "-c",
-        _MACOS_INSTALL_SCRIPT,
-        "qimchi-update",
-        str(os.getpid()),
-        dmg,
-        app_bundle,
-        log,
-    ]
+def _is_relaunched_child(argv: list[str], environ) -> bool:
+    # Setup inherits the old app's environment through the update helper, so
+    # the Qimchi it starts after an update must not be taken for a child.
+    return environ.get(_LAUNCHER_ACTIVE) == "1" and "--after-update" not in argv
+
+
+def _env_for_new_qimchi() -> dict[str, str]:
+    """Environment for a helper or process that starts a fresh Qimchi."""
+    env = dict(os.environ)
+    env.pop(_LAUNCHER_ACTIVE, None)
+    return env
 
 
 def _install_marker_path(home: str | None = None) -> str:
@@ -1284,6 +1329,7 @@ class _Updates:
 
         if pending is not None and pending.get("tag") == result["tag"]:
             self._log(f"[updater] {result['tag']} is already downloaded")
+            self._offer = {**result, **pending}
             return self._set(status="downloaded", checkedAt=checked_at)
 
         self._offer = result
@@ -1337,6 +1383,7 @@ class _Updates:
                 "tag": offer["tag"],
                 "notes": offer.get("notes", ""),
                 "platform": offer["platform"],
+                "asset_url": offer["asset_url"],
                 "install_mode": offer.get("install_mode", ""),
                 "asset_name": offer.get("asset_name", ""),
                 "path": destination,
@@ -1356,6 +1403,42 @@ class _Updates:
         self._set(status="downloading", progress=0.0, error=None, prompt=None)
         threading.Thread(target=run, name="qimchi-update-download", daemon=True).start()
         return self.status()
+
+    def redownload(self) -> dict:
+        state = self.status()
+        pending = self._offer
+        if state["status"] != "downloaded" or not pending:
+            self._log(f"[updater] nothing to redownload (status {state['status']})")
+            return state
+        if not pending.get("asset_url"):
+            try:
+                from api.settings import desktop_settings
+                from api.updater import check_for_update
+
+                refreshed = check_for_update(
+                    include_previews=desktop_settings().previewReleases,
+                    log=self._log,
+                )
+            except Exception as exc:
+                self._log(f"[updater] could not refresh the download URL: {exc!r}")
+                refreshed = None
+            if refreshed and refreshed.get("tag") == pending.get("tag"):
+                pending = {**refreshed, **pending}
+                self._offer = pending
+            else:
+                return self._set(
+                    status="error",
+                    error="The download link could not be refreshed. Check for updates and try again.",
+                    prompt=None,
+                )
+
+        offer = dict(pending)
+        self._clear_pending()
+        offer.pop("path", None)
+        self._offer = offer
+        self._log(f"[updater] redownloading {offer['tag']}")
+        self._set(status="available", progress=0.0, error=None, prompt=None)
+        return self.download()
 
     def remind_at_next_launch(self) -> dict:
         self._log(
@@ -1384,6 +1467,10 @@ class _Updates:
         self._set(status="installing", prompt=None)
         try:
             if platform == "windows" or os.name == "nt":
+                # Preserve the previous setup.log before the Windows installer overwrites it.
+                _rotate_update_log(
+                    os.path.join(os.path.dirname(installer), "setup.log"), max_bytes=0
+                )
                 # DETACHED_PROCESS makes PowerShell exit before running this script.
                 flags = (
                     subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
@@ -1392,6 +1479,7 @@ class _Updates:
                     _windows_install_after_exit_command(installer),
                     creationflags=flags,
                     close_fds=True,
+                    env=_env_for_new_qimchi(),
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -1403,26 +1491,8 @@ class _Updates:
                 )
                 _close_windows(self._log)
             elif platform == "macos" or sys.platform == "darwin":
-                bundle = _running_app_bundle()
-                if bundle:
-                    log = os.path.join(os.path.dirname(installer), "install.log")
-                    subprocess.Popen(
-                        _macos_install_after_exit_command(installer, bundle, log),
-                        close_fds=True,
-                        start_new_session=True,
-                        stdin=subprocess.DEVNULL,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                    self._log(
-                        f"[updater] {bundle} will be replaced once this app has "
-                        f"closed (log: {log})"
-                    )
-                else:
-                    subprocess.Popen(["open", installer], close_fds=True)
-                    self._log(
-                        "[updater] not running from an .app; opened the disk image"
-                    )
+                # Close Qimchi so the user can replace the app manually.
+                _show_disk_image(installer, self._log)
                 _close_windows(self._log)
             elif _try_replace_running_appimage(installer, self._log):
                 _close_windows(self._log)
@@ -1629,9 +1699,9 @@ def _run_native_smoke(window, dataset_path: str, download_dir: str, log) -> bool
 
 def main() -> int:
     # Stop a re-launched frozen child before it creates another server/window.
-    if os.environ.get("QIMCHI_LAUNCHER_ACTIVE") == "1":
+    if _is_relaunched_child(sys.argv, os.environ):
         return 0
-    os.environ["QIMCHI_LAUNCHER_ACTIVE"] = "1"
+    os.environ[_LAUNCHER_ACTIVE] = "1"
 
     headless_smoke = os.environ.get("QIMCHI_HEADLESS_SMOKE") == "1"
     native_smoke = os.environ.get("QIMCHI_NATIVE_SMOKE") == "1"
@@ -1702,6 +1772,12 @@ def main() -> int:
 
     # Configure HTTPS before the backend and its workers start.
     _use_bundled_certificates(log)
+
+    if getattr(sys, "frozen", False) and sys.platform.startswith("linux"):
+        import platform
+
+        typelib_dirs = _use_system_gtk(os.environ, platform.machine())
+        log(f"[gtk] system typelib folders: {', '.join(typelib_dirs) or 'none found'}")
 
     if not (headless_smoke or native_smoke):
         _ensure_chrome_for_kaleido(log)

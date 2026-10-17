@@ -89,6 +89,43 @@ def _group_of(proc) -> str:
     return "other"
 
 
+_WEBVIEW_KINDS = {
+    # WebKitGTK and WKWebView name their processes by role.
+    "webkitwebprocess": "renderer",
+    "webkitnetworkprocess": "network",
+    "webkitgpuprocess": "gpu",
+    "com.apple.webkit.webcontent": "renderer",
+    "com.apple.webkit.networking": "network",
+    "com.apple.webkit.gpu": "gpu",
+}
+_WEBVIEW_KIND_ORDER = ("renderer", "gpu", "browser", "network", "utility", "other")
+
+
+def _webview_kind(proc) -> str:
+    """Return the WebView process role for memory diagnostics."""
+    name = _process_name(proc)
+    for prefix, kind in _WEBVIEW_KINDS.items():
+        if name.startswith(prefix):
+            return kind
+    try:
+        cmdline = proc.cmdline()
+    except Exception:
+        return "other"
+    # WebView2 uses --type to distinguish roles sharing the same executable.
+    role = next((arg[7:] for arg in cmdline if arg.startswith("--type=")), None)
+    if role is None:
+        return "browser"
+    if role == "renderer":
+        return "renderer"
+    if role == "gpu-process":
+        return "gpu"
+    if role == "utility":
+        return (
+            "network" if any("NetworkService" in arg for arg in cmdline) else "utility"
+        )
+    return "other"
+
+
 _responsible_pid_fn: Any = None
 _responsible_pid_state = "untried"
 
@@ -186,6 +223,7 @@ def sample() -> dict[str, Any]:
     result: dict[str, Any] = {"time": datetime.now().isoformat(timespec="seconds")}
     for group, procs in groups.items():
         rss = private = count = 0
+        kinds: dict[str, dict[str, int]] = {}
         for proc in procs:
             try:
                 r, p = _memory(proc)
@@ -194,7 +232,18 @@ def sample() -> dict[str, Any]:
             rss += r
             private += p
             count += 1
+            if group == "webview":
+                try:
+                    kind = kinds.setdefault(
+                        _webview_kind(proc), {"count": 0, "private": 0}
+                    )
+                except Exception:
+                    continue
+                kind["count"] += 1
+                kind["private"] += p
         result[group] = {"count": count, "rss": rss, "private": private}
+        if kinds:
+            result[group]["kinds"] = kinds
     if not webview_available:
         result["webview"] = None
 
@@ -231,6 +280,15 @@ def _total(sample_: dict[str, Any]) -> int:
     )
 
 
+def _kind_order(name: str) -> int:
+    return _WEBVIEW_KIND_ORDER.index(name) if name in _WEBVIEW_KIND_ORDER else 99
+
+
+def _format_kind(name: str, data: dict[str, int]) -> str:
+    count = f"{data['count']}x " if data["count"] > 1 else ""
+    return f"{name} {count}{_mb(data['private'])}"
+
+
 def format_sample(current: dict[str, Any], baseline: dict[str, Any] | None) -> str:
     """One readable line: private memory per group, growth, counts and gauges."""
     parts = []
@@ -240,7 +298,18 @@ def format_sample(current: dict[str, Any], baseline: dict[str, Any] | None) -> s
             parts.append(f"{group} unavailable")
             continue
         count = f"{data['count']}x " if group != "qimchi" else ""
-        parts.append(f"{group} {count}{_mb(data['private'])}")
+        part = f"{group} {count}{_mb(data['private'])}"
+        kinds = data.get("kinds")
+        if kinds:
+            part += (
+                " ("
+                + ", ".join(
+                    _format_kind(name, kinds[name])
+                    for name in sorted(kinds, key=_kind_order)
+                )
+                + ")"
+            )
+        parts.append(part)
     total = _total(current)
     line = " | ".join(parts) + f" | total {_mb(total)}"
     if baseline is not None:
@@ -476,6 +545,15 @@ def _log_files() -> list[Path]:
     found = {
         path for pattern in names for path in folder.glob(pattern) if path.is_file()
     }
+    # Include update logs and state files, excluding downloaded installers.
+    updates = _home() / "updates"
+    if updates.is_dir():
+        found |= {
+            path
+            for pattern in ("*.log", "*.log.*", "*.json")
+            for path in updates.glob(pattern)
+            if path.is_file()
+        }
     return sorted(found)
 
 
@@ -533,7 +611,8 @@ def build_bundle(destination: Path, include_crash_reports: bool) -> dict[str, An
     with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as bundle:
         for path in _log_files():
             try:
-                bundle.write(path, f"logs/{path.name}")
+                folder = "logs/updates" if path.parent.name == "updates" else "logs"
+                bundle.write(path, f"{folder}/{path.name}")
                 manifest["logs"].append(path.name)
             except OSError as exc:
                 manifest["skipped"].append(f"{path.name}: {exc}")

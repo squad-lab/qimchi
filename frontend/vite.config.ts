@@ -85,6 +85,9 @@ export default defineConfig(({ mode }) => {
       },
     ],
 
+    // CHANGELOG.md lives alongside frontend; serve its raw import in development.
+    server: { fs: { allow: [resolve("..")] } },
+
     define: {
       global: "globalThis",
       __QIMCHI_VERSION__: JSON.stringify(qimchiVersion),

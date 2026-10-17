@@ -74,12 +74,27 @@ class PlotResponse(BaseModel):
     invalid: bool = False
 
 
+class PlotContext(BaseModel):
+    """Plot parameters the client can resend to restore a missing server context."""
+
+    fpath: str
+    indeps: List[str]
+    deps: List[str]
+    plotType: Literal["LinePlot", "HeatMap"]
+    cut: Optional[LineCut] = None
+
+
 class TransformPlotRequest(BaseModel):
     plot_ref: str
     filters_order: List[str] = Field(default_factory=list)
     filters_opts: Dict[str, dict] = Field(default_factory=dict)
     slider: Dict[str, dict] = Field(default_factory=dict)
     swap_xy: bool = False
+    context: Optional[PlotContext] = None
+
+
+class ReleasePlotContextsRequest(BaseModel):
+    plot_refs: List[str] = Field(default_factory=list, max_length=1000)
 
 
 class TransformPlotResponse(BaseModel):

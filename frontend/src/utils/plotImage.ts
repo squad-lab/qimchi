@@ -1,9 +1,10 @@
 // Plotly rasterizes SVG through an <img>, which cannot access page fonts.
-// Embed those fonts first and apply the light export theme.
+// Embed those fonts before rasterizing and apply the selected export theme.
 import type { Layout } from "plotly.js";
 
 import Plotly from "../components/Plots/plotly";
-import { applyThemeToLayout, lightTheme } from "../components/Plots/themes";
+import { applyThemeToLayout, darkTheme, lightTheme } from "../components/Plots/themes";
+import type { PlotTheme } from "../components/interfaces";
 
 /** The first font file listed in an @font-face `src`. */
 export const fontUrlOf = (src: string): string | null =>
@@ -17,16 +18,61 @@ export function withStyle(svg: string, css: string): string {
   return `${svg.slice(0, at)}<defs><style>${css}</style></defs>${svg.slice(at)}`;
 }
 
-/** A layout drawn in the light theme, on a transparent background. */
-export function lightLayout(layout: Partial<Layout>): Partial<Layout> {
-  const themed = applyThemeToLayout(layout, lightTheme);
-  const axisLine = { linecolor: lightTheme.colors.text };
+/** Apply the given theme with a transparent background. */
+export function themedLayout(layout: Partial<Layout>, theme: PlotTheme): Partial<Layout> {
+  const themed = applyThemeToLayout(layout, theme);
+  const axisLine = { linecolor: theme.colors.text };
   return {
     ...themed,
     xaxis: { ...themed.xaxis, ...axisLine },
     yaxis: { ...themed.yaxis, ...axisLine },
   };
 }
+
+// A Plotly title may be plain text or an object.
+const titleObject = (title: unknown): { text?: string; font?: object } =>
+  typeof title === "string" ? { text: title } : ((title as object | undefined) ?? {});
+
+const white = (axis: Partial<Layout["xaxis"]> | undefined) => ({
+  ...axis,
+  linecolor: "white",
+  tickcolor: "white",
+  tickfont: { ...axis?.tickfont, color: "white" },
+  title: {
+    ...titleObject(axis?.title),
+    font: { ...titleObject(axis?.title).font, color: "white" },
+  },
+  minor: { ...axis?.minor, tickcolor: "white" },
+});
+
+/** Match the dark disk export with a transparent background and white text, lines and ticks. */
+export function darkLayout(layout: Partial<Layout>): Partial<Layout> {
+  const themed = themedLayout({ ...layout, title: titleObject(layout.title) }, darkTheme);
+  const coloraxis = themed.coloraxis;
+  return {
+    ...themed,
+    font: { ...themed.font, color: "white" },
+    title: {
+      ...titleObject(themed.title),
+      font: { ...titleObject(themed.title).font, color: "white" },
+    },
+    xaxis: white(themed.xaxis),
+    yaxis: white(themed.yaxis),
+    ...(coloraxis && {
+      coloraxis: {
+        ...coloraxis,
+        colorbar: {
+          ...coloraxis.colorbar,
+          tickfont: { ...coloraxis.colorbar?.tickfont, color: "white" },
+          tickcolor: "white",
+          outlinecolor: "white",
+        },
+      },
+    }),
+  };
+}
+
+export const lightLayout = (layout: Partial<Layout>) => themedLayout(layout, lightTheme);
 
 const toDataUrl = (blob: Blob) =>
   new Promise<string>((resolve, reject) => {
@@ -91,12 +137,28 @@ export const fontFamiliesIn = (svg: string): string[] => {
   return [...families];
 };
 
-/** Render the current Plotly view as a transparent PNG. */
-export async function plotToPng(graph: HTMLElement, scale: number): Promise<Blob> {
+/** Use the displayed plot dimensions for export; leave undrawn figures unchanged. */
+export function withDrawnSize<T extends { layout?: object }>(
+  figure: T,
+  container: HTMLElement | null,
+): T {
+  const graph = container?.querySelector<HTMLElement>(".js-plotly-plot");
+  if (!graph?.clientWidth || !graph.clientHeight) return figure;
+  return {
+    ...figure,
+    layout: { ...figure.layout, width: graph.clientWidth, height: graph.clientHeight },
+  };
+}
+
+/** Render the current Plotly view as a transparent PNG using the light or dark export style. */
+export async function plotToPng(graph: HTMLElement, scale: number, dark = false): Promise<Blob> {
   const width = graph.clientWidth;
   const height = graph.clientHeight;
   const drawn = graph as HTMLElement & { data: Plotly.Data[]; layout: Partial<Layout> };
-  const figure = { data: drawn.data, layout: lightLayout(drawn.layout) };
+  const figure = {
+    data: drawn.data,
+    layout: dark ? darkLayout(drawn.layout) : lightLayout(drawn.layout),
+  };
   const svgUrl = await Plotly.toImage(figure, { format: "svg", width, height });
   const svg = decodeURIComponent(svgUrl.slice(svgUrl.indexOf(",") + 1));
   const fonts = await Promise.all(fontFamiliesIn(svg).map(embeddedFont));

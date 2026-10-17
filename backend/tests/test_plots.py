@@ -33,6 +33,78 @@ def test_plot_context_reference_is_stable_and_registered():
     assert plots.get_plot_context("missing") is None
 
 
+def test_plot_contexts_are_a_bounded_cache(monkeypatch):
+    plots._PLOT_CONTEXTS.clear()
+    monkeypatch.setattr(plots, "_MAX_PLOT_CONTEXTS", 3)
+    for name in ("a", "b", "c"):
+        plots.register_plot_context(name, {"fpath": name})
+    # Accessing a context protects it from the next LRU eviction.
+    assert plots.get_plot_context("a") == {"fpath": "a"}
+    plots.register_plot_context("d", {"fpath": "d"})
+    assert list(plots._PLOT_CONTEXTS) == ["c", "a", "d"]
+    plots._PLOT_CONTEXTS.clear()
+
+
+def test_plot_contexts_survive_threads_adding_while_others_read(monkeypatch):
+    """Check that concurrent cache reads, writes and releases do not raise errors."""
+    import sys
+    import threading
+
+    plots._PLOT_CONTEXTS.clear()
+    monkeypatch.setattr(plots, "_MAX_PLOT_CONTEXTS", 8)
+    errors = []
+
+    def add(start):
+        try:
+            for i in range(start, start + 2000):
+                plots.register_plot_context(f"r{i}", {"fpath": str(i)})
+        except Exception as exc:  # pragma: no cover - capture concurrent cache failures
+            errors.append(exc)
+
+    def read():
+        try:
+            for _ in range(20000):
+                for ref in list(plots._PLOT_CONTEXTS)[:1]:
+                    plots.get_plot_context(ref)
+                plots.release_plot_contexts(["r0"])
+        except Exception as exc:  # pragma: no cover
+            errors.append(exc)
+
+    threads = [threading.Thread(target=add, args=(n * 2000,)) for n in range(4)]
+    threads.append(threading.Thread(target=read))
+    # Use frequent thread switches to increase the chance of exposing cache races.
+    interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    finally:
+        sys.setswitchinterval(interval)
+
+    assert errors == []
+    assert len(plots._PLOT_CONTEXTS) <= 8
+    plots._PLOT_CONTEXTS.clear()
+
+
+@pytest.mark.asyncio
+async def test_released_plot_contexts_are_forgotten():
+    from api.models import ReleasePlotContextsRequest
+
+    plots._PLOT_CONTEXTS.clear()
+    plots.register_plot_context("open", {"fpath": "open"})
+    plots.register_plot_context("closed", {"fpath": "closed"})
+
+    response = await plots.release_plot_contexts_endpoint(
+        ReleasePlotContextsRequest(plot_refs=["closed", "unknown"])
+    )
+
+    assert response == {"released": 1}
+    assert list(plots._PLOT_CONTEXTS) == ["open"]
+    plots._PLOT_CONTEXTS.clear()
+
+
 def test_resolve_context_fpath_preserves_live_fragments_and_disk_fallback():
     dataset = xr.Dataset(attrs={"path": "database.db#run_id=4"})
     assert (

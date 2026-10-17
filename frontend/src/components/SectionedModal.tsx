@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { Rnd } from "react-rnd";
+import { fitToWindow, useKeepRndInWindow } from "../utils/keepInWindow";
 
 import Tooltip from "./Tooltip";
 
@@ -84,6 +85,8 @@ const SectionedModal = ({
   children,
 }: SectionedModalProps) => {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const rndRef = useRef<Rnd>(null);
+  useKeepRndInWindow(rndRef, isOpen, 500, 400);
   const colors = ACCENT_CLASSES[accent];
 
   const bringToFront = () => {
@@ -117,7 +120,7 @@ const SectionedModal = ({
           className={`w-full flex items-center gap-2.5 text-left text-sm font-semibold transition-all border-b border-gray-100 border-l-4 ${
             depth === 0
               ? "px-2.5 py-3.5 @min-[560px]/modal:px-4"
-              : "pl-5 pr-2.5 py-2.5 text-[13px] @min-[560px]/modal:pl-9 @min-[560px]/modal:pr-4"
+              : "pl-5 pr-2.5 py-2.5 text-[0.8125rem] @min-[560px]/modal:pl-9 @min-[560px]/modal:pr-4"
           } ${
             active
               ? `${colors.active} shadow-inner`
@@ -137,12 +140,17 @@ const SectionedModal = ({
   return (
     <div ref={wrapperRef} className="fixed inset-0 pointer-events-none">
       <Rnd
-        default={{
-          x: window.innerWidth / 2 - 455,
-          y: window.innerHeight / 2 - 325,
-          width: 910,
-          height: 670,
-        }}
+        ref={rndRef}
+        default={fitToWindow(
+          {
+            x: window.innerWidth / 2 - 455,
+            y: window.innerHeight / 2 - 325,
+            width: 910,
+            height: 670,
+          },
+          500,
+          400,
+        )}
         minWidth={500}
         minHeight={400}
         dragHandleClassName="drag-handle"
@@ -166,7 +174,7 @@ const SectionedModal = ({
                 <h2 className="text-sm font-bold text-gray-800 tracking-tight">{title}</h2>
                 {shortcut && (
                   <span
-                    className={`text-[12px] font-mono font-bold px-1 py-0.5 rounded border opacity-90 ${colors.badge}`}
+                    className={`text-[0.75rem] font-mono font-bold px-1 py-0.5 rounded border opacity-90 ${colors.badge}`}
                   >
                     {shortcut}
                   </span>

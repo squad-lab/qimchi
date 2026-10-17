@@ -816,6 +816,28 @@ const ViewerHelp = memo(() => (
         </li>
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <div>
+            <strong>Markers:</strong> Add vertical lines, horizontal lines or points to the LineCut
+            preview.
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              <li>
+                Choose a tool and click the preview. Hold Shift to place freely instead of snapping
+                to data.
+              </li>
+              <li>
+                Select a marker and use the arrow keys to move it. Shift moves 5 steps by default;
+                change this under Settings &gt; Plots.
+              </li>
+              <li>Press Delete or use the marker list to remove it.</li>
+              <li>
+                Horizontal and vertical cuts keep separate markers until the plot closes. Oblique
+                cuts have none.
+              </li>
+            </ul>
+          </div>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
             On a live heat map, Follow keeps the cut on the row or column currently being measured,
             including its partial values. It moves when the next line starts and changes orientation
@@ -842,14 +864,16 @@ const ViewerHelp = memo(() => (
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            <strong>Export → Disk (E):</strong> Save the plot as PNG/SVG
+            <strong>Export → Disk (E):</strong> Save the plot as PNG/SVG, at the size and shape it
+            has in the Viewer, so a full-width plot is saved wide. Send to Notes does the same
           </span>
         </li>
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            <strong>Export → Copy:</strong> Copy the plot to the clipboard as a PNG, exactly as it
-            is shown
+            <strong>Export → Copy:</strong> Copy the plot to the clipboard as a transparent PNG,
+            exactly as it is shown. In dark mode you get the dark version of the disk export, with
+            white text and lines
           </span>
         </li>
         <li className="flex gap-2 leading-relaxed">
@@ -923,6 +947,16 @@ const ViewerHelp = memo(() => (
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>Clear All Plots, or press Alt+Shift+V, to remove every plot</span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Closed a plot by mistake? Press Ctrl+Z (Cmd+Z on a Mac), or Undo in the message that
+            appears, to bring it back where it was, with its filters, settings and width. After
+            Clear All Plots, one Ctrl+Z brings them all back. The Recently closed button in the
+            Viewer&apos;s ribbon lists the last closed plots, 25 unless you change it under Settings
+            &gt; Plots, so you can reopen any one of them
+          </span>
         </li>
       </ul>
     </div>
@@ -1021,13 +1055,14 @@ const SettingsHelp = memo(() => (
       </p>
       <ul className="list-disc space-y-2 pl-5 leading-relaxed">
         <li>
-          <strong>General</strong>: choose the theme, interface zoom and default plot width. The
-          System theme follows your operating system
+          <strong>General</strong>: choose the theme and interface zoom, or restore every setting to
+          its default. The System theme follows your operating system
         </li>
         <li>
           <strong>Plots</strong>: choose which plots are created for a new measurement, whether
-          custom plots are recreated, whether plots use a square aspect ratio and which direction
-          LineCut starts in
+          custom plots are recreated, how wide plots are and whether they use a square aspect ratio,
+          which direction LineCut starts in, how far Shift with an arrow key moves a LineCut marker,
+          and how many closed plots to keep
         </li>
         <li>
           <strong>Explorer</strong>, <strong>Live</strong> and <strong>Export</strong>: set the sort
@@ -1202,9 +1237,9 @@ const DesktopHelp = memo(() => (
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            To report a problem, open Settings &gt; Developer and choose Save logs for a bug report.
-            It saves both logs and a summary of your computer in one ZIP file to attach. Tick the
-            crash reports option to include recent crash reports from the app window as well
+            To report a problem, use the bug button on the sidebar rail. It explains what to
+            include, links to a new GitLab issue, and creates a ZIP containing the logs and a system
+            summary. Recent crash reports can be included as well
           </span>
         </li>
         <li className="flex gap-2 leading-relaxed">
@@ -1315,6 +1350,7 @@ const KeyboardHelp = memo(() => (
           ["Alt+Shift+C", "Clear Composer"],
           ["Alt+Shift+B", "Clear Basket"],
           ["Alt+Shift+V", "Clear Viewer (all plots)"],
+          ["Ctrl+Z", "Reopen the last closed plot(s)"],
           ["Alt+Shift+H", "Heart selected datasets (Explorer)"],
           ["Alt+Shift+T", "Trash selected datasets (Explorer)"],
           ["Alt+1", "Open Explorer pane"],
@@ -1625,7 +1661,7 @@ const HelpModal = ({
                     : "border-transparent hover:bg-gray-50"
                 }`}
               >
-                <div className="mb-0.5 flex items-center gap-1 text-[11px] font-medium text-gray-500">
+                <div className="mb-0.5 flex items-center gap-1 text-[0.6875rem] font-medium text-gray-500">
                   <span>{result.entry.sectionLabel}</span>
                   {result.entry.heading && result.entry.heading !== result.entry.text && (
                     <>

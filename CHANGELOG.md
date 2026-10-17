@@ -1,5 +1,41 @@
 ## Qimchi Changelog
 
+### v0.7.1 - 2026-10-17
+
+- [Feature] Reopen closed plots with Ctrl+Z (Cmd+Z on Mac), Undo, or Recently closed, preserving their position, filters, settings and width. Clear All Plots can also be undone.
+- [Feature] Add vertical lines, horizontal lines or points to LineCut previews. Markers snap to data and can be moved with arrow keys or removed with Delete.
+- [Feature] Settings > Updates shows the running version's formatted, scrollable changelog, including offline.
+- [Feature] The sidebar bug report button now opens reporting instructions, a direct link to a new GitLab issue, and the log-bundle controls.
+- [Feature] Downloaded updates can be downloaded again before installation.
+- [Fix] Copying a plot in dark mode now produces a transparent PNG with white text and lines, matching the dark disk export. Previously, copying always used the light style.
+- [Fix] Images saved to disk or sent to Notes now match the plot's displayed dimensions in the Viewer instead of using a fixed 700 × 500 size.
+- [Fix] Selecting "Start Qimchi after installation" during a Windows update now starts the app instead of being blocked by the installation-in-progress marker.
+- [Fix] Qimchi opens again by itself after an in-app update on Windows and Linux. It used to start and then close at once without showing a window.
+- [Fix] Update prompts show the offered version's release notes instead of installation instructions from the GitLab release description.
+- [Fix] Prevented the image-resource memory leak caused by repeated live heat-map redraws in Chromium/WebView2. This could grow memory by several gigabytes and crash the window during a long measurement (see: https://github.com/plotly/plotly.js/issues/8097).
+- [Fix] If the window has to reload, for example after a crash, the Basket and the plots in the Viewer come back as they were.
+- [Fix] Qimchi uses much less memory while it is not exporting: each of its background image exporters now takes about 90% less memory.
+- [Fix] A LineCut that follows the newest line of a live heat map now goes all the way to the last row or column. It used to stop one or more lines before the end.
+- [Fix] The LineCut card no longer goes missing after the window gets smaller. A card you had moved could end up outside the window and stay there until Qimchi was restarted; it is now kept inside the window.
+- [Fix] The Filters, Appearance, Help, Settings and notification panels, and the pinned parameters card, now stay inside the window. In a small window they used to open with their title bar above the top edge, where they could not be moved or closed, and shrinking the window could leave them out of view.
+- [Fix] Searching Metadata now finds a dataset's own attributes, such as Sample Name or Cryostat, by name or value. It used to find only fields nested inside them, like those in a Parameters Snapshot.
+- [Fix] The Linux AppImage starts on newer distributions. On Arch Linux it failed at launch with "CXXABI_1.3.15 not found" or "undefined symbol" errors, and on Fedora it could not find WebKit. It now uses the system's own GTK and WebKit libraries, and is tested on Ubuntu, Debian, Fedora and Arch before each release.
+- [Fix] Interface zoom now applies consistently to compact labels, walkthroughs, notes, release notes, and docked LineCut text.
+- [Fix] Qimchi no longer keeps a copy of every live measurement you have watched in memory for the rest of the session.
+- [Fix] Settings → Updates no longer squeezes the version text into the buttons when a downloaded update is waiting; the buttons move below the text when there is not enough room.
+- [Fix] Derivative filters on live data now show a note and wait until the selected axis has at least two points.
+- [Misc] The Windows installer runs on Windows 10 (version 1809 or later) again. Windows 11 remains the supported version, but the installer no longer refuses to start on Windows 10.
+- [Misc] Settings > Plots now groups controls by purpose and includes Plot width. General puts Restore all defaults first, and appearance controls have clearer headings.
+- [Misc] Bug-report bundles now include updater logs, which rotate to limit their size.
+- [Misc] Closing plots now releases their server contexts after a short delay to reduce memory use.
+- [Misc] The macOS disk image has a branded, Retina-ready drag-to-Applications layout and Qimchi icons for the app and mounted disk, matching the Windows icon. The app bundle is named Qimchi.app with a capital Q; the Finder window and mounted disk use the short name Qimchi.
+- [Misc] On macOS, installing an update closes Qimchi and opens the new disk image. Drag Qimchi to Applications to replace the old version, then open it again.
+- [Misc] Windows setup uses Qimchi branding and two pages: configure the install folder, desktop shortcut and launch preference, then install.
+- [Misc] Plot-control tooltips now show their keyboard shortcuts and use the same styled tooltips throughout the plot ribbons.
+- [Misc] Bug-report logs now show which part of the window (page, graphics, network) is using its memory.
+- [Misc] Large live heat maps do much less work on each refresh, so they update more often and use less memory.
+- [Misc] Release installers are now stored in GitLab's package registry so download links remain available after build artifacts expire.
+
 ### v0.7.0 - 2026-10-01
 
 - [Feature] Complex variables, including HDF5 `r`/`i` pairs, are available as amplitude, phase in radians, real, and imaginary values. Library metadata is preserved for these measurements.

@@ -32,13 +32,16 @@ import type { AxisType, Dash } from "plotly.js";
 import plotlyColorscales from "./plotly_colorscales_plotlyjs.json";
 import { applyThemeToLayout, lightTheme } from "./themes";
 import { PlotAPI, type TransformPlotRequest } from "../../services/plotAPI";
+import { holdPlotContext } from "../../services/plotContexts";
 import { PROD_BACKEND_URL } from "../../config";
 import "./PlotWrapper.css";
 import PlotComponent from "./Plot";
 import LineCutGuide from "./LineCutGuide";
 import LineCutPopup from "./LineCutPopup";
+import { LineCutMarkerBar, LineCutMarkerOverlay } from "./LineCutMarkers";
+import { useLineCutMarkers } from "./useLineCutMarkers";
 import { useLineCutStore } from "../../stores/lineCutStore";
-import { plotToPng } from "../../utils/plotImage";
+import { plotToPng, withDrawnSize } from "../../utils/plotImage";
 import AppearanceModal from "./AppearanceModal";
 import FiltersModal from "./FiltersModal";
 import type { AppliedFilter } from "../../components/interfaces";
@@ -47,6 +50,7 @@ import type { AttrData, PlotConfiguration, SliderConfig } from "../../components
 import { useToast } from "../../hooks/useToast";
 import { usePlotStore } from "../../stores/plotStore";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useThemeStore } from "../../stores/themeStore";
 import { appearanceDefaultsFor } from "../../settings/userSettings";
 import {
   appearanceOverrides as diffAppearance,
@@ -67,6 +71,12 @@ import {
 } from "../../services/exportAPI";
 import { PLOT_WIDTHS, type LineCutDirection } from "../../settings/userSettings";
 import { findFrontier, type Frontier } from "../../utils/liveFrontier";
+import {
+  numeric2DExtent,
+  numericExtent,
+  toNumeric2DArray,
+  toNumericArray,
+} from "../../utils/numericArrays";
 import { engineeringPresentation, unitMetaFromLayout } from "./engineeringTicks";
 import { engineeringFormatter, type AxisUnitMeta } from "../../utils/engineeringFormat";
 import {
@@ -98,7 +108,7 @@ const LINE_CUT_MODE_FOR_DIRECTION: Record<LineCutDirection, LineCutMode> = {
   oblique: "oblique",
 };
 
-type QimchiAxesMeta = Partial<Record<"x" | "y", { variable?: string; dependent?: boolean }>>;
+type QimchiAxesMeta = Partial<Record<"x" | "y" | "z", { variable?: string; dependent?: boolean }>>;
 
 class SupersededTransformError extends Error {}
 
@@ -317,6 +327,7 @@ const PlotWrapper: React.FC<Props> = ({
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
   // Squarify state - when true, force the plot container to maintain 1:1 aspect ratio
   const isSquareMode = useSettingsStore((state) => state.settings.plots.squarify);
+  const interfaceZoom = useSettingsStore((state) => state.settings.general.zoom);
   // A plot stores only what differs from the user's defaults, so changing a
   // default in Settings reaches every plot that has not overridden that value.
   const appearanceDefaults = useSettingsStore((state) =>
@@ -361,6 +372,8 @@ const PlotWrapper: React.FC<Props> = ({
   useEffect(() => {
     setActivePlotRef(plotRef);
   }, [plotRef]);
+  // Defer context release while this plot uses the reference.
+  useEffect(() => (activePlotRef ? holdPlotContext(activePlotRef) : undefined), [activePlotRef]);
 
   const handleRelayout = useCallback((data: Record<string, unknown>) => {
     const nativeTitleKey = "coloraxis.colorbar.title.text";
@@ -473,7 +486,7 @@ const PlotWrapper: React.FC<Props> = ({
   const exportPayload = useStableCallback((): PlotExportPayload | null =>
     plotConfig && customizedPlotJson
       ? {
-          plot_json: exportPlotJson,
+          plot_json: withDrawnSize(exportPlotJson, plotContainerRef.current),
           fpath: plotConfig.fpath,
           relayout_data: relayoutData,
           applied_filters: appliedFilters,
@@ -523,7 +536,8 @@ const PlotWrapper: React.FC<Props> = ({
       showToast("This browser does not allow copying images to the clipboard.", "error");
       return;
     }
-    const image = plotToPng(graph, exportScale ?? 2);
+    const dark = useThemeStore.getState().theme === "dark";
+    const image = plotToPng(graph, exportScale ?? 2, dark);
     // Start the clipboard write within the click's user-activation window.
     navigator.clipboard
       .write([new ClipboardItem({ "image/png": image })])
@@ -547,7 +561,7 @@ const PlotWrapper: React.FC<Props> = ({
       const axiosResponse = await axios.post(
         `${PROD_BACKEND_URL}/export-plot-images/send-to-notes`,
         {
-          plot_json: exportPlotJson,
+          plot_json: withDrawnSize(exportPlotJson, plotContainerRef.current),
           fpath: plotConfig.fpath,
           relayout_data: relayoutData,
           applied_filters: appliedFilters,
@@ -767,6 +781,22 @@ const PlotWrapper: React.FC<Props> = ({
     [lineCutOwnerId],
   );
 
+  // Reuse curve samples across pointer updates until the preview changes.
+  const lineCutSamples = useMemo(
+    () => ({
+      x: toNumericArray(lineCutPreviewJson?.data?.[0]?.x),
+      y: toNumericArray(lineCutPreviewJson?.data?.[0]?.y),
+    }),
+    [lineCutPreviewJson],
+  );
+  const lineCutMarkers = useLineCutMarkers({
+    plotId: lineCutOwnerId,
+    preview: lineCutPreviewJson,
+    active: isLineCutActive,
+    enabled: resolvedLineCutAxis !== "oblique",
+    notify: showToast,
+  });
+
   // Ref to track isApplyingFilters for effects that shouldn't re-run when this flag changes
   const isApplyingFiltersRef = useRef<boolean>(isApplyingFilters);
 
@@ -815,157 +845,6 @@ const PlotWrapper: React.FC<Props> = ({
   } = usePlotStore();
   const presetLinkId = usePlotStore((state) =>
     plotConfig?.id ? (state.plotStates[plotConfig.id]?.filter_preset_id ?? null) : null,
-  );
-
-  const isArrayLikeValue = useCallback((value: unknown): boolean => {
-    if (value == null) return false;
-    if (Array.isArray(value) || ArrayBuffer.isView(value)) return true;
-    if (typeof value !== "object") return false;
-    const len = (value as { length?: unknown }).length;
-    return typeof len === "number" && Number.isFinite(len) && len >= 0;
-  }, []);
-
-  const toNumericArray = useCallback(
-    // keepNonFinite preserves NaN positions, which a 2D reshape needs: a live
-    // heatmap holds NaN for every point not yet measured.
-    (values: unknown, keepNonFinite = false): number[] => {
-      if (!values) return [];
-
-      if (typeof values === "object" && !Array.isArray(values)) {
-        const obj = values as Record<string, unknown>;
-
-        // Plotly/NumPy-style binary typed-array payload: { dtype, bdata }
-        if (typeof obj.bdata === "string" && typeof obj.dtype === "string") {
-          try {
-            const dtypeRaw = String(obj.dtype).trim();
-            const dtype = dtypeRaw.replace(/^[<>=|]/, "").toLowerCase();
-            const b64 = String(obj.bdata);
-            const bin = atob(b64);
-            const bytes = new Uint8Array(bin.length);
-            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-            const buffer = bytes.buffer;
-
-            const typedToNumbers = (arr: ArrayLike<number | bigint>) =>
-              Array.from(arr as ArrayLike<number | bigint>)
-                .map((v) => (typeof v === "bigint" ? Number(v) : Number(v)))
-                .filter((v) => keepNonFinite || Number.isFinite(v));
-
-            if (dtype === "f8" || dtype === "float64") {
-              return typedToNumbers(new Float64Array(buffer));
-            }
-            if (dtype === "f4" || dtype === "float32") {
-              return typedToNumbers(new Float32Array(buffer));
-            }
-            if (dtype === "i1" || dtype === "int8") {
-              return typedToNumbers(new Int8Array(buffer));
-            }
-            if (dtype === "u1" || dtype === "uint8") {
-              return typedToNumbers(new Uint8Array(buffer));
-            }
-            if (dtype === "i2" || dtype === "int16") {
-              return typedToNumbers(new Int16Array(buffer));
-            }
-            if (dtype === "u2" || dtype === "uint16") {
-              return typedToNumbers(new Uint16Array(buffer));
-            }
-            if (dtype === "i4" || dtype === "int32") {
-              return typedToNumbers(new Int32Array(buffer));
-            }
-            if (dtype === "u4" || dtype === "uint32") {
-              return typedToNumbers(new Uint32Array(buffer));
-            }
-          } catch {
-            // fall through to generic array-like decoder
-          }
-        }
-      }
-
-      if (!isArrayLikeValue(values)) return [];
-
-      return Array.from(values as ArrayLike<unknown>)
-        .map((v) => (v == null ? NaN : typeof v === "number" ? v : Number(v)))
-        .filter((v) => keepNonFinite || Number.isFinite(v));
-    },
-    [isArrayLikeValue],
-  );
-
-  const toNumeric2DArray = useCallback(
-    (values: unknown): number[][] => {
-      if (!values) return [];
-
-      // Handle ndarray-like payloads such as { dtype, bdata, shape, _inputArray }
-      if (typeof values === "object" && !Array.isArray(values)) {
-        const obj = values as Record<string, unknown>;
-
-        // Plotly often stores z as { dtype, bdata, shape, _inputArray }.
-        // Prefer _inputArray when present because it is already row-structured.
-        if (Array.isArray(obj._inputArray)) {
-          const rowsFromInputArray = (obj._inputArray as unknown[])
-            .map((row) => toNumericArray(row, true))
-            .filter((row) => row.length > 0);
-          if (rowsFromInputArray.length > 0) {
-            return rowsFromInputArray;
-          }
-        }
-
-        const shapeRaw = obj.shape;
-
-        const parseShape = (shape: unknown): { rows: number; cols: number } | null => {
-          if (Array.isArray(shape) && shape.length >= 2) {
-            const rows = Number(shape[0]);
-            const cols = Number(shape[1]);
-            if (Number.isFinite(rows) && Number.isFinite(cols)) {
-              return {
-                rows: Math.max(0, Math.floor(rows)),
-                cols: Math.max(0, Math.floor(cols)),
-              };
-            }
-          }
-          if (typeof shape === "string") {
-            const nums = shape
-              .replace(/[()[\]\s]/g, "")
-              .split(",")
-              .map((x) => Number(x))
-              .filter((x) => Number.isFinite(x));
-            if (nums.length >= 2) {
-              return {
-                rows: Math.max(0, Math.floor(nums[0])),
-                cols: Math.max(0, Math.floor(nums[1])),
-              };
-            }
-          }
-          return null;
-        };
-
-        const parsedShape = parseShape(shapeRaw);
-        if (parsedShape) {
-          const rows = parsedShape.rows;
-          const cols = parsedShape.cols;
-          const flat = toNumericArray(values, true);
-          if (rows > 0 && cols > 0 && flat.length >= rows * cols) {
-            const out: number[][] = [];
-            for (let r = 0; r < rows; r++) {
-              out.push(flat.slice(r * cols, (r + 1) * cols));
-            }
-            return out;
-          }
-        }
-      }
-
-      if (!isArrayLikeValue(values)) return [];
-
-      const rows = Array.from(values as ArrayLike<unknown>);
-      if (rows.length === 0) return [];
-
-      const first = rows[0];
-      if (isArrayLikeValue(first)) {
-        return rows.map((row) => toNumericArray(row, true)).filter((row) => row.length > 0);
-      }
-
-      const flat = toNumericArray(rows, true);
-      return flat.length > 0 ? [flat] : [];
-    },
-    [isArrayLikeValue, toNumericArray],
   );
 
   const getClosestIndex = useCallback(
@@ -1031,6 +910,9 @@ const PlotWrapper: React.FC<Props> = ({
       };
 
       const units = unitMetaFromLayout(customizedPlotJson.layout);
+      const heatmapAxes =
+        (customizedPlotJson.layout as { meta?: { qimchi_axes?: QimchiAxesMeta } })?.meta
+          ?.qimchi_axes ?? {};
       const axisName = (axis: "x" | "y") =>
         (units[axis] as { label?: string } | undefined)?.label || axis.toUpperCase();
       const axisValue = (axis: "x" | "y", value: number) =>
@@ -1100,8 +982,12 @@ const PlotWrapper: React.FC<Props> = ({
           },
         ],
         layout: {
-          meta: { qimchi_units: { x: units[alongAxis], y: units.z } },
-          title: { text: title, font: { size: 16 } },
+          meta: {
+            qimchi_units: { x: units[alongAxis], y: units.z },
+            // Associate markers with the preview's axis variables.
+            qimchi_axes: { x: heatmapAxes[alongAxis], y: heatmapAxes.z },
+          },
+          title: { text: title, font: { size: 16 * interfaceZoom } },
           uirevision: title,
           margin: { t: 48, r: 20, b: 52, l: 70 },
           xaxis: {
@@ -1110,16 +996,16 @@ const PlotWrapper: React.FC<Props> = ({
                 alongAxis === "y"
                   ? getTitleText(customizedPlotJson.layout?.yaxis)
                   : getTitleText(customizedPlotJson.layout?.xaxis),
-              font: { size: 14 },
+              font: { size: 14 * interfaceZoom },
             },
-            tickfont: { size: 13 },
+            tickfont: { size: 13 * interfaceZoom },
           },
           yaxis: {
             title: {
               text: getZTitle(),
-              font: { size: 14 },
+              font: { size: 14 * interfaceZoom },
             },
-            tickfont: { size: 13 },
+            tickfont: { size: 13 * interfaceZoom },
           },
           paper_bgcolor: "rgba(0,0,0,0)",
           plot_bgcolor: "rgba(0,0,0,0)",
@@ -1615,7 +1501,6 @@ const PlotWrapper: React.FC<Props> = ({
       plotConfig,
       sliderConfig,
       showToast,
-      toNumericArray,
     ],
   );
 
@@ -2062,7 +1947,7 @@ const PlotWrapper: React.FC<Props> = ({
           const values =
             explicitRange.length >= 2
               ? explicitRange.slice(0, 2)
-              : (updatedPlotJson.data || []).flatMap((trace: any) => toNumericArray(trace?.[axis]));
+              : (updatedPlotJson.data || []).flatMap((trace: any) => numericExtent(trace?.[axis]));
           const presentation = engineeringPresentation(
             unitDefinitions[axis],
             values,
@@ -2093,9 +1978,7 @@ const PlotWrapper: React.FC<Props> = ({
               : [];
           const zValues = explicitBounds.length
             ? explicitBounds
-            : (updatedPlotJson.data || []).flatMap((trace: any) =>
-                toNumeric2DArray(trace?.z).flat(),
-              );
+            : (updatedPlotJson.data || []).flatMap((trace: any) => numeric2DExtent(trace?.z));
           const presentation = engineeringPresentation(unitDefinitions.z, zValues, 5);
           const presentationTitle = presentation?.title;
           if (presentationTitle !== undefined) {
@@ -2134,7 +2017,7 @@ const PlotWrapper: React.FC<Props> = ({
 
       return updatedPlotJson;
     },
-    [toNumeric2DArray, toNumericArray],
+    [],
   );
 
   // Memoize appearance updates and temporary colour-scale previews.
@@ -3350,7 +3233,7 @@ const PlotWrapper: React.FC<Props> = ({
       xs: finite(toNumericArray(trace?.["x"])),
       ys: finite(toNumericArray(trace?.["y"])),
     };
-  }, [isLineCutActive, isHeatmapPlot, customizedPlotJson, toNumericArray]);
+  }, [isLineCutActive, isHeatmapPlot, customizedPlotJson]);
 
   const handlePlotClick = (event: Plotly.PlotMouseEvent) => {
     if (!isBGCorrActive) return;
@@ -3640,7 +3523,7 @@ const PlotWrapper: React.FC<Props> = ({
         )}
         {view === "popup" ? (
           <>
-            <Tooltip content="Expand to the full window" position="bottom">
+            <Tooltip content="Expand to the full window (M)" position="bottom">
               <button
                 type="button"
                 onClick={() => setIsMaximized(true)}
@@ -3664,9 +3547,14 @@ const PlotWrapper: React.FC<Props> = ({
         ) : null}
       </div>
 
-      <div className="flex-1 min-h-0 p-2 relative">
+      <div className="flex-1 min-h-0 p-2 relative" data-linecut-panel>
         {lineCutPreviewJson ? (
-          <PlotComponent plotJson={lineCutPreviewJson} compact={view === "popup"} />
+          <>
+            <PlotComponent plotJson={lineCutPreviewJson} compact={view === "popup"} />
+            {lineCutMarkers.available && (
+              <LineCutMarkerOverlay state={lineCutMarkers} samples={lineCutSamples} />
+            )}
+          </>
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
             <div className="rounded-full bg-blue-50 p-3">
@@ -3688,7 +3576,7 @@ const PlotWrapper: React.FC<Props> = ({
                   {lineCutModes.map(({ key, label }) => (
                     <div key={key} className="contents">
                       <dt>
-                        <kbd className="inline-block min-w-5 rounded border border-gray-300 bg-white px-1.5 py-0.5 font-mono text-[11px] text-gray-700 shadow-sm">
+                        <kbd className="inline-block min-w-5 rounded border border-gray-300 bg-white px-1.5 py-0.5 font-mono text-[0.6875rem] text-gray-700 shadow-sm">
                           {key}
                         </kbd>
                       </dt>
@@ -3701,6 +3589,7 @@ const PlotWrapper: React.FC<Props> = ({
           </div>
         )}
       </div>
+      <LineCutMarkerBar state={lineCutMarkers} />
     </>
   );
 
@@ -3732,7 +3621,7 @@ const PlotWrapper: React.FC<Props> = ({
             <div className="flex items-center gap-1">
               {/* Swap X & Y Axes (heatmaps only) */}
               {isHeatmapPlot && (
-                <Tooltip content="Swap X & Y Axes" position="bottom">
+                <Tooltip content="Swap X & Y Axes (S)" position="bottom">
                   <button
                     onClick={handleSwapAxes}
                     className={`relative p-1.5 rounded transition-colors duration-150 ${
@@ -3740,7 +3629,7 @@ const PlotWrapper: React.FC<Props> = ({
                         ? "bg-blue-100 text-blue-600"
                         : "qimchi-dark-hover-plain hover:bg-gray-200"
                     }`}
-                    title="Swap X & Y Axes"
+                    aria-label="Swap X and Y axes"
                     disabled={isApplyingFilters}
                   >
                     <ArrowLeftRight
@@ -3754,7 +3643,7 @@ const PlotWrapper: React.FC<Props> = ({
               {/* LineCut (Heatmaps only) */}
               {isHeatmapPlot && (
                 <Tooltip
-                  content={isLineCutActive ? "Leave LineCut (Esc)" : "LineCut"}
+                  content={isLineCutActive ? "Leave LineCut (Esc)" : "LineCut (Shift+X)"}
                   position="bottom"
                 >
                   <button
@@ -3764,7 +3653,7 @@ const PlotWrapper: React.FC<Props> = ({
                         ? "bg-blue-100 text-blue-600 border border-blue-600"
                         : "qimchi-dark-hover-plain hover:bg-gray-200"
                     }`}
-                    title="Generate line slices (X/Y/O keys)"
+                    aria-label="LineCut"
                     disabled={isApplyingFilters}
                   >
                     <ScissorsLineDashed
@@ -3779,7 +3668,9 @@ const PlotWrapper: React.FC<Props> = ({
 
               <Tooltip
                 content={
-                  isLineCutActive ? "Return to the Viewer with LineCut in a pop-up" : "Restore"
+                  isLineCutActive
+                    ? "Return to the Viewer with LineCut in a pop-up (M)"
+                    : "Restore (M)"
                 }
                 position="bottom"
               >
@@ -3893,7 +3784,7 @@ const PlotWrapper: React.FC<Props> = ({
                               }}
                               disabled={m.disabled}
                               title={m.disabled ? "WIP" : m.label}
-                              className={`flex-1 text-[10px] font-bold py-1.5 px-3 rounded-full transition-all ${
+                              className={`flex-1 text-[0.625rem] font-bold py-1.5 px-3 rounded-full transition-all ${
                                 bgCorrMode === m.id
                                   ? "bg-white text-blue-700 shadow-sm border border-blue-100"
                                   : m.disabled
@@ -3903,7 +3794,7 @@ const PlotWrapper: React.FC<Props> = ({
                             >
                               <span className="inline-flex items-center gap-1 justify-center w-full">
                                 {m.label}
-                                {m.disabled && <span className="text-[9px]">WIP</span>}
+                                {m.disabled && <span className="text-[0.5625rem]">WIP</span>}
                               </span>
                             </button>
                           ))}
@@ -4049,7 +3940,7 @@ const PlotWrapper: React.FC<Props> = ({
 
             {isBGCorrActive && (
               <div className="absolute top-12 left-1/2 transform -translate-x-1/2 z-30 flex items-center gap-2 bg-white/95 dark:bg-gray-800/95 backdrop-blur-md border border-blue-200 px-3 py-2 rounded-full shadow-xl animate-in fade-in slide-in-from-top-2 duration-300">
-                <span className="text-[10px] font-bold text-blue-600 px-1 uppercase tracking-wider">
+                <span className="text-[0.625rem] font-bold text-blue-600 px-1 uppercase tracking-wider">
                   {bgCorrPoints.length === 0
                     ? "Pick Points"
                     : `${bgCorrPoints.length} Pt${bgCorrPoints.length > 1 ? "s" : ""}`}
@@ -4059,13 +3950,13 @@ const PlotWrapper: React.FC<Props> = ({
                   <button
                     onClick={() => applyBGCorrNow(bgCorrPoints)}
                     disabled={bgCorrPoints.length === 0}
-                    className="qimchi-bg-corr-apply bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-[10px] font-bold px-2.5 py-1 rounded-full transition-all active:scale-95"
+                    className="qimchi-bg-corr-apply bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-[0.625rem] font-bold px-2.5 py-1 rounded-full transition-all active:scale-95"
                   >
                     Apply
                   </button>
                   <button
                     onClick={() => setIsBGCorrActive(false)}
-                    className="qimchi-dark-hover-plain hover:bg-red-50 text-red-600 text-[10px] font-bold px-2 py-1 rounded-full transition-colors"
+                    className="qimchi-dark-hover-plain hover:bg-red-50 text-red-600 text-[0.625rem] font-bold px-2 py-1 rounded-full transition-colors"
                   >
                     Cancel
                   </button>
@@ -4117,11 +4008,11 @@ const PlotWrapper: React.FC<Props> = ({
           <div className="flex justify-center">
             <div className="flex flex-col gap-1 items-center">
               {onClose && (
-                <Tooltip content="Close" position="left">
+                <Tooltip content="Close (Del)" position="left">
                   <button
                     onClick={onClose}
                     className="qimchi-dark-hover-plain p-1.5 rounded hover:bg-gray-300 transition-colors"
-                    title="Close"
+                    aria-label="Close plot"
                   >
                     <X size={16} className="text-red-600" />
                   </button>
@@ -4166,7 +4057,7 @@ const PlotWrapper: React.FC<Props> = ({
                         ? "bg-amber-100 hover:bg-amber-200"
                         : "qimchi-dark-hover-plain hover:bg-gray-300"
                     }`}
-                    title={plotConfig?.pinned ? "Unpin" : "Pin to measurement"}
+                    aria-label={plotConfig?.pinned ? "Unpin plot" : "Pin plot to measurement"}
                     aria-pressed={Boolean(plotConfig?.pinned)}
                   >
                     {plotConfig?.pinned ? (
@@ -4179,11 +4070,11 @@ const PlotWrapper: React.FC<Props> = ({
               )}
 
               {/* Reset button at the top */}
-              <Tooltip content="Reset plot" position="left">
+              <Tooltip content="Reset plot (R)" position="left">
                 <button
                   onClick={handleReset}
                   className="qimchi-dark-hover-plain p-1.5 rounded hover:bg-orange-100 hover:text-orange-600 transition-colors duration-150"
-                  title="Reset"
+                  aria-label="Reset plot"
                 >
                   <RotateCcw size={16} className="text-gray-600" />
                 </button>
@@ -4196,7 +4087,7 @@ const PlotWrapper: React.FC<Props> = ({
             <div className="flex flex-col gap-1 items-center mt-1">
               {isHeatmapPlot && (
                 <>
-                  <Tooltip content="LineCut Tool" position="left">
+                  <Tooltip content="LineCut Tool (Shift+X)" position="left">
                     <button
                       onClick={toggleLineCutMode}
                       className={`relative p-1.5 rounded transition-colors duration-150 ${
@@ -4220,7 +4111,7 @@ const PlotWrapper: React.FC<Props> = ({
                     </button>
                   </Tooltip>
 
-                  <Tooltip content="Swap X & Y Axes" position="left">
+                  <Tooltip content="Swap X & Y Axes (S)" position="left">
                     <button
                       onClick={handleSwapAxes}
                       className={`relative p-1.5 rounded transition-colors duration-150 ${
@@ -4244,7 +4135,11 @@ const PlotWrapper: React.FC<Props> = ({
 
               {/* Appearance Settings */}
               <Tooltip
-                content={shiftHeld && hoverAppearanceBtn ? "Paint Appearance" : "Edit Appearance"}
+                content={
+                  shiftHeld && hoverAppearanceBtn
+                    ? "Paint Appearance (Shift+click)"
+                    : "Edit Appearance (A)"
+                }
                 position="left"
               >
                 <button
@@ -4259,7 +4154,7 @@ const PlotWrapper: React.FC<Props> = ({
                   onMouseEnter={() => setHoverAppearanceBtn(true)}
                   onMouseLeave={() => setHoverAppearanceBtn(false)}
                   className="qimchi-dark-hover-plain relative p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
-                  title={shiftHeld && hoverAppearanceBtn ? "Paint Appearance" : "Edit Appearance"}
+                  aria-label="Edit appearance"
                 >
                   <Palette
                     size={16}
@@ -4277,12 +4172,12 @@ const PlotWrapper: React.FC<Props> = ({
               <Tooltip
                 content={
                   shiftHeld && hoverFiltersBtn
-                    ? "Paint Filters"
+                    ? "Paint Filters (Shift+click)"
                     : appliedFilters.length > 0
                       ? // Names only, in the order they are applied -- the full
                         // filter strings live in the modal.
-                        `Filters: ${appliedFilters.map((f) => filterLabel(f.name)).join(" → ")}`
-                      : "Apply Filters & Sliders"
+                        `Filters (F): ${appliedFilters.map((f) => filterLabel(f.name)).join(" → ")}`
+                      : "Apply Filters & Sliders (F)"
                 }
                 position="left"
               >
@@ -4297,13 +4192,7 @@ const PlotWrapper: React.FC<Props> = ({
                   onMouseEnter={() => setHoverFiltersBtn(true)}
                   onMouseLeave={() => setHoverFiltersBtn(false)}
                   className="qimchi-dark-hover-plain relative p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
-                  title={
-                    shiftHeld && hoverFiltersBtn
-                      ? "Paint Filters"
-                      : appliedFilters.length > 0
-                        ? `Filters: ${appliedFilters.map((f) => filterLabel(f.name)).join(" → ")}`
-                        : "Apply Filters & Sliders"
-                  }
+                  aria-label="Edit filters"
                   disabled={isApplyingFilters}
                 >
                   <PocketKnife
@@ -4330,10 +4219,14 @@ const PlotWrapper: React.FC<Props> = ({
                 </button>
               </Tooltip>
 
-              <RibbonFlyout label="Export" icon={<Download size={16} className="text-gray-600" />}>
+              <RibbonFlyout
+                label="Export"
+                tooltip="Export (E)"
+                icon={<Download size={16} className="text-gray-600" />}
+              >
                 {(close) => (
                   <>
-                    <Tooltip content="Export images" position="top">
+                    <Tooltip content="Export images (E)" position="top">
                       <button
                         type="button"
                         role="menuitem"
@@ -4345,10 +4238,10 @@ const PlotWrapper: React.FC<Props> = ({
                         aria-label="Export images"
                       >
                         <ImageDown size={16} className="text-gray-600" />
-                        <span className="text-[11px] font-medium text-gray-700">Disk</span>
+                        <span className="text-[0.6875rem] font-medium text-gray-700">Disk</span>
                       </button>
                     </Tooltip>
-                    <Tooltip content="Send to Notes" position="top">
+                    <Tooltip content="Send to Notes (N)" position="top">
                       <button
                         type="button"
                         role="menuitem"
@@ -4360,7 +4253,7 @@ const PlotWrapper: React.FC<Props> = ({
                         aria-label="Send to Notes"
                       >
                         <ImagePlus size={16} className="text-gray-600" />
-                        <span className="text-[11px] font-medium text-gray-700">Notes</span>
+                        <span className="text-[0.6875rem] font-medium text-gray-700">Notes</span>
                       </button>
                     </Tooltip>
                     <Tooltip content="Copy as PNG" position="top">
@@ -4375,7 +4268,7 @@ const PlotWrapper: React.FC<Props> = ({
                         aria-label="Copy to clipboard"
                       >
                         <ClipboardCopy size={16} className="text-gray-600" />
-                        <span className="text-[11px] font-medium text-gray-700">Copy</span>
+                        <span className="text-[0.6875rem] font-medium text-gray-700">Copy</span>
                       </button>
                     </Tooltip>
                   </>
@@ -4398,7 +4291,7 @@ const PlotWrapper: React.FC<Props> = ({
                         dispatchPlotWidthPreset(percent);
                         close();
                       }}
-                      className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                      className={`rounded px-1.5 py-0.5 text-[0.6875rem] font-medium ${
                         widthPercent === percent
                           ? "bg-blue-100 text-blue-700"
                           : "qimchi-dark-hover-plain text-gray-700 hover:bg-gray-100"
@@ -4411,11 +4304,11 @@ const PlotWrapper: React.FC<Props> = ({
               </RibbonFlyout>
 
               {/* Maximize */}
-              <Tooltip content="Maximize" position="left">
+              <Tooltip content="Maximize (M)" position="left">
                 <button
                   onClick={handleMaximize}
                   className="qimchi-dark-hover-plain p-1.5 rounded hover:bg-gray-200 transition-colors duration-150"
-                  title="Maximize"
+                  aria-label="Maximize plot"
                 >
                   <Maximize2 size={16} className="text-gray-600" />
                 </button>

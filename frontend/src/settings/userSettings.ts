@@ -39,6 +39,10 @@ export interface UserSettings {
     recreateCustomPlots: boolean;
     /** Initial LineCut direction. */
     lineCutDirection: LineCutDirection;
+    /** Number of data steps a LineCut marker moves with Shift+arrow. */
+    lineCutMarkerStep: number;
+    /** Maximum number of closed plots retained for reopening. */
+    closedPlotsLimit: number;
   };
   explorer: {
     sortBy: ExplorerSort;
@@ -70,6 +74,12 @@ export interface UserSettings {
   };
 }
 
+/** Closed-plot history limits and the threshold for the Settings warning. */
+export const CLOSED_PLOTS_LIMIT = { min: 1, max: 100, recommended: 25 } as const;
+
+/** Shift+arrow step sizes offered in Settings. */
+export const LINE_CUT_MARKER_STEPS = [2, 3, 5, 10, 20] as const;
+
 export const FACTORY_SETTINGS: UserSettings = {
   general: { theme: "system", zoom: 1, plotWidth: 50, walkthroughSeen: false },
   plots: {
@@ -77,6 +87,8 @@ export const FACTORY_SETTINGS: UserSettings = {
     squarify: false,
     recreateCustomPlots: true,
     lineCutDirection: "horizontal",
+    lineCutMarkerStep: 5,
+    closedPlotsLimit: 25,
   },
   explorer: { sortBy: "timestamp" },
   live: { autoAddToBasket: true, minRefreshMs: 300 },
@@ -103,7 +115,13 @@ const ENUM_LEAVES: Record<string, readonly unknown[]> = {
   "explorer.sortBy": ["name", "timestamp", "size", "chrono"],
   "plots.plottingBehaviour": ["heatmapOrLine", "both", "none"],
   "plots.lineCutDirection": ["horizontal", "vertical", "oblique"],
+  "plots.lineCutMarkerStep": LINE_CUT_MARKER_STEPS,
   "live.minRefreshMs": LIVE_REFRESH_STEPS,
+};
+
+// Allowed ranges for integer settings.
+const INTEGER_LEAVES: Record<string, readonly [number, number]> = {
+  "plots.closedPlotsLimit": [CLOSED_PLOTS_LIMIT.min, CLOSED_PLOTS_LIMIT.max],
 };
 
 /** The effective settings: stored values over the defaults, ignoring anything malformed. */
@@ -122,6 +140,12 @@ export const resolveSettings = (stored: unknown): UserSettings => {
     }
     if (value === undefined) return def;
     if (ENUM_LEAVES[path]) return ENUM_LEAVES[path].includes(value) ? value : def;
+    if (INTEGER_LEAVES[path]) {
+      const [min, max] = INTEGER_LEAVES[path];
+      return Number.isInteger(value) && (value as number) >= min && (value as number) <= max
+        ? value
+        : def;
+    }
     if (def === null) {
       return value === null || typeof value === NULLABLE_LEAF_TYPES[path] ? value : def;
     }

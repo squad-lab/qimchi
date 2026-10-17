@@ -219,6 +219,29 @@ def test_heatmap_differentiation_keeps_a_compact_colorbar_title(heat_figure):
     assert coloraxis["cmin"] <= coloraxis["cmax"]
 
 
+@pytest.mark.parametrize("name", ["diff_x", "diff_y"])
+def test_heatmap_differentiation_waits_for_a_second_line(heat_figure, name, caplog):
+    heat_figure["data"][0].update(y=[0], z=[[1.0, 2.0, 3.0]])
+    if name == "diff_y":
+        heat_figure["data"][0].update(x=[0], y=[0, 1, 2], z=[[1.0], [2.0], [3.0]])
+
+    with caplog.at_level("ERROR", logger="qimchi"):
+        result, warnings = filters.apply_filters([name], {name: {}}, heat_figure, 2)
+
+    assert not caplog.records
+    assert len(warnings) == 1 and "at least two points" in warnings[0]
+    assert np.array_equal(_axis(result, "z").ravel(), _axis(heat_figure, "z").ravel())
+
+
+def test_line_differentiation_waits_for_a_second_point(line_figure):
+    line_figure["data"][0].update(x=[0], y=[1])
+
+    result, warnings = filters.apply_filters(["diff"], {"diff": {}}, line_figure, 1)
+
+    assert "at least two points" in warnings[0]
+    assert list(_axis(result, "y")) == [1]
+
+
 def test_differentiation_keeps_fraction_when_engineering_prefix_changes(line_figure):
     line_figure["layout"]["xaxis"]["title"]["text"] = "Plunger Gate 2 (V)"
     line_figure["layout"]["yaxis"]["title"]["text"] = "Top Gate Leakage (A)"
@@ -654,6 +677,65 @@ async def test_transform_endpoint_success_missing_context_and_failure(
     with pytest.raises(HTTPException) as failed:
         await filters.transform_plot_endpoint(request)
     assert failed.value.status_code == 500
+
+
+@pytest.mark.asyncio
+async def test_transform_takes_back_a_released_context_from_the_request(
+    monkeypatch, line_figure
+):
+    from api.models import PlotContext
+
+    plots._PLOT_CONTEXTS.clear()
+    seen = {}
+
+    def render(**kwargs):
+        seen.update(kwargs)
+        return line_figure, []
+
+    monkeypatch.setattr(filters, "_generate_plot_json_for_transform", render)
+    request = TransformPlotRequest(
+        plot_ref="released",
+        context=PlotContext(
+            fpath="run.nc", indeps=["x"], deps=["y"], plotType="LinePlot"
+        ),
+    )
+
+    response = await filters.transform_plot_endpoint(request)
+
+    assert response.plot_ref == "released"
+    assert seen["fpath"] == "run.nc" and seen["deps"] == ["y"]
+    # Later requests can use the restored server context.
+    assert plots.get_plot_context("released")["fpath"] == "run.nc"
+    plots._PLOT_CONTEXTS.clear()
+
+
+@pytest.mark.asyncio
+async def test_transform_prefers_the_servers_own_context(monkeypatch, line_figure):
+    from api.models import PlotContext
+
+    plots._PLOT_CONTEXTS.clear()
+    plots.register_plot_context(
+        "known",
+        {"fpath": "server.nc", "indeps": ["x"], "deps": ["y"], "plotType": "LinePlot"},
+    )
+    seen = {}
+
+    def render(**kwargs):
+        seen.update(kwargs)
+        return line_figure, []
+
+    monkeypatch.setattr(filters, "_generate_plot_json_for_transform", render)
+    await filters.transform_plot_endpoint(
+        TransformPlotRequest(
+            plot_ref="known",
+            context=PlotContext(
+                fpath="client.nc", indeps=["x"], deps=["y"], plotType="LinePlot"
+            ),
+        )
+    )
+
+    assert seen["fpath"] == "server.nc"
+    plots._PLOT_CONTEXTS.clear()
 
 
 def test_filtered_colorbar_title_is_enlarged(heat_figure):

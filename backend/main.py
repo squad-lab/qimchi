@@ -1,5 +1,4 @@
 import asyncio
-import atexit
 import logging
 import os
 import sys
@@ -20,6 +19,7 @@ from api import (
     dirtree,
     download,
     export,
+    export_render,
     filters,
     library,
     live_measurements,
@@ -45,49 +45,14 @@ _enable_kaleido_warmup = os.environ.get("ENABLE_KALEIDO_WARMUP", "true").lower()
     "yes",
 )
 
-# Workaround for Kaleido v1 performance regression with the v0 API:
-# explicitly manage the Kaleido sync server lifecycle.
-_enable_kaleido_sync_server = os.environ.get(
-    "ENABLE_KALEIDO_SYNC_SERVER", "true"
-).lower() in (
-    "1",
-    "true",
-    "yes",
-)
-
-
-def _start_kaleido_sync_server(context: str) -> bool:
-    if not _enable_kaleido_sync_server:
-        logging.info("Kaleido sync server disabled for %s", context)
-        return False
-    try:
-        import kaleido
-
-        kaleido.start_sync_server(page_generator=export.export_page_generator())
-        logging.info("Kaleido sync server started for %s", context)
-        return True
-    except Exception:
-        logging.exception("Failed to start Kaleido sync server for %s", context)
-        return False
-
-
-def _stop_kaleido_sync_server(context: str) -> None:
-    if not _enable_kaleido_sync_server:
-        return
-    try:
-        import kaleido
-
-        kaleido.stop_sync_server()
-        logging.info("Kaleido sync server stopped for %s", context)
-    except Exception:
-        logging.exception("Failed to stop Kaleido sync server for %s", context)
-
 
 def _warm_export_pool(pool: ProcessPoolExecutor, workers: int) -> None:
     """Warm each export worker off the event loop with one real render."""
     try:
         started = time.perf_counter()
-        futures = [pool.submit(export.warm_export_worker) for _ in range(workers)]
+        futures = [
+            pool.submit(export_render.warm_export_worker) for _ in range(workers)
+        ]
         warmed = 0
         slowest = 0.0
         # Use one deadline for the whole pool, not one timeout per worker.
@@ -115,13 +80,6 @@ def _warm_export_pool(pool: ProcessPoolExecutor, workers: int) -> None:
         )
     except Exception:
         logging.exception("Kaleido warm-up could not run")
-
-
-def _init_export_worker() -> None:
-    """ProcessPool worker initializer for export image generation."""
-    started = _start_kaleido_sync_server("export-worker")
-    if started:
-        atexit.register(_stop_kaleido_sync_server, "export-worker")
 
 
 # Monitoring endpoints
@@ -166,7 +124,9 @@ async def lifespan(app: FastAPI):
             logging.exception("Qimchi DB init failed (library features disabled)")
             set_db_status(False, f"{type(exc).__name__}: {exc}")
 
-        app.state.kaleido_sync_started = _start_kaleido_sync_server("api-process")
+        app.state.kaleido_sync_started = export_render.start_kaleido_sync_server(
+            "api-process"
+        )
 
         # Pre-spawn worker processes; keep conservative worker count
         # Respect EXPORT_MAX_WORKERS env var if provided, else conservative default
@@ -176,7 +136,7 @@ async def lifespan(app: FastAPI):
             max_workers = min(4, (os.cpu_count() or 1))
         app.state.export_pool = ProcessPoolExecutor(
             max_workers=max_workers,
-            initializer=_init_export_worker,
+            initializer=export_render.init_export_worker,
         )
 
         # Warm the worker processes in the background.
@@ -209,7 +169,7 @@ async def lifespan(app: FastAPI):
             logging.exception("Error shutting down export pool")
         finally:
             if getattr(app.state, "kaleido_sync_started", False):
-                _stop_kaleido_sync_server("api-process")
+                export_render.stop_kaleido_sync_server("api-process")
 
 
 app = FastAPI(lifespan=lifespan)

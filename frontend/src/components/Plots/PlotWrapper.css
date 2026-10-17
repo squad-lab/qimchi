@@ -292,3 +292,8 @@
   outline-color: rgba(97, 175, 239, 0.6) !important;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
 }
+
+/* Clicks place markers while a LineCut marker tool is active. */
+.qimchi-marker-armed .js-plotly-plot .plotly .nsewdrag {
+  cursor: cell;
+}

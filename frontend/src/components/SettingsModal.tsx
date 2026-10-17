@@ -38,6 +38,8 @@ import {
   LIVE_REFRESH_MAX_MS,
   LIVE_REFRESH_MIN_MS,
   LIVE_REFRESH_STEP_MS,
+  LINE_CUT_MARKER_STEPS,
+  CLOSED_PLOTS_LIMIT,
   PLOT_WIDTHS,
   ZOOM_STEPS,
   type ExplorerSort,
@@ -101,7 +103,7 @@ interface SettingsSearchEntry {
 const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   { id: "theme", sectionId: "general", sectionLabel: "General", label: "Theme" },
   { id: "zoom", sectionId: "general", sectionLabel: "General", label: "Zoom" },
-  { id: "plot-width", sectionId: "general", sectionLabel: "General", label: "Plot width" },
+  { id: "plot-width", sectionId: "plots", sectionLabel: "Plots", label: "Plot width" },
   { id: "sort", sectionId: "explorer", sectionLabel: "Explorer", label: "Sort by" },
   {
     id: "auto-add",
@@ -137,7 +139,21 @@ const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
     label: "Default LineCut direction",
     keywords: "horizontal vertical oblique",
   },
+  {
+    id: "linecut-marker-step",
+    sectionId: "plots",
+    sectionLabel: "Plots",
+    label: "Marker step with Shift",
+    keywords: "markers arrow keys nudge",
+  },
   { id: "square", sectionId: "plots", sectionLabel: "Plots", label: "Square plots" },
+  {
+    id: "closed-plots",
+    sectionId: "plots",
+    sectionLabel: "Plots",
+    label: "Closed plots to keep",
+    keywords: "recently closed undo reopen history ctrl+z",
+  },
   {
     id: "heatmap-colorscale",
     sectionId: "heatmap.colormap",
@@ -160,14 +176,14 @@ const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
         id: `${sectionId}-major`,
         sectionId,
         sectionLabel,
-        label: "Major Grid & Ticks",
+        label: "Major grid & ticks",
         keywords: `${axis} grid color dash width number tick angle length`,
       },
       {
         id: `${sectionId}-minor`,
         sectionId,
         sectionLabel,
-        label: "Minor Grid & Ticks",
+        label: "Minor grid & ticks",
         keywords: `${axis} grid color dash width number tick length`,
       },
     ];
@@ -183,14 +199,14 @@ const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
     id: "line-settings",
     sectionId: "line.style",
     sectionLabel: "LinePlot · Line & markers",
-    label: "Line Settings",
+    label: "Line",
     keywords: "color width opacity dash shape smoothing",
   },
   {
     id: "marker-settings",
     sectionId: "line.style",
     sectionLabel: "LinePlot · Line & markers",
-    label: "Marker Settings",
+    label: "Markers",
     keywords: "symbol color size opacity",
   },
   { id: "formats", sectionId: "export", sectionLabel: "Export", label: "Formats" },
@@ -232,28 +248,97 @@ const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   },
 ];
 
+/**
+ * Commit on blur or Enter so partial input cannot lower the limit and discard history.
+ */
+const ClosedPlotsLimitField = ({
+  value,
+  onCommit,
+}: {
+  value: number;
+  onCommit: (limit: number) => void;
+}) => {
+  const [draft, setDraft] = useState(String(value));
+  const [shown, setShown] = useState(value);
+  if (value !== shown) {
+    setShown(value);
+    setDraft(String(value));
+  }
+  const number = Number(draft);
+  const valid =
+    draft.trim() !== "" &&
+    Number.isInteger(number) &&
+    number >= CLOSED_PLOTS_LIMIT.min &&
+    number <= CLOSED_PLOTS_LIMIT.max;
+  const commit = () => {
+    if (valid && number !== value) onCommit(number);
+    else if (!valid) setDraft(String(value));
+  };
+  const footer = !valid ? (
+    <p className="mt-2 text-xs text-red-600">
+      Enter a whole number from {CLOSED_PLOTS_LIMIT.min} to {CLOSED_PLOTS_LIMIT.max}.
+    </p>
+  ) : number > CLOSED_PLOTS_LIMIT.recommended ? (
+    <p
+      role="note"
+      className="mt-2 flex items-start gap-1.5 rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-800"
+    >
+      <AlertTriangle size={14} className="mt-px shrink-0" aria-hidden />
+      Keeping more than {CLOSED_PLOTS_LIMIT.recommended} makes the list long and uses more memory.
+    </p>
+  ) : null;
+  return (
+    <Field
+      label="Closed plots to keep"
+      description="How many closed plots you can reopen. The oldest are dropped first."
+      inline
+      footer={footer}
+    >
+      <input
+        type="number"
+        aria-label="Closed plots to keep"
+        min={CLOSED_PLOTS_LIMIT.min}
+        max={CLOSED_PLOTS_LIMIT.max}
+        step={1}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") commit();
+        }}
+        className="w-24 rounded border border-gray-300 p-1.5 text-sm"
+      />
+    </Field>
+  );
+};
+
 const Field = ({
   label,
   description,
   inline = false,
+  footer,
   children,
 }: {
   label: string;
   description?: string;
   inline?: boolean;
+  footer?: React.ReactNode;
   children: React.ReactNode;
 }) => (
   <div
     data-setting-label={label}
-    className={`border-b border-gray-100 py-3 last:border-b-0 ${
-      inline ? "flex items-center justify-between gap-6" : ""
-    }`}
+    className="border-b border-gray-100 py-3 last:border-b-0 [&:has(+h4)]:border-b-0"
   >
-    <div className="min-w-0">
-      <div className="text-sm font-medium text-gray-700">{label}</div>
-      {description && <div className="mt-0.5 text-xs text-gray-500">{description}</div>}
+    <div className={inline ? "flex flex-wrap items-center justify-between gap-x-6 gap-y-2" : ""}>
+      <div className={inline ? "min-w-0 flex-1 basis-56" : "min-w-0"}>
+        <div className="text-sm font-medium text-gray-700">{label}</div>
+        {description && <div className="mt-0.5 text-xs text-gray-500">{description}</div>}
+      </div>
+      <div className={inline ? "shrink-0" : "mt-2 w-full min-w-0 [&>select]:w-full"}>
+        {children}
+      </div>
     </div>
-    <div className={inline ? "shrink-0" : "mt-2 w-full min-w-0 [&>select]:w-full"}>{children}</div>
+    {footer}
   </div>
 );
 
@@ -409,6 +494,17 @@ const Checkboxes = <T extends string>({
       );
     })}
   </div>
+);
+
+/** Subheading for related settings, with a divider except for the first group. */
+const GroupHeading = ({ title, first = false }: { title: string; first?: boolean }) => (
+  <h4
+    className={`pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 ${
+      first ? "" : "mt-4 border-t border-gray-200 pt-4"
+    }`}
+  >
+    {title}
+  </h4>
 );
 
 const SectionHeader = ({ title, onReset }: { title: string; onReset: () => void }) => (
@@ -579,45 +675,19 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
       case "general":
         return (
           <>
-            <SectionHeader title="General" onReset={() => resetSection(["general"])} />
-            <Field label="Theme" description="System follows your operating system.">
-              <Segmented
-                label="Theme"
-                value={settings.general.theme}
-                options={[
-                  { value: "system", label: "System" },
-                  { value: "light", label: "Light" },
-                  { value: "dark", label: "Dark" },
-                ]}
-                onChange={(theme) => update(["general", "theme"], theme)}
-              />
-            </Field>
-            <Field label="Zoom" description="The size of the whole interface.">
-              <select
-                aria-label="Zoom"
-                value={settings.general.zoom}
-                onChange={(e) => update(["general", "zoom"], Number(e.target.value))}
-                className="rounded border border-gray-300 p-1.5 text-sm"
-              >
-                {ZOOM_STEPS.map((step) => (
-                  <option key={step} value={step}>
-                    {Math.round(step * 100)}%
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Plot width" description="How much of the Viewer's width each plot takes.">
-              <Segmented
-                label="Plot width"
-                value={settings.general.plotWidth}
-                options={PLOT_WIDTHS.map((width) => ({ value: width, label: `${width}%` }))}
-                onChange={(width) => update(["general", "plotWidth"], width)}
-              />
-            </Field>
+            <SectionHeader
+              title="General"
+              onReset={() => {
+                // Plot width resets with the Plots section.
+                resetSection(["general", "theme"]);
+                resetSection(["general", "zoom"]);
+                resetSection(["general", "walkthroughSeen"]);
+              }}
+            />
             {/* Confirmed in place rather than with window.confirm, whose native
                 dialog is titled with the server address and ignores the theme. */}
             <div
-              className={`mt-6 rounded-md border p-3 ${
+              className={`mb-2 rounded-md border p-3 ${
                 confirmingResetAll ? "border-red-200 bg-red-50" : "border-gray-200"
               }`}
             >
@@ -662,15 +732,49 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
                 </div>
               )}
             </div>
+            <GroupHeading title="Interface" />
+            <Field label="Theme" description="System follows your operating system.">
+              <Segmented
+                label="Theme"
+                value={settings.general.theme}
+                options={[
+                  { value: "system", label: "System" },
+                  { value: "light", label: "Light" },
+                  { value: "dark", label: "Dark" },
+                ]}
+                onChange={(theme) => update(["general", "theme"], theme)}
+              />
+            </Field>
+            <Field label="Zoom" description="The size of the whole interface.">
+              <select
+                aria-label="Zoom"
+                value={settings.general.zoom}
+                onChange={(e) => update(["general", "zoom"], Number(e.target.value))}
+                className="rounded border border-gray-300 p-1.5 text-sm"
+              >
+                {ZOOM_STEPS.map((step) => (
+                  <option key={step} value={step}>
+                    {Math.round(step * 100)}%
+                  </option>
+                ))}
+              </select>
+            </Field>
           </>
         );
       case "plots":
         return (
           <>
-            <SectionHeader title="Plots" onReset={() => resetSection(["plots"])} />
+            <SectionHeader
+              title="Plots"
+              onReset={() => {
+                resetSection(["plots"]);
+                resetSection(["general", "plotWidth"]);
+              }}
+            />
+            <GroupHeading title="New measurements" first />
             <Field
               label="Plotting behaviour"
-              description="Which plots to create when a measurement is added to the basket. Plots are only made when the measurement's variables allow them."
+              description="Which plots to create when you add a measurement to the Basket."
             >
               <select
                 aria-label="Plotting behaviour"
@@ -685,7 +789,7 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
             </Field>
             <Field
               label="Recreate custom plots"
-              description="Adding a measurement recreates the plots already in the Viewer. Turn this off to recreate only its default plots, not Composer plots or LineCuts."
+              description="Give new measurements the plots already in the Viewer. When off, they get only their default plots."
               inline
             >
               <Toggle
@@ -694,9 +798,28 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
                 onChange={(on) => update(["plots", "recreateCustomPlots"], on)}
               />
             </Field>
+
+            <GroupHeading title="Layout" />
+            <Field label="Plot width" description="How much of the Viewer's width each plot takes.">
+              <Segmented
+                label="Plot width"
+                value={settings.general.plotWidth}
+                options={PLOT_WIDTHS.map((width) => ({ value: width, label: `${width}%` }))}
+                onChange={(width) => update(["general", "plotWidth"], width)}
+              />
+            </Field>
+            <Field label="Square plots" description="Keep every plot at a 1:1 aspect ratio." inline>
+              <Toggle
+                label="Square plots"
+                checked={settings.plots.squarify}
+                onChange={(on) => update(["plots", "squarify"], on)}
+              />
+            </Field>
+
+            <GroupHeading title="LineCut" />
             <Field
               label="Default LineCut direction"
-              description="Initial direction. While active, press X, Y, or O to switch. Measured axes do not support Oblique."
+              description="Switch with X, Y or O while LineCut is on. Oblique needs two swept axes."
             >
               <select
                 aria-label="LineCut direction"
@@ -709,13 +832,29 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
                 <option value="oblique">Oblique (O)</option>
               </select>
             </Field>
-            <Field label="Square plots" description="Keep every plot at a 1:1 aspect ratio." inline>
-              <Toggle
-                label="Square plots"
-                checked={settings.plots.squarify}
-                onChange={(on) => update(["plots", "squarify"], on)}
-              />
+            <Field
+              label="Marker step with Shift"
+              description="How far Shift with an arrow key moves the selected marker."
+            >
+              <select
+                aria-label="Marker step with Shift"
+                value={settings.plots.lineCutMarkerStep}
+                onChange={(e) => update(["plots", "lineCutMarkerStep"], Number(e.target.value))}
+                className="rounded border border-gray-300 p-1.5 text-sm"
+              >
+                {LINE_CUT_MARKER_STEPS.map((step) => (
+                  <option key={step} value={step}>
+                    {step} steps
+                  </option>
+                ))}
+              </select>
             </Field>
+
+            <GroupHeading title="Closed plots" />
+            <ClosedPlotsLimitField
+              value={settings.plots.closedPlotsLimit}
+              onCommit={(limit) => update(["plots", "closedPlotsLimit"], limit)}
+            />
           </>
         );
       case "explorer":
@@ -902,7 +1041,7 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
               title={`${plotLabel} defaults`}
               onReset={() => resetSection(["appearance", type])}
             />
-            <p className="mb-4 text-xs text-gray-500">
+            <p className="mb-4 border-b border-gray-200 pb-4 text-xs text-gray-500">
               Applies to every {plotLabel} straight away, except where a plot has its own setting.
             </p>
             {part === "colormap" && <ColormapSection {...props} showColorRange={false} />}
@@ -1033,7 +1172,7 @@ const SettingsModal = ({ isOpen, onClose, initialSection }: SettingsModalProps) 
                     : "border-transparent hover:bg-gray-50"
                 }`}
               >
-                <div className="mb-0.5 flex items-center gap-1 text-[11px] font-medium text-gray-500">
+                <div className="mb-0.5 flex items-center gap-1 text-[0.6875rem] font-medium text-gray-500">
                   <span>{result.sectionLabel}</span>
                   <ChevronRight size={11} />
                   <span>Setting</span>

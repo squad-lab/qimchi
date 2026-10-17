@@ -12,41 +12,6 @@ import main
 from api.shared import db, paths
 
 
-def test_kaleido_sync_server_start_stop_and_disabled(monkeypatch):
-    calls = []
-    fake = SimpleNamespace(
-        start_sync_server=lambda **kwargs: calls.append(("start", kwargs)),
-        stop_sync_server=lambda: calls.append("stop"),
-    )
-    monkeypatch.setitem(__import__("sys").modules, "kaleido", fake)
-    monkeypatch.setattr(main, "_enable_kaleido_sync_server", True)
-    monkeypatch.setattr(main.export, "export_page_generator", lambda: "font-page")
-
-    assert main._start_kaleido_sync_server("test") is True
-    main._stop_kaleido_sync_server("test")
-    assert calls == [("start", {"page_generator": "font-page"}), "stop"]
-
-    monkeypatch.setattr(main, "_enable_kaleido_sync_server", False)
-    assert main._start_kaleido_sync_server("test") is False
-    main._stop_kaleido_sync_server("test")
-    assert calls == [("start", {"page_generator": "font-page"}), "stop"]
-
-
-def test_kaleido_sync_server_failures_are_nonfatal(monkeypatch):
-    fake = SimpleNamespace(
-        start_sync_server=lambda **_kwargs: (_ for _ in ()).throw(
-            RuntimeError("start")
-        ),
-        stop_sync_server=lambda: (_ for _ in ()).throw(RuntimeError("stop")),
-    )
-    monkeypatch.setitem(__import__("sys").modules, "kaleido", fake)
-    monkeypatch.setattr(main, "_enable_kaleido_sync_server", True)
-    monkeypatch.setattr(main.export, "export_page_generator", lambda: "font-page")
-
-    assert main._start_kaleido_sync_server("test") is False
-    main._stop_kaleido_sync_server("test")
-
-
 def test_warm_export_pool_counts_success_and_ignores_task_failures():
     class Future:
         def __init__(self, value=None, error=None):
@@ -74,20 +39,6 @@ def test_warm_export_pool_counts_success_and_ignores_task_failures():
         submit=lambda _fn: (_ for _ in ()).throw(RuntimeError("closed"))
     )
     main._warm_export_pool(broken_pool, 1)
-
-
-def test_init_export_worker_registers_shutdown_only_after_start(monkeypatch):
-    registrations = []
-    monkeypatch.setattr(main, "_start_kaleido_sync_server", lambda _context: True)
-    monkeypatch.setattr(
-        main.atexit,
-        "register",
-        lambda function, context: registrations.append((function, context)),
-    )
-
-    main._init_export_worker()
-
-    assert registrations == [(main._stop_kaleido_sync_server, "export-worker")]
 
 
 @pytest.mark.asyncio
@@ -124,10 +75,12 @@ async def test_lifespan_initializes_and_shuts_down_services(monkeypatch):
     monkeypatch.setattr(
         main, "set_db_status", lambda ready, error: events.append(("db", ready, error))
     )
-    monkeypatch.setattr(main, "_start_kaleido_sync_server", lambda _context: True)
     monkeypatch.setattr(
-        main,
-        "_stop_kaleido_sync_server",
+        main.export_render, "start_kaleido_sync_server", lambda _context: True
+    )
+    monkeypatch.setattr(
+        main.export_render,
+        "stop_kaleido_sync_server",
         lambda context: events.append(("stop", context)),
     )
     monkeypatch.setattr(main, "ProcessPoolExecutor", Pool)
@@ -155,7 +108,9 @@ async def test_lifespan_degrades_on_database_and_pool_failures(monkeypatch):
     monkeypatch.setattr(
         main, "set_db_status", lambda ready, error: statuses.append((ready, error))
     )
-    monkeypatch.setattr(main, "_start_kaleido_sync_server", lambda _context: False)
+    monkeypatch.setattr(
+        main.export_render, "start_kaleido_sync_server", lambda _context: False
+    )
     monkeypatch.setattr(
         main,
         "ProcessPoolExecutor",

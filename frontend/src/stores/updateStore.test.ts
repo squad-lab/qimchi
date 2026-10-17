@@ -28,6 +28,19 @@ describe("updateStore", () => {
     expect(useUpdateStore.getState().state).toEqual(downloading);
   });
 
+  it("requests a fresh copy of a downloaded update", async () => {
+    const downloading = state({ status: "downloading", tag: "v0.7.0-rc.9" });
+    const redownload = vi.fn().mockResolvedValue(downloading);
+    window.pywebview = {
+      api: { redownload_update: redownload },
+    } as unknown as typeof window.pywebview;
+
+    await useUpdateStore.getState().redownload();
+
+    expect(redownload).toHaveBeenCalledOnce();
+    expect(useUpdateStore.getState().state).toEqual(downloading);
+  });
+
   it("reopens the install prompt only for a downloaded update", () => {
     useUpdateStore.getState().receive(state({ status: "downloading", tag: "v0.7.0-rc.9" }));
     useUpdateStore.getState().showReady();

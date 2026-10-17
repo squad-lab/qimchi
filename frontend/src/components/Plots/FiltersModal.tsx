@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { Rnd } from "react-rnd";
+import { fitToWindow, useKeepRndInWindow } from "../../utils/keepInWindow";
 
 // Local imports
 import "./FiltersModal.css";
@@ -443,6 +444,8 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   const [zIndexLocal, setZIndexLocal] = useState<number | undefined>(undefined);
   const zRef = useRef<number | undefined>(undefined);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const rndRef = useRef<Rnd>(null);
+  useKeepRndInWindow(rndRef, isOpen, 300, 240);
 
   useEffect(() => {
     if (isOpen) {
@@ -1011,13 +1014,18 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
   return createPortal(
     <div ref={wrapperRef} className="fixed inset-0 pointer-events-none">
       <Rnd
-        default={{
-          // Bottom right
-          x: window.innerWidth - 620,
-          y: window.innerHeight - 578,
-          width: 600,
-          height: 550,
-        }}
+        ref={rndRef}
+        default={fitToWindow(
+          {
+            // Open in the bottom-right corner.
+            x: window.innerWidth - 620,
+            y: window.innerHeight - 578,
+            width: 600,
+            height: 550,
+          },
+          300,
+          240,
+        )}
         enableResizing={false}
         dragHandleClassName="drag-handle"
         bounds="parent"
@@ -1124,7 +1132,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                         />
                         <span className="text-left flex-1 font-semibold">Applied</span>
                         {appliedOrder.length > 0 && (
-                          <span className="rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white">
+                          <span className="rounded-full bg-blue-600 px-1.5 text-[0.625rem] font-bold text-white">
                             {appliedOrder.length}
                           </span>
                         )}
@@ -1148,7 +1156,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                         <Bookmark size={18} className="text-blue-600 dark:text-blue-300" />
                         <span className="text-left flex-1 font-semibold">Saved Presets</span>
                         {presets && presets.length > 0 && (
-                          <span className="rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white">
+                          <span className="rounded-full bg-blue-600 px-1.5 text-[0.625rem] font-bold text-white">
                             {presets.length}
                           </span>
                         )}
@@ -1219,7 +1227,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                       {isEnabled && !reason && (
                         // One-based position in the applied filter order.
                         <span
-                          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-green-600 text-[10px] font-bold text-white"
+                          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-green-600 text-[0.625rem] font-bold text-white"
                           aria-label={`Applied ${appliedOrder.indexOf(key) + 1} of ${appliedOrder.length}`}
                         >
                           {appliedOrder.indexOf(key) + 1}
@@ -2080,7 +2088,7 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
                                       </span>
                                     </div>
                                     {p.row_idx !== undefined && (
-                                      <span className="text-[10px] text-gray-400">
+                                      <span className="text-[0.625rem] text-gray-400">
                                         [{p.row_idx},{p.col_idx}]
                                       </span>
                                     )}

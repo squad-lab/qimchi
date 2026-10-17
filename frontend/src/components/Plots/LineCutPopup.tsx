@@ -2,11 +2,11 @@ import { useEffect, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Rnd } from "react-rnd";
 
+import { fitToWindow, type Box } from "../../utils/keepInWindow";
+
 const WIDTH = 616;
 const HEIGHT = 462;
 const MARGIN = 12;
-
-type Box = { x: number; y: number; width: number; height: number };
 
 // Restore the card's last position and size within this session.
 let lastBox: Box | null = null;
@@ -16,7 +16,8 @@ const MIN_HEIGHT = 220;
 
 /** Place the card beside the plot, constrained to the available window space. */
 const initialBox = (anchor: HTMLElement | null): Box => {
-  if (lastBox) return lastBox;
+  // Refit positions saved in a larger window.
+  if (lastBox) return fitToWindow(lastBox, MIN_WIDTH, MIN_HEIGHT);
   const height = Math.max(MIN_HEIGHT, Math.min(HEIGHT, window.innerHeight - 2 * MARGIN));
   const rect = anchor?.getBoundingClientRect();
   if (!rect) {
@@ -49,14 +50,16 @@ const LineCutPopup = ({ anchorRef, children }: Props) => {
 
   // Until the user places it, the card follows its plot when the Viewer's
   // layout moves the plot (a new plot, a width change, a resized window).
+  // Preserve manual placement while keeping the card inside the window.
   useEffect(() => {
     let frame = 0;
     let seen = "";
     const follow = () => {
       frame = requestAnimationFrame(follow);
       const rect = anchorRef.current?.getBoundingClientRect();
-      if (lastBox || !rect) return;
-      const key = `${rect.left},${rect.top},${rect.width},${window.innerWidth},${window.innerHeight}`;
+      if (!rect) return;
+      const windowSize = `${window.innerWidth},${window.innerHeight}`;
+      const key = lastBox ? windowSize : `${rect.left},${rect.top},${rect.width},${windowSize}`;
       if (key === seen) return;
       if (seen) setBox(initialBox(anchorRef.current));
       seen = key;

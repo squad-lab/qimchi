@@ -720,7 +720,7 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
           <div className="flex min-w-0 flex-1 flex-col p-2">
             {selectionContextLabel && (
               <div className="mb-2 flex">
-                <span className="truncate rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-600">
+                <span className="truncate rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[0.6875rem] text-gray-600">
                   {selectionContextLabel}
                 </span>
               </div>

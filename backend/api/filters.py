@@ -395,11 +395,25 @@ class Differentiate(Filter):
         """Initialize numerical differentiation."""
         super().__init__(figure, num_axes, options)
 
+    def _too_few_points(self, count: int, along: dict) -> bool:
+        """Warn and return True when the axis has fewer than two points."""
+        # A live measurement may have only one point along this axis.
+        if count >= 2:
+            return False
+        logger.debug("Differentiate | skipped: %d point(s) along %s", count, along)
+        self.warnings.append(
+            f"The derivative along {along['label']} needs at least two points, "
+            "so it is not applied yet."
+        )
+        return True
+
     def apply_1d(self):
         """
         Applies the differentiation filter to a 1D plot.
 
         """
+        if self._too_few_points(self.y_axis.size, self.x_definition):
+            return
         # Update y data and y-axis label
         self.new_fig.data[0].y = np.gradient(self.y_axis, self.x_axis)
         definition = axis_definition(
@@ -425,6 +439,11 @@ class Differentiate(Filter):
             twod_axis (int): Axis along which to differentiate
 
         """
+        if twod_axis in (0, 1) and self._too_few_points(
+            self.z_axis.shape[twod_axis],
+            self.y_definition if twod_axis == 0 else self.x_definition,
+        ):
+            return
         # For np.gradient with 2D data, we need to specify spacing for each axis
         # axis=0 corresponds to rows (y-direction), axis=1 corresponds to columns (x-direction)
         match twod_axis:
@@ -1701,6 +1720,12 @@ async def transform_plot_endpoint(
         from .plots import get_plot_context
 
         ctx = get_plot_context(request.plot_ref)
+        if not ctx and request.context is not None:
+            # Restore a released or evicted context from the client's copy.
+            from .plots import register_plot_context
+
+            ctx = request.context.model_dump(exclude_none=True)
+            register_plot_context(request.plot_ref, ctx)
         if not ctx:
             raise HTTPException(status_code=404, detail="Unknown plot_ref")
 

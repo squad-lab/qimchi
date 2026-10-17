@@ -39,6 +39,23 @@ test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
 });
 
+test("zoom scales text with custom font sizes", async ({ page }) => {
+  await mockLiveHeatmapApi(page);
+  await mockSettingsApi(page);
+  await page.goto("/");
+  await openSettings(page);
+
+  const shortcut = settingsDialog(page).getByText("Shift+S", { exact: true });
+  await expect
+    .poll(() => shortcut.evaluate((node) => getComputedStyle(node).fontSize))
+    .toBe("12px");
+
+  await settingsDialog(page).getByLabel("Zoom").selectOption("1.25");
+  await expect
+    .poll(() => shortcut.evaluate((node) => getComputedStyle(node).fontSize))
+    .toBe("15px");
+});
+
 test("a heatmap default applies to existing plots, except where a plot overrides it", async ({
   page,
 }) => {
@@ -56,7 +73,7 @@ test("a heatmap default applies to existing plots, except where a plot overrides
   await settingsDialog(page).getByRole("button", { name: "Close modal" }).click();
 
   // The plot's own choice wins over later defaults...
-  await page.getByTitle("Edit Appearance").first().click();
+  await page.getByRole("button", { name: "Edit appearance" }).first().click();
   await chooseColorscale(page, page, "Inferno");
   await expect.poll(async () => (await heatmapLook(page))?.colorscale).toBe(INFERNO);
   await openSettings(page, "HeatMap");
@@ -66,7 +83,7 @@ test("a heatmap default applies to existing plots, except where a plot overrides
   await settingsDialog(page).getByRole("button", { name: "Close modal" }).click();
 
   // ...until the plot is reset, which returns it to the user's defaults.
-  await page.getByTitle("Reset", { exact: true }).first().click();
+  await page.getByRole("button", { name: "Reset plot" }).first().click();
   await expect.poll(async () => (await heatmapLook(page))?.colorscale).toBe(CIVIDIS);
 });
 
@@ -104,8 +121,8 @@ test("wide Settings sections stay in one column", async ({ page }) => {
   expect(tipBox!.y).toBeGreaterThan(colorscaleBox!.y + colorscaleBox!.height);
 
   await dialog.getByRole("button", { name: "X axis" }).first().click();
-  const major = await dialog.getByRole("heading", { name: "Major Grid & Ticks" }).boundingBox();
-  const minor = await dialog.getByRole("heading", { name: "Minor Grid & Ticks" }).boundingBox();
+  const major = await dialog.getByRole("heading", { name: "Major grid & ticks" }).boundingBox();
+  const minor = await dialog.getByRole("heading", { name: "Minor grid & ticks" }).boundingBox();
   expect(major).not.toBeNull();
   expect(minor).not.toBeNull();
   expect(minor!.y).toBeGreaterThan(major!.y);
@@ -155,6 +172,8 @@ test("rail buttons and Settings edit the same saved values", async ({ page }) =>
     "aria-checked",
     "true",
   );
+  // Plot width is under Plots.
+  await settingsDialog(page).getByRole("button", { name: "Plots", exact: true }).click();
   await expect(settingsDialog(page).getByRole("radio", { name: "66%" })).toHaveAttribute(
     "aria-checked",
     "true",
@@ -362,4 +381,36 @@ test("Shift+S toggles Settings, like Shift+H does Help", async ({ page }) => {
   ).toHaveClass(/lucide-download/);
   await page.keyboard.press("Shift+S");
   await expect(settingsDialog(page)).toHaveCount(0);
+});
+
+test("the number of closed plots to keep is saved when you leave the box, with a warning above 25", async ({
+  page,
+}) => {
+  await mockLiveHeatmapApi(page);
+  const settings = await mockSettingsApi(page);
+  await page.goto("/");
+  await openSettings(page, "Plots");
+
+  const input = settingsDialog(page).getByLabel("Closed plots to keep");
+  const warning = settingsDialog(page).getByRole("note");
+  await expect(input).toHaveValue("25");
+  await expect(warning).toHaveCount(0);
+
+  // Keep edits local until Enter or blur commits the value.
+  await input.fill("40");
+  await expect(warning).toContainText("more than 25");
+  expect(settings.patches).toHaveLength(0);
+  await input.press("Enter");
+  await expect.poll(() => settings.document).toMatchObject({ plots: { closedPlotsLimit: 40 } });
+
+  // Blur discards an invalid value and restores the saved limit.
+  await input.fill("500");
+  await expect(settingsDialog(page).getByText("Enter a whole number from 1 to 100.")).toBeVisible();
+  await input.blur();
+  await expect(input).toHaveValue("40");
+
+  await input.fill("10");
+  await input.blur();
+  await expect(warning).toHaveCount(0);
+  await expect.poll(() => settings.document).toMatchObject({ plots: { closedPlotsLimit: 10 } });
 });

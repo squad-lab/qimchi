@@ -51,6 +51,52 @@ def test_an_unknown_webview_is_reported_as_unavailable_not_zero():
     assert "webview unavailable" in line
 
 
+class _FakeProcess:
+    def __init__(self, name: str, *args: str) -> None:
+        self.info = {"name": name}
+        self._cmdline = [name, *args]
+
+    def cmdline(self) -> list[str]:
+        return self._cmdline
+
+
+@pytest.mark.parametrize(
+    ("process", "kind"),
+    [
+        (_FakeProcess("msedgewebview2.exe", "--embedded-browser-webview=1"), "browser"),
+        (_FakeProcess("msedgewebview2.exe", "--type=renderer"), "renderer"),
+        (_FakeProcess("msedgewebview2.exe", "--type=gpu-process"), "gpu"),
+        (
+            _FakeProcess(
+                "msedgewebview2.exe",
+                "--type=utility",
+                "--utility-sub-type=network.mojom.NetworkService",
+            ),
+            "network",
+        ),
+        (_FakeProcess("msedgewebview2.exe", "--type=utility"), "utility"),
+        (_FakeProcess("msedgewebview2.exe", "--type=crashpad-handler"), "other"),
+        (_FakeProcess("com.apple.WebKit.WebContent"), "renderer"),
+        (_FakeProcess("WebKitGPUProcess"), "gpu"),
+    ],
+)
+def test_each_webview_process_is_named_by_its_role(process, kind):
+    assert diagnostics._webview_kind(process) == kind
+
+
+def test_the_webview_is_broken_down_by_role():
+    webview = _group(4, 3000)
+    webview["kinds"] = {
+        "browser": {"count": 1, "private": 200 << 20},
+        "renderer": {"count": 2, "private": 2500 << 20},
+        "gpu": {"count": 1, "private": 300 << 20},
+    }
+
+    line = diagnostics.format_sample(_fake_sample(webview=webview), None)
+
+    assert "webview 4x 2.9 GB (renderer 2x 2.4 GB, gpu 300 MB, browser 200 MB)" in line
+
+
 def test_sampling_this_process_works_and_counts_gauges():
     diagnostics.register_gauge("test items", lambda: 7)
     diagnostics.register_gauge("broken", lambda: 1 / 0)
@@ -151,6 +197,13 @@ def home(tmp_path, monkeypatch):
 
 def test_the_bundle_holds_the_logs_and_the_system_details(home, tmp_path):
     target = tmp_path / "bundle.zip"
+    (home / "updates").mkdir()
+    (home / "updates" / "install.log").write_text("installing", encoding="utf-8")
+    (home / "updates" / "qimchi-setup.exe").write_bytes(b"MZ")
+    (home / "updates" / "setup.log").write_text("setup", encoding="utf-8")
+    (home / "updates" / "setup.log.1").write_text("previous setup", encoding="utf-8")
+    (home / "updates" / "pending.json").write_text("{}", encoding="utf-8")
+    (home / "updates" / "qimchi-v1.dmg").write_bytes(b"dmg")
 
     manifest = diagnostics.build_bundle(target, include_crash_reports=False)
 
@@ -159,6 +212,13 @@ def test_the_bundle_holds_the_logs_and_the_system_details(home, tmp_path):
         info = json.loads(bundle.read("system-info.json"))
     assert {"logs/qimchi.log", "logs/qimchi.log.1", "logs/qimchi_debug.log"} <= names
     assert "logs/unrelated.txt" not in names
+    assert {
+        "logs/updates/install.log",
+        "logs/updates/setup.log",
+        "logs/updates/setup.log.1",
+        "logs/updates/pending.json",
+    } <= names
+    assert not any(name.endswith((".exe", ".dmg")) for name in names)
     assert info["bundle"]["logs"] == manifest["logs"]
     assert "platform" in info
 

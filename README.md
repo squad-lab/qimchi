@@ -1,40 +1,37 @@
-# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.7.0
+# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.7.1
+
+[![Website](https://img.shields.io/badge/website-qimchi.squad--lab.org-8cc63e)](https://qimchi.squad-lab.org)
 
 Plotly based data visualization tool for `xarray` data. Optimized to work with the optional [`qanary`](https://gitlab.com/squad-lab/qanary) package. Qimchi supports any dataset format convertible to `xarray` (see [Supported Dataset Types](#supported-dataset-types) below). Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html).
 
 This repository contains a unified FastAPI application that serves a React-based frontend for the Qimchi plotter.
 
-## What's new in 0.7.0
-
 > [!TIP]
+> 🌐 **Website:** [qimchi.squad-lab.org](https://qimchi.squad-lab.org) has short videos of every feature and the download links for each platform.
+>
 > 🖥️ **Desktop app:** a self-contained build of Qimchi that runs in its own window, with no separate Git, Python or Node installation required. Installers for Windows (`.exe`), Linux (`.AppImage`) and macOS (`.dmg`) are available on the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases). The app checks for updates on startup and can install them with one click.
 
-- **New-user walkthrough:** opens on first launch with two bundled demo measurements. Restart it any time from Help or the compass in the sidebar.
-- **More dataset support:** MATLAB `.mat` files and complex-valued data such as IQ signals, shown as amplitude, phase, real and imaginary parts.
-- **Library tools:** heart, trash and tag measurements, with bulk actions and saved state shown in the Explorer.
-- **Flexible tags:** add multiple tags per measurement and filter with the Tags dropdown or `#tag` / `#"two words"` in search.
-- **Persistent measurement identity:** marks survive file renames and moves using qanary IDs, QCoDeS GUIDs or a data-derived signature.
-- **Built-in notes:** notes are stored in the library, work for live measurements and QCoDeS runs, and existing `.md` sidecars are imported automatically.
-- **Dark mode:** follows your system by default and can be toggled from the sidebar.
-- **Plot pinning:** keep one plot fixed while Next/Prev changes the others for side-by-side comparison. Custom plots are also recreated for newly added measurements.
-- **Live frontier LineCuts:** follow the row or column currently being measured on a live heat map, including swapped axes.
-- **Filter presets:** save and reuse filter configurations, toggle them from the Applied list without losing their settings, and apply input-resistance correction to heat maps.
-- **Live parameter tracking:** pin qanary parameters from Metadata and compare them across measurements.
-- **Better diagnostics and updates:** create bug-report bundles from Settings, with recent crash reports included by default, and see clearer update prompts with release notes.
-- **Improved UI:** sidebar panels are easier to switch between, Explorer can go full-window with `Shift+F`, and several views are faster and more responsive.
-- **Searchable Help and Settings:** find guidance or jump directly to a setting, with keyboard navigation in both. Persistent app zoom controls are available from the sidebar.
+## What's new in 0.7.1
 
-Everything in this release is listed in the [changelog on `preview`](https://gitlab.com/squad-lab/qimchi/-/blob/preview/CHANGELOG.md).
+- **Undo closed plots:** reopen plots with Ctrl+Z (Cmd+Z on Mac), Undo or Recently closed, restoring their position, filters, settings and width. Clear All Plots can also be undone.
+- **LineCut markers:** add vertical lines, horizontal lines or points to a LineCut preview. They snap to the data and can be nudged with the arrow keys.
+- **Lower live heat-map memory use:** prevents the image-resource leak caused by repeated heat-map redraws, and reduces the work done on each live refresh.
+- **Smaller background exporters:** image-export workers use about 90% less memory while idle.
+- **Workspace recovery:** the Basket and Viewer plots are restored after a window reload, including recovery from a crash.
+- **Reliable LineCuts and panels:** live frontier LineCuts reach the final row or column, and floating cards and panels stay inside the window when it is resized.
+- **Clearer controls:** interface zoom applies consistently, and plot-control tooltips show their keyboard shortcuts.
+- **Version-specific changelogs:** Settings > Updates shows the running version's formatted changelog offline, and update prompts show the offered stable or RC version's changes. Windows updates restart Qimchi when "Start Qimchi after installation" is checked.
+- **Linux on newer distributions:** the AppImage now starts on Arch and Fedora. Each release is tested on Ubuntu, Debian, Fedora and Arch.
+- **Easier bug reports and updates:** the sidebar bug-report button opens reporting instructions, a new-issue link, and log-bundle controls; downloaded updates can be downloaded again before installation.
 
-<!-- TODO: -->
-<!-- Full API documentation and more can be found [here](https://qimchi.squad-lab.org) -->
+Everything in this release is listed in the [changelog](CHANGELOG.md#v071---2026-10-17).
 
 ---
 
 ## Table of Contents
 
-- [ Qimchi v0.7.0](#-qimchi-v070)
-  - [What's new in 0.7.0](#whats-new-in-070)
+- [ Qimchi v0.7.1](#-qimchi-v071)
+  - [What's new in 0.7.1](#whats-new-in-071)
   - [Table of Contents](#table-of-contents)
   - [Installation](#installation)
     - [Windows](#windows)
@@ -49,6 +46,7 @@ Everything in this release is listed in the [changelog on `preview`](https://git
   - [Environment Variables](#environment-variables)
   - [Supported Dataset Types](#supported-dataset-types)
   - [Measurements](#measurements)
+  - [Contributing](#contributing)
   - [Authors](#authors)
 
 ---
@@ -65,11 +63,11 @@ The desktop app is the recommended install on all three platforms. Qimchi can al
 > [!tip]
 > Easiest method for Windows users.
 
-Download `qimchi-setup-<version>.exe` from the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases) and run it. It installs per user, so no administrator rights are needed, and it creates a Start Menu entry plus an optional desktop shortcut. Qimchi runs as a desktop app and bundles everything it needs -- no Git, Python or Node.js required.
+Download `qimchi-setup-<version>.exe` from the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases) and run it. Choose the install folder, optional desktop shortcut and whether to start Qimchi on one configuration page, then click **Install**. The second page shows progress and closes when installation finishes. It installs per user by default, so no administrator rights are needed, and creates a Start Menu entry. Qimchi runs as a desktop app and bundles everything it needs -- no Git, Python or Node.js required.
 
 Windows SmartScreen will warn that the publisher is unrecognised: click **More info**, then **Run anyway**. Qimchi is not code-signed yet, so this appears once per version you install.
 
-Requires Windows 11 (x64) with the Edge WebView2 runtime (preinstalled).
+Requires Windows 11 (x64) with the Edge WebView2 runtime (preinstalled). It can also be installed on Windows 10 (version 1809 or later), but is not officially supported. If Qimchi does not open there, install the [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/).
 
 `qanary` is not installed with Qimchi. If you need it, install it from its [repository](https://gitlab.com/squad-lab/qanary).
 
@@ -78,7 +76,7 @@ Requires Windows 11 (x64) with the Edge WebView2 runtime (preinstalled).
 > [!tip]
 > Easiest method: the desktop app, from the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases).
 
-**macOS** -- download `qimchi-<version>.dmg`, open it, and drag Qimchi to Applications. Double-click Qimchi there; macOS reports that the app is from an unidentified developer. Open **System Settings -> Privacy and Security**, scroll down to **Security**, click **Open Anyway** next to Qimchi, confirm, and enter your account credentials. Qimchi is not notarized yet, so this happens once per version you install. Requires Apple Silicon.
+**macOS** -- download `qimchi-<version>.dmg`, open its branded installer window, and drag **Qimchi** to **Applications**. The app bundle is named `Qimchi.app`. Double-click Qimchi there; macOS reports that the app is from an unidentified developer. Open **System Settings -> Privacy and Security**, scroll down to **Security**, click **Open Anyway** next to Qimchi, confirm, and enter your account credentials. Qimchi is not notarized yet, so this happens once per version you install. Requires Apple Silicon.
 
 **Linux** -- download `qimchi-x86_64-<version>.AppImage`, then:
 
@@ -491,6 +489,9 @@ Measurement examples referencing `qanary` can be found in its own repository. Re
 
 To plot measurements from your own code while they run, use [`qimchi-connect`](https://gitlab.com/squad-lab/qimchi-connect). It works with any measurement code and has ready-made support for QCoDeS and Quantify.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, checks and release-note instructions.
 
 ## Authors
 
