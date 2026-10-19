@@ -480,7 +480,7 @@ Qimchi's backend supports loading datasets in any format that can be converted t
 - MATLAB `.mat` files
 - `xarray` DataTrees (hierarchical datasets)
 - SQLite-backed containers with `xarray`-compatible structure
-- Custom formats convertible to `xarray` via user-defined loaders (see [Custom Dataset Support](https://qimchi.squad-lab.org/docs/custom_datasets.md))
+- Custom formats convertible to `xarray` via user-defined loaders (see [Custom Dataset Support](https://qimchi.squad-lab.org/docs/custom-datasets/))
 
 Complex-valued variables, from any of these, are split into their amplitude, phase (in radians), real and imaginary parts, so each can be plotted and filtered like any other variable.
 
