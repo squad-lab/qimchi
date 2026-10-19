@@ -427,13 +427,13 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
       ${tip(
         "Libraries that send live data",
         `<ul>
-          <li><a href="${QANARY_URL}" target="_blank" rel="noreferrer">qanary</a> runs sweeps and
+          <li><a href="${QANARY_URL}" target="_blank" rel="noreferrer">Qanary</a> runs sweeps and
           measurements, and publishes them for you.</li>
-          <li><a href="${CONNECT_URL}" target="_blank" rel="noreferrer">qimchi-connect</a> works
+          <li><a href="${CONNECT_URL}" target="_blank" rel="noreferrer">Qimchi-Connect</a> works
           with any measurement code. It has ready-made support for QCoDeS and Quantify.</li>
         </ul>`,
       )}
-      <p>With qimchi-connect, a few lines are enough:</p>
+      <p>With Qimchi-Connect, a few lines are enough:</p>
       <pre class="qimchi-walkthrough-code">from qimchi_connect import live_measurement
 
 with live_measurement(

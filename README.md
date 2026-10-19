@@ -2,7 +2,7 @@
 
 [![Website](https://img.shields.io/badge/website-qimchi.squad--lab.org-8cc63e)](https://qimchi.squad-lab.org)
 
-Plotly based data visualization tool for `xarray` data. Optimized to work with the optional [`qanary`](https://gitlab.com/squad-lab/qanary) package. Qimchi supports any dataset format convertible to `xarray` (see [Supported Dataset Types](#supported-dataset-types) below). Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html).
+Plotly based data visualization tool for `xarray` data. Optimized to work with the optional [Qanary](https://gitlab.com/squad-lab/qanary) package. Qimchi supports any dataset format convertible to `xarray` (see [Supported Dataset Types](#supported-dataset-types) below). Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html).
 
 This repository contains a unified FastAPI application that serves a React-based frontend for the Qimchi plotter.
 
@@ -487,7 +487,7 @@ Complex-valued variables, from any of these, are split into their amplitude, pha
 ## Measurements
 Measurement examples referencing `qanary` can be found in its own repository. Refer to [its repository](https://gitlab.com/squad-lab/qanary) for more details. If you need `qanary`, the project must be installed manually; it is no longer installed automatically by the Qimchi installer.
 
-To plot measurements from your own code while they run, use [`qimchi-connect`](https://gitlab.com/squad-lab/qimchi-connect). It works with any measurement code and has ready-made support for QCoDeS and Quantify.
+To plot measurements from your own code while they run, use [Qimchi-Connect](https://gitlab.com/squad-lab/qimchi-connect). It works with any measurement code and has ready-made support for QCoDeS and Quantify.
 
 ## Contributing
 

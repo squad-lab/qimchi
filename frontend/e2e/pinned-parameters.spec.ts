@@ -6,7 +6,7 @@ const snapshot = {
   dmm_v1: { value: 5.0760782441045915, unit: "V", label: "Voltmeter" },
 };
 
-test("pins a qanary parameter to a floating window", async ({ page }) => {
+test("pins a Qanary parameter to a floating window", async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
   await mockLiveHeatmapApi(page);
   const requested: string[][] = [];

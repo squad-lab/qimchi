@@ -497,7 +497,7 @@ class TestLiveRowAccumulation:
     def test_a_producer_that_cannot_describe_rows_is_never_accumulated(
         self, monkeypatch
     ):
-        """An older qimchi-connect sends no row fields, so nothing is held."""
+        """An older Qimchi-Connect sends no row fields, so nothing is held."""
         plain = self._grid(2)
         asked = self._serve(monkeypatch, [plain])
 

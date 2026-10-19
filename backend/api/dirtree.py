@@ -1001,7 +1001,7 @@ INTERNAL_META_KEYS: frozenset = frozenset(
     }
 )
 
-# Preferred qanary metadata sections.
+# Preferred Qanary metadata sections.
 PREFERRED_META_KEYS: list = [
     "Sweeps",
     "Parameters Snapshot",
@@ -1190,7 +1190,7 @@ async def get_metadata(path: PathData) -> Dict:
                 key for key in PREFERRED_META_KEYS if key in metadata
             ]
             if qanary_sections:
-                # qanary reserves this pane for its four metadata sections.
+                # Qanary reserves this pane for its four metadata sections.
                 meta_dict = {key: metadata[key] for key in qanary_sections}
             else:
                 # Other formats expose their remaining attrs directly.

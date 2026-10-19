@@ -5,7 +5,7 @@ Measurements are registered when they are opened, and their library state is
 stored in the Qimchi database so the directory tree can filter against it.
 
 Measurements are keyed by the UUID resolved in ``shared/identity.py``. The
-resolver prefers the qanary ``Measurement ID``, then a QCoDeS run ``guid``,
+resolver prefers the Qanary ``Measurement ID``, then a QCoDeS run ``guid``,
 and finally a content-signature-based UUID5. ``measurements.uuid_origin``
 records which source produced the UUID.
 

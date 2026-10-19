@@ -31,7 +31,7 @@ dependencies = [
     "setuptools~=82.0.0",
     "scipy~=1.17.0",
     "watchdog~=6.0.0",
-    # See qimchi-connect: 16.0 logs a timed-out live probe as an ERROR
+    # See Qimchi-Connect: 16.0 logs a timed-out live probe as an ERROR
     # traceback in the producer's console.
     "websockets~=17.1",
     "uvicorn~=0.42.0",

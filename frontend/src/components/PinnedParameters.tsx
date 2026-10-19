@@ -9,7 +9,7 @@ import { usePinnedParametersStore } from "../stores/pinnedParametersStore";
 
 const MARGIN = 12;
 
-/** Show pinned qanary parameters for the latest Basket measurement. */
+/** Show pinned Qanary parameters for the latest Basket measurement. */
 const PinnedParameters = ({ basketItems }: { basketItems: BasketItem[] }) => {
   const { pinned, unpin, clear } = usePinnedParametersStore();
   const nodeRef = useRef<HTMLDivElement>(null);

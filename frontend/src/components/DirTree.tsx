@@ -2565,7 +2565,7 @@ const TreeItemComponent = ({
             </Tooltip>
           )}
 
-          {/* Heart / Trash / Tag buttons - dataset leaves (qanary measurements) */}
+          {/* Heart / Trash / Tag buttons - dataset leaves (Qanary measurements) */}
           {isDatasetLeafNode && libraryButtons}
 
           {/* Open Notes Button - any dataset leaf except sqlite container nodes */}

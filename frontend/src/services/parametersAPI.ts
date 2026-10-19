@@ -11,7 +11,7 @@ export interface PinnedParameter {
   missing?: boolean;
 }
 
-/** Fetch named qanary Parameters Snapshot entries. */
+/** Fetch named Qanary Parameters Snapshot entries. */
 export const fetchPinnedParameters = async (
   path: string,
   names: string[],

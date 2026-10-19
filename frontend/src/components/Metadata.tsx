@@ -37,7 +37,7 @@ const BULKY_META_KEYS = new Set([
   "instruments",
 ]);
 
-// qanary stores parameters as `{value, unit, label}`.
+// Qanary stores parameters as `{value, unit, label}`.
 const PARAMETERS_SNAPSHOT_KEY = "Parameters Snapshot";
 
 const isParameterEntry = (value: unknown): boolean =>
