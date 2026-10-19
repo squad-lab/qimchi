@@ -48,6 +48,7 @@ Everything in this release is listed in the [changelog](CHANGELOG.md#v071---2026
   - [Measurements](#measurements)
   - [Contributing](#contributing)
   - [Authors](#authors)
+  - [License](#license)
 
 ---
 
@@ -495,5 +496,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, checks and release
 
 ## Authors
 
-- Spandan Anupam: [s.anupam@fz-juelich.de](mailto:s.anupam@fz-juelich.de)
 - Jyotirmaya Shivottam: [shivottam@proton.me](mailto:shivottam@proton.me)
+- Spandan Anupam: [s.anupam@fz-juelich.de](mailto:s.anupam@fz-juelich.de)
+
+## License
+
+Qimchi is free software under the [AGPL-3.0-or-later](LICENSE). [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists bundled dependencies and their licenses.
+
+Copyright © 2024–2026 Forschungszentrum Jülich GmbH, PGI-11.

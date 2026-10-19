@@ -87,6 +87,11 @@ datas += copy_metadata("qimchi-api")
 # they must be bundled as data at _internal/migrations/. api/shared/db.py's
 # run_migrations() resolves them via sys._MEIPASS/migrations when frozen.
 datas += [(os.path.join(_repo_root, "backend", "migrations"), "migrations")]
+# Use notices generated for this build, or the committed copy if none exist.
+_notices = os.path.join(_repo_root, "packaging", "build", "THIRD_PARTY_NOTICES.md")
+if not os.path.isfile(_notices):
+    _notices = os.path.join(_repo_root, "THIRD_PARTY_NOTICES.md")
+datas += [(_notices, "."), (os.path.join(_repo_root, "LICENSE"), ".")]
 # Some DB deps read their own package metadata at import time.
 for _pkg in ("alembic", "sqlalchemy", "sqlmodel", "mako"):
     try:

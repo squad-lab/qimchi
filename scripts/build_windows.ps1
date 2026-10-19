@@ -188,6 +188,13 @@ Assert-LastExit "uv pip install build tools"
 & $pythonExe -c "import importlib.metadata as m; m.distribution('qimchi-api')" 2>&1 | Out-Null
 Assert-LastExit "qimchi-api metadata check (editable install incomplete?)"
 
+# Generate license notices from this Python environment and frontend/node_modules.
+$notices = "packaging/build/THIRD_PARTY_NOTICES.md"
+Remove-StaleArtifact $notices
+& $pythonExe scripts/third_party_notices.py --output $notices
+Assert-LastExit "third_party_notices.py"
+if (!(Test-Path $notices)) { throw "third_party_notices.py reported success but $notices was not produced" }
+
 # ── 5. PyInstaller (onedir) ───────────────────────────────────────────────────
 Write-Host "Building onedir app with PyInstaller..."
 # Uses the canonical spec at packaging/qimchi.spec (committed; portable paths).

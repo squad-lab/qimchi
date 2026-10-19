@@ -67,4 +67,6 @@ Preview notes live in `md/release-notes/vX.Y.Z-rc.N.md`, headed `### vX.Y.Z-rc.N
 
 Before running the manual `tag_preview` CI job on `preview`, add the file for the next unused RC number. CI refuses to tag a preview without its notes. If the stable version is already tagged, update the project version before preparing another candidate.
 
+After adding, removing or upgrading dependencies, run `npm install` in `frontend/`, then regenerate [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) with `backend/.venv/bin/python scripts/third_party_notices.py` (`backend\.venv\Scripts\python.exe` on Windows). Desktop builds regenerate and bundle the notices for their platform.
+
 Release descriptions and update prompts use the notes at the offered tag. Settings > Updates uses the same sources bundled with the running build, including offline.

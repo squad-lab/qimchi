@@ -3,9 +3,8 @@ name = "qimchi-api"
 version = "0.7.1"
 description = "Plot your spicy quantum measurements with ease"
 authors = [
-  { name = "Spandan Anupam", email = "s.anupam@fz-juelich.de" },
   { name = "Jyotirmaya Shivottam", email = "shivottam@proton.me" },
-  { name = "Lino Visser", email = "l.visser@fz-juelich.de" },
+  { name = "Spandan Anupam", email = "s.anupam@fz-juelich.de" },
 ]
 license = "AGPL-3.0-or-later"
 keywords = ["quantum", "plotter", "plotly", "fastapi", "react"]
