@@ -47,6 +47,7 @@ Everything in this release is listed in the [changelog](CHANGELOG.md#v071---2026
   - [Supported Dataset Types](#supported-dataset-types)
   - [Measurements](#measurements)
   - [Contributing](#contributing)
+  - [Citing Qimchi](#citing-qimchi)
   - [Authors](#authors)
   - [License](#license)
 
@@ -493,6 +494,23 @@ To plot measurements from your own code while they run, use [Qimchi-Connect](htt
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, checks and release-note instructions.
+
+## Citing Qimchi
+
+Please cite Qimchi when using it in your work:
+
+```bibtex
+@misc{qimchi,
+  author       = {Shivottam, Jyotirmaya and Anupam, Spandan},
+  title        = {Qimchi: Live plotting for quantum measurements},
+  year         = {2026},
+  note         = {Version 0.7.1, software},
+  howpublished = {GitLab},
+  url          = {https://gitlab.com/squad-lab/qimchi}
+}
+```
+
+The website's [Cite section](https://qimchi.squad-lab.org/#cite) provides entries for the latest release in BibTeX, BibLaTeX and APS formats. [CITATION.cff](CITATION.cff) contains machine-readable citation metadata.
 
 ## Authors
 

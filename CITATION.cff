@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "Please cite Qimchi using the metadata below."
+type: software
+title: "Qimchi: Live plotting for quantum measurements"
+abstract: >-
+  Qimchi is an application for plotting measurement data stored as xarray
+  datasets, from disk or live while a measurement runs. It reads Zarr, NetCDF
+  and HDF5, QCoDeS databases, CSV and other formats, and offers heat maps and
+  line plots with filters, line cuts, per-measurement notes and image export.
+  It runs as a desktop app on Windows, Linux and macOS, or as a web server.
+authors:
+  - given-names: Jyotirmaya
+    family-names: Shivottam
+    affiliation: Forschungszentrum Jülich GmbH
+    orcid: "https://orcid.org/0000-0002-2688-9421"
+  - given-names: Spandan
+    family-names: Anupam
+    affiliation: Forschungszentrum Jülich GmbH
+    orcid: "https://orcid.org/0000-0003-4996-3265"
+repository-code: "https://gitlab.com/squad-lab/qimchi"
+url: "https://qimchi.squad-lab.org"
+license: AGPL-3.0-or-later
+version: 0.7.1
+keywords:
+  - data visualization
+  - plotting
+  - xarray
+  - live plotting
+  - quantum measurements
+  - QCoDeS
