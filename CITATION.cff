@@ -20,7 +20,7 @@ authors:
 repository-code: "https://gitlab.com/squad-lab/qimchi"
 url: "https://qimchi.squad-lab.org"
 license: AGPL-3.0-or-later
-version: 0.7.1
+version: 0.7.2
 keywords:
   - data visualization
   - plotting

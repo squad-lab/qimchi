@@ -1,6 +1,6 @@
 [project]
 name = "qimchi-api"
-version = "0.7.1"
+version = "0.7.2"
 description = "Plot your spicy quantum measurements with ease"
 authors = [
   { name = "Jyotirmaya Shivottam", email = "shivottam@proton.me" },

@@ -1,5 +1,10 @@
 ## Qimchi Changelog
 
+### v0.7.2 - 2026-10-21
+
+- [Misc] Bundle third-party license notices with desktop installers and Docker images.
+- [Misc] Add citation metadata and BibTeX references, and archive stable releases on Zenodo.
+
 ### v0.7.1 - 2026-10-17
 
 - [Feature] Reopen closed plots with Ctrl+Z (Cmd+Z on Mac), Undo, or Recently closed, preserving their position, filters, settings and width. Clear All Plots can also be undone.

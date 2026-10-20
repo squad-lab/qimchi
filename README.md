@@ -1,4 +1,4 @@
-# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.7.1
+# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.7.2
 
 [![Website](https://img.shields.io/badge/website-qimchi.squad--lab.org-8cc63e)](https://qimchi.squad-lab.org)
 
@@ -11,27 +11,19 @@ This repository contains a unified FastAPI application that serves a React-based
 >
 > 🖥️ **Desktop app:** a self-contained build of Qimchi that runs in its own window, with no separate Git, Python or Node installation required. Installers for Windows (`.exe`), Linux (`.AppImage`) and macOS (`.dmg`) are available on the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases). The app checks for updates on startup and can install them with one click.
 
-## What's new in 0.7.1
+## What's new in 0.7.2
 
-- **Undo closed plots:** reopen plots with Ctrl+Z (Cmd+Z on Mac), Undo or Recently closed, restoring their position, filters, settings and width. Clear All Plots can also be undone.
-- **LineCut markers:** add vertical lines, horizontal lines or points to a LineCut preview. They snap to the data and can be nudged with the arrow keys.
-- **Lower live heat-map memory use:** prevents the image-resource leak caused by repeated heat-map redraws, and reduces the work done on each live refresh.
-- **Smaller background exporters:** image-export workers use about 90% less memory while idle.
-- **Workspace recovery:** the Basket and Viewer plots are restored after a window reload, including recovery from a crash.
-- **Reliable LineCuts and panels:** live frontier LineCuts reach the final row or column, and floating cards and panels stay inside the window when it is resized.
-- **Clearer controls:** interface zoom applies consistently, and plot-control tooltips show their keyboard shortcuts.
-- **Version-specific changelogs:** Settings > Updates shows the running version's formatted changelog offline, and update prompts show the offered stable or RC version's changes. Windows updates restart Qimchi when "Start Qimchi after installation" is checked.
-- **Linux on newer distributions:** the AppImage now starts on Arch and Fedora. Each release is tested on Ubuntu, Debian, Fedora and Arch.
-- **Easier bug reports and updates:** the sidebar bug-report button opens reporting instructions, a new-issue link, and log-bundle controls; downloaded updates can be downloaded again before installation.
+- **Bundled licenses:** desktop installers and Docker images include third-party license notices.
+- **Citation and archiving:** citation metadata and BibTeX references are included, and stable releases are archived on Zenodo.
 
-Everything in this release is listed in the [changelog](CHANGELOG.md#v071---2026-10-17).
+Everything in this release is listed in the [changelog](CHANGELOG.md#v072---2026-10-21).
 
 ---
 
 ## Table of Contents
 
-- [ Qimchi v0.7.1](#-qimchi-v071)
-  - [What's new in 0.7.1](#whats-new-in-071)
+- [ Qimchi v0.7.2](#-qimchi-v072)
+  - [What's new in 0.7.2](#whats-new-in-072)
   - [Table of Contents](#table-of-contents)
   - [Installation](#installation)
     - [Windows](#windows)
@@ -504,7 +496,7 @@ Please cite Qimchi when using it in your work:
   author       = {Shivottam, Jyotirmaya and Anupam, Spandan},
   title        = {Qimchi: Live plotting for quantum measurements},
   year         = {2026},
-  note         = {Version 0.7.1, software},
+  note         = {Version 0.7.2, software},
   howpublished = {GitLab},
   url          = {https://gitlab.com/squad-lab/qimchi}
 }
