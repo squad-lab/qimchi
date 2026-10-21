@@ -139,7 +139,7 @@ const ExplorerHelp = memo(() => (
       </div>
       <p className="text-xs text-gray-500">
         Qimchi recognises Quantify runs inside HDF5 datasets. They can also be streamed live with
-        qimchi-connect. DataTree nodes can be browsed inside Zarr, NetCDF, and HDF5 containers.
+        Qimchi-Connect. DataTree nodes can be browsed inside Zarr, NetCDF, and HDF5 containers.
       </p>
     </div>
 
@@ -528,7 +528,7 @@ const MetadataHelp = memo(() => (
             Pinned Parameters
           </h4>
           <p className="text-xs leading-relaxed">
-            In a qanary Parameters Snapshot, hover over a parameter and click its pin. Pinned values
+            In a Qanary Parameters Snapshot, hover over a parameter and click its pin. Pinned values
             appear in a movable window and update when you use Next or Prev. Unpin them there or in
             Metadata.
           </p>

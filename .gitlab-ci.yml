@@ -20,6 +20,9 @@ variables:
       - "macos"
       - "all"
     description: "Optional ad-hoc desktop build target for a preview web pipeline"
+  ZENODO_ARCHIVE_TAG:
+    value: ""
+    description: "Optional: archive this existing stable tag (e.g. v0.7.1) on Zenodo from a web pipeline"
 stages:
   - format
   - test
@@ -121,6 +124,20 @@ pytest:
     key: uv-$CI_JOB_NAME
     paths:
       - .uv-cache
+
+citation:
+  stage: test
+  script:
+    - pip install --quiet cffconvert==2.0.0 pyyaml
+    - cffconvert --validate
+    # Check that CITATION.cff matches the package version.
+    - |
+      python - <<'PY'
+      import sys, tomllib, yaml
+      cff = yaml.safe_load(open("CITATION.cff", encoding="utf-8"))["version"]
+      project = tomllib.load(open("backend/pyproject.toml", "rb"))["project"]["version"]
+      sys.exit(f"CITATION.cff says {cff}, backend/pyproject.toml says {project}" if str(cff) != project else 0)
+      PY
 
 frontend-quality:
   stage: test
@@ -716,6 +733,48 @@ release:
     # Preview release (offered only to installs already on the preview channel).
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-rc\.\d+$/
       when: on_success
+
+# Archive stable releases on Zenodo using CITATION.cff from this checkout.
+# Set ZENODO_ARCHIVE_TAG in a web pipeline to archive an existing release.
+zenodo:
+  stage: release
+  script:
+    - pip install --quiet pyyaml
+    - TAG="${CI_COMMIT_TAG:-$ZENODO_ARCHIVE_TAG}"
+    - git fetch --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
+    - git archive --format=zip --prefix="qimchi-${TAG#v}/" -o "qimchi-${TAG}.zip" "$TAG"
+    - ZENODO_TOKEN="$ZENODO_SPANDAN" python scripts/zenodo_release.py --tag "$TAG" --file "qimchi-${TAG}.zip"
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/ && $ZENODO_SPANDAN
+      needs: [release]
+    - if: $CI_PIPELINE_SOURCE == "web" && $ZENODO_ARCHIVE_TAG =~ /^v\d+\.\d+\.\d+$/ && $ZENODO_SPANDAN
+      needs: []
+
+# Submit stable release updates to microsoft/winget-pkgs.
+# Requires an existing Qimchi.Qimchi manifest and a classic WINGET_GITHUB_TOKEN
+# with public_repo scope from the account that owns the winget-pkgs fork.
+winget:
+  stage: release
+  needs: [release]
+  # Winget submission failures must not block the release.
+  allow_failure: true
+  variables:
+    KOMAC_VERSION: "2.17.1"
+    KOMAC_SHA256: "e694e79cd451afabf47bead66ed34586fef4814f7b94e4b61a098f419978d5d7"
+  script:
+    - curl -fsSL -o komac.tar.gz "https://github.com/russellbanks/Komac/releases/download/v${KOMAC_VERSION}/komac-${KOMAC_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+    - echo "${KOMAC_SHA256}  komac.tar.gz" | sha256sum -c -
+    - tar -xzf komac.tar.gz komac
+    - |
+      ./komac update Qimchi.Qimchi \
+        --version "${CI_COMMIT_TAG#v}" \
+        --urls "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/qimchi/${CI_COMMIT_TAG}/qimchi-setup-${CI_COMMIT_TAG}.exe" \
+        --release-notes-url "${CI_PROJECT_URL}/-/releases/${CI_COMMIT_TAG}" \
+        --created-with "Qimchi GitLab CI" \
+        --submit \
+        --token "$WINGET_GITHUB_TOKEN"
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/ && $WINGET_GITHUB_TOKEN
 
 # Rebuild the website after publishing a release to update its download links
 # and version numbers.

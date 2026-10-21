@@ -1,7 +1,7 @@
 // Zustand store for the Qimchi library: per-measurement heart/trash/tag state
 // and the DirTree filter toggles. State is keyed by normalized dataset path (the
 // backend returns abs_path alongside the uuid). The backend resolves a uuid for
-// every readable dataset (qanary id, QCoDeS guid, or a content signature); a
+// every readable dataset (Qanary id, QCoDeS guid, or a content signature); a
 // dataset it cannot identify comes back without one and its actions are no-ops.
 import { create } from "zustand";
 

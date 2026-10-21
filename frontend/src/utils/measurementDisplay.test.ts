@@ -15,7 +15,7 @@ describe("extractQanaryMeasurementId", () => {
 
   it("returns null when there is none, rather than a partial match", () => {
     expect(extractQanaryMeasurementId("Single gate sweep")).toBeNull();
-    // A QCoDeS guid has no leading run number, so it is not a qanary id.
+    // A QCoDeS guid has no leading run number, so it is not a Qanary id.
     expect(extractQanaryMeasurementId("4df2d70a-0000-0000-0000-019a6e3255ed")).toBeNull();
   });
 });
@@ -25,7 +25,7 @@ describe("formatQanaryMeasurementId", () => {
     expect(formatQanaryMeasurementId(QANARY_ID)).toBe("21-680ac98c*");
   });
 
-  it("leaves anything that is not a qanary id alone", () => {
+  it("leaves anything that is not a Qanary id alone", () => {
     // QCoDeS guids must survive untouched: they are the identity elsewhere.
     const guid = "4df2d70a-0000-0000-0000-019a6e3255ed";
     expect(formatQanaryMeasurementId(guid)).toBe(guid);
@@ -39,7 +39,7 @@ describe("formatQanaryDatasetName", () => {
     expect(formatQanaryDatasetName(`${QANARY_ID}.nc`)).toBe("21-680ac98c*.nc");
   });
 
-  it("only shortens qanary names, and only the extensions it knows", () => {
+  it("only shortens Qanary names, and only the extensions it knows", () => {
     expect(formatQanaryDatasetName(`${QANARY_ID}.h5`)).toBe(`${QANARY_ID}.h5`);
     expect(formatQanaryDatasetName("Single gate sweep.zarr")).toBe("Single gate sweep.zarr");
   });

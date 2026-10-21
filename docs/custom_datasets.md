@@ -1,9 +1,10 @@
 # Custom Dataset Support
 
 Qimchi backend is **xarray-first**.  
-The extension model is: write a custom loader/provider that converts your format to `xr.Dataset` (or `xr.DataTree` later), then register it with the central loader.
 
-## Extension API (already available)
+The extension model is: write a custom loader/provider that converts your format to `xr.Dataset` (or an `xr.DataTree`), then register it with the central loader.
+
+## Extension API
 
 From `backend/api/data_loader.py`:
 
@@ -114,6 +115,27 @@ This is the easiest and most stable integration path.
 ## Complex-Valued Data
 
 You don't need to handle complex numbers yourself. Whatever a provider returns passes through `load_data_sync` / `load_data_async`, which split every complex data variable into `<name>_amplitude`, `<name>_phase` (radians), `<name>_real` and `<name>_imag`. The measurement's identity is unchanged by the split, so hearts, tags and notes stay attached.
+
+## Metadata Integration (Optional)
+
+Qimchi displays and searches metadata from `ds.attrs`. The options below add summaries, pinned parameters and support for your format's measurement IDs. Each integration is optional.
+
+- **Measurement details.** The Explorer's summary strip, plot titles and the info block in exported images read a fixed set of attributes: `Timestamp`, `Cryostat`, `Wafer ID`, `Device Type`, `Sample Name`, `Experiment Name` and `Measurement ID`. If your format records any of these under other names, copy them across in `_convert_to_xarray`:
+
+  ```python
+  ds.attrs["Sample Name"] = header["sample"]
+  ds.attrs["Timestamp"] = header["started_at"]
+  ```
+
+- **Pinned instrument parameters.** Store instrument settings in `ds.attrs["Parameters Snapshot"]` as a dict of `{name: {"label": ..., "value": ..., "unit": ...}}` or a JSON string with that structure. Users can pin these parameters in the Metadata panel to display their values beside plots with SI prefixes. Adding a Parameters Snapshot limits the panel to Qanary's sections (`Sweeps`, `Parameters Snapshot`, `Extra Metadata`, `Instruments Snapshot`). Put other metadata you want displayed in `Extra Metadata`.
+
+- **Nested metadata.** Store nested metadata as dicts or lists. The Metadata panel displays them as collapsible sections and also expands JSON-encoded values.
+
+- **Persistent measurement IDs.** Hearts, tags and notes are attached to a measurement ID. Qimchi uses Qanary's `Measurement ID` or QCoDeS's run `guid` when available. Otherwise, it derives an ID from the dataset's structure, identifying attributes and sampled coordinate values; changing these can change the ID. If your format has a stable run ID, add support for it in `backend/api/shared/identity.py` to preserve annotations when files are rewritten.
+
+- **Format-specific sections.** QCoDeS runs have a "QCoDeS Metadata" section built from `QCODES_META_KEYS` in `backend/api/dirtree.py`. Add similar handling there to give your format its own metadata section.
+
+To contribute your provider and metadata mapping, open an issue or merge request at <https://gitlab.com/squad-lab/qimchi>. See [CONTRIBUTING.md](https://gitlab.com/squad-lab/qimchi/-/blob/main/CONTRIBUTING.md) for setup and testing instructions.
 
 ## Optional UX Integration (Discovery + Frontend)
 

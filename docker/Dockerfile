@@ -41,6 +41,7 @@ RUN python -m pip install --no-cache-dir -U pip setuptools wheel \
 COPY backend/api/ /app/api/
 COPY backend/main.py /app/
 COPY backend/migrations/ /app/migrations/
+COPY LICENSE THIRD_PARTY_NOTICES.md /app/
 
 # Install the local project after its sources are present. Dependencies were
 # cached in the preceding layer; --locked keeps the image reproducible.

@@ -1,6 +1,6 @@
 """
 End-to-end verification that a real QCoDeS measurement, published with
-qimchi_connect the way examples/qcodes_measurement.py in the qimchi-connect repo
+qimchi_connect the way examples/qcodes_measurement.py in the Qimchi-Connect repo
 does, resolves through Qimchi's own production data_loader while still
 running: memory:// -> the shared live_measurements.db registry -> a live
 WebSocket connection -- the exact path a real QCoDeS/qanary measurement

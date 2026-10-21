@@ -158,6 +158,10 @@ APP_BUNDLE="packaging/build/Qimchi.app"
 # Clear before building so the check below proves THIS run produced the bundle.
 rm -rf "$APP_BUNDLE"
 
+# Generate license notices from this Python environment and frontend/node_modules.
+rm -f packaging/build/THIRD_PARTY_NOTICES.md
+"$PYTHON_EXE" scripts/third_party_notices.py --output packaging/build/THIRD_PARTY_NOTICES.md
+
 "$PYTHON_EXE" -m PyInstaller \
     --clean --noconfirm \
     --distpath packaging/build \

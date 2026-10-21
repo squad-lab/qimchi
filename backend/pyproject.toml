@@ -1,11 +1,10 @@
 [project]
 name = "qimchi-api"
-version = "0.7.1"
+version = "0.7.2"
 description = "Plot your spicy quantum measurements with ease"
 authors = [
-  { name = "Spandan Anupam", email = "s.anupam@fz-juelich.de" },
   { name = "Jyotirmaya Shivottam", email = "shivottam@proton.me" },
-  { name = "Lino Visser", email = "l.visser@fz-juelich.de" },
+  { name = "Spandan Anupam", email = "s.anupam@fz-juelich.de" },
 ]
 license = "AGPL-3.0-or-later"
 keywords = ["quantum", "plotter", "plotly", "fastapi", "react"]
@@ -31,7 +30,7 @@ dependencies = [
     "setuptools~=82.0.0",
     "scipy~=1.17.0",
     "watchdog~=6.0.0",
-    # See qimchi-connect: 16.0 logs a timed-out live probe as an ERROR
+    # See Qimchi-Connect: 16.0 logs a timed-out live probe as an ERROR
     # traceback in the producer's console.
     "websockets~=17.1",
     "uvicorn~=0.42.0",

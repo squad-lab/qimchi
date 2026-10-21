@@ -13,7 +13,7 @@ type OptionWithIconType = {
   icon?: React.ComponentType<{ size?: number; className?: string }> | string;
 };
 
-// Helper function to format title: shows UUID for qanary datasets, truncated title otherwise
+// Helper function to format title: shows UUID for Qanary datasets, truncated title otherwise
 const formatTitleWithUUID = (title: string, maxLength = 15) => {
   if (!title) return "Plot";
 
@@ -27,7 +27,7 @@ const formatTitleWithUUID = (title: string, maxLength = 15) => {
     return `${displayId.substring(0, maxLength - 3)}...`;
   }
 
-  // No UUID (non-qanary dataset): show the title itself, truncated
+  // No UUID (non-Qanary dataset): show the title itself, truncated
   if (title.length <= maxLength) {
     return title;
   }

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-/** Pinned qanary Parameters Snapshot entries. */
+/** Pinned Qanary Parameters Snapshot entries. */
 interface PinnedParametersState {
   pinned: string[];
   toggle: (name: string) => void;

@@ -142,6 +142,10 @@ APP_BIN="$APP_DIR/qimchi"
 # Clear before building so the check below proves THIS run produced the binary.
 rm -rf "$APP_DIR"
 
+# Generate license notices from this Python environment and frontend/node_modules.
+rm -f packaging/build/THIRD_PARTY_NOTICES.md
+"$PYTHON_EXE" scripts/third_party_notices.py --output packaging/build/THIRD_PARTY_NOTICES.md
+
 "$PYTHON_EXE" -m PyInstaller \
     --clean --noconfirm \
     --distpath packaging/build \

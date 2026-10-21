@@ -4,7 +4,7 @@ Demo measurements for the walkthrough.
 The walkthrough needs measurements that exist on every install, so they are
 generated here rather than shipped as files: `POST /demo/prepare` writes them
 into `<app home>/demo/`, and `POST /demo/live/start` publishes a live one
-through qimchi-connect, exactly as a user's own measurement code would.
+through Qimchi-Connect, exactly as a user's own measurement code would.
 
 Everything is deterministic (fixed shapes and a seeded noise generator), so a
 regenerated file has the same content identity and keeps its hearts and notes.
@@ -297,7 +297,7 @@ async def prepare() -> dict:
 
 
 class _LiveDemo:
-    """One live logo at a time, published through qimchi-connect."""
+    """One live logo at a time, published through Qimchi-Connect."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()

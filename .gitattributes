@@ -42,3 +42,4 @@
 # Collapse generated lockfiles in GitLab merge request diffs.
 backend/uv.lock -diff linguist-generated=true gitlab-generated=true
 frontend/package-lock.json -diff linguist-generated=true gitlab-generated=true
+THIRD_PARTY_NOTICES.md -diff linguist-generated=true gitlab-generated=true

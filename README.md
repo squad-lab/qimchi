@@ -1,8 +1,8 @@
-# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.7.1
+# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.7.2
 
 [![Website](https://img.shields.io/badge/website-qimchi.squad--lab.org-8cc63e)](https://qimchi.squad-lab.org)
 
-Plotly based data visualization tool for `xarray` data. Optimized to work with the optional [`qanary`](https://gitlab.com/squad-lab/qanary) package. Qimchi supports any dataset format convertible to `xarray` (see [Supported Dataset Types](#supported-dataset-types) below). Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html).
+Plotly based data visualization tool for `xarray` data. Optimized to work with the optional [Qanary](https://gitlab.com/squad-lab/qanary) package. Qimchi supports any dataset format convertible to `xarray` (see [Supported Dataset Types](#supported-dataset-types) below). Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html).
 
 This repository contains a unified FastAPI application that serves a React-based frontend for the Qimchi plotter.
 
@@ -11,27 +11,19 @@ This repository contains a unified FastAPI application that serves a React-based
 >
 > 🖥️ **Desktop app:** a self-contained build of Qimchi that runs in its own window, with no separate Git, Python or Node installation required. Installers for Windows (`.exe`), Linux (`.AppImage`) and macOS (`.dmg`) are available on the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases). The app checks for updates on startup and can install them with one click.
 
-## What's new in 0.7.1
+## What's new in 0.7.2
 
-- **Undo closed plots:** reopen plots with Ctrl+Z (Cmd+Z on Mac), Undo or Recently closed, restoring their position, filters, settings and width. Clear All Plots can also be undone.
-- **LineCut markers:** add vertical lines, horizontal lines or points to a LineCut preview. They snap to the data and can be nudged with the arrow keys.
-- **Lower live heat-map memory use:** prevents the image-resource leak caused by repeated heat-map redraws, and reduces the work done on each live refresh.
-- **Smaller background exporters:** image-export workers use about 90% less memory while idle.
-- **Workspace recovery:** the Basket and Viewer plots are restored after a window reload, including recovery from a crash.
-- **Reliable LineCuts and panels:** live frontier LineCuts reach the final row or column, and floating cards and panels stay inside the window when it is resized.
-- **Clearer controls:** interface zoom applies consistently, and plot-control tooltips show their keyboard shortcuts.
-- **Version-specific changelogs:** Settings > Updates shows the running version's formatted changelog offline, and update prompts show the offered stable or RC version's changes. Windows updates restart Qimchi when "Start Qimchi after installation" is checked.
-- **Linux on newer distributions:** the AppImage now starts on Arch and Fedora. Each release is tested on Ubuntu, Debian, Fedora and Arch.
-- **Easier bug reports and updates:** the sidebar bug-report button opens reporting instructions, a new-issue link, and log-bundle controls; downloaded updates can be downloaded again before installation.
+- **Bundled licenses:** desktop installers and Docker images include third-party license notices.
+- **Citation and archiving:** citation metadata and BibTeX references are included, and stable releases are archived on Zenodo.
 
-Everything in this release is listed in the [changelog](CHANGELOG.md#v071---2026-10-17).
+Everything in this release is listed in the [changelog](CHANGELOG.md#v072---2026-10-21).
 
 ---
 
 ## Table of Contents
 
-- [ Qimchi v0.7.1](#-qimchi-v071)
-  - [What's new in 0.7.1](#whats-new-in-071)
+- [ Qimchi v0.7.2](#-qimchi-v072)
+  - [What's new in 0.7.2](#whats-new-in-072)
   - [Table of Contents](#table-of-contents)
   - [Installation](#installation)
     - [Windows](#windows)
@@ -47,7 +39,9 @@ Everything in this release is listed in the [changelog](CHANGELOG.md#v071---2026
   - [Supported Dataset Types](#supported-dataset-types)
   - [Measurements](#measurements)
   - [Contributing](#contributing)
+  - [Citing Qimchi](#citing-qimchi)
   - [Authors](#authors)
+  - [License](#license)
 
 ---
 
@@ -480,20 +474,43 @@ Qimchi's backend supports loading datasets in any format that can be converted t
 - MATLAB `.mat` files
 - `xarray` DataTrees (hierarchical datasets)
 - SQLite-backed containers with `xarray`-compatible structure
-- Custom formats convertible to `xarray` via user-defined loaders (see [Custom Dataset Support](https://qimchi.squad-lab.org/docs/custom_datasets.md))
+- Custom formats convertible to `xarray` via user-defined loaders (see [Custom Dataset Support](https://qimchi.squad-lab.org/docs/custom-datasets/))
 
 Complex-valued variables, from any of these, are split into their amplitude, phase (in radians), real and imaginary parts, so each can be plotted and filtered like any other variable.
 
 ## Measurements
 Measurement examples referencing `qanary` can be found in its own repository. Refer to [its repository](https://gitlab.com/squad-lab/qanary) for more details. If you need `qanary`, the project must be installed manually; it is no longer installed automatically by the Qimchi installer.
 
-To plot measurements from your own code while they run, use [`qimchi-connect`](https://gitlab.com/squad-lab/qimchi-connect). It works with any measurement code and has ready-made support for QCoDeS and Quantify.
+To plot measurements from your own code while they run, use [Qimchi-Connect](https://gitlab.com/squad-lab/qimchi-connect). It works with any measurement code and has ready-made support for QCoDeS and Quantify.
 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, checks and release-note instructions.
 
+## Citing Qimchi
+
+Please cite Qimchi when using it in your work:
+
+```bibtex
+@misc{qimchi,
+  author       = {Shivottam, Jyotirmaya and Anupam, Spandan},
+  title        = {Qimchi: Live plotting for quantum measurements},
+  year         = {2026},
+  note         = {Version 0.7.2, software},
+  howpublished = {GitLab},
+  url          = {https://gitlab.com/squad-lab/qimchi}
+}
+```
+
+The website's [Cite section](https://qimchi.squad-lab.org/#cite) provides entries for the latest release in BibTeX, BibLaTeX and APS formats. [CITATION.cff](CITATION.cff) contains machine-readable citation metadata.
+
 ## Authors
 
-- Spandan Anupam: [s.anupam@fz-juelich.de](mailto:s.anupam@fz-juelich.de)
 - Jyotirmaya Shivottam: [shivottam@proton.me](mailto:shivottam@proton.me)
+- Spandan Anupam: [s.anupam@fz-juelich.de](mailto:s.anupam@fz-juelich.de)
+
+## License
+
+Qimchi is free software under the [AGPL-3.0-or-later](LICENSE). [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists bundled dependencies and their licenses.
+
+Copyright © 2024–2026 Forschungszentrum Jülich GmbH, PGI-11.

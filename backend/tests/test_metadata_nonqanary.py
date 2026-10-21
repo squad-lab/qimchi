@@ -1,4 +1,4 @@
-"""Metadata responses for qanary and other dataset formats."""
+"""Metadata responses for Qanary and other dataset formats."""
 
 import json
 
@@ -54,7 +54,7 @@ async def test_a_qanary_dataset_shows_its_four_sections_and_nothing_else(monkeyp
 
 @pytest.mark.asyncio
 async def test_qcodes_run_surfaces_its_own_attrs(monkeypatch):
-    """A QCoDeS run has none of qanary's sections, and must not be blanked."""
+    """A QCoDeS run has none of Qanary's sections, and must not be blanked."""
     _patch_loader(
         monkeypatch,
         _dataset(
@@ -154,14 +154,14 @@ async def test_attrs_payload_surfaces_qcodes_identity_fields(monkeypatch):
     assert out["guid"] == "aaaa-bbbb"
     assert out["exp_name"] == "T1"
     assert out["sample_name"] == "device_A"
-    # qanary's keys are still present, so the cached payload keeps its shape.
+    # Qanary's keys are still present, so the cached payload keeps its shape.
     assert out["Cryostat"] == "N/A"
     assert out["independents"] == ["x"]
 
 
 @pytest.mark.asyncio
 async def test_attrs_payload_is_unchanged_for_a_qanary_dataset(monkeypatch):
-    """Cached and fresh qanary payloads retain the same shape."""
+    """Cached and fresh Qanary payloads retain the same shape."""
     _patch_loader(
         monkeypatch,
         _dataset({"Cryostat": "BlueFors", "Measurement ID": "abc-123"}),

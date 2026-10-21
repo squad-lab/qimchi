@@ -23,7 +23,7 @@ AppId={{7C5F3B82-A1E4-4D6F-9B2C-E5D8F3A7C6B1}
 AppName=Qimchi
 AppVersion={#AppVersion}
 AppVerName=Qimchi {#AppVersion}
-AppPublisher=squad-lab (FZJ)
+AppPublisher=SQUAD Lab (FZJ)
 AppPublisherURL=https://gitlab.com/squad-lab/qimchi
 AppSupportURL=https://gitlab.com/squad-lab/qimchi/-/issues
 AppUpdatesURL=https://gitlab.com/squad-lab/qimchi/-/releases
@@ -257,7 +257,7 @@ end;
   (saved window/UI state), and the debug log. The library database
   (qimchi.db -- notes, hearts, tags) is deliberately KEPT so annotations
   survive a reinstall/upgrade, as are exports (~/Downloads), the datasets, and
-  the live registry (live_measurements.db) written by qimchi-connect. }
+  the live registry (live_measurements.db) written by Qimchi-Connect. }
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   QimchiHome: string;

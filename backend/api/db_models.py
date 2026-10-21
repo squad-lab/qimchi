@@ -14,7 +14,7 @@ A few implementation details are worth keeping in mind:
 - Measurements are identified by UUID rather than ``abs_path``. This keeps the
   database independent of where a dataset happens to live and makes future
   cross-node syncing easier. ``shared/identity.py`` resolves the UUID from the
-  qanary ``Measurement ID`` when available, then a QCoDeS run ``guid``, and
+  Qanary ``Measurement ID`` when available, then a QCoDeS run ``guid``, and
   finally a content-signature-based UUID5. ``measurements.uuid_origin`` records
   which method was used.
 

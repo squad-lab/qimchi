@@ -1,8 +1,8 @@
 """
-End-to-end coverage for a live qanary heatmap and Qimchi filter.
+End-to-end coverage for a live Qanary heatmap and Qimchi filter.
 
-The producer is a real, hardware-free qanary measurement. It runs in an
-isolated environment with a pinned qanary release because qanary intentionally
+The producer is a real, hardware-free Qanary measurement. It runs in an
+isolated environment with a pinned Qanary release because Qanary intentionally
 uses Zarr 2 while the Qimchi backend uses Zarr 3. The consumer remains this process and
 uses Qimchi's production registry lookup, WebSocket loader, heatmap builder,
 and filter implementation without mocking any layer in that path.
@@ -123,7 +123,7 @@ def _qanary_spec() -> str:
 
 
 def test_qanary_live_heatmap_and_filter_use_the_production_qimchi_path(tmp_path):
-    """A partial qanary grid should become a filtered live Qimchi heatmap."""
+    """A partial Qanary grid should become a filtered live Qimchi heatmap."""
     if shutil.which("uv") is None:
         pytest.skip("uv is required to run qanary in its isolated environment")
 
@@ -196,7 +196,7 @@ def test_qanary_live_heatmap_and_filter_use_the_production_qimchi_path(tmp_path)
             time.sleep(0.1)
 
         assert observed_plot is not None, (
-            "never observed a partial filtered qanary heatmap while the "
+            "never observed a partial filtered Qanary heatmap while the "
             f"measurement was live; log:\n{log_path.read_text(encoding='utf-8')}"
         )
         assert observed_plot["type"] == "HeatMap"

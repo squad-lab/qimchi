@@ -285,7 +285,7 @@ test("walks through the demo measurements from start to finish", async ({ page }
 
   await cardButton(page, "Next").click();
   await expect(cardTitle(page)).toHaveText("Plot your own measurements live");
-  await expect(card(page).getByRole("link", { name: "qimchi-connect" })).toHaveAttribute(
+  await expect(card(page).getByRole("link", { name: "Qimchi-Connect" })).toHaveAttribute(
     "href",
     "https://gitlab.com/squad-lab/qimchi-connect",
   );
