@@ -87,6 +87,9 @@ class Zenodo:
     ) -> Any:
         if not url.startswith("http"):
             url = self.api + url
+        # The token goes with every request, so never follow a link off Zenodo.
+        if not url.startswith(self.api + "/"):
+            sys.exit(f"Refusing to send the Zenodo token to {url}")
         headers = {"Authorization": f"Bearer {self.token}", **(headers or {})}
         if json_body is not None:
             data = json.dumps(json_body).encode()
