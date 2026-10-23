@@ -5,6 +5,7 @@ description = "Plot your spicy quantum measurements with ease"
 authors = [
   { name = "Jyotirmaya Shivottam", email = "shivottam@proton.me" },
   { name = "Spandan Anupam", email = "s.anupam@fz-juelich.de" },
+  { name = "Vincent Mourik", email = "v.mourik@fz-juelich.de" },
 ]
 license = "AGPL-3.0-or-later"
 keywords = ["quantum", "plotter", "plotly", "fastapi", "react"]
