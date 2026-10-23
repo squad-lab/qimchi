@@ -743,7 +743,7 @@ zenodo:
     - TAG="${CI_COMMIT_TAG:-$ZENODO_ARCHIVE_TAG}"
     - git fetch --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
     - git archive --format=zip --prefix="qimchi-${TAG#v}/" -o "qimchi-${TAG}.zip" "$TAG"
-    - ZENODO_TOKEN="$ZENODO_SPANDAN" python scripts/zenodo_release.py --tag "$TAG" --file "qimchi-${TAG}.zip"
+    - ZENODO_TOKEN="$ZENODO_SPANDAN" python scripts/zenodo_release.py --tag "$TAG" --language python --language typescript --file "qimchi-${TAG}.zip"
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/ && $ZENODO_SPANDAN
       needs: [release]
