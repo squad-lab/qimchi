@@ -1,6 +1,7 @@
 # <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.7.2
 
 [![Website](https://img.shields.io/badge/website-qimchi.squad--lab.org-8cc63e)](https://qimchi.squad-lab.org)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23537382.svg)](https://doi.org/10.5281/zenodo.23537382)
 
 Plotly based data visualization tool for `xarray` data. Optimized to work with the optional [Qanary](https://gitlab.com/squad-lab/qanary) package. Qimchi supports any dataset format convertible to `xarray` (see [Supported Dataset Types](#supported-dataset-types) below). Documentation for handling these files can be found [here](https://xarray.pydata.org/en/stable/io.html).
 
@@ -493,14 +494,17 @@ Please cite Qimchi when using it in your work:
 
 ```bibtex
 @misc{qimchi,
-  author       = {Shivottam, Jyotirmaya and Anupam, Spandan},
+  author       = {Shivottam, Jyotirmaya and Anupam, Spandan and Mourik, Vincent},
   title        = {Qimchi: Live plotting for quantum measurements},
   year         = {2026},
   note         = {Version 0.7.2, software},
-  howpublished = {GitLab},
-  url          = {https://gitlab.com/squad-lab/qimchi}
+  publisher    = {Zenodo},
+  doi          = {10.5281/zenodo.23537382},
+  url          = {https://doi.org/10.5281/zenodo.23537382}
 }
 ```
+
+This DOI always points to the latest release. Each release also has its own DOI, listed on the [Zenodo record](https://doi.org/10.5281/zenodo.23537382); use that one to cite the exact version you used.
 
 The website's [Cite section](https://qimchi.squad-lab.org/#cite) provides entries for the latest release in BibTeX, BibLaTeX and APS formats. [CITATION.cff](CITATION.cff) contains machine-readable citation metadata.
 
@@ -508,6 +512,7 @@ The website's [Cite section](https://qimchi.squad-lab.org/#cite) provides entrie
 
 - Jyotirmaya Shivottam: [shivottam@proton.me](mailto:shivottam@proton.me)
 - Spandan Anupam: [s.anupam@fz-juelich.de](mailto:s.anupam@fz-juelich.de)
+- Vincent Mourik: [v.mourik@fz-juelich.de](mailto:v.mourik@fz-juelich.de)
 
 ## License
 
