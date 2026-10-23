@@ -108,8 +108,8 @@ const UpdateDialog = () => {
               </>
             ) : (
               <>
-                A new version of Qimchi is out. It downloads in the background, so you can keep
-                working, and you'll be asked to install it once it's ready.
+                Download the update in the background. Qimchi will ask you to install it when it is
+                ready.
               </>
             )}
           </p>
