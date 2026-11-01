@@ -15,6 +15,8 @@ export interface DatasetAttributesLike {
   dependents?: string[];
   /** Per-dependent list of the independents it varies over (see AttrData). */
   variable_independents?: Record<string, string[]>;
+  /** Dimensions associated with each independent (see AttrData). */
+  independent_dimensions?: Record<string, string[]>;
 }
 
 export interface DatasetLike {

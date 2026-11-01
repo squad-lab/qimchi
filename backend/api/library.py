@@ -404,7 +404,8 @@ def _read_cached_attrs(path: str) -> dict | None:
             cached = json.loads(row.metadata_json)
         except (TypeError, ValueError):
             return None
-        if not isinstance(cached, dict) or "variable_independents" not in cached:
+        # Rebuild cached payloads that lack the current dimension fields.
+        if not isinstance(cached, dict) or "unlabelled_dimensions" not in cached:
             return None
         return cached
 

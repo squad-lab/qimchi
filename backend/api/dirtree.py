@@ -998,6 +998,7 @@ INTERNAL_META_KEYS: frozenset = frozenset(
         "qimchi_connect",
         "qimchi_connect_rows",
         "qimchi_connect_source",
+        "qimchi_qcodes_records",
     }
 )
 
@@ -1009,14 +1010,18 @@ PREFERRED_META_KEYS: list = [
     "Instruments Snapshot",
 ]
 
-# Expose stable QCoDeS metadata as one structured section.
+# Group QCoDeS run details separately from its raw metadata.
+QCODES_RUN_SECTION: str = "Run Information"
 QCODES_META_SECTION: str = "QCoDeS Metadata"
+QCODES_SUMMARY_KEYS: tuple[tuple[str, str], ...] = (
+    ("Experiment", "exp_name"),
+    ("Sample", "sample_name"),
+    ("Name", "ds_name"),
+    ("Records", "qimchi_qcodes_records"),
+)
 QCODES_META_KEYS: tuple[str, ...] = (
-    "ds_name",
-    "exp_name",
     "guid",
     "run_timestamp",
-    "sample_name",
     "snapshot",
 )
 
@@ -1053,6 +1058,7 @@ NON_QANARY_ATTR_KEYS: list = [
     "guid",
     "exp_name",
     "sample_name",
+    "ds_name",
     "run_timestamp",
     "completed_timestamp",
     "qimchi_db_uuid",
@@ -1068,7 +1074,8 @@ def build_attrs_payload(data: xr.Dataset) -> Dict:
     if not isinstance(metadata, dict):
         metadata = dict(metadata)
 
-    indeps: list = list(data.coords.keys())  # Coordinates -> independents
+    # Scalar coordinates cannot serve as sweep axes.
+    indeps: list = [name for name, coord in data.coords.items() if coord.ndim > 0]
     deps: list = list(data.data_vars.keys())  # Data variables -> dependents
 
     # Flat tables have no coord/var split: every column is both.
@@ -1094,25 +1101,40 @@ def build_attrs_payload(data: xr.Dataset) -> Dict:
         value = metadata.get(key)
         if isinstance(value, (str, int, float, bool)):
             attr_json[key] = value
+    if metadata.get("guid") and "qimchi_qcodes_records" in metadata:
+        attr_json["records"] = metadata["qimchi_qcodes_records"]
 
-    # Which independents each dependent actually varies over, in coordinate order.
+    # Track each dependent's axes and each axis's dimensions. Axes on the
+    # same dimension form a line, not a grid.
     var_indeps: dict = {}
+    coord_dims: dict = {}
+    unlabelled: list = []
     if not (isinstance(tabular_columns, list) and tabular_columns):
         coord_dims = {
             str(name): tuple(str(dim) for dim in coord.dims)
             for name, coord in data.coords.items()
+            if coord.ndim > 0
         }
+        # Use position values for dimensions without coordinates.
+        labelled = {dims[0] for dims in coord_dims.values() if len(dims) == 1}
+        unlabelled = [str(dim) for dim in data.dims if str(dim) not in labelled]
+        indeps = indeps + unlabelled
+        coord_dims.update({dim: (dim,) for dim in unlabelled})
         for name, var in data.data_vars.items():
             dims = {str(dim) for dim in var.dims}
             var_indeps[str(name)] = [
                 coord_name
                 for coord_name, coord_dim_names in coord_dims.items()
-                if coord_dim_names and dims.issuperset(coord_dim_names)
+                if dims.issuperset(coord_dim_names)
             ]
 
     attr_json["independents"] = indeps
     attr_json["dependents"] = deps
     attr_json["variable_independents"] = var_indeps
+    attr_json["independent_dimensions"] = {
+        name: list(dims) for name, dims in coord_dims.items()
+    }
+    attr_json["unlabelled_dimensions"] = unlabelled
     return attr_json
 
 
@@ -1174,6 +1196,12 @@ async def get_metadata(path: PathData) -> Dict:
             key in metadata for key in ("run_id", "ds_name", "qcodes_db_path")
         )
         if is_qcodes:
+            run_info = {
+                label: metadata[attr]
+                for label, attr in QCODES_SUMMARY_KEYS
+                if attr in metadata and metadata[attr] is not None
+            }
+            meta_dict: dict = {QCODES_RUN_SECTION: run_info} if run_info else {}
             qcodes_meta: dict = {}
             for key in QCODES_META_KEYS:
                 if key not in metadata:
@@ -1184,7 +1212,7 @@ async def get_metadata(path: PathData) -> Dict:
                     if parsed_snapshot is not None:
                         value = parsed_snapshot
                 qcodes_meta[key] = value
-            meta_dict: dict = {QCODES_META_SECTION: qcodes_meta}
+            meta_dict[QCODES_META_SECTION] = qcodes_meta
         else:
             qanary_sections: list = [
                 key for key in PREFERRED_META_KEYS if key in metadata

@@ -208,5 +208,9 @@ export interface AttrData {
    * coordinate order.
    */
   variable_independents?: Record<string, string[]>;
+  /** Dimensions associated with each independent. */
+  independent_dimensions?: Record<string, string[]>;
+  /** Coordinate-free dimensions plotted by position. */
+  unlabelled_dimensions?: string[];
   [key: string]: string | string[] | number | boolean | Record<string, string[]> | undefined;
 }

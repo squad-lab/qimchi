@@ -574,7 +574,11 @@ const Basket = ({
         {Object.entries(item.attributes)
           .filter(
             ([key]) =>
-              key !== "independents" && key !== "dependents" && key !== "variable_independents",
+              key !== "independents" &&
+              key !== "dependents" &&
+              key !== "variable_independents" &&
+              key !== "independent_dimensions" &&
+              key !== "unlabelled_dimensions",
           )
           .map(
             ([key, value]) =>

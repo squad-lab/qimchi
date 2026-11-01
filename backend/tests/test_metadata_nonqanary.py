@@ -65,6 +65,7 @@ async def test_qcodes_run_surfaces_its_own_attrs(monkeypatch):
                 "guid": "aaaa-bbbb",
                 "run_timestamp": "2026-09-11 10:00:00+0000",
                 "sample_name": "device-a",
+                "qimchi_qcodes_records": 42,
                 "qcodes_db_path": "/data/experiments.db",
                 "snapshot": json.dumps({"station": {"instruments": {}}}),
                 "completed_timestamp": "not requested",
@@ -74,14 +75,20 @@ async def test_qcodes_run_surfaces_its_own_attrs(monkeypatch):
 
     out = await dirtree.get_metadata(PathData(path="/tmp/experiments.db#run_id=7"))
 
-    assert set(out) == {dirtree.QCODES_META_SECTION}
+    assert list(out) == [dirtree.QCODES_RUN_SECTION, dirtree.QCODES_META_SECTION]
+    assert out[dirtree.QCODES_RUN_SECTION] == {
+        "Experiment": "transport",
+        "Sample": "device-a",
+        "Name": "sweep",
+        "Records": 42,
+    }
     qcodes = out[dirtree.QCODES_META_SECTION]
     assert list(qcodes) == list(dirtree.QCODES_META_KEYS)
-    assert qcodes["ds_name"] == "sweep"
     assert qcodes["guid"] == "aaaa-bbbb"
     assert qcodes["snapshot"] == {"station": {"instruments": {}}}
     assert "run_id" not in qcodes
     assert "completed_timestamp" not in qcodes
+    assert "qimchi_qcodes_records" not in qcodes
     # No placeholder rows for sections this dataset never had.
     assert "Sweeps" not in out
     assert "N/A" not in qcodes.values()
@@ -144,6 +151,8 @@ async def test_attrs_payload_surfaces_qcodes_identity_fields(monkeypatch):
                 "guid": "aaaa-bbbb",
                 "exp_name": "T1",
                 "sample_name": "device_A",
+                "ds_name": "sweep",
+                "qimchi_qcodes_records": 0,
             }
         ),
     )
@@ -154,6 +163,8 @@ async def test_attrs_payload_surfaces_qcodes_identity_fields(monkeypatch):
     assert out["guid"] == "aaaa-bbbb"
     assert out["exp_name"] == "T1"
     assert out["sample_name"] == "device_A"
+    assert out["ds_name"] == "sweep"
+    assert out["records"] == 0
     # Qanary's keys are still present, so the cached payload keeps its shape.
     assert out["Cryostat"] == "N/A"
     assert out["independents"] == ["x"]
@@ -173,6 +184,8 @@ async def test_attrs_payload_is_unchanged_for_a_qanary_dataset(monkeypatch):
         "independents",
         "dependents",
         "variable_independents",
+        "independent_dimensions",
+        "unlabelled_dimensions",
     }
 
 
@@ -210,7 +223,7 @@ async def test_large_qcodes_snapshot_is_returned_without_bookkeeping(monkeypatch
     out = await dirtree.get_metadata(PathData(path="/tmp/experiments.db#run_id=8"))
 
     qcodes = out[dirtree.QCODES_META_SECTION]
-    assert qcodes["ds_name"] == "sweep"
+    assert out[dirtree.QCODES_RUN_SECTION] == {"Name": "sweep"}
     assert qcodes["guid"] == "aaaa-bbbb"
     assert qcodes["snapshot"] == snapshot_data
     assert "__qimchi_metadata_too_large__" not in json.dumps(qcodes)

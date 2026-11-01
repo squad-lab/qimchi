@@ -48,7 +48,8 @@ def test_qcodes_loader_decodes_the_station_snapshot(tmp_path, monkeypatch):
     qcodes_dataset = SimpleNamespace(
         to_xarray_dataset=lambda: xr.Dataset(
             attrs={"snapshot": '{"station": {"temperature": 0.02}}'}
-        )
+        ),
+        number_of_results=1,
     )
     monkeypatch.setattr(
         qcodes.dataset, "initialised_database_at", lambda _path: nullcontext()

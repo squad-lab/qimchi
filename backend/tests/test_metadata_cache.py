@@ -224,3 +224,29 @@ async def test_store_cached_attrs_updates_an_existing_row(tmp_path):
 
     cached = await library.get_cached_attrs(str(nc))
     assert cached is not None and cached["dependents"] == ["signal"]
+
+
+def test_payload_lists_a_dimension_without_coordinates_as_an_independent():
+    ds = xr.Dataset(
+        data_vars={"signal": (("sweep", "voltage"), np.zeros((3, 8)))},
+        coords={"voltage": np.linspace(0, 1, 8)},
+    )
+
+    payload = build_attrs_payload(ds)
+
+    assert payload["independents"] == ["voltage", "sweep"]
+    assert payload["unlabelled_dimensions"] == ["sweep"]
+    assert payload["independent_dimensions"]["sweep"] == ["sweep"]
+    assert payload["variable_independents"]["signal"] == ["voltage", "sweep"]
+
+
+@pytest.mark.asyncio
+async def test_a_row_cached_before_unlabelled_dimensions_is_built_again(tmp_path):
+    nc = tmp_path / "run.nc"
+    _dataset().to_netcdf(nc)
+    with xr.open_dataset(nc) as ds:
+        payload = build_attrs_payload(ds)
+    payload.pop("unlabelled_dimensions")
+    _register(str(nc), payload)
+
+    assert await library.get_cached_attrs(str(nc)) is None

@@ -155,6 +155,8 @@ def _add_export_info_footer(
                 "independents",
                 "dependents",
                 "variable_independents",
+                "independent_dimensions",
+                "unlabelled_dimensions",
                 "Size",
                 "size",
             ):

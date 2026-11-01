@@ -37,6 +37,7 @@ from qimchi_connect import registry as live_db
 # Local imports
 from .diagnostics import register_gauge
 from .logger import logger
+from .qcodes_layout import qcodes_run_to_xarray
 
 MEMORY_PROTOCOL = "memory://"
 
@@ -1175,7 +1176,18 @@ def _load_qcodes_xarray_dataset(db_path: Path, run_id: int) -> xr.Dataset:
     try:
         with initialised_database_at(str(db_path)):
             qcodes_dataset = load_by_id(run_id)
-            dataset = qcodes_dataset.to_xarray_dataset()
+            try:
+                dataset = qcodes_run_to_xarray(qcodes_dataset)
+            except Exception:
+                logger.warning(
+                    "Could not lay out QCoDeS run_id=%s by its sweeps; "
+                    "using QCoDeS' own conversion",
+                    run_id,
+                    exc_info=True,
+                )
+                dataset = qcodes_dataset.to_xarray_dataset()
+            # Store the result count separately from run metadata.
+            dataset.attrs["qimchi_qcodes_records"] = qcodes_dataset.number_of_results
     except Exception as exc:
         raise DatasetResolutionError(
             f"Failed to load QCoDeS run_id={run_id} from '{db_path}': {exc}"
