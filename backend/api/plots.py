@@ -18,7 +18,12 @@ import xarray as xr
 from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
 
-from .data_loader import MEMORY_PROTOCOL, load_dataset_async, resolve_to_disk_path
+from .data_loader import (
+    MEMORY_PROTOCOL,
+    load_dataset_async,
+    qcodes_run_id,
+    resolve_to_disk_path,
+)
 from .diagnostics import register_gauge
 
 # Local imports
@@ -201,6 +206,13 @@ def _apply_filters_sync(
     return filtered_plots
 
 
+def _dataset_name(fpath: str) -> str:
+    """Return a dataset stem with its QCoDeS run ID, if any."""
+    run_id = qcodes_run_id(fpath)
+    stem = Path(fpath.split("#", 1)[0]).stem if run_id is not None else Path(fpath).stem
+    return f"{stem}_run{run_id}" if run_id is not None else stem
+
+
 def validate_variables(
     datasets: List[xr.Dataset], indeps: List[str], deps: List[str]
 ) -> Dict:
@@ -381,6 +393,26 @@ def gen_slider_config(
     return slider_config
 
 
+def index_axis_dimensions(dataset: xr.Dataset, axes: List[str]) -> xr.Dataset:
+    """Assign positional coordinates to requested axes that lack them."""
+    missing = [
+        name for name in axes if name in dataset.dims and name not in dataset.coords
+    ]
+    if not missing:
+        return dataset
+    return dataset.assign_coords(
+        {name: np.arange(dataset.sizes[name]) for name in missing}
+    )
+
+
+def measure_coordinates(dataset: xr.Dataset, deps: List[str]) -> xr.Dataset:
+    """Convert coordinates selected as plot values to data variables."""
+    names = [
+        dep for dep in deps if dep in dataset.coords and dep not in dataset.indexes
+    ]
+    return dataset.reset_coords(names) if names else dataset
+
+
 def apply_data_slicing(
     dataset: xr.Dataset, indeps: List[str], slider: Dict
 ) -> xr.Dataset:
@@ -559,6 +591,7 @@ def create_line_plots(
     for i, (dataset, fpath) in enumerate(zip(datasets, fpaths)):
         try:
             metadata = dataset.attrs
+            dataset = index_axis_dimensions(dataset, indeps)
 
             # Always generate accurate slider configuration from the dataset dimensions
             auto_slider_config = gen_slider_config(dataset, indeps, deps)
@@ -578,6 +611,7 @@ def create_line_plots(
                 )
                 dataset = apply_data_slicing(dataset, indeps, slider_for_slicing)
 
+            dataset = measure_coordinates(dataset, deps)
             plot_indeps, companion = list(indeps), None
             if cut:
                 dataset, x_var, companion = apply_line_cut(dataset, indeps, deps, cut)
@@ -613,7 +647,7 @@ def create_line_plots(
                     is_live = False
 
                 context_fpath = _resolve_context_fpath(fpath, dataset, is_live)
-                dataset_name = Path(context_fpath).stem
+                dataset_name = _dataset_name(context_fpath)
 
                 context = {
                     "fpath": context_fpath,
@@ -687,6 +721,7 @@ def create_heat_maps(
     for i, (dataset, fpath) in enumerate(zip(datasets, fpaths)):
         try:
             metadata = dataset.attrs
+            dataset = index_axis_dimensions(dataset, indeps)
 
             # Always generate accurate slider configuration from the dataset dimensions
             auto_slider_config = gen_slider_config(dataset, indeps, deps)
@@ -702,6 +737,8 @@ def create_heat_maps(
             # Apply data slicing if slider is provided
             if slider_for_slicing:
                 dataset = apply_data_slicing(dataset, indeps, slider_for_slicing)
+
+            dataset = measure_coordinates(dataset, deps)
 
             # For HeatMaps, we need 2 independents (X, Y) and 1 or more dependents (Z)
             if len(indeps) < 2:
@@ -744,7 +781,7 @@ def create_heat_maps(
                     is_live = False
 
                 context_fpath = _resolve_context_fpath(fpath, dataset, is_live)
-                dataset_name = Path(context_fpath).stem
+                dataset_name = _dataset_name(context_fpath)
 
                 context = {
                     "fpath": context_fpath,
@@ -844,7 +881,7 @@ async def _create_plots(request: PlotRequest) -> PlotResponse:
                 dataset = await load_dataset_async(fpath)
                 # Store the path in dataset attributes for reference
                 dataset.attrs["path"] = fpath
-                datasets.append(dataset)
+                datasets.append(index_axis_dimensions(dataset, request.indeps))
             except Exception as e:
                 # Keep the current live plot on transient read errors.
                 if fpath.startswith(MEMORY_PROTOCOL):

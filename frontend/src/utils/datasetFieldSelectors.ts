@@ -57,9 +57,6 @@ const intersect = (base: Set<string>, next: Set<string>): Set<string> => {
   return result;
 };
 
-const hasAllNames = (set: Set<string>, values: string[]): boolean =>
-  values.every((value) => set.has(value));
-
 /**
  * The independents a dependent actually varies over, or null when the dataset
  * did not report it -- older cached payloads and flat tables have no such
@@ -71,6 +68,27 @@ export const getFieldIndependents = (
 ): string[] | null => {
   const dims = attributes?.variable_independents?.[field];
   return Array.isArray(dims) ? dims : null;
+};
+
+/**
+ * Return two independent axes on distinct sweep dimensions for a heat map.
+ * Without dimension metadata, use the first two independents.
+ */
+export const heatmapAxes = (field: string, attributes?: DatasetAttributesLike): string[] => {
+  const indeps = getFieldIndependents(field, attributes) ?? [];
+  const sweeps = attributes?.independent_dimensions;
+  if (!sweeps) return indeps.slice(0, 2);
+
+  const axes: string[] = [];
+  const used = new Set<string>();
+  for (const name of indeps) {
+    const dims = sweeps[name];
+    if (dims?.length !== 1 || used.has(dims[0])) continue;
+    axes.push(name);
+    used.add(dims[0]);
+    if (axes.length === 2) break;
+  }
+  return axes;
 };
 
 /**
@@ -174,6 +192,21 @@ export const isFieldShared = (
   return sharedFields.sharedDeps.has(fieldName);
 };
 
+/**
+ * Check whether a coordinate spans every selected axis dimension.
+ * Missing dimension metadata permits the coordinate.
+ */
+const coordinateVariesAlong = (
+  coordinate: string,
+  axisIndependents: string[],
+  attributes: DatasetAttributesLike,
+): boolean => {
+  const sweeps = attributes.independent_dimensions;
+  const own = sweeps?.[coordinate];
+  if (!sweeps || !own) return true;
+  return axisIndependents.every((name) => (sweeps[name] ?? []).every((dim) => own.includes(dim)));
+};
+
 export const isComposerCompatibleWithDataset = (
   composerSelection: ComposerSelectionLike,
   datasetAttributes?: DatasetAttributesLike,
@@ -192,14 +225,21 @@ export const isComposerCompatibleWithDataset = (
     const resolved = axisIndependents(name, datasetAttributes, composerSelection.plotType);
     return resolved === null || resolved.length === 1;
   });
-  const depsMatch = hasAllNames(deps, composerSelection.deps);
+  // Coordinates may be plot values unless also selected as axes.
+  const depsMatch = composerSelection.deps.every(
+    (name) => deps.has(name) || (indeps.has(name) && !composerSelection.indeps.includes(name)),
+  );
   if (!axesMatch || !depsMatch) return false;
 
-  // Each dependent must vary along the sweeps its axes run along.
+  // Each plotted value must span the selected axis dimensions.
   const axisDims = composerSelection.indeps.flatMap(
     (name) => axisIndependents(name, datasetAttributes, composerSelection.plotType) ?? [],
   );
-  return composerSelection.deps.every((dep) => dependsOnAll(dep, axisDims, datasetAttributes));
+  return composerSelection.deps.every((dep) =>
+    deps.has(dep)
+      ? dependsOnAll(dep, axisDims, datasetAttributes)
+      : coordinateVariesAlong(dep, axisDims, datasetAttributes),
+  );
 };
 
 export const getEligibleDatasetsForComposer = <T extends DatasetLike>(

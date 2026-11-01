@@ -91,6 +91,33 @@ describe("generateAutoPlotConfigs", () => {
     expect(result.plotConfigs.map((config) => config.plotType)).toEqual(["LinePlot"]);
   });
 
+  it("never builds a heatmap from two axes along the same sweep", () => {
+    // Temperature and time share one sweep dimension.
+    const attributes = {
+      independents: ["target_temperature", "time"],
+      dependents: ["resistance"],
+      variable_independents: { resistance: ["target_temperature", "time"] },
+      independent_dimensions: { target_temperature: ["time"], time: ["time"] },
+    };
+    const result = generateAutoPlotConfigs({ ...item(), attributes } as BasketItem);
+
+    expect(result.plotConfigs.map((config) => config.plotType)).toEqual(["LinePlot"]);
+    expect(result.plotConfigs[0].indeps).toEqual(["target_temperature"]);
+  });
+
+  it("takes heatmap axes from different sweeps, skipping one along the same sweep", () => {
+    const attributes = {
+      independents: ["gate", "gate_readback", "bias"],
+      dependents: ["signal"],
+      variable_independents: { signal: ["gate", "gate_readback", "bias"] },
+      independent_dimensions: { gate: ["gate"], gate_readback: ["gate"], bias: ["bias"] },
+    };
+    const result = generateAutoPlotConfigs({ ...item(), attributes } as BasketItem);
+
+    expect(result.plotConfigs[0].plotType).toBe("HeatMap");
+    expect(result.plotConfigs[0].indeps).toEqual(["gate", "bias"]);
+  });
+
   it("falls back to the first two independents when dims are unknown", () => {
     // Flat tables, and payloads cached before variable_independents existed.
     const result = generateAutoPlotConfigs(item(["gate", "bias"], ["signal"]));

@@ -1,7 +1,7 @@
 import { BasketItem } from "../components/Basket";
 import type { PlotConfiguration, AppliedFilter } from "../components/interfaces";
 import { isDatasetPath, isMemoryPath } from "./datasetPaths";
-import { getFieldIndependents } from "./datasetFieldSelectors";
+import { getFieldIndependents, heatmapAxes } from "./datasetFieldSelectors";
 import type { PlottingBehaviour } from "../settings/userSettings";
 
 interface AutoPlotResult {
@@ -12,7 +12,8 @@ interface AutoPlotResult {
 
 /**
  * Generates plot configurations for automatic plot creation when a measurement is added to the basket.
- * - HeatMap: the first dependent that actually varies over 2+ independents, against those two
+ * - HeatMap: the first dependent spanning two distinct sweep dimensions,
+ *   plotted against the corresponding independents
  * - LinePlot: the first dependent, against the first independent it varies over
  *
  * Datasets routinely mix 1D and 2D variables over the same coordinates (two
@@ -72,11 +73,9 @@ export function generateAutoPlotConfigs(
 
     // Pick the heatmap's dependent by its own dimensionality, falling back to
     // the plain lists when the dataset reports no per-variable independents.
-    const heatmapDep = dependents.find(
-      (dep) => (getFieldIndependents(dep, item.attributes) ?? []).length >= 2,
-    );
+    const heatmapDep = dependents.find((dep) => heatmapAxes(dep, item.attributes).length >= 2);
     const heatmapIndeps = heatmapDep
-      ? (getFieldIndependents(heatmapDep, item.attributes) ?? []).slice(0, 2)
+      ? heatmapAxes(heatmapDep, item.attributes)
       : independents.slice(0, 2);
     const knowsVariableIndeps = dependents.some(
       (dep) => getFieldIndependents(dep, item.attributes) !== null,

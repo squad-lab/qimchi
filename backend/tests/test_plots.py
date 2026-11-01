@@ -1109,3 +1109,127 @@ async def test_a_request_without_dependents_is_invalid():
         PlotRequest(fpaths=["/x.nc"], indeps=["a", "b"], deps=[], plotType="HeatMap")
     )
     assert result.invalid is True
+
+
+def _plotted_values(values) -> np.ndarray:
+    if isinstance(values, dict):
+        return np.frombuffer(base64.b64decode(values["bdata"]), dtype=values["dtype"])
+    return np.asarray(values)
+
+
+def _corrected_bias_dataset() -> xr.Dataset:
+    """Create a gate-bias sweep with corrected bias and time coordinates."""
+    gate = np.array([0.0, 1.0, 2.0])
+    bias = np.array([-1.0, 0.0, 1.0, 2.0])
+    current = gate[:, None] + bias[None, :] * 0.1
+    return xr.Dataset(
+        {"current": (("gate", "bias"), current)},
+        coords={
+            "gate": gate,
+            "bias": bias,
+            "bias_corrected": (("gate", "bias"), bias[None, :] - current * 0.5),
+            "time": ("gate", np.array([10.0, 20.0, 35.0])),
+        },
+        attrs={"path": "/data/run.nc"},
+    )
+
+
+def test_a_coordinate_can_be_plotted_along_its_own_sweep():
+    dataset = _corrected_bias_dataset()
+
+    valid = plots.validate_axes([dataset], ["gate"], ["time"], "LinePlot")
+    flat = plots.validate_axes([dataset], ["bias"], ["time"], "LinePlot")
+    [plot] = plots.create_line_plots([dataset], ["/data/run.nc"], ["gate"], ["time"])
+
+    assert valid["valid"], valid["errors"]
+    assert not flat["valid"]
+    np.testing.assert_allclose(
+        _plotted_values(plot["plotJson"]["data"][0]["y"]), [10.0, 20.0, 35.0]
+    )
+
+
+def test_a_setpoint_can_be_plotted_against_its_readback():
+    dataset = _shared_sweep_dataset()
+
+    [plot] = plots.create_line_plots(
+        [dataset], ["/data/run.nc"], ["measured_gate"], ["gate"]
+    )
+
+    np.testing.assert_allclose(
+        _plotted_values(plot["plotJson"]["data"][0]["y"]), [0.0, 1.0, 2.0, 3.0]
+    )
+
+
+def test_a_two_dimensional_coordinate_can_be_a_heat_map():
+    dataset = _corrected_bias_dataset()
+
+    valid = plots.validate_axes(
+        [dataset], ["gate", "bias"], ["bias_corrected"], "HeatMap"
+    )
+    [plot] = plots.create_heat_maps(
+        [dataset], ["/data/run.nc"], ["gate", "bias"], ["bias_corrected"]
+    )
+
+    assert valid["valid"], valid["errors"]
+    z = _plotted_values(plot["plotJson"]["data"][0]["z"]).reshape(3, 4)
+    np.testing.assert_allclose(z, dataset["bias_corrected"].values, rtol=1e-6)
+
+
+def test_a_cut_follows_a_coordinate_heat_map():
+    dataset = _corrected_bias_dataset()
+    cut = {
+        "start": {"gate": 0.0, "bias": 0.0},
+        "end": {"gate": 2.0, "bias": 0.0},
+        "points": 3,
+    }
+
+    [plot] = plots.create_line_plots(
+        [dataset], ["/data/run.nc"], ["gate", "bias"], ["bias_corrected"], cut=cut
+    )
+
+    expected = dataset["bias_corrected"].sel(bias=0.0).values
+    np.testing.assert_allclose(
+        _plotted_values(plot["plotJson"]["data"][0]["y"]), expected
+    )
+
+
+def _unlabelled_sweep_dataset() -> xr.Dataset:
+    """Create a map with no coordinate for its outer sweep."""
+    return xr.Dataset(
+        {"signal": (("sweep", "x"), np.arange(12.0).reshape(3, 4))},
+        coords={"x": [0.0, 0.5, 1.0, 1.5]},
+        attrs={"path": "/data/run.nc"},
+    )
+
+
+def test_a_dimension_without_coordinates_can_be_an_axis():
+    dataset = _unlabelled_sweep_dataset()
+
+    [heat_map] = plots.create_heat_maps(
+        [dataset], ["/data/run.nc"], ["sweep", "x"], ["signal"]
+    )
+    [line] = plots.create_line_plots([dataset], ["/data/run.nc"], ["sweep"], ["signal"])
+
+    np.testing.assert_array_equal(
+        _plotted_values(heat_map["plotJson"]["data"][0]["y"]), [0, 1, 2]
+    )
+    np.testing.assert_array_equal(
+        _plotted_values(line["plotJson"]["data"][0]["x"]), [0, 1, 2]
+    )
+    assert set(line["slider_config"]) == {"x"}
+    assert "sweep" not in dataset.coords, "the loaded dataset is left as it was"
+
+
+def test_axis_positions_are_numbered_only_for_the_requested_axes():
+    dataset = _unlabelled_sweep_dataset()
+
+    indexed = plots.index_axis_dimensions(dataset, ["x", "signal"])
+
+    assert indexed is dataset
+    valid = plots.validate_axes(
+        [plots.index_axis_dimensions(dataset, ["sweep"])],
+        ["sweep"],
+        ["signal"],
+        "LinePlot",
+    )
+    assert valid["valid"], valid["errors"]

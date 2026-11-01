@@ -257,4 +257,47 @@ describe("isComposerCompatibleWithDataset with a dependent on an axis", () => {
       isComposerCompatibleWithDataset({ indeps: ["signal"], deps: ["current"] }, twoDimensional),
     ).toBe(false);
   });
+
+  describe("a coordinate as the plotted value", () => {
+    const repeated = {
+      independents: ["repetition", "time", "gate", "bias", "bias_corrected"],
+      dependents: ["current"],
+      variable_independents: { current: ["gate", "bias", "bias_corrected"] },
+      independent_dimensions: {
+        repetition: ["repetition"],
+        time: ["repetition"],
+        gate: ["gate"],
+        bias: ["bias"],
+        bias_corrected: ["gate", "bias"],
+      },
+    };
+
+    it("plots a coordinate that changes along the line's sweep", () => {
+      expect(
+        isComposerCompatibleWithDataset({ indeps: ["repetition"], deps: ["time"] }, repeated),
+      ).toBe(true);
+      expect(
+        isComposerCompatibleWithDataset({ indeps: ["bias"], deps: ["bias_corrected"] }, repeated),
+      ).toBe(true);
+    });
+
+    it("refuses one that stays constant along the line, or the axis itself", () => {
+      expect(isComposerCompatibleWithDataset({ indeps: ["gate"], deps: ["time"] }, repeated)).toBe(
+        false,
+      );
+      expect(isComposerCompatibleWithDataset({ indeps: ["gate"], deps: ["gate"] }, repeated)).toBe(
+        false,
+      );
+    });
+
+    it("draws a heat map of a coordinate that varies over both axes", () => {
+      const heatmap = (deps: string[]) =>
+        isComposerCompatibleWithDataset(
+          { indeps: ["bias", "gate"], deps, plotType: "HeatMap" },
+          repeated,
+        );
+      expect(heatmap(["bias_corrected"])).toBe(true);
+      expect(heatmap(["time"])).toBe(false);
+    });
+  });
 });
