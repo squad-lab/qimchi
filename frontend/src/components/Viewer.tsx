@@ -1,23 +1,35 @@
 import axios from "axios";
 import { PROD_BACKEND_URL } from "../config";
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { Panel } from "react-resizable-panels";
 import {
   ChartScatter,
   CopyPlus,
+  Download,
+  Bookmark,
   ImageDown,
   Loader2,
   Radio,
   RulerDimensionLine,
   Trash2,
+  Upload,
 } from "lucide-react";
 import RecentlyClosed from "./RecentlyClosed";
 import { closedPlotLabel, useClosedPlotsStore, type ClosedPlot } from "../stores/closedPlotsStore";
 
 // Local imports
 import Basket, { BasketFieldSelection, BasketItem } from "./Basket";
+import type { BasketSelection } from "../utils/basketSelection";
 import { TreeNode } from "./treeUtils";
-import { AttrData } from "./interfaces";
+import type { AttrData, PlotConfiguration } from "./interfaces";
 import { axisCombinations, missingAxesMessage } from "../utils/composerAxes";
 import PlotComposer, {
   ComposerSelectionSnapshot,
@@ -49,13 +61,29 @@ import {
 import { isDatasetPath, isMemoryPath } from "../utils/datasetPaths";
 import { finishArchiveDownload } from "../utils/download";
 import { useSettingsStore } from "../stores/settingsStore";
-import { PLOT_WIDTHS, type PlotWidthPercent } from "../settings/userSettings";
+import {
+  PLOT_WIDTHS,
+  appearanceDefaultsFor,
+  type PlotWidthPercent,
+} from "../settings/userSettings";
+import {
+  buildPlotSetup,
+  composerAxesFor,
+  planPlotSetup,
+  type PlannedPlot,
+  type ReadPlotSetupResult,
+  type SavedPlot,
+} from "../utils/plotSetup";
+import PlotSetupDialog, { type PlotSetupDialogMode } from "./PlotSetupDialog";
+import ConfirmManyPlots, { CONFIRM_PLOT_COUNT, type ManyPlotsRequest } from "./ConfirmManyPlots";
 import { useWalkthroughStore } from "../walkthrough/walkthroughStore";
 
 interface ViewerProps {
   defaultWidth?: number; // In percentage (0-100)
   onSelectNode: (node: TreeNode) => void;
   basketItems: BasketItem[];
+  basketSelection: BasketSelection;
+  onBasketSelectionChange: Dispatch<SetStateAction<BasketSelection>>;
   onRemoveBasketItem: (id: string) => void;
   onClearBasket: () => void;
   onAddToBasket: (item: BasketItem) => boolean;
@@ -69,6 +97,8 @@ interface ViewerProps {
 const Viewer = ({
   defaultWidth = 80,
   basketItems,
+  basketSelection,
+  onBasketSelectionChange,
   onRemoveBasketItem,
   onClearBasket,
   onAddToBasket,
@@ -144,7 +174,6 @@ const Viewer = ({
       return next;
     });
   }, [plotConfigs]);
-  const [selectedDatasetIds, setSelectedDatasetIds] = useState<Set<string>>(new Set());
   const [selectedPlotId, setSelectedPlotId] = useState<string | null>(null);
   const [viewerHeight, setViewerHeight] = useState<string>("calc(100vh - 200px)");
 
@@ -428,17 +457,7 @@ const Viewer = ({
     });
   }, [basketItems]);
 
-  // Keep selected dataset IDs valid as basket contents change.
-  const effectiveSelectedDatasetIds = useMemo(() => {
-    const existingIds = new Set(basketItems.map((item) => item.id));
-    const next = new Set(Array.from(selectedDatasetIds).filter((id) => existingIds.has(id)));
-
-    if (next.size === 0 && basketItems.length === 1) {
-      next.add(basketItems[0].id);
-    }
-
-    return next;
-  }, [basketItems, selectedDatasetIds]);
+  const selectedDatasetIds = useMemo(() => new Set(basketSelection.ids), [basketSelection.ids]);
 
   const effectiveSelectedPlotId = useMemo(() => {
     if (plotConfigs.length === 0) {
@@ -527,6 +546,131 @@ const Viewer = ({
     }
   };
 
+  const [plotSetupDialog, setPlotSetupDialog] = useState<PlotSetupDialogMode | null>(null);
+  const [manyPlots, setManyPlots] = useState<ManyPlotsRequest | null>(null);
+  const closeManyPlots = useCallback(() => setManyPlots(null), []);
+  const closePlotSetupDialog = useCallback(() => setPlotSetupDialog(null), []);
+  const appearanceDefaultsForPlot = (plotType: "LinePlot" | "HeatMap") =>
+    appearanceDefaultsFor(
+      useSettingsStore.getState().settings,
+      plotType === "HeatMap" ? "heatmap" : "line",
+    );
+  const plotSetupTargets = () =>
+    getSelectedDatasets(basketItems, selectedDatasetIds).filter(
+      (item) => item.type === "file" && isDatasetPath(item.path),
+    );
+
+  const buildCurrentPlotSetup = (name: string) =>
+    buildPlotSetup(
+      shownPlotConfigs,
+      (plotId) => usePlotStore.getState().plotStates[plotId],
+      (plotId) => perPlotWidthMapRef.current[plotId],
+      appearanceDefaultsForPlot,
+      name,
+    );
+
+  const plotSetupBlockedReason =
+    plotSetupTargets().length === 0
+      ? "Add the measurements the plots should be drawn for to the Basket and select them, then load the setup."
+      : null;
+
+  // Restore Composer axes only when one selection can reproduce all plots.
+  const fillComposerFromSetup = (plots: SavedPlot[], dataset?: BasketItem) => {
+    const axes = composerAxesFor(plots);
+    if (!axes || !dataset) return;
+    const field = (name: string, type: PlotField["type"]): PlotField => ({
+      id: `${dataset.id}-${name}`,
+      source: dataset.path,
+      name,
+      type,
+    });
+    const axisField = (name: string) =>
+      field(name, dataset.attributes?.independents?.includes(name) ? "independent" : "dependent");
+    const heatmap = axes.plotType === "HeatMap";
+    composerActionRef.current?.fillComposer(
+      axes.plotType,
+      axes.x.map(axisField),
+      axes.y.map((name) => (heatmap ? axisField(name) : field(name, "dependent"))),
+      axes.z.map((name) => field(name, "dependent")),
+    );
+  };
+
+  const applyPlotSetup = (read: ReadPlotSetupResult, source: string): boolean => {
+    if (!read.ok) {
+      showToast(read.error, "error", 6000, "Viewer");
+      return false;
+    }
+    const targets = plotSetupTargets();
+    const { planned, skipped } = planPlotSetup(read.plots, targets, appearanceDefaultsForPlot);
+    if (planned.length === 0) {
+      showToast(
+        `None of the plots in ${source} can be drawn for the selected measurements. They do not have the same variables.`,
+        "error",
+        8000,
+        "Viewer",
+      );
+      return false;
+    }
+
+    const draw = () => drawPlotSetup(read, source, targets, planned, skipped);
+    if (planned.length > CONFIRM_PLOT_COUNT) {
+      setManyPlots({
+        count: planned.length,
+        reason: `Loading ${source}`,
+        hint: "To draw fewer, select fewer measurements in the Basket, or load a setup with fewer plots.",
+        draw,
+      });
+    } else {
+      draw();
+    }
+    return true;
+  };
+
+  const drawPlotSetup = (
+    read: Extract<ReadPlotSetupResult, { ok: true }>,
+    source: string,
+    targets: BasketItem[],
+    planned: PlannedPlot[],
+    skipped: string[],
+  ) => {
+    const added = addPlots(planned.map((plot) => plot.config));
+    // Restore plot state before the plot mounts.
+    const widths: Record<string, number> = {};
+    added.forEach((config, index) => {
+      const { state, width } = planned[index];
+      if (Object.keys(state).length > 0) {
+        usePlotStore.getState().restorePlotState(config.id, { ...state, id: config.id });
+      }
+      if (width !== undefined) widths[config.id] = width;
+    });
+    if (Object.keys(widths).length > 0) setPerPlotWidthMap((prev) => ({ ...prev, ...widths }));
+    fillComposerFromSetup(
+      read.plots,
+      targets.find((item) => item.path === added[0].fpath),
+    );
+
+    const loaded = `Loaded ${added.length} plot${added.length === 1 ? "" : "s"} from ${source}.`;
+    const notes: string[] = [];
+    if (skipped.length > 0) {
+      const listed = skipped.slice(0, 3).join("; ");
+      const more = skipped.length > 3 ? ` and ${skipped.length - 3} more` : "";
+      notes.push(
+        `Skipped ${listed}${more}, because the measurement does not have those variables.`,
+      );
+    }
+    if (read.unreadable > 0) {
+      notes.push(
+        `${read.unreadable} plot${read.unreadable === 1 ? " in the setup was" : "s in the setup were"} not readable.`,
+      );
+    }
+    showToast(
+      [loaded, ...notes].join(" "),
+      notes.length ? "warning" : "success",
+      notes.length ? 8000 : 4000,
+      "Viewer",
+    );
+  };
+
   const [composerIndeps, setComposerIndeps] = useState<string[]>([]);
   const handleComposerSelectionChange = useCallback((snapshot: ComposerSelectionSnapshot) => {
     // Keep the previous array when the names are unchanged: this feeds a
@@ -538,11 +682,10 @@ const Viewer = ({
     );
   }, []);
 
-  const selectedDatasets = getSelectedDatasets(basketItems, effectiveSelectedDatasetIds);
+  const selectedDatasets = getSelectedDatasets(basketItems, selectedDatasetIds);
   const sharedFields = computeSharedFields(selectedDatasets);
   const enforceSharedGating =
-    effectiveSelectedDatasetIds.size > 1 &&
-    sharedFields.knownDatasetCount === effectiveSelectedDatasetIds.size;
+    selectedDatasetIds.size > 1 && sharedFields.knownDatasetCount === selectedDatasetIds.size;
 
   // Also update on window resize
   useEffect(() => {
@@ -674,36 +817,15 @@ const Viewer = ({
   }, []);
 
   const getSelectionContextLabel = () => {
-    if (effectiveSelectedDatasetIds.size === 0) {
-      return "No dataset selected";
+    if (selectedDatasetIds.size === 0) {
+      return "The Basket is empty";
     }
 
-    if (effectiveSelectedDatasetIds.size === 1) {
+    if (selectedDatasetIds.size === 1) {
       return `Selected: ${selectedDatasets[0]?.name ?? "1 dataset"}`;
     }
 
-    return `Selected: ${effectiveSelectedDatasetIds.size} datasets`;
-  };
-
-  const handleToggleDatasetSelection = (datasetId: string, multiSelect: boolean) => {
-    setSelectedDatasetIds((prev) => {
-      const next = new Set(prev);
-
-      if (multiSelect) {
-        if (next.has(datasetId)) {
-          next.delete(datasetId);
-        } else {
-          next.add(datasetId);
-        }
-        return next;
-      }
-
-      if (next.size === 1 && next.has(datasetId)) {
-        return next;
-      }
-
-      return new Set([datasetId]);
-    });
+    return `Selected: ${selectedDatasetIds.size} datasets`;
   };
 
   const handleAutofillComposerField = (field: BasketFieldSelection) => {
@@ -722,18 +844,18 @@ const Viewer = ({
       return;
     }
 
-    if (effectiveSelectedDatasetIds.size === 0) {
-      showToast("Select at least one dataset in Basket before plotting.", "warning");
+    if (selectedDatasetIds.size === 0) {
+      showToast("Add a measurement to the Basket before plotting.", "warning");
       return;
     }
 
-    const currentlySelected = getSelectedDatasets(basketItems, effectiveSelectedDatasetIds);
+    const currentlySelected = getSelectedDatasets(basketItems, selectedDatasetIds);
     if (currentlySelected.length === 0) {
       showToast("No selected datasets are available for plotting.", "error");
       return;
     }
 
-    let created = 0;
+    const planned: Omit<PlotConfiguration, "id">[] = [];
     let skipped = false;
     axisCombinations(snapshot).forEach(({ indeps, deps }) => {
       const eligibility = getEligibleDatasetsForComposer(currentlySelected, {
@@ -745,8 +867,7 @@ const Viewer = ({
 
       eligibility.eligible.forEach((dataset) => {
         const sourceByPath: "memory" | "disk" = isMemoryPath(dataset.path) ? "memory" : "disk";
-        created += 1;
-        addPlot({
+        planned.push({
           // Mark Composer plots for replication to measurements added later.
           origin: "custom",
           fpath: dataset.path,
@@ -759,26 +880,39 @@ const Viewer = ({
       });
     });
 
-    if (created === 0) {
+    if (planned.length === 0) {
       showToast("No selected datasets can be plotted with the current composer settings.", "error");
       return;
     }
 
-    if (skipped) {
-      showToast(
-        "Some plots were skipped, because not every selected measurement has these fields or they cannot be plotted against each other.",
-        "warning",
-      );
+    const draw = () => {
+      planned.forEach((config) => addPlot(config));
+      if (skipped) {
+        showToast(
+          "Some plots were skipped, because not every selected measurement has these fields or they cannot be plotted against each other.",
+          "warning",
+        );
+      }
+    };
+    if (planned.length > CONFIRM_PLOT_COUNT) {
+      setManyPlots({
+        count: planned.length,
+        reason: "The Composer",
+        hint: "To draw fewer, select fewer measurements in the Basket or fewer fields in the Composer.",
+        draw,
+      });
+    } else {
+      draw();
     }
   };
 
   useEffect(() => {
-    if (effectiveSelectedDatasetIds.size !== 1) {
-      previousSelectionKeyRef.current = Array.from(effectiveSelectedDatasetIds).sort().join("|");
+    if (selectedDatasetIds.size !== 1) {
+      previousSelectionKeyRef.current = Array.from(selectedDatasetIds).sort().join("|");
       return;
     }
 
-    const selectionKey = Array.from(effectiveSelectedDatasetIds).sort().join("|");
+    const selectionKey = Array.from(selectedDatasetIds).sort().join("|");
     if (selectionKey === previousSelectionKeyRef.current) {
       return;
     }
@@ -808,7 +942,7 @@ const Viewer = ({
       showToast("Selected dataset does not match current composer fields.", "warning", 3000);
       composer.clearComposer();
     }
-  }, [effectiveSelectedDatasetIds, selectedDatasets, showToast]);
+  }, [selectedDatasetIds, selectedDatasets, showToast]);
 
   const handleDownload = async (items: BasketItem[]) => {
     try {
@@ -882,8 +1016,8 @@ const Viewer = ({
           <div ref={basketRef} className="shrink-0" data-tour="basket">
             <Basket
               items={basketItems}
-              selectedDatasetIds={effectiveSelectedDatasetIds}
-              onToggleDatasetSelection={handleToggleDatasetSelection}
+              selection={basketSelection}
+              onSelectionChange={onBasketSelectionChange}
               onRemoveItem={onRemoveBasketItem}
               onClearAll={onClearBasket}
               onDownload={handleDownload}
@@ -1098,6 +1232,67 @@ const Viewer = ({
                   )}
                 </button>
               </Tooltip>
+
+              <RibbonFlyout
+                label="Plot setup"
+                tooltip="Save or load a plot setup"
+                icon={<Bookmark size={16} className="text-gray-600" />}
+              >
+                {(close) => (
+                  <>
+                    <Tooltip
+                      content={
+                        hiddenPlotCount > 0
+                          ? "Save the shown plots' variables and settings to the library or a file"
+                          : "Save the plots' variables and settings to the library or a file"
+                      }
+                      position="top"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={shownPlotConfigs.length === 0}
+                        onClick={() => {
+                          close();
+                          setPlotSetupDialog("save");
+                        }}
+                        className="qimchi-dark-hover-plain flex items-center gap-1 rounded px-1.5 py-1 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        aria-label="Save plot setup"
+                      >
+                        <Upload size={16} className="text-gray-600" />
+                        <span className="text-[0.6875rem] font-medium text-gray-700">Save</span>
+                      </button>
+                    </Tooltip>
+                    <Tooltip
+                      content="Draw a saved setup for the measurements selected in the Basket"
+                      position="top"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          close();
+                          setPlotSetupDialog("load");
+                        }}
+                        className="qimchi-dark-hover-plain flex items-center gap-1 rounded px-1.5 py-1 hover:bg-gray-100"
+                        aria-label="Load plot setup"
+                      >
+                        <Download size={16} className="text-gray-600" />
+                        <span className="text-[0.6875rem] font-medium text-gray-700">Load</span>
+                      </button>
+                    </Tooltip>
+                  </>
+                )}
+              </RibbonFlyout>
+              <ConfirmManyPlots request={manyPlots} onClose={closeManyPlots} />
+              <PlotSetupDialog
+                mode={plotSetupDialog}
+                onClose={closePlotSetupDialog}
+                buildSetup={buildCurrentPlotSetup}
+                onLoad={applyPlotSetup}
+                loadBlockedReason={plotSetupBlockedReason}
+                notify={(message, type) => showToast(message, type, 5000, "Viewer")}
+              />
 
               <div className="h-px w-6 shrink-0 bg-gray-300" role="separator" />
 

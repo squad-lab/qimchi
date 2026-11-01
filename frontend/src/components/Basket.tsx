@@ -1,4 +1,12 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { createPortal } from "react-dom";
 import { PROD_BACKEND_URL } from "../config";
 import axios from "axios";
@@ -41,6 +49,14 @@ import {
 import { detectDatasetKind, isDatasetPath, isSqliteContainerPath } from "../utils/datasetPaths";
 import { finishArchiveDownload } from "../utils/download";
 import type { AttrData } from "./interfaces";
+import {
+  selectAll,
+  selectOnly,
+  selectRange,
+  stepFrom,
+  toggleSelected,
+  type BasketSelection,
+} from "../utils/basketSelection";
 
 export interface BasketItem {
   id: string;
@@ -63,8 +79,8 @@ export interface BasketFieldSelection {
 
 interface BasketProps {
   items: BasketItem[];
-  selectedDatasetIds: Set<string>;
-  onToggleDatasetSelection: (datasetId: string, multiSelect: boolean) => void;
+  selection: BasketSelection;
+  onSelectionChange: Dispatch<SetStateAction<BasketSelection>>;
   onRemoveItem: (id: string) => void;
   onClearAll: () => void;
   onDownload?: (items: BasketItem[]) => void;
@@ -106,6 +122,8 @@ const observeRowResize = (element: Element, onResize: () => void): (() => void) 
     sharedRowObserver?.unobserve(element);
   };
 };
+
+const basketOptionId = (index: number) => `basket-option-${index}`;
 
 // Component to display the independents and dependents as draggable items with unified styling
 const FieldItem = memo(
@@ -436,8 +454,8 @@ FieldsRow.displayName = "FieldsRow";
 
 const Basket = ({
   items,
-  selectedDatasetIds,
-  onToggleDatasetSelection,
+  selection,
+  onSelectionChange,
   onRemoveItem,
   onClearAll,
   onDownload,
@@ -537,17 +555,72 @@ const Basket = ({
     });
   }, []);
 
+  const listRef = useRef<HTMLDivElement>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const order = items.map((item) => item.id);
+  const active =
+    activeId !== null && order.includes(activeId)
+      ? activeId
+      : (selection.anchor ?? selection.ids[0] ?? order[0] ?? null);
+  // Read keyboard selection from refs to avoid stale values between renders.
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const activate = (id: string) => {
+    activeRef.current = id;
+    setActiveId(id);
+  };
+  // Show the active card only during keyboard navigation.
+  const [showActive, setShowActive] = useState(false);
+
+  const handleCardClick = (event: React.MouseEvent, id: string) => {
+    const add = event.ctrlKey || event.metaKey;
+    activate(id);
+    setShowActive(false);
+    listRef.current?.focus({ preventScroll: true });
+    if (event.shiftKey) onSelectionChange((current) => selectRange(current, order, id, add));
+    else if (add) onSelectionChange((current) => toggleSelected(current, id));
+    else onSelectionChange(selectOnly(id));
+  };
+
+  const moveTo = (step: -1 | 1 | "first" | "last", select: "only" | "extend" | "none") => {
+    const id = stepFrom(order, activeRef.current, step);
+    if (id === null) return;
+    activate(id);
+    setShowActive(true);
+    document
+      .getElementById(basketOptionId(order.indexOf(id)))
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (select === "only") onSelectionChange(selectOnly(id));
+    else if (select === "extend") onSelectionChange((current) => selectRange(current, order, id));
+  };
+
+  useShortcut("basket-previous", () => moveTo(-1, "only"));
+  useShortcut("basket-next", () => moveTo(1, "only"));
+  useShortcut("basket-first", () => moveTo("first", "only"));
+  useShortcut("basket-last", () => moveTo("last", "only"));
+  useShortcut("basket-extend-previous", () => moveTo(-1, "extend"));
+  useShortcut("basket-extend-next", () => moveTo(1, "extend"));
+  useShortcut("basket-extend-first", () => moveTo("first", "extend"));
+  useShortcut("basket-extend-last", () => moveTo("last", "extend"));
+  useShortcut("basket-focus-previous", () => moveTo(-1, "none"));
+  useShortcut("basket-focus-next", () => moveTo(1, "none"));
+  useShortcut("basket-toggle", () => {
+    const id = activeRef.current;
+    if (id !== null) onSelectionChange((current) => toggleSelected(current, id));
+  });
+  useShortcut("basket-select-all", () => onSelectionChange((current) => selectAll(current, order)));
+
   // Stable per-type predicates: an inline arrow here was a new function on
   // every render, which defeated FieldsRow's memo for every card.
   const isSharedChipEnabled = useCallback(
     (fieldName: string, type: "independent" | "dependent") => {
-      if (!enforceSharedGating || selectedDatasetIds.size <= 1) {
+      if (!enforceSharedGating || selection.ids.length <= 1) {
         return true;
       }
 
       return isFieldShared(fieldName, type, sharedFields);
     },
-    [enforceSharedGating, selectedDatasetIds, sharedFields],
+    [enforceSharedGating, selection.ids.length, sharedFields],
   );
 
   const isIndepChipEnabled = useCallback(
@@ -746,8 +819,8 @@ const Basket = ({
       >
         {/* Basket Items - Horizontal scrolling container */}
         {isExpanded && (
-          // TODOLATER: This fine? 166px is a bit arbitrary.
-          <div className="h-[166px] min-w-0 flex-1 overflow-x-auto overflow-y-hidden scrollbar-thin scrollbar-track-gray-100 scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 relative">
+          // Let the Basket grow so nested scrollbars do not hide card bottoms.
+          <div className="min-h-[166px] min-w-0 flex-1 overflow-x-auto overflow-y-hidden scrollbar-thin scrollbar-track-gray-100 scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 relative">
             {items.length === 0 ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500">
                 <ShoppingBasket size={48} className="mb-2 text-gray-400" />
@@ -755,199 +828,250 @@ const Basket = ({
                 <p className="text-sm mt-1">Add datasets from the explorer</p>
               </div>
             ) : (
-              <div className="p-2 flex gap-2 min-w-fit">
-                {items.map((item) => (
+              <div
+                ref={listRef}
+                role="listbox"
+                aria-multiselectable="true"
+                aria-label="Measurements in the Basket"
+                aria-activedescendant={
+                  active !== null ? basketOptionId(order.indexOf(active)) : undefined
+                }
+                tabIndex={0}
+                data-shortcut-scope="basket"
+                onFocus={(e) => {
+                  if (e.target === e.currentTarget && e.target.matches(":focus-visible")) {
+                    setShowActive(true);
+                  }
+                }}
+                onBlur={(e) => {
+                  if (e.target === e.currentTarget) setShowActive(false);
+                }}
+                className="p-2 flex gap-2 min-w-fit outline-none"
+              >
+                {items.map((item, index) => {
                   // Dataset-card selection is the source of truth for plotting scope.
-                  <div
-                    key={item.id}
-                    data-basket-item-card="true"
-                    onClick={(e) =>
-                      onToggleDatasetSelection(item.id, Boolean(e.ctrlKey || e.metaKey))
-                    }
-                    className={`flex flex-col rounded p-2 transition-all duration-200 border shrink-0 w-[250px] cursor-pointer ${
-                      selectedDatasetIds.has(item.id)
-                        ? "bg-slate-100 border-slate-400 ring-1 ring-slate-400"
-                        : "bg-gray-50 hover:bg-gray-100 border-gray-200"
-                    }`}
-                  >
-                    {/* Compact header with item info */}
-                    <div className="flex flex-col space-y-1 mb-2">
-                      <div className="flex items-center justify-between">
-                        {/* Left side: Info and Database icon with title */}
-                        <div className="flex items-center min-w-0 flex-1">
-                          {/* Attributes status */}
-                          <div className="mr-1">
-                            <Tooltip content={getAttr(item)} position="bottom">
-                              <span className="text-sm text-gray-500 shrink-0">
-                                {item.attributes ? (
-                                  <Info size={15} className="text-blue-500" />
-                                ) : externalLoadingAttributes.has(item.id) ? (
-                                  <LoaderCircle size={15} className="text-blue-500 animate-spin" />
-                                ) : (
-                                  <Info size={15} className="text-gray-400" />
-                                )}
-                              </span>
-                            </Tooltip>
-                          </div>
-
-                          {/* Database icon and name */}
-                          <div className="mr-1">
-                            <Tooltip
-                              content={getDatasetTypeLabel(item)}
-                              position="top"
-                              className="flex items-center"
-                            >
-                              <span className="inline-flex items-center justify-center leading-none">
-                                {renderBasketDatasetIcon(item)}
-                              </span>
-                            </Tooltip>
-                          </div>
-
-                          {/* live indicator removed */}
-
-                          <div className="min-w-0 flex-1">
-                            <Tooltip content={item.name} position="top">
-                              <span
-                                className="text-xs font-semibold text-gray-900 truncate block"
-                                title={item.name}
-                              >
-                                {item.name}
-                              </span>
-                            </Tooltip>
-                          </div>
-                        </div>
-
-                        {/* Action buttons */}
-                        <div className="flex items-center">
-                          {/* Copy buttons */}
-                          <Tooltip content="Copy filename" position="top">
-                            <button
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                await copyToClipboard(item.name, item.id, "filename");
+                  const isSelected = selection.ids.includes(item.id);
+                  return (
+                    <div
+                      key={item.id}
+                      id={basketOptionId(index)}
+                      role="option"
+                      aria-selected={isSelected}
+                      data-basket-item-card="true"
+                      onMouseDown={(e) => {
+                        // Prevent Shift+click from selecting page text.
+                        if (e.shiftKey) e.preventDefault();
+                      }}
+                      onClick={(e) => handleCardClick(e, item.id)}
+                      className={`flex flex-col rounded p-2 transition-all duration-200 border shrink-0 w-[250px] cursor-pointer ${
+                        isSelected
+                          ? "bg-slate-100 border-slate-400 ring-1 ring-slate-400"
+                          : "bg-gray-50 hover:bg-gray-100 border-gray-200"
+                      } ${
+                        showActive && item.id === active
+                          ? "outline-2 outline-offset-2 outline-blue-500"
+                          : ""
+                      }`}
+                    >
+                      {/* Compact header with item info */}
+                      <div className="flex flex-col space-y-1 mb-2">
+                        <div className="flex items-center justify-between">
+                          {/* Left side: Info and Database icon with title */}
+                          <div className="flex items-center min-w-0 flex-1">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => {
+                                const range = (e.nativeEvent as MouseEvent).shiftKey;
+                                activate(item.id);
+                                onSelectionChange((current) =>
+                                  range
+                                    ? selectRange(current, order, item.id, true)
+                                    : toggleSelected(current, item.id),
+                                );
                               }}
-                              className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                              title="Copy filename"
-                            >
-                              {copiedItems[item.id] === "filename" ? (
-                                <Check size={14} className="text-green-600" />
-                              ) : (
-                                <Copy size={14} />
-                              )}
-                            </button>
-                          </Tooltip>
-
-                          {/* Download button */}
-                          <Tooltip content="Download" position="top">
-                            <button
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                try {
-                                  const response = await axios.post(
-                                    `${PROD_BACKEND_URL}/download-multiple/`,
-                                    { paths: [item.path] },
-                                    { responseType: "blob" },
-                                  );
-                                  const result = finishArchiveDownload(
-                                    response,
-                                    `${item.name}.zip`,
-                                  );
-                                  if (result.savedTo) {
-                                    showToast(`Saved to ${result.savedTo}`, "success");
-                                  }
-                                } catch (error) {
-                                  console.error("Error downloading item:", error);
-                                  showToast("Failed to download item", "error");
-                                }
-                              }}
-                              className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-100 rounded transition-colors"
-                              title="Download"
-                              aria-label={`Download ${item.name}`}
-                            >
-                              <Download size={14} />
-                            </button>
-                          </Tooltip>
-
-                          {/* Open notes button - any dataset except sqlite container nodes */}
-                          {isDatasetPath(item.path) &&
-                            !isSqliteContainerPath(item.path) &&
-                            onOpenNotesItem && (
-                              <Tooltip content="Open notes" position="top">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onOpenNotesItem(item);
-                                  }}
-                                  className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
-                                  title="Open notes"
-                                >
-                                  <NotebookPen size={14} />
-                                </button>
+                              tabIndex={-1}
+                              aria-label={`Select ${item.name}`}
+                              className="mr-1.5 size-[0.9rem] shrink-0 cursor-pointer accent-blue-600"
+                            />
+                            {/* Attributes status */}
+                            <div className="mr-1">
+                              <Tooltip content={getAttr(item)} position="bottom">
+                                <span className="text-sm text-gray-500 shrink-0">
+                                  {item.attributes ? (
+                                    <Info size={15} className="text-blue-500" />
+                                  ) : externalLoadingAttributes.has(item.id) ? (
+                                    <LoaderCircle
+                                      size={15}
+                                      className="text-blue-500 animate-spin"
+                                    />
+                                  ) : (
+                                    <Info size={15} className="text-gray-400" />
+                                  )}
+                                </span>
                               </Tooltip>
-                            )}
+                            </div>
 
-                          {/* live toggle removed */}
+                            {/* Database icon and name */}
+                            <div className="mr-1">
+                              <Tooltip
+                                content={getDatasetTypeLabel(item)}
+                                position="top"
+                                className="flex items-center"
+                              >
+                                <span className="inline-flex items-center justify-center leading-none">
+                                  {renderBasketDatasetIcon(item)}
+                                </span>
+                              </Tooltip>
+                            </div>
 
-                          {/* Remove button */}
-                          <Tooltip content="Remove" position="top">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onRemoveItem(item.id);
-                              }}
-                              className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-red-600 hover:bg-red-100 rounded transition-colors"
-                              title="Remove"
-                            >
-                              <X size={14} />
-                            </button>
-                          </Tooltip>
+                            {/* live indicator removed */}
+
+                            <div className="min-w-0 flex-1">
+                              <Tooltip content={item.name} position="top">
+                                <span
+                                  className="text-xs font-semibold text-gray-900 truncate block"
+                                  title={item.name}
+                                >
+                                  {item.name}
+                                </span>
+                              </Tooltip>
+                            </div>
+                          </div>
+
+                          {/* Action buttons */}
+                          <div className="flex items-center">
+                            {/* Copy buttons */}
+                            <Tooltip content="Copy filename" position="top">
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  await copyToClipboard(item.name, item.id, "filename");
+                                }}
+                                className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                title="Copy filename"
+                              >
+                                {copiedItems[item.id] === "filename" ? (
+                                  <Check size={14} className="text-green-600" />
+                                ) : (
+                                  <Copy size={14} />
+                                )}
+                              </button>
+                            </Tooltip>
+
+                            {/* Download button */}
+                            <Tooltip content="Download" position="top">
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  try {
+                                    const response = await axios.post(
+                                      `${PROD_BACKEND_URL}/download-multiple/`,
+                                      { paths: [item.path] },
+                                      { responseType: "blob" },
+                                    );
+                                    const result = finishArchiveDownload(
+                                      response,
+                                      `${item.name}.zip`,
+                                    );
+                                    if (result.savedTo) {
+                                      showToast(`Saved to ${result.savedTo}`, "success");
+                                    }
+                                  } catch (error) {
+                                    console.error("Error downloading item:", error);
+                                    showToast("Failed to download item", "error");
+                                  }
+                                }}
+                                className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-100 rounded transition-colors"
+                                title="Download"
+                                aria-label={`Download ${item.name}`}
+                              >
+                                <Download size={14} />
+                              </button>
+                            </Tooltip>
+
+                            {/* Open notes button - any dataset except sqlite container nodes */}
+                            {isDatasetPath(item.path) &&
+                              !isSqliteContainerPath(item.path) &&
+                              onOpenNotesItem && (
+                                <Tooltip content="Open notes" position="top">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onOpenNotesItem(item);
+                                    }}
+                                    className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                                    title="Open notes"
+                                  >
+                                    <NotebookPen size={14} />
+                                  </button>
+                                </Tooltip>
+                              )}
+
+                            {/* live toggle removed */}
+
+                            {/* Remove button */}
+                            <Tooltip content="Remove" position="top">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onRemoveItem(item.id);
+                                }}
+                                className="qimchi-dark-hover-plain p-1 text-gray-400 hover:text-red-600 hover:bg-red-100 rounded transition-colors"
+                                title="Remove"
+                              >
+                                <X size={14} />
+                              </button>
+                            </Tooltip>
+                          </div>
                         </div>
+
+                        {/* Wafer ID if available */}
+                        {item.attributes && item.attributes.wafer_id && (
+                          <span className="text-xs text-gray-500 bg-blue-100 px-1 py-0.5 rounded truncate">
+                            {item.attributes.wafer_id}
+                          </span>
+                        )}
                       </div>
 
-                      {/* Wafer ID if available */}
-                      {item.attributes && item.attributes.wafer_id && (
-                        <span className="text-xs text-gray-500 bg-blue-100 px-1 py-0.5 rounded truncate">
-                          {item.attributes.wafer_id}
-                        </span>
-                      )}
-                    </div>
+                      {/* Fields section with fixed height and loading placeholders */}
+                      <div className="space-y-1.5">
+                        {/* Independents Section */}
+                        <FieldsRow
+                          type="independent"
+                          loading={!item.attributes}
+                          fields={item.attributes?.independents ?? []}
+                          itemName={item.name}
+                          itemPath={item.path}
+                          selectedItems={selectedItems}
+                          getSelectedItems={getSelectedItems}
+                          onToggleSelect={handleToggleSelect}
+                          onAutofillComposerField={onAutofillComposerField}
+                          isChipEnabled={isIndepChipEnabled}
+                          highlightedFields={highlightedFields}
+                        />
 
-                    {/* Fields section with fixed height and loading placeholders */}
-                    <div className="space-y-1.5">
-                      {/* Independents Section */}
-                      <FieldsRow
-                        type="independent"
-                        loading={!item.attributes}
-                        fields={item.attributes?.independents ?? []}
-                        itemName={item.name}
-                        itemPath={item.path}
-                        selectedItems={selectedItems}
-                        getSelectedItems={getSelectedItems}
-                        onToggleSelect={handleToggleSelect}
-                        onAutofillComposerField={onAutofillComposerField}
-                        isChipEnabled={isIndepChipEnabled}
-                        highlightedFields={highlightedFields}
-                      />
-
-                      {/* Dependents Section */}
-                      <FieldsRow
-                        type="dependent"
-                        loading={!item.attributes}
-                        fields={item.attributes?.dependents ?? []}
-                        narrowedBy={composerIndeps}
-                        variableIndependents={item.attributes?.variable_independents}
-                        itemName={item.name}
-                        itemPath={item.path}
-                        selectedItems={selectedItems}
-                        getSelectedItems={getSelectedItems}
-                        onToggleSelect={handleToggleSelect}
-                        onAutofillComposerField={onAutofillComposerField}
-                        isChipEnabled={isDepChipEnabled}
-                        highlightedFields={highlightedFields}
-                      />
+                        {/* Dependents Section */}
+                        <FieldsRow
+                          type="dependent"
+                          loading={!item.attributes}
+                          fields={item.attributes?.dependents ?? []}
+                          narrowedBy={composerIndeps}
+                          variableIndependents={item.attributes?.variable_independents}
+                          itemName={item.name}
+                          itemPath={item.path}
+                          selectedItems={selectedItems}
+                          getSelectedItems={getSelectedItems}
+                          onToggleSelect={handleToggleSelect}
+                          onAutofillComposerField={onAutofillComposerField}
+                          isChipEnabled={isDepChipEnabled}
+                          highlightedFields={highlightedFields}
+                        />
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

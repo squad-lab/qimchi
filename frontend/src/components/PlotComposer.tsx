@@ -1,5 +1,16 @@
 import { forwardRef, useState, useEffect, useImperativeHandle, useCallback } from "react";
-import { X, Play, Eye, EyeOff, Trash2, Grid, ChartLine, ListMusic } from "lucide-react";
+import {
+  X,
+  Play,
+  Eye,
+  EyeOff,
+  Trash2,
+  Grid,
+  ChartLine,
+  ListMusic,
+  SquareFunction,
+  Variable,
+} from "lucide-react";
 
 // Local imports
 import Tooltip from "./Tooltip";
@@ -17,6 +28,10 @@ export interface PlotField {
 }
 
 type PlotType = "LinePlot" | "HeatMap";
+type Axis = "x" | "y" | "z";
+
+// Identify a drag from a Composer chip and its source axis.
+const COMPOSER_AXIS_TYPE = "application/composer-axis";
 
 export interface PlotComposerConfig {
   fpath: string; // Single dataset path
@@ -56,6 +71,7 @@ export interface PlotComposerHandle {
   createPlotFromComposer: () => void;
   clearComposer: () => void;
   autofillFromField: (field: PlotField) => void;
+  fillComposer: (plotType: PlotType, x: PlotField[], y: PlotField[], z: PlotField[]) => void;
   hasComposerSelections: () => boolean;
   getComposerSelectionNames: () => ComposerSelectionSnapshot;
 }
@@ -175,33 +191,13 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
       (fieldType: "independent" | "dependent" | null, field: "x" | "y" | "z"): string | null => {
         if (!fieldType) return null;
 
-        // Universal restrictions:
-        // - X can always have at most 1 item (independent or dependent)
-        if (field === "x" && xFields.length >= 1) {
-          return "X-axis can only accept one field";
-        }
-
-        // Z-axis is only enabled for HeatMap
+        // Check axis compatibility per measurement when plotting.
         if (field === "z" && plotType !== "HeatMap") {
           return "Z-axis is only available for HeatMap plots";
         }
-
-        // Plot-type specific restrictions
-        if (plotType === "LinePlot") {
-          // LinePlot: x can be indep/dep (1 max), y can be dep (multiple)
-          if (field === "y" && fieldType === "independent") {
-            return "LinePlot Y-axis only accepts dependent variables";
-          }
-        } else if (plotType === "HeatMap") {
-          // HeatMap: x can be indep/dep (1 max), y can be indep/dep (multiple), z can be dep (multiple)
-          if (field === "z" && fieldType === "independent") {
-            return "HeatMap Z-axis only accepts dependent variables";
-          }
-        }
-
         return null;
       },
-      [plotType, xFields.length],
+      [plotType],
     );
 
     // Enhanced validation function
@@ -255,27 +251,13 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
         }
 
         if (plotFields.length === 0) return;
+        const from = e.dataTransfer.getData(COMPOSER_AXIS_TYPE) as Axis | "";
+        if (from === field) return;
 
         // Enhanced validation
-        const invalidFields = plotFields.filter((plotField) => {
-          // Universal restrictions
-          // - X can always have at most 1 item (independent or dependent)
-          if (field === "x" && xFields.length >= 1) return true;
-
-          // Z-axis is only enabled for HeatMap
-          if (field === "z" && plotType !== "HeatMap") return true;
-
-          // Plot-type specific restrictions
-          if (plotType === "LinePlot") {
-            // LinePlot: x can be indep/dep (1 max), y can be dep (multiple)
-            if (field === "y" && plotField.type === "independent") return true;
-          } else if (plotType === "HeatMap") {
-            // HeatMap: x can be indep/dep (1 max), y can be indep/dep (multiple), z can be dep (multiple)
-            if (field === "z" && plotField.type === "independent") return true;
-          }
-
-          return false;
-        });
+        const invalidFields = plotFields.filter((plotField) =>
+          Boolean(getDropValidationError(plotField.type, field)),
+        );
 
         if (invalidFields.length > 0) {
           // Show appropriate error message
@@ -291,8 +273,10 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
         // Add the fields to the appropriate array
         switch (field) {
           case "x":
-            // X can always have at most 1 item for all plot types
-            setXFields(plotFields);
+            setXFields((prev) => {
+              const filtered = prev.filter((f) => !plotFields.some((pf) => pf.id === f.id));
+              return [...filtered, ...plotFields];
+            });
             break;
           case "y":
             setYFields((prev) => {
@@ -307,6 +291,10 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
               return [...filtered, ...plotFields];
             });
             break;
+        }
+        // Move chips dragged from another axis.
+        if (from) {
+          plotFields.forEach((plotField) => removeField(plotField.id, from));
         }
       } catch {
         showToast("Failed to handle dropped plot field", "error");
@@ -447,6 +435,12 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
         createPlotFromComposer: () => handleCreatePlot(),
         clearComposer: () => clearAllFields(),
         autofillFromField: (field: PlotField) => handleAutofillField(field),
+        fillComposer: (type: PlotType, x: PlotField[], y: PlotField[], z: PlotField[]) => {
+          setPlotType(type);
+          setXFields(x);
+          setYFields(y);
+          setZFields(z);
+        },
         hasComposerSelections: () => xFields.length > 0 || yFields.length > 0 || zFields.length > 0,
         getComposerSelectionNames,
       }),
@@ -462,6 +456,49 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
     );
 
     const canCreatePlot = xFields.length > 0 && yFields.length > 0;
+
+    // Moving a chip between axes follows the Basket drag behavior.
+    const renderChip = (plotField: PlotField, field: Axis) => {
+      // Field ids are basketItemId-fieldName.
+      const sourceId = plotField.id.substring(0, plotField.id.lastIndexOf("-"));
+      const Icon = plotField.type === "independent" ? Variable : SquareFunction;
+      return (
+        <div
+          key={plotField.id}
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData("application/plot-fields", JSON.stringify([plotField]));
+            e.dataTransfer.setData(COMPOSER_AXIS_TYPE, field);
+            e.dataTransfer.effectAllowed = "copyMove";
+            setDraggedFieldType(plotField.type);
+          }}
+          onDragEnd={() => {
+            setDragOverField(null);
+            setInvalidDropField(null);
+            setDraggedFieldType(null);
+          }}
+          className={`flex cursor-grab items-center gap-1.5 rounded-lg px-2 py-1 text-sm active:cursor-grabbing ${
+            plotField.type === "independent"
+              ? "bg-blue-100 text-blue-900 hover:bg-blue-200"
+              : "bg-red-100 text-red-900 hover:bg-red-200"
+          }`}
+        >
+          <Icon size={14} className="shrink-0" />
+          <Tooltip content={`Source: ${sourceId}`} position="top">
+            <span className="block max-w-64 truncate">{plotField.name}</span>
+          </Tooltip>
+          <Tooltip content="Remove field" position="top">
+            <button
+              onClick={() => removeField(plotField.id, field)}
+              className="text-gray-500 hover:text-red-600"
+              aria-label={`Remove ${plotField.name} from ${field}-axis`}
+            >
+              <X size={12} />
+            </button>
+          </Tooltip>
+        </div>
+      );
+    };
 
     const renderDropZone = (
       field: "x" | "y" | "z",
@@ -513,31 +550,8 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
         return colorClasses.border;
       };
 
-      const getInvalidMessage = () => {
-        if (!isInvalid || !draggedFieldType) return null;
-
-        // Universal restriction: X can only have 1 item
-        if (field === "x" && xFields.length >= 1) {
-          return "X-axis can only have one field";
-        }
-
-        // Z-axis only enabled for HeatMap
-        if (field === "z" && plotType !== "HeatMap") {
-          return "Z-axis is only available for HeatMap plots";
-        }
-
-        if (plotType === "LinePlot") {
-          if (field === "y" && draggedFieldType === "independent") {
-            return "LinePlot Y-axis only accepts dependent variables";
-          }
-        } else if (plotType === "HeatMap") {
-          if (field === "z" && draggedFieldType === "independent") {
-            return "HeatMap Z-axis only accepts dependent variables";
-          }
-        }
-
-        return null;
-      };
+      const getInvalidMessage = () =>
+        isInvalid && draggedFieldType ? getDropValidationError(draggedFieldType, field) : null;
 
       const invalidMessage = getInvalidMessage();
 
@@ -588,47 +602,11 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
                   <div
                     className={`flex flex-1 items-center justify-center text-sm ${colorClasses.textMuted} text-center`}
                   >
-                    {field === "x"
-                      ? "Drag any field here (max 1)"
-                      : field === "y"
-                        ? plotType === "LinePlot"
-                          ? "Drag dependents here"
-                          : "Drag any field here"
-                        : "Drag dependents here"}
+                    Drag any field here
                   </div>
                 ) : (
                   <div className="flex flex-1 flex-wrap content-start gap-2">
-                    {fields.map((plotField) => {
-                      // Extract the source ID from the plotField ID (format: basketItemId-fieldName)
-                      const sourceId = plotField.id.substring(0, plotField.id.lastIndexOf("-"));
-
-                      return (
-                        <div
-                          key={plotField.id}
-                          className={`
-                          flex items-center space-x-2 px-3 py-1 rounded-lg text-sm
-                          ${
-                            plotField.type === "independent"
-                              ? "bg-blue-100 text-blue-900"
-                              : "bg-red-100 text-red-900"
-                          }
-                        `}
-                        >
-                          <Tooltip content={`Source: ${sourceId}`} position="top">
-                            <span className="truncate max-w-32">{plotField.name}</span>
-                          </Tooltip>
-                          <Tooltip content="Remove field" position="top">
-                            <button
-                              onClick={() => removeField(plotField.id, field)}
-                              className="text-gray-500 hover:text-red-600"
-                              aria-label={`Remove ${plotField.name} from ${field}-axis`}
-                            >
-                              <X size={12} />
-                            </button>
-                          </Tooltip>
-                        </div>
-                      );
-                    })}
+                    {fields.map((plotField) => renderChip(plotField, field))}
                   </div>
                 )}
               </div>
@@ -661,47 +639,11 @@ const PlotComposer = forwardRef<PlotComposerHandle, PlotComposerProps>(
                 <div
                   className={`flex flex-1 items-center justify-center text-sm ${colorClasses.textMuted} text-center`}
                 >
-                  {field === "x"
-                    ? "Drag any field here (max 1)"
-                    : field === "y"
-                      ? plotType === "LinePlot"
-                        ? "Drag dependents here"
-                        : "Drag any field here"
-                      : "Drag dependents here"}
+                  Drag any field here
                 </div>
               ) : (
                 <div className="flex flex-1 flex-wrap content-start gap-2">
-                  {fields.map((plotField) => {
-                    // Extract the source ID from the plotField ID (format: basketItemId-fieldName)
-                    const sourceId = plotField.id.substring(0, plotField.id.lastIndexOf("-"));
-
-                    return (
-                      <div
-                        key={plotField.id}
-                        className={`
-                        flex items-center space-x-2 px-3 py-1 rounded-lg text-sm
-                        ${
-                          plotField.type === "independent"
-                            ? "bg-blue-100 text-blue-900"
-                            : "bg-red-100 text-red-900"
-                        }
-                      `}
-                      >
-                        <Tooltip content={`Source: ${sourceId}`} position="top">
-                          <span className="truncate max-w-32">{plotField.name}</span>
-                        </Tooltip>
-                        <Tooltip content="Remove field" position="top">
-                          <button
-                            onClick={() => removeField(plotField.id, field)}
-                            className="text-gray-500 hover:text-red-600"
-                            aria-label={`Remove ${plotField.name} from ${field}-axis`}
-                          >
-                            <X size={12} />
-                          </button>
-                        </Tooltip>
-                      </div>
-                    );
-                  })}
+                  {fields.map((plotField) => renderChip(plotField, field))}
                 </div>
               )}
             </div>

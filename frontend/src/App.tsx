@@ -31,6 +31,12 @@ import { useWalkthroughStore } from "./walkthrough/walkthroughStore";
 import { isHeldBackByWalkthrough } from "./walkthrough/steps";
 import { isPathTrashed, useLibraryStore } from "./stores/libraryStore";
 import { readSessionValue, SESSION_KEYS, writeSessionValue } from "./utils/sessionRestore";
+import {
+  EMPTY_SELECTION,
+  parseSelection,
+  reconcileSelection,
+  type BasketSelection,
+} from "./utils/basketSelection";
 
 // Browser default, and what the rem-based Tailwind scales assume at 100%.
 const BASE_FONT_SIZE_PX = 16;
@@ -42,6 +48,13 @@ const AppContent: React.FC = () => {
   // Several adds can run in one event (a multi-selection, a drop), before the
   // state re-renders, so the limit is checked against this synchronous copy.
   const basketItemsRef = useRef<BasketItem[]>(basketItems);
+  const [basketSelection, setBasketSelection] = useState<BasketSelection>(() =>
+    reconcileSelection(
+      parseSelection(readSessionValue<unknown>(SESSION_KEYS.basketSelection, EMPTY_SELECTION)),
+      [],
+      basketItems.map((item) => item.id),
+    ),
+  );
   const lastLimitWarningRef = useRef(0);
   const { showToast } = useToast();
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
@@ -163,6 +176,22 @@ const AppContent: React.FC = () => {
     setNotesSelectedItemId(itemId);
   };
 
+  // Update selection whenever Basket contents change.
+  const commitBasket = (next: BasketItem[]) => {
+    const before = basketItemsRef.current.map((item) => item.id);
+    basketItemsRef.current = next;
+    setBasketItems(next);
+    setBasketSelection((selection) =>
+      reconcileSelection(
+        selection,
+        before,
+        next.map((item) => item.id),
+      ),
+    );
+  };
+  const commitBasketRef = useRef(commitBasket);
+  commitBasketRef.current = commitBasket;
+
   // Returns whether the item was newly added, so callers skip loading its attributes otherwise.
   const handleAddToBasket = (item: BasketItem): boolean => {
     try {
@@ -177,7 +206,8 @@ const AppContent: React.FC = () => {
         return false;
       }
 
-      if (isPathTrashed(useLibraryStore.getState().statesByPath, item.path)) {
+      const { statesByPath, virtualParents } = useLibraryStore.getState();
+      if (isPathTrashed(statesByPath, item.path, virtualParents)) {
         showToast(
           "Restore this measurement or its parent folder before adding it to the Basket.",
           "warning",
@@ -202,9 +232,7 @@ const AppContent: React.FC = () => {
       }
 
       // Prepend so newly added items appear at the beginning of the basket.
-      const next = [item, ...current];
-      basketItemsRef.current = next;
-      setBasketItems(next);
+      commitBasket([item, ...current]);
       // Keep Notes dropdown aligned to the latest added basket item.
       setNotesSelectedItemId(item.id);
       return true;
@@ -245,14 +273,11 @@ const AppContent: React.FC = () => {
   }, [datasetKeys, openNotesPanel]);
 
   const handleRemoveBasketItem = (id: string) => {
-    const next = basketItemsRef.current.filter((item) => item.id !== id);
-    basketItemsRef.current = next;
-    setBasketItems(next);
+    commitBasket(basketItemsRef.current.filter((item) => item.id !== id));
   };
 
   const handleClearBasket = () => {
-    basketItemsRef.current = [];
-    setBasketItems([]);
+    commitBasket([]);
   };
 
   const handleUpdateBasketItemAttributes = (itemId: string, attributes: AttrData) => {
@@ -308,6 +333,10 @@ const AppContent: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    writeSessionValue(SESSION_KEYS.basketSelection, basketSelection);
+  }, [basketSelection]);
+
   const addDatasetToBasketRef = useRef(addDatasetToBasket);
   addDatasetToBasketRef.current = addDatasetToBasket;
 
@@ -328,14 +357,9 @@ const AppContent: React.FC = () => {
       registerWalkthrough({
         addToBasket: (item) => addDatasetToBasketRef.current(item),
         basketItems: () => basketItemsRef.current,
-        removeFromBasket: (id) => {
-          basketItemsRef.current = basketItemsRef.current.filter((item) => item.id !== id);
-          setBasketItems(basketItemsRef.current);
-        },
-        clearBasket: () => {
-          basketItemsRef.current = [];
-          setBasketItems([]);
-        },
+        removeFromBasket: (id) =>
+          commitBasketRef.current(basketItemsRef.current.filter((item) => item.id !== id)),
+        clearBasket: () => commitBasketRef.current([]),
       }),
     [registerWalkthrough],
   );
@@ -426,6 +450,8 @@ const AppContent: React.FC = () => {
               <Viewer
                 onSelectNode={handleSelectNode}
                 basketItems={basketItems}
+                basketSelection={basketSelection}
+                onBasketSelectionChange={setBasketSelection}
                 onRemoveBasketItem={handleRemoveBasketItem}
                 onClearBasket={handleClearBasket}
                 onAddToBasket={handleAddToBasket}
