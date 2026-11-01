@@ -224,7 +224,10 @@ def test_a_cut_line_plot_shows_the_companion_on_hover():
     assert "Field" in trace["hovertemplate"]
     assert "%{customdata" in trace["hovertemplate"]
     assert "Gate" in figure["layout"]["xaxis"]["title"]["text"]
-    assert "cut" in figure["layout"]["title"]["text"]
+    assert figure["layout"]["title"]["text"] == "run.nc"
+    assert figure["layout"]["title"]["subtitle"]["text"].startswith(
+        "Cut through gate and field"
+    )
     assert figure["layout"]["meta"]["qimchi_axes"]["x"]["variable"] == "gate"
 
 

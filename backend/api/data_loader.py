@@ -1114,6 +1114,14 @@ def _read_qcodes_sqlite(path: Path, query: str) -> list[tuple]:
     raise last if last else RuntimeError(f"Could not read {path}")
 
 
+def qcodes_run_id(ref: str) -> Optional[int]:
+    """Return the run ID from a QCoDeS reference, if present."""
+    try:
+        return _parse_qcodes_reference(ref)[1]
+    except DataLoaderError:
+        return None
+
+
 def _get_latest_qcodes_run_id(db_path: Path) -> int:
     """Return the latest run ID in a QCoDeS SQLite database."""
     try:

@@ -21,7 +21,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from plotly import graph_objects as go
 
-from .data_loader import resolve_to_disk_path
+from .data_loader import qcodes_run_id, resolve_to_disk_path
 
 # Local imports
 from .diagnostics import register_gauge, sampler
@@ -259,6 +259,12 @@ def _cleanup_old_tasks() -> None:
                 pass
     if to_remove:
         logger.debug(f"Cleaned up {len(to_remove)} old export tasks")
+
+
+def _run_suffix(fpath: str) -> str:
+    """Add a QCoDeS run ID to export filenames."""
+    run_id = qcodes_run_id(fpath)
+    return f"_run{run_id}" if run_id is not None else ""
 
 
 def _export_plot_images_sync(
@@ -530,6 +536,7 @@ async def _run_export_task(
     applied_filters: list[Dict] | None = None,
     measurement_info: Dict | None = None,
     options: ExportSettings | None = None,
+    name_suffix: str = "",
 ) -> None:
     """
     Background task to run export in executor.
@@ -550,6 +557,7 @@ async def _run_export_task(
             applied_filters,
             measurement_info,
             options,
+            name_suffix,
         )
 
         # Update task status
@@ -611,7 +619,7 @@ def _export_many_plot_images_sync(
             plot.get("applied_filters") or [],
             plot.get("measurement_info") or {},
             options,
-            name_suffix=f"_{index:02d}",
+            name_suffix=f"{_run_suffix(plot['fpath'])}_{index:02d}",
         )
 
     workers = max(1, min(len(plots), os.cpu_count() or 1, 8))
@@ -751,7 +759,7 @@ def _save_light_dark_pngs(
     # timestamp
     if not ts:
         ts = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    base_filename = extras_dir / f"{dataset_uuid}__{ts}__plot"
+    base_filename = extras_dir / f"{dataset_uuid}__{ts}__plot{_run_suffix(fpath)}"
 
     # Convert incoming JSON to a Figure
     try:
@@ -986,6 +994,7 @@ async def export_plot_images(request: Request) -> JSONResponse:
                 applied_filters,
                 measurement_info,
                 options,
+                _run_suffix(fpath),
             )
         )
 

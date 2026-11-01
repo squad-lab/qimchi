@@ -1102,3 +1102,65 @@ def test_r_in_correction_works_along_y_and_before_other_filters():
     first_column = _z(result)[:, 0]
     inside = np.abs(grid) <= 0.5
     np.testing.assert_allclose(first_column[inside], -2 * grid[inside], atol=1e-9)
+
+
+def test_a_qcodes_plot_is_titled_by_its_run_with_the_database_underneath():
+    title = figures.plot_title_layout(
+        {
+            "guid": "aaaaaaaa-0000-0000-0000-000000000000",
+            "run_id": 3,
+            "ds_name": "R_vs_T",
+            "exp_name": "cooldown",
+            "sample_name": "some_sample",
+            "qcodes_db_path": "/data/cooldown.db",
+            "path": "/data/cooldown.db#run_id=3",
+        },
+        "fallback",
+    )
+
+    assert title["text"] == "3 | R_vs_T"
+    # Omit the duplicate experiment name and QCoDeS' default sample name.
+    assert title["subtitle"]["text"] == "cooldown.db"
+    assert figures.plot_top_margin(title) > figures.plot_top_margin({})
+
+
+def test_a_file_plot_is_titled_by_its_file_and_folder():
+    title = figures.plot_title_layout({"path": "/data/cooldown-1/map.nc"}, "fallback")
+
+    assert title["text"] == "map.nc"
+    assert title["subtitle"]["text"] == "cooldown-1"
+
+
+def test_a_quantify_plot_is_titled_by_its_name_and_tuid():
+    title = figures.plot_title_layout(
+        {"tuid": "20260911-120000-123-abcdef", "name": "Rabi", "path": "/q/x.hdf5"},
+        "fallback",
+    )
+
+    assert (title["text"], title["subtitle"]["text"]) == (
+        "Rabi",
+        "20260911-120000-123-abcdef",
+    )
+
+
+def test_qanary_titles_are_unchanged_and_unnamed_data_keeps_the_fallback():
+    qanary = {
+        "Experiment Name": "Gate sweep",
+        "Measurement ID": "1-40d7d11d-cbd9-48f4-9921-1ae6ac3a67fa",
+        "path": "/data/1-40d7d11d-cbd9-48f4-9921-1ae6ac3a67fa.zarr",
+    }
+
+    title = figures.plot_title_layout(qanary, "fallback")
+    assert title["text"] == "Gate sweep: 1-40d7d11d*"
+    assert "subtitle" not in title
+    assert figures.plot_title_layout({}, "signal vs gate")["text"] == "signal vs gate"
+
+
+def test_long_titles_are_shortened_in_the_middle():
+    title = figures.plot_title_layout(
+        {"path": "/data/" + "a" * 40 + "_the_end_of_a_very_long_name.nc"}, "fallback"
+    )
+
+    assert len(title["text"]) == 48
+    assert title["text"].startswith("aaaa")
+    assert title["text"].endswith("long_name.nc")

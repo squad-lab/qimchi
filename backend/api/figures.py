@@ -8,6 +8,7 @@ import json
 import re
 from abc import ABC, abstractmethod
 from copy import deepcopy
+from pathlib import Path
 
 import numpy as np
 from plotly import graph_objects as go
@@ -66,6 +67,102 @@ def format_measurement_plot_title(meta: dict, fallback: str) -> str:
     )
 
     return f"{experiment_name}: {display_id}" + (f" ({context})" if context else "")
+
+
+# QCoDeS uses this sample name when none is supplied.
+_QCODES_PLACEHOLDER_SAMPLE = "some_sample"
+# Keep titles within a one-third-width plot card.
+_MAX_TITLE_CHARS = 48
+_MAX_SUBTITLE_CHARS = 64
+
+
+def _middle_ellipsis(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    head = limit // 2
+    tail = limit - 1 - head
+    return f"{text[:head]}…{text[-tail:]}"
+
+
+def _source_title(meta: dict) -> tuple[str, str]:
+    """Return a non-Qanary measurement title and source label."""
+    path = _metadata_text(meta, "path")
+    run_name = _metadata_text(meta, "ds_name")
+    run_id = _metadata_text(meta, "run_id")
+    if meta.get("guid") and run_name and run_id:
+        source = Path(_metadata_text(meta, "qcodes_db_path") or path.split("#", 1)[0])
+        context = [source.name] if source.name else []
+        experiment = _metadata_text(meta, "exp_name")
+        if experiment and experiment != source.stem:
+            context.append(experiment)
+        sample = _metadata_text(meta, "sample_name")
+        if sample and sample not in (_QCODES_PLACEHOLDER_SAMPLE, experiment):
+            context.append(sample)
+        return f"{run_id} | {run_name}", " · ".join(context)
+
+    tuid = _metadata_text(meta, "tuid")
+    if tuid:
+        name = _metadata_text(meta, "name")
+        return (name, tuid) if name else (tuid, "")
+
+    if path.startswith("memory://"):
+        return path.removeprefix("memory://"), ""
+    if path:
+        source = Path(path)
+        return source.name, source.parent.name
+    return "", ""
+
+
+def plot_title_layout(meta: dict, fallback: str, note: str = "") -> dict:
+    """
+    Build a plot title with an optional source or cut subtitle.
+
+    Qanary titles use the experiment and measurement ID. Other titles use the
+    QCoDeS run, Quantify dataset, or filename, with source context below.
+
+    Args:
+        meta (dict): Dataset attributes.
+        fallback (str): Title to use when the measurement is unnamed.
+        note (str): Optional subtitle prefix, such as a cut description.
+
+    Returns:
+        dict: Plotly title layout, including a subtitle when available.
+
+    """
+    text = format_measurement_plot_title(meta, "")
+    context = ""
+    if not text:
+        text, context = _source_title(meta)
+        text = _middle_ellipsis(text, _MAX_TITLE_CHARS)
+    if not text:
+        text, note = fallback, ""
+    subtitle = " · ".join(part for part in (note, context) if part)
+
+    title: dict = {
+        "text": text,
+        "font": dict(
+            family="Fira Sans, Arial, sans-serif",
+            size=16,
+            color="rgba(0,0,0,0.6)",
+        ),
+        "x": 0.5,
+        # Pin the title to the top so resizing does not move it into the plot.
+        "y": 1,
+        "yref": "container",
+        "yanchor": "top",
+        "pad": {"t": 10},
+    }
+    if subtitle:
+        # Let the subtitle inherit the theme's text color.
+        title["subtitle"] = {
+            "text": _middle_ellipsis(subtitle, _MAX_SUBTITLE_CHARS),
+            "font": {"family": "Fira Sans, Arial, sans-serif", "size": 12},
+        }
+    return title
+
+
+def plot_top_margin(title: dict) -> int:
+    return 64 if "subtitle" in title else 40
 
 
 # Plot width options
@@ -439,24 +536,17 @@ class Line(QimchiFigure):
         self.y_hover = hover_entry(y_definition, "y")
 
         # Plot titles are a display surface: Qanary IDs are shortened here only.
-        fallback_title = (
-            f"{dep_var} along a cut in {self.ind[0]} and {self.companion}"
-            if self.companion
-            else f"{dep_var} vs {self.ind[0]}"
-        )
-        plot_title = format_measurement_plot_title(self.meta, fallback_title)
+        if self.companion:
+            title = plot_title_layout(
+                self.meta,
+                f"{dep_var} along a cut in {self.ind[0]} and {self.companion}",
+                note=f"Cut through {self.ind[0]} and {self.companion}",
+            )
+        else:
+            title = plot_title_layout(self.meta, f"{dep_var} vs {self.ind[0]}")
 
         layout = {
-            "title": {
-                "text": plot_title,
-                "font": dict(
-                    family="Fira Sans, Arial, sans-serif",
-                    size=16,
-                    color="rgba(0,0,0,0.6)",
-                ),
-                "x": 0.5,
-                "y": 0.97,
-            },
+            "title": title,
             "xaxis": {
                 "title": self.x_title,
                 "ticks": "outside",
@@ -531,7 +621,7 @@ class Line(QimchiFigure):
                 "family": "Fira Sans, Arial, sans-serif",
                 "size": 16,
             },
-            "margin": {"l": 50, "r": 10, "t": 40, "b": 50},
+            "margin": {"l": 50, "r": 10, "t": plot_top_margin(title), "b": 50},
             "paper_bgcolor": "rgba(0,0,0,0)",
             "plot_bgcolor": "rgba(0,0,0,0)",
             "meta": {
@@ -705,21 +795,12 @@ class HeatMap(QimchiFigure):
         self.z_hover = hover_entry(z_definition, "z")
 
         # Plot titles are a display surface: Qanary IDs are shortened here only.
-        plot_title = format_measurement_plot_title(
+        title = plot_title_layout(
             self.meta, f"{dep_var} vs {self.ind[1]}, {self.ind[0]}"
         )
 
         layout = {
-            "title": {
-                "text": plot_title,
-                "font": dict(
-                    family="Fira Sans, Arial, sans-serif",
-                    size=16,
-                    color="rgba(0,0,0,0.6)",
-                ),
-                "x": 0.5,
-                "y": 0.97,
-            },
+            "title": title,
             "xaxis": {
                 "title": self.x_title,
                 "ticks": "outside",
@@ -809,7 +890,7 @@ class HeatMap(QimchiFigure):
             "margin": {
                 "l": 50,
                 "r": colorbar_gutter_px(self.z_title),
-                "t": 40,
+                "t": plot_top_margin(title),
                 "b": 50,
             },
             "annotations": [colorbar_title_annotation(self.z_title)],

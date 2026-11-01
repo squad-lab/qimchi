@@ -716,3 +716,10 @@ def test_a_long_filter_chain_wraps_inside_the_image():
     assert [joined.index(name) for name in names] == sorted(
         joined.index(name) for name in names
     )
+
+
+def test_export_file_names_say_which_qcodes_run_they_show():
+    assert export._run_suffix("/data/cooldown.db#run_id=3") == "_run3"
+    assert export._run_suffix("/data/cooldown.sqlite#12") == "_run12"
+    assert export._run_suffix("/data/map.nc") == ""
+    assert export._run_suffix("memory://abc") == ""

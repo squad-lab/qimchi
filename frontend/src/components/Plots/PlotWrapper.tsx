@@ -315,6 +315,8 @@ const PlotWrapper: React.FC<Props> = ({
   };
 
   const plotTitle = getPlotTitle(plotJson);
+  const titleLayout = plotJson.layout?.title;
+  const plotSubtitle = (typeof titleLayout === "object" && titleLayout?.subtitle?.text) || "";
   // Filters that depend on sweep order cannot use a measured x axis.
   const xAxisIsMeasured = Boolean(
     (
@@ -3610,12 +3612,15 @@ const PlotWrapper: React.FC<Props> = ({
             className="flex items-center justify-between p-3 bg-gray-50 border-b border-gray-200"
             style={{ height: "52px" }}
           >
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-gray-700">
-                {(typeof plotJson.layout?.title === "string"
-                  ? plotJson.layout.title
-                  : plotJson.layout?.title?.text) || "Plot"}
+            <div className="flex min-w-0 items-baseline gap-3">
+              <span className="shrink-0 text-sm font-medium text-gray-700">
+                {plotTitle || "Plot"}
               </span>
+              {plotSubtitle && (
+                <span className="truncate text-xs text-gray-500" title={plotSubtitle}>
+                  {plotSubtitle}
+                </span>
+              )}
             </div>
 
             <div className="flex items-center gap-1">
