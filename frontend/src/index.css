@@ -138,6 +138,8 @@ select:not([multiple]) {
      left-hand tooltip near the right of the window wrapped word by word. */
   width: max-content;
   max-width: min(22rem, calc(100vw - 1rem));
+  /* Wrap long field names without spaces. */
+  overflow-wrap: anywhere;
 }
 
 .tooltip-top {
