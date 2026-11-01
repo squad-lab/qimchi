@@ -136,6 +136,8 @@ test.describe("full-window Explorer", () => {
   });
 
   test("Shift+F expands it and Esc returns", async ({ page }) => {
+    // Wait for the app to render before sending the shortcut.
+    await expect(page.getByRole("button", { name: "Expand to full window" })).toBeVisible();
     await page.keyboard.press("Shift+F");
     await expect(page.getByRole("button", { name: "Exit full window" })).toBeVisible();
 

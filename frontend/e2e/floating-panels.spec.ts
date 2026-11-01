@@ -49,6 +49,8 @@ for (const [name, open] of panels) {
   test(`the ${name} panel opens inside a small window`, async ({ page }) => {
     await openPlot(page);
     await page.setViewportSize({ width: 1100, height: 520 });
+    // Scroll the ribbon into view before clicking to avoid a missed click.
+    await page.getByRole("button", { name: "Edit appearance" }).first().scrollIntoViewIfNeeded();
     const panel = await open(page);
     await expect(panel).toBeVisible();
     await expect.poll(() => inside(page, panel)).toBe(true);
