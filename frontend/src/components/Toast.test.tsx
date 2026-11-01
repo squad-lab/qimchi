@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ToastProvider } from "./Toast";
 import { useToast } from "../hooks/useToast";
@@ -46,6 +46,34 @@ describe("ToastProvider", () => {
 
     expect(screen.queryByText("note 2")).toBeNull();
     expect(screen.queryByText("note 0")).toBeNull();
+  });
+
+  it("dismisses each toast on time while new ones keep arriving", async () => {
+    vi.useFakeTimers();
+    try {
+      const Stream = () => {
+        const { showToast } = useToast();
+        return <button onClick={() => showToast(`tick ${Date.now()}`, "info", 1000)}>tick</button>;
+      };
+      render(
+        <ToastProvider>
+          <Stream />
+        </ToastProvider>,
+      );
+
+      const tick = screen.getByRole("button", { name: "tick" });
+      // Add a one-second toast every 500 ms for ten seconds.
+      for (let i = 0; i < 20; i++) {
+        act(() => {
+          fireEvent.click(tick);
+          vi.advanceTimersByTime(500);
+        });
+      }
+
+      expect(screen.getAllByText(/^tick /).length).toBeLessThanOrEqual(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("piles notifications into a deck and fans them out on hover", async () => {

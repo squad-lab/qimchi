@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { X, AlertCircle, CheckCircle, Info, AlertTriangle } from "lucide-react";
 import { ToastContext, LogItem, ToastAction } from "../hooks/useToast";
 import NotificationLogModal from "./NotificationLogModal";
@@ -123,7 +123,15 @@ const ToastContainer: React.FC<{
 
   useEffect(() => {
     if (!toasts.length) setIsExpanded(false);
-  }, [toasts.length]);
+    setHeights((prev) => {
+      const shown = new Set(toasts.map((toast) => toast.id));
+      const gone = Object.keys(prev).filter((id) => !shown.has(id));
+      if (gone.length === 0) return prev;
+      const next = { ...prev };
+      for (const id of gone) delete next[id];
+      return next;
+    });
+  }, [toasts]);
 
   if (!ordered.length) return null;
 
@@ -187,6 +195,9 @@ const Toast: React.FC<ToastProps> = ({
 }) => {
   const [isVisible, setIsVisible] = useState(true);
   const [isExiting, setIsExiting] = useState(false);
+  // Keep the latest callback without restarting the dismissal timer.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (paused) return;
@@ -194,12 +205,12 @@ const Toast: React.FC<ToastProps> = ({
       setIsExiting(true);
       setTimeout(() => {
         setIsVisible(false);
-        onClose?.();
+        onCloseRef.current?.();
       }, 200); // Animation duration
     }, duration);
 
     return () => clearTimeout(timer);
-  }, [duration, onClose, paused]);
+  }, [duration, paused]);
 
   const getToastStyles = () => {
     switch (type) {
