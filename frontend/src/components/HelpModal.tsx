@@ -141,6 +141,11 @@ const ExplorerHelp = memo(() => (
         Qimchi recognises Quantify runs inside HDF5 datasets. They can also be streamed live with
         Qimchi-Connect. DataTree nodes can be browsed inside Zarr, NetCDF, and HDF5 containers.
       </p>
+      <p className="text-xs text-gray-500 mt-2">
+        QCoDeS databases open as folders, with runs grouped by start date. Repeated sweeps can gain
+        a <span className="font-mono">repetition</span> axis; evenly stepped values recorded against
+        time can serve as plot axes.
+      </p>
     </div>
 
     <div className="space-y-2">
@@ -200,6 +205,12 @@ const ExplorerHelp = memo(() => (
             Folders can be hearted, trashed and tagged too, and everything inside a folder counts as
             marked when you filter. Unlike a measurement, a folder loses its marks if you rename or
             move it
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            QCoDeS databases and date groups support folder marks, which also apply to their runs
           </span>
         </li>
       </ul>
@@ -405,11 +416,24 @@ const BasketHelp = memo(() => (
       <ul className="space-y-2 text-gray-600">
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
-          <span>Click a card to select it as the active plotting dataset</span>
+          <span>
+            Click a card to select its measurement for plotting. A nonempty Basket always keeps one
+            selected
+          </span>
         </li>
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
-          <span>Use Ctrl/Cmd+Click to select multiple datasets for composite plots</span>
+          <span>
+            Use card checkboxes or Ctrl/Cmd+Click to select multiple measurements. Shift+Click
+            selects a range
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            With a card focused, use arrow keys to move the selection or Shift+Arrow to extend it.
+            See Shortcuts for more
+          </span>
         </li>
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
@@ -525,6 +549,17 @@ const MetadataHelp = memo(() => (
         <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
           <h4 className="font-semibold text-gray-800 mb-1 flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+            QCoDeS Runs
+          </h4>
+          <p className="text-xs leading-relaxed">
+            Run Information lists the experiment, sample, name and record count. QCoDeS Metadata
+            contains the GUID, start time and station snapshot.
+          </p>
+        </div>
+
+        <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
+          <h4 className="font-semibold text-gray-800 mb-1 flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
             Pinned Parameters
           </h4>
           <p className="text-xs leading-relaxed">
@@ -567,13 +602,20 @@ const ComposerHelp = memo(() => (
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            <strong>LinePlot:</strong> one X field and one or more dependent Y fields
+            <strong>LinePlot:</strong> one or more X fields and one or more Y fields
           </span>
         </li>
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            <strong>HeatMap:</strong> one X field, one Y field and one or more dependent Z fields
+            <strong>HeatMap:</strong> one or more X, Y and Z fields
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Qimchi draws each field combination for every selected measurement. It asks before
+            drawing more than 30 plots, including from a plot setup
           </span>
         </li>
       </ul>
@@ -608,6 +650,20 @@ const ComposerHelp = memo(() => (
             axis
           </span>
         </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Independent coordinates can be LinePlot Y or HeatMap Z values when they vary along the
+            selected axes
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Dimensions without coordinates appear as independents and use zero-based positions on
+            plots
+          </span>
+        </li>
       </ul>
     </div>
 
@@ -621,6 +677,10 @@ const ComposerHelp = memo(() => (
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>Double-click a chip to fill the next available axis (X → Y → Z)</span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>Drag a chip between Composer axes to move it</span>
         </li>
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
@@ -688,6 +748,14 @@ const ViewerHelp = memo(() => (
     <div className="space-y-2">
       <h4 className="font-medium text-gray-800">Reading a Plot</h4>
       <ul className="space-y-2 text-gray-600">
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
+            Plot titles identify their measurements. Qanary shows an experiment and short ID; QCoDeS
+            shows a run number and name; Quantify shows a name and TUID. Other files show their
+            names. Source details appear below, and long names are shortened in the middle
+          </span>
+        </li>
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
@@ -951,6 +1019,16 @@ const ViewerHelp = memo(() => (
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
+            Save the config of shown plots as a named setup in the library or a file. Setups keep
+            variables, filters, sliders, appearance and width, but no reference to the measurement
+            paths. Loading applies them to selected Basket measurements and skips incompatible
+            plots. Library setups can be renamed, deleted or exported. When one Composer selection
+            can reproduce the plots, it is restored too!
+          </span>
+        </li>
+        <li className="flex gap-2 leading-relaxed">
+          <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
+          <span>
             Closed a plot by mistake? Press Ctrl+Z (Cmd+Z on a Mac), or Undo in the message that
             appears, to bring it back where it was, with its filters, settings and width. After
             Clear All Plots, one Ctrl+Z brings them all back. The Recently closed button in the
@@ -1159,7 +1237,10 @@ const DesktopHelp = memo(() => (
         </li>
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
-          <span>Qimchi also writes the individual PNG and SVG files beside the dataset</span>
+          <span>
+            Qimchi also saves individual PNG and SVG files beside the dataset. QCoDeS filenames
+            include the run number
+          </span>
         </li>
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
@@ -1363,6 +1444,30 @@ const KeyboardHelp = memo(() => (
           ["Shift+R", "Refresh Directory"],
           ["Ctrl/Cmd + / −", "Zoom in / out (desktop app)"],
           ["Esc", "Close modals / exit modes / leave the walkthrough"],
+        ].map(([key, desc]) => (
+          <div key={key} className="contents">
+            <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-800 text-xs self-start">
+              {key}
+            </span>
+            <span className="text-gray-600 text-xs self-center">{desc}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    {/* Basket */}
+    <div>
+      <h4 className="font-medium text-gray-800 mb-2">
+        Basket <span className="font-normal text-gray-500 text-xs">(when a card has focus)</span>
+      </h4>
+      <div className="grid grid-cols-1 @min-[460px]/panel:grid-cols-2 @min-[860px]/panel:grid-cols-4 gap-x-4 gap-y-1.5">
+        {[
+          ["← / →", "Select the previous or next measurement"],
+          ["Shift+← / →", "Extend the selection"],
+          ["Home / End", "Select the first or last measurement"],
+          ["Ctrl/Cmd+← / →", "Move focus without changing the selection"],
+          ["Space", "Toggle the focused measurement"],
+          ["Ctrl/Cmd+A", "Select all measurements"],
         ].map(([key, desc]) => (
           <div key={key} className="contents">
             <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-800 text-xs self-start">
