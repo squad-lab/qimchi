@@ -130,13 +130,22 @@ citation:
   script:
     - pip install --quiet cffconvert==2.0.0 pyyaml
     - cffconvert --validate
-    # Check that CITATION.cff matches the package version.
+    # Allow CITATION.cff to match the package version or an existing version tag.
+    - git fetch --tags --quiet
     - |
       python - <<'PY'
-      import sys, tomllib, yaml
-      cff = yaml.safe_load(open("CITATION.cff", encoding="utf-8"))["version"]
+      import subprocess, sys, tomllib, yaml
+      cff = str(yaml.safe_load(open("CITATION.cff", encoding="utf-8"))["version"])
       project = tomllib.load(open("backend/pyproject.toml", "rb"))["project"]["version"]
-      sys.exit(f"CITATION.cff says {cff}, backend/pyproject.toml says {project}" if str(cff) != project else 0)
+      released = subprocess.run(
+          ["git", "rev-parse", "--quiet", "--verify", f"refs/tags/v{cff}"],
+          capture_output=True,
+      ).returncode == 0
+      if cff != project and not released:
+          sys.exit(
+              f"CITATION.cff version {cff} matches neither the package version "
+              f"({project}) nor an existing v{cff} tag"
+          )
       PY
 
 frontend-quality:
