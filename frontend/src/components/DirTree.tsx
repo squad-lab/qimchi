@@ -73,6 +73,7 @@ import {
   isPathTrashed,
   useLibraryStore,
   normalizePath,
+  type VirtualParents,
 } from "../stores/libraryStore";
 import TagPopover from "./TagPopover";
 import TagFilterMenu from "./TagFilterMenu";
@@ -221,6 +222,7 @@ const DirTree = ({
   const libraryTags = useLibraryStore((s) => s.tags);
   const setFilterHeartedOnly = useLibraryStore((s) => s.setFilterHeartedOnly);
   const setShowTrashed = useLibraryStore((s) => s.setShowTrashed);
+  const setVirtualParents = useLibraryStore((s) => s.setVirtualParents);
   const toggleSelectedTag = useLibraryStore((s) => s.toggleSelectedTag);
   const applyHeartMany = useLibraryStore((s) => s.applyHeartMany);
   const applyTrashMany = useLibraryStore((s) => s.applyTrashMany);
@@ -694,6 +696,28 @@ const DirTree = ({
     return index;
   }, [apiData]);
 
+  // Record date-group ancestry for QCoDeS runs, so folder actions include them.
+  useEffect(() => {
+    const parents: VirtualParents = {};
+    const walk = (nodes: TreeNode[], parentKey: string | null) => {
+      nodes.forEach((node) => {
+        const key = normalizePath(node.path);
+        if (
+          parentKey &&
+          key !== parentKey &&
+          !key.startsWith(`${parentKey}/`) &&
+          !key.startsWith(`${parentKey}#`)
+        ) {
+          parents[key] = parentKey;
+        }
+        if (node.children) walk(node.children, key);
+      });
+    };
+    walk(apiData, null);
+    const current = useLibraryStore.getState().virtualParents;
+    if (JSON.stringify(current) !== JSON.stringify(parents)) setVirtualParents(parents);
+  }, [apiData, setVirtualParents]);
+
   // Which nodes survive the current filters. Kept separate from ordering so
   // changing the sort or its direction does not re-run every predicate over
   // the whole tree, and so a keystroke sorts only the survivors.
@@ -1023,8 +1047,8 @@ const DirTree = ({
     try {
       e.stopPropagation();
 
-      const libraryStates = useLibraryStore.getState().statesByPath;
-      if (isPathTrashed(libraryStates, node.path)) {
+      const { statesByPath: libraryStates, virtualParents } = useLibraryStore.getState();
+      if (isPathTrashed(libraryStates, node.path, virtualParents)) {
         e.preventDefault();
         showToast("Restore this item or its parent folder before dragging it.", "warning");
         return;
@@ -1043,7 +1067,7 @@ const DirTree = ({
 
       // Process each item to drag
       itemsToDrag.forEach((item) => {
-        if (isPathTrashed(libraryStates, item.path)) return;
+        if (isPathTrashed(libraryStates, item.path, virtualParents)) return;
         if (item.type === "file") {
           // For files, add them directly
           validItemsToDrag.push(item);
@@ -1051,7 +1075,8 @@ const DirTree = ({
           // For folders, add all direct children that are dataset files.
           const folderChildren = item.children || [];
           const datasetChildren = folderChildren.filter(
-            (child) => isDatasetNode(child) && !isPathTrashed(libraryStates, child.path),
+            (child) =>
+              isDatasetNode(child) && !isPathTrashed(libraryStates, child.path, virtualParents),
           );
           validItemsToDrag.push(...datasetChildren);
         }
@@ -1119,7 +1144,8 @@ const DirTree = ({
       // If already in basket, remove it
       onRemoveBasketItem?.(node.id);
     } else {
-      if (isPathTrashed(useLibraryStore.getState().statesByPath, node.path)) {
+      const { statesByPath, virtualParents } = useLibraryStore.getState();
+      if (isPathTrashed(statesByPath, node.path, virtualParents)) {
         showToast("Restore this measurement or its parent folder before adding it.", "warning");
         return;
       }
@@ -1144,10 +1170,10 @@ const DirTree = ({
   // Add all selected files to basket (only files, not folders)
   const handleAddAllSelectedToBasket = () => {
     const selectedNodes = getSelectedNodes();
-    const libraryStates = useLibraryStore.getState().statesByPath;
+    const { statesByPath: libraryStates, virtualParents } = useLibraryStore.getState();
     // Filter to only files for basket functionality
     const selectedFiles = selectedNodes.filter(
-      (node) => node.type === "file" && !isPathTrashed(libraryStates, node.path),
+      (node) => node.type === "file" && !isPathTrashed(libraryStates, node.path, virtualParents),
     );
     selectedFiles.forEach((node) => {
       if (!basketItems.some((item) => item.id === node.id)) {
@@ -2175,17 +2201,18 @@ const TreeItemComponent = ({
   const libState = useLibraryStore((s) => s.statesByPath[normalizePath(nodeData.path)]);
   // Inside a trashed folder: shown as trashed, but only the folder can restore it.
   const inTrashedFolder = useLibraryStore(
-    (s) => !libState?.trashed && inheritedState(s.statesByPath, nodeData.path).trashed,
+    (s) =>
+      !libState?.trashed && inheritedState(s.statesByPath, nodeData.path, s.virtualParents).trashed,
   );
   const inHeartedFolder = useLibraryStore(
     (s) =>
       !libState?.hearted &&
-      inheritedState(s.statesByPath, nodeData.path).hearted &&
-      !effectiveState(s.statesByPath, nodeData.path).trashed,
+      inheritedState(s.statesByPath, nodeData.path, s.virtualParents).hearted &&
+      !effectiveState(s.statesByPath, nodeData.path, s.virtualParents).trashed,
   );
   const isEffectivelyTrashed = Boolean(libState?.trashed || inTrashedFolder);
   const isEffectivelyHearted = useLibraryStore(
-    (s) => effectiveState(s.statesByPath, nodeData.path).hearted,
+    (s) => effectiveState(s.statesByPath, nodeData.path, s.virtualParents).hearted,
   );
   const hasMarks = Boolean(
     libState?.hearted || libState?.trashed || (libState?.tags?.length ?? 0) > 0,

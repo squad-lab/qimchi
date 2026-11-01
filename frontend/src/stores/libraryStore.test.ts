@@ -380,4 +380,24 @@ describe("folders", () => {
     expect(effectiveState(states, path)).toEqual({ hearted: false, trashed: true });
     expect(states[path].hearted).toBe(true);
   });
+
+  it("passes a QCoDeS database's and date folder's marks to its runs", () => {
+    const db = "C:/data/fridge.db";
+    const day = `${db}#date=2026-10-23`;
+    const run = `${db}#run_id=4`;
+    const otherRun = `${db}#run_id=1`;
+    const parents = { [run]: day, [otherRun]: `${db}#date=2026-10-22` };
+
+    const dbHearted = { [db]: { uuid: "d", hearted: true, trashed: false, tags: [] } };
+    expect(effectiveState(dbHearted, "C:\\data\\fridge.db#run_id=4", parents).hearted).toBe(true);
+    expect(inheritedState(dbHearted, "C:/data/fridge.dbx#run_id=4").hearted).toBe(false);
+
+    const dayTrashed = { [day]: { uuid: "t", hearted: false, trashed: true, tags: [5] } };
+    expect(inheritedState(dayTrashed, run, parents)).toEqual({
+      hearted: false,
+      trashed: true,
+      tags: [5],
+    });
+    expect(isPathTrashed(dayTrashed, otherRun, parents)).toBe(false);
+  });
 });

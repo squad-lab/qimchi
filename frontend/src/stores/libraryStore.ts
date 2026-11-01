@@ -30,15 +30,31 @@ interface PathState {
   tags: number[];
 }
 
+/** Implicit parent folders keyed by normalized path. */
+export type VirtualParents = Record<string, string>;
+
+// A QCoDeS run belongs to both its database and its date group.
+const isWithin = (key: string, ancestor: string): boolean =>
+  key.startsWith(`${ancestor}/`) || key.startsWith(`${ancestor}#`);
+
 /** A path takes on hearts, trash and tags from its ancestor folders */
 export const inheritedState = (
   statesByPath: Record<string, PathState>,
   path: string,
+  virtualParents: VirtualParents = {},
 ): { hearted: boolean; trashed: boolean; tags: number[] } => {
   const key = normalizePath(path);
+  const parents: string[] = [];
+  for (let parent = virtualParents[key]; parent && !parents.includes(parent);) {
+    parents.push(parent);
+    parent = virtualParents[parent];
+  }
   const inherited = { hearted: false, trashed: false, tags: [] as number[] };
   for (const [ancestor, state] of Object.entries(statesByPath)) {
-    if (!key.startsWith(`${ancestor}/`)) continue;
+    const isAncestor =
+      isWithin(key, ancestor) ||
+      parents.some((parent) => parent === ancestor || isWithin(parent, ancestor));
+    if (!isAncestor) continue;
     inherited.hearted ||= state.hearted;
     inherited.trashed ||= state.trashed;
     for (const tag of state.tags) if (!inherited.tags.includes(tag)) inherited.tags.push(tag);
@@ -50,9 +66,10 @@ export const inheritedState = (
 export const effectiveState = (
   statesByPath: Record<string, PathState>,
   path: string,
+  virtualParents: VirtualParents = {},
 ): { hearted: boolean; trashed: boolean } => {
   const own = statesByPath[normalizePath(path)];
-  const inherited = inheritedState(statesByPath, path);
+  const inherited = inheritedState(statesByPath, path, virtualParents);
   const trashed = Boolean(own?.trashed || inherited.trashed);
   return {
     hearted: !trashed && Boolean(own?.hearted || inherited.hearted),
@@ -61,8 +78,12 @@ export const effectiveState = (
 };
 
 /** Whether a path or any of its parent folders is trashed. */
-export const isPathTrashed = (statesByPath: Record<string, PathState>, path: string): boolean => {
-  return effectiveState(statesByPath, path).trashed;
+export const isPathTrashed = (
+  statesByPath: Record<string, PathState>,
+  path: string,
+  virtualParents: VirtualParents = {},
+): boolean => {
+  return effectiveState(statesByPath, path, virtualParents).trashed;
 };
 
 const withClearedHearts = (
@@ -83,6 +104,7 @@ interface LibraryStore {
   // normalized path -> state (measurements that are hearted/trashed/tagged OR
   // registered this session)
   statesByPath: Record<string, PathState>;
+  virtualParents: VirtualParents;
   tags: Tag[]; // all of the user's tags
   filterHeartedOnly: boolean;
   showTrashed: boolean;
@@ -131,10 +153,12 @@ interface LibraryStore {
   getStateForPath: (path: string) => PathState | undefined;
   setFilterHeartedOnly: (value: boolean) => void;
   setShowTrashed: (value: boolean) => void;
+  setVirtualParents: (parents: VirtualParents) => void;
 }
 
 export const useLibraryStore = create<LibraryStore>((set, get) => ({
   statesByPath: {},
+  virtualParents: {},
   tags: [],
   filterHeartedOnly: false,
   showTrashed: false,
@@ -437,4 +461,5 @@ export const useLibraryStore = create<LibraryStore>((set, get) => ({
 
   setFilterHeartedOnly: (value) => set({ filterHeartedOnly: value }),
   setShowTrashed: (value) => set({ showTrashed: value }),
+  setVirtualParents: (parents) => set({ virtualParents: parents }),
 }));
