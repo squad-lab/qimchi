@@ -17,9 +17,10 @@ export interface UsePlotCollectionReturn {
   addPlot: (config: Omit<PlotConfiguration, "id">) => void;
   /**
    * Add several plots after any pinned plots, preserving their order within
-   * the group. Use this for auto-generated default plots.
+   * the group. Use this for auto-generated default plots. Returns the plots as
+   * added, with their ids.
    */
-  addPlots: (configs: Omit<PlotConfiguration, "id">[]) => void;
+  addPlots: (configs: Omit<PlotConfiguration, "id">[]) => PlotConfiguration[];
   removePlot: (id: string) => void;
   /** Restore closed plots at saved positions, preserving pin order and skipping open IDs. */
   restorePlots: (plots: { config: PlotConfiguration; index: number }[]) => void;
@@ -114,10 +115,11 @@ export const usePlotCollection = (): UsePlotCollectionReturn => {
 
   const addPlots = useCallback(
     (configs: Omit<PlotConfiguration, "id">[]) => {
-      if (configs.length === 0) return;
+      if (configs.length === 0) return [];
       const built = configs.map((config, index) => buildPlot(config, index));
       // Pinned plots stay first; the new group leads the remaining plots.
       setPlotConfigs((prev) => pinnedFirst([...built, ...prev]));
+      return built;
     },
     [buildPlot],
   );

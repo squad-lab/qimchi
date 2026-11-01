@@ -159,6 +159,45 @@ export async function deleteFilterPreset(id: number): Promise<void> {
   await axios.delete(`${API_BASE_URL}/library/filter-presets/${id}`);
 }
 
+export interface SavedPlotSetup {
+  id: number;
+  name: string;
+  /** Saved plot setup data, parsed with `readPlotSetup`. */
+  setup: unknown;
+  updatedAt: string;
+}
+
+export async function getPlotSetups(): Promise<SavedPlotSetup[]> {
+  const { data } = await axios.get<SavedPlotSetup[]>(`${API_BASE_URL}/library/plot-setups`);
+  if (!Array.isArray(data)) throw new Error("The library did not return a list of plot setups.");
+  return data;
+}
+
+/** Save a plot setup; return HTTP 409 for a duplicate name. */
+export async function createPlotSetup(name: string, setup: object): Promise<SavedPlotSetup> {
+  const { data } = await axios.post<SavedPlotSetup>(`${API_BASE_URL}/library/plot-setups`, {
+    name,
+    setup,
+  });
+  return data;
+}
+
+/** Rename a plot setup, replace its plots, or both. */
+export async function updatePlotSetup(
+  id: number,
+  changes: { name?: string; setup?: object },
+): Promise<SavedPlotSetup> {
+  const { data } = await axios.patch<SavedPlotSetup>(
+    `${API_BASE_URL}/library/plot-setups/${id}`,
+    changes,
+  );
+  return data;
+}
+
+export async function deletePlotSetup(id: number): Promise<void> {
+  await axios.delete(`${API_BASE_URL}/library/plot-setups/${id}`);
+}
+
 /** Return the server error detail or a fallback message. */
 export function libraryErrorMessage(error: unknown, fallback: string): string {
   const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;

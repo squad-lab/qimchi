@@ -18,11 +18,11 @@ import { describePresetChanges, presetSummary, samePresetFilters } from "../../u
 
 const buttonBase =
   "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50";
-const primaryClass = `${buttonBase} bg-blue-600 px-2.5 py-1.5 text-white shadow-sm hover:bg-blue-700`;
-const secondaryClass = `${buttonBase} qimchi-dark-hover-plain border border-gray-300 px-2.5 py-1.5 text-gray-700 hover:bg-gray-100`;
-const dangerClass = `${buttonBase} bg-red-600 px-2.5 py-1.5 text-white shadow-sm hover:bg-red-700`;
+export const primaryClass = `${buttonBase} bg-blue-600 px-2.5 py-1.5 text-white shadow-sm hover:bg-blue-700`;
+export const secondaryClass = `${buttonBase} qimchi-dark-hover-plain border border-gray-300 px-2.5 py-1.5 text-gray-700 hover:bg-gray-100`;
+export const dangerClass = `${buttonBase} bg-red-600 px-2.5 py-1.5 text-white shadow-sm hover:bg-red-700`;
 // Disabled buttons swallow no pointer events, so their Tooltip still shows.
-const iconClass =
+export const iconClass =
   "qimchi-dark-hover-plain shrink-0 rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:pointer-events-none disabled:opacity-40";
 const inputClass =
   "min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500";
@@ -52,8 +52,8 @@ const ErrorText = ({ children }: { children: React.ReactNode }) => (
   </p>
 );
 
-/** Single-line preset name form. */
-const NameForm = ({
+/** Single-line name input shared by presets and plot setups. */
+export const NameForm = ({
   initial = "",
   label,
   placeholder,
