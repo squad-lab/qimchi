@@ -1,5 +1,24 @@
 ## Qimchi Changelog
 
+### v0.7.3 - Unreleased
+
+- [Feature] Plot titles identify QCoDeS runs (number and name), Quantify datasets (name and TUID), and files (name and folder). Source details sit below the title; line cuts name their axes, and long names shorten in the middle.
+- [Feature] QCoDeS image export filenames include the run number, including images saved to Notes.
+- [Feature] QCoDeS metadata shows a run summary with its experiment, sample, name and record count.
+- [Feature] Plot setups save variables, filters, sliders, appearance and width to the library or a file for reuse with other measurements. Library setups can be renamed or deleted; compatible setups also restore Composer axes.
+- [Feature] Basket cards have selection checkboxes and support Shift+Click ranges and keyboard selection with arrows, Home, End, Space and Ctrl/Cmd+A.
+- [Feature] The Composer accepts multiple X fields and lets fields move between axes by dragging. Composer and plot setup requests for more than 30 plots require confirmation.
+- [Feature] Independent coordinates can be plotted as LinePlot Y or HeatMap Z values when they span the chosen axes. Dimensions without coordinates can be plotted by position.
+- [Fix] Tooltips wrap long names without spaces.
+- [Fix] The Basket keeps a measurement selected as items are added or removed and after reload. The selected card's outline remains visible during horizontal scrolling.
+- [Fix] QCoDeS runs retain setpoint axes when values repeat. Repeated sweeps gain a `repetition` axis, and noisy 2D raster readbacks are gridded by row.
+- [Fix] Evenly stepped QCoDeS ramps recorded against time can serve as axes. Singleton axes no longer create one-row heat maps, and constant parameters sort last.
+- [Fix] Default heat maps skip axis pairs that share one sweep dimension.
+- [Fix] QCoDeS databases and date folders can be hearted, trashed and tagged in the Explorer; their runs follow those folder marks.
+- [Fix] Notifications expire on time while new ones arrive.
+- [Misc] QCoDeS databases are read with the bundled QCoDeS 0.59, which opens databases up to schema version 9 and upgrades older ones in place.
+- [Misc] Citation metadata includes the Zenodo DOI and Dr. Vincent Mourik as an author.
+
 ### v0.7.2 - 2026-10-21
 
 - [Misc] Bundle third-party license notices with desktop installers and Docker images.

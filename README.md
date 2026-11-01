@@ -1,4 +1,4 @@
-# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.7.2
+# <img src="./frontend/public/qimchi-logo.png" alt="Qimchi Logo" width="25" style="vertical-align: middle;"/> Qimchi v0.7.3
 
 [![Website](https://img.shields.io/badge/website-qimchi.squad--lab.org-8cc63e)](https://qimchi.squad-lab.org)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23537382.svg)](https://doi.org/10.5281/zenodo.23537382)
@@ -12,19 +12,22 @@ This repository contains a unified FastAPI application that serves a React-based
 >
 > 🖥️ **Desktop app:** a self-contained build of Qimchi that runs in its own window, with no separate Git, Python or Node installation required. Installers for Windows (`.exe`), Linux (`.AppImage`) and macOS (`.dmg`) are available on the [Releases page](https://gitlab.com/squad-lab/qimchi/-/releases). The app checks for updates on startup and can install them with one click.
 
-## What's new in 0.7.2
+## What's new in 0.7.3
 
-- **Bundled licenses:** desktop installers and Docker images include third-party license notices.
-- **Citation and archiving:** citation metadata and BibTeX references are included, and stable releases are archived on Zenodo.
+- **Enhanced QCoDeS support:** repeated and noisy sweeps retain useful axes, stepped ramps can be plotted directly, and database and date folders support Explorer marks.
+- **Composer:** combine multiple X, Y and Z fields, drag fields between axes, and plot independent coordinates as values.
+- **Plot setups:** save plot variables and settings to the library or a file, then apply them to other measurements.
+- **Basket selection:** use checkboxes, Shift+Click or the keyboard. A nonempty Basket always keeps one measurement selected.
+- **Plot titles and exports:** titles identify measurements; QCoDeS image filenames include run numbers.
 
-Everything in this release is listed in the [changelog](CHANGELOG.md#v072---2026-10-21).
+Everything in this release is listed in the [changelog](CHANGELOG.md#v073---unreleased).
 
 ---
 
 ## Table of Contents
 
-- [ Qimchi v0.7.2](#-qimchi-v072)
-  - [What's new in 0.7.2](#whats-new-in-072)
+- [ Qimchi v0.7.3](#-qimchi-v073)
+  - [What's new in 0.7.3](#whats-new-in-073)
   - [Table of Contents](#table-of-contents)
   - [Installation](#installation)
     - [Windows](#windows)
@@ -467,7 +470,7 @@ SERVE_STATIC_FILES=true
 ## Supported Dataset Types
 Qimchi's backend supports loading datasets in any format that can be converted to an `xarray` DataArray or Dataset. This includes:
 - Zarr (v2 and v3)
-- QCoDeS databases (via `load_by_id()`)
+- QCoDeS databases, read with the bundled QCoDeS 0.59, up to schema v9
 - Quantify databases
 - NetCDF
 - HDF5
