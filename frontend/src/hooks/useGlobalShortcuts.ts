@@ -64,14 +64,34 @@ export type ShortcutAction =
   | "selected-send-to-notes"
   | "selected-export-images"
   | "selected-remove-plot"
+  | "basket-previous"
+  | "basket-next"
+  | "basket-first"
+  | "basket-last"
+  | "basket-extend-previous"
+  | "basket-extend-next"
+  | "basket-extend-first"
+  | "basket-extend-last"
+  | "basket-focus-previous"
+  | "basket-focus-next"
+  | "basket-toggle"
+  | "basket-select-all"
   | "toggle-help"
   | "toggle-settings"
   | "escape";
+
+export type ShortcutScope = "basket";
 
 interface ShortcutConfig {
   action: ShortcutAction;
   alt?: boolean;
   shift?: boolean;
+  /** Require Ctrl, or Cmd on macOS. */
+  ctrl?: boolean;
+  /** Required `data-shortcut-scope` value on the focused element. */
+  scope?: ShortcutScope;
+  /** Allow repeated keydown events while the key is held. */
+  repeat?: boolean;
 }
 
 // Single-file mapping for all global shortcuts
@@ -84,7 +104,10 @@ export const KEYBOARD_SHORTCUTS: Record<string, ShortcutConfig | ShortcutConfig[
     { action: "selected-open-filters" },
     { action: "toggle-explorer-expanded", shift: true }, // Shift+F
   ],
-  a: { action: "selected-open-appearance" },
+  a: [
+    { action: "selected-open-appearance" },
+    { action: "basket-select-all", ctrl: true, scope: "basket" },
+  ],
   b: [
     { action: "selected-toggle-bgcorr" },
     { action: "toggle-basket", alt: true }, // Alt+B
@@ -119,7 +142,32 @@ export const KEYBOARD_SHORTCUTS: Record<string, ShortcutConfig | ShortcutConfig[
     { action: "toggle-help", shift: true }, // Shift+H
   ],
   delete: { action: "selected-remove-plot" },
+  arrowleft: [
+    { action: "basket-previous", scope: "basket", repeat: true },
+    { action: "basket-extend-previous", shift: true, scope: "basket", repeat: true },
+    { action: "basket-focus-previous", ctrl: true, scope: "basket", repeat: true },
+  ],
+  arrowright: [
+    { action: "basket-next", scope: "basket", repeat: true },
+    { action: "basket-extend-next", shift: true, scope: "basket", repeat: true },
+    { action: "basket-focus-next", ctrl: true, scope: "basket", repeat: true },
+  ],
+  home: [
+    { action: "basket-first", scope: "basket" },
+    { action: "basket-extend-first", shift: true, scope: "basket" },
+  ],
+  end: [
+    { action: "basket-last", scope: "basket" },
+    { action: "basket-extend-last", shift: true, scope: "basket" },
+  ],
+  " ": [
+    { action: "basket-toggle", scope: "basket" },
+    { action: "basket-toggle", ctrl: true, scope: "basket" },
+  ],
 };
+
+const scopeOf = (target: EventTarget | null): string | undefined =>
+  target instanceof HTMLElement ? target.dataset.shortcutScope : undefined;
 
 // macOS composes Option+<key> into a different character, so e.key never
 // matches an Alt shortcut there. e.code names the physical key and is
@@ -140,14 +188,11 @@ export const useGlobalShortcutsInit = () => {
       const key = e.key.toLowerCase();
       const altKey = e.altKey ? physicalKey(e) : null;
       // Always allow Escape, even when an input/textarea has focus.
-      if (e.repeat || (key !== "escape" && key !== "esc" && isEditableTarget(e.target))) {
+      if (key !== "escape" && key !== "esc" && isEditableTarget(e.target)) {
         return;
       }
-
-      // Only process standard keyboard commands without ctrl or meta to avoid OS/browser conflicts
-      if (e.ctrlKey || e.metaKey) {
-        return;
-      }
+      const ctrl = e.ctrlKey || e.metaKey;
+      const scope = scopeOf(e.target);
 
       // Physical key first, composed character second: on a non-QWERTY layout
       // e.code is the QWERTY position, so e.key stays the fallback.
@@ -160,6 +205,8 @@ export const useGlobalShortcutsInit = () => {
         for (const config of configs) {
           const requiresAlt = config.alt || false;
           const requiresShift = config.shift || false;
+          if (config.scope !== undefined && config.scope !== scope) continue;
+          if (ctrl !== (config.ctrl || false) || (e.repeat && !config.repeat)) continue;
 
           if (e.altKey === requiresAlt && e.shiftKey === requiresShift) {
             e.preventDefault();

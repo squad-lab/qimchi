@@ -1,6 +1,7 @@
 /** Preserve Basket and Viewer state across reloads, but not new app launches. */
 export const SESSION_KEYS = {
   basket: "qimchi-session-basket",
+  basketSelection: "qimchi-session-basket-selection",
   plots: "qimchi-session-plots",
   plotWidths: "qimchi-session-plot-widths",
   closedPlots: "qimchi-session-closed-plots",
