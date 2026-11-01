@@ -163,6 +163,21 @@ class FilterPreset(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=_utcnow)
 
 
+class PlotSetup(SQLModel, table=True):
+    """A named set of plot configurations without measurement paths."""
+
+    __tablename__ = "plot_setups"
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_plot_setups_user_name"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    name: str
+    setup_json: str = "{}"
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
 class DatasetScanCache(SQLModel, table=True):
     """
     Node-local Explorer scan cache keyed by absolute path.

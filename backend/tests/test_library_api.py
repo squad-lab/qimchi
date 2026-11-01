@@ -277,3 +277,83 @@ async def test_a_folder_that_is_not_there_is_refused(tmp_path):
             library.RegisterRequest(path=str(tmp_path / "gone"), folder=True)
         )
     assert missing.value.status_code == 404
+
+
+def _qcodes_database(path, run_days: dict[int, str]):
+    """Create a QCoDeS-style database with runs on specified UTC dates."""
+    import sqlite3
+    from datetime import datetime, timezone
+
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE runs (run_id INTEGER, name TEXT, "
+            "result_table_name TEXT, run_timestamp REAL)"
+        )
+        for run_id, day in run_days.items():
+            started = datetime.fromisoformat(f"{day}T12:00:00").replace(
+                tzinfo=timezone.utc
+            )
+            connection.execute(
+                "INSERT INTO runs VALUES (?, ?, ?, ?)",
+                (run_id, f"run{run_id}", f"results-{run_id}", started.timestamp()),
+            )
+    connection.close()
+
+
+async def _hearted_run(db_path, run_id: int) -> str:
+    path = f"{db_path}#run_id={run_id}"
+    registered = await library.register(
+        library.RegisterRequest(path=path, attrs={"guid": f"guid-{run_id}"})
+    )
+    await library.heart(library.HeartRequest(uuid=registered.uuid, hearted=True))
+    return path
+
+
+@pytest.mark.asyncio
+async def test_a_qcodes_database_and_its_date_folders_can_be_hearted(tmp_path):
+    db_path = tmp_path / "fridge.db"
+    _qcodes_database(db_path, {1: "2026-10-22"})
+
+    for path in (str(db_path), f"{db_path}#date=2026-10-22"):
+        registered = await library.register(
+            library.RegisterRequest(path=path, folder=True)
+        )
+        hearted = await library.heart(
+            library.HeartRequest(uuid=registered.uuid, hearted=True)
+        )
+        assert hearted.hearted is True
+
+    assert {state.abs_path for state in await library.states()} == {
+        str(db_path),
+        f"{db_path}#date=2026-10-22",
+    }
+
+
+@pytest.mark.asyncio
+async def test_trashing_a_qcodes_database_unhearts_its_runs(tmp_path):
+    db_path = tmp_path / "fridge.db"
+    _qcodes_database(db_path, {1: "2026-10-22", 2: "2026-10-23"})
+    runs = [await _hearted_run(db_path, run_id) for run_id in (1, 2)]
+
+    database = await library.register(
+        library.RegisterRequest(path=str(db_path), folder=True)
+    )
+    trashed = await library.trash(
+        library.TrashRequest(uuid=database.uuid, trashed=True)
+    )
+
+    assert sorted(trashed.unhearted_paths) == sorted(runs)
+
+
+@pytest.mark.asyncio
+async def test_trashing_a_date_folder_unhearts_only_that_days_runs(tmp_path):
+    db_path = tmp_path / "fridge.db"
+    _qcodes_database(db_path, {1: "2026-10-22", 2: "2026-10-23", 3: "2026-10-23"})
+    runs = {run_id: await _hearted_run(db_path, run_id) for run_id in (1, 2, 3)}
+
+    day = await library.register(
+        library.RegisterRequest(path=f"{db_path}#date=2026-10-23", folder=True)
+    )
+    trashed = await library.trash(library.TrashRequest(uuid=day.uuid, trashed=True))
+
+    assert sorted(trashed.unhearted_paths) == sorted([runs[2], runs[3]])

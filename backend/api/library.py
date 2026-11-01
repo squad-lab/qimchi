@@ -37,6 +37,7 @@ from .db_models import (
     MeasurementState,
     MeasurementTag,
     Note,
+    PlotSetup,
     Tag,
     _utcnow,
 )
@@ -143,6 +144,25 @@ class UpdateFilterPresetRequest(BaseModel):
 
     name: str | None = None
     filters: list[PresetFilter] | None = None
+
+
+class PlotSetupOut(BaseModel):
+    id: int
+    name: str
+    setup: dict[str, Any]
+    updatedAt: datetime
+
+
+class CreatePlotSetupRequest(BaseModel):
+    name: str
+    setup: dict[str, Any]
+
+
+class UpdatePlotSetupRequest(BaseModel):
+    """Optional changes to a plot setup's name or plots."""
+
+    name: str | None = None
+    setup: dict[str, Any] | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -497,7 +517,8 @@ def _register(
 
 
 def _register_folder(path: str) -> StateOut:
-    if not Path(path).is_dir():
+    # Explorer treats QCoDeS databases and date groups as folders.
+    if not Path(path.partition("#")[0]).exists():
         raise HTTPException(status_code=404, detail=f"No folder at {path}")
     uuid = folder_uuid(path)
     with session_scope() as session:
@@ -526,10 +547,31 @@ def _set_heart(uuid: str, hearted: bool) -> StateOut:
         return StateOut(uuid=uuid, hearted=hearted, trashed=bool(state.trashed))
 
 
+def _qcodes_date_folder_runs(folder_path: str) -> list[str]:
+    """Return run references for a QCoDeS date group."""
+    db_path, _, fragment = folder_path.partition("#")
+    if not fragment.startswith("date="):
+        return []
+    from .data_loader import list_qcodes_runs
+    from .dirtree import qcodes_run_day
+
+    day = fragment.removeprefix("date=")
+    try:
+        runs = list_qcodes_runs(db_path)
+    except Exception:
+        logger.warning("library: could not list the runs in %s", db_path, exc_info=True)
+        return []
+    return [
+        f"{db_path}#run_id={run['run_id']}"
+        for run in runs
+        if qcodes_run_day(run["run_timestamp"]) == day
+    ]
+
+
 def _unheart_folder_descendants(session: Session, folder_path: str) -> list[str]:
     """Clear descendant hearts in one statement and return their paths."""
     base = folder_path.rstrip("/\\")
-    prefixes = (f"{base}/", f"{base}\\")
+    prefixes = (f"{base}/", f"{base}\\", f"{base}#")
     descendants = session.exec(
         select(Measurement.uuid, Measurement.abs_path)
         .join(MeasurementState, MeasurementState.uuid == Measurement.uuid)
@@ -537,8 +579,11 @@ def _unheart_folder_descendants(session: Session, folder_path: str) -> list[str]
             MeasurementState.user_id == LOCAL_USER_ID,
             MeasurementState.hearted == True,  # noqa: E712
             or_(
-                Measurement.abs_path.startswith(prefixes[0], autoescape=True),
-                Measurement.abs_path.startswith(prefixes[1], autoescape=True),
+                *(
+                    Measurement.abs_path.startswith(prefix, autoescape=True)
+                    for prefix in prefixes
+                ),
+                Measurement.abs_path.in_(_qcodes_date_folder_runs(base)),
             ),
         )
     ).all()
@@ -731,19 +776,25 @@ def _preset_out(preset: FilterPreset) -> FilterPresetOut:
     )
 
 
-def _preset_name(name: str, session: Session, exclude_id: int | None = None) -> str:
-    """Validate and normalize a unique preset name."""
+def _unique_name(
+    model: type[FilterPreset] | type[PlotSetup],
+    noun: str,
+    name: str,
+    session: Session,
+    exclude_id: int | None = None,
+) -> str:
+    """Trim a name and reject empty or duplicate values for this user."""
     name = name.strip()
     if not name:
-        raise HTTPException(status_code=400, detail="Preset name cannot be empty")
-    query = select(FilterPreset).where(
-        FilterPreset.user_id == LOCAL_USER_ID, FilterPreset.name == name
-    )
+        raise HTTPException(
+            status_code=400, detail=f"{noun.capitalize()} name cannot be empty"
+        )
+    query = select(model).where(model.user_id == LOCAL_USER_ID, model.name == name)
     if exclude_id is not None:
-        query = query.where(FilterPreset.id != exclude_id)
+        query = query.where(model.id != exclude_id)
     if session.exec(query).first() is not None:
         raise HTTPException(
-            status_code=409, detail=f"A preset named {name!r} already exists"
+            status_code=409, detail=f"A {noun} named {name!r} already exists"
         )
     return name
 
@@ -770,7 +821,7 @@ def _create_filter_preset(req: CreateFilterPresetRequest) -> FilterPresetOut:
     with session_scope() as session:
         preset = FilterPreset(
             user_id=LOCAL_USER_ID,
-            name=_preset_name(req.name, session),
+            name=_unique_name(FilterPreset, "preset", req.name, session),
             filters_json=_filters_json(req.filters),
         )
         session.add(preset)
@@ -786,7 +837,9 @@ def _update_filter_preset(
         if preset is None or preset.user_id != LOCAL_USER_ID:
             raise HTTPException(status_code=404, detail="Unknown preset")
         if req.name is not None:
-            preset.name = _preset_name(req.name, session, exclude_id=preset_id)
+            preset.name = _unique_name(
+                FilterPreset, "preset", req.name, session, exclude_id=preset_id
+            )
         if req.filters is not None:
             preset.filters_json = _filters_json(req.filters)
         preset.updated_at = _utcnow()
@@ -801,6 +854,76 @@ def _delete_filter_preset(preset_id: int) -> None:
         if preset is None or preset.user_id != LOCAL_USER_ID:
             raise HTTPException(status_code=404, detail="Unknown preset")
         session.delete(preset)
+
+
+def _plot_setup_out(row: PlotSetup) -> PlotSetupOut:
+    return PlotSetupOut(
+        id=row.id,
+        name=row.name,
+        setup=json.loads(row.setup_json or "{}"),
+        updatedAt=row.updated_at,
+    )
+
+
+def _setup_json(setup: dict[str, Any]) -> str:
+    """Validate the plot setup envelope and serialize it."""
+    plots = setup.get("plots")
+    if setup.get("qimchi") != "plot-setup" or not isinstance(plots, list):
+        raise HTTPException(status_code=400, detail="This is not a plot setup")
+    if not plots:
+        raise HTTPException(
+            status_code=400, detail="A plot setup needs at least one plot"
+        )
+    return json.dumps(setup)
+
+
+def _owned_plot_setup(session: Session, setup_id: int) -> PlotSetup:
+    row = session.get(PlotSetup, setup_id)
+    if row is None or row.user_id != LOCAL_USER_ID:
+        raise HTTPException(status_code=404, detail="Unknown plot setup")
+    return row
+
+
+def _list_plot_setups() -> list[PlotSetupOut]:
+    with session_scope() as session:
+        rows = session.exec(
+            select(PlotSetup)
+            .where(PlotSetup.user_id == LOCAL_USER_ID)
+            .order_by(PlotSetup.name)
+        ).all()
+        return [_plot_setup_out(row) for row in rows]
+
+
+def _create_plot_setup(req: CreatePlotSetupRequest) -> PlotSetupOut:
+    with session_scope() as session:
+        row = PlotSetup(
+            user_id=LOCAL_USER_ID,
+            name=_unique_name(PlotSetup, "plot setup", req.name, session),
+            setup_json=_setup_json(req.setup),
+        )
+        session.add(row)
+        session.flush()
+        return _plot_setup_out(row)
+
+
+def _update_plot_setup(setup_id: int, req: UpdatePlotSetupRequest) -> PlotSetupOut:
+    with session_scope() as session:
+        row = _owned_plot_setup(session, setup_id)
+        if req.name is not None:
+            row.name = _unique_name(
+                PlotSetup, "plot setup", req.name, session, exclude_id=setup_id
+            )
+        if req.setup is not None:
+            row.setup_json = _setup_json(req.setup)
+        row.updated_at = _utcnow()
+        session.add(row)
+        session.flush()
+        return _plot_setup_out(row)
+
+
+def _delete_plot_setup(setup_id: int) -> None:
+    with session_scope() as session:
+        session.delete(_owned_plot_setup(session, setup_id))
 
 
 @router.post("/register", response_model=StateOut)
@@ -882,3 +1005,24 @@ async def update_filter_preset(
 async def delete_filter_preset(preset_id: int) -> dict:
     await asyncio.to_thread(_delete_filter_preset, preset_id)
     return {"deleted": preset_id}
+
+
+@router.get("/plot-setups", response_model=list[PlotSetupOut])
+async def list_plot_setups() -> list[PlotSetupOut]:
+    return await asyncio.to_thread(_list_plot_setups)
+
+
+@router.post("/plot-setups", response_model=PlotSetupOut)
+async def create_plot_setup(req: CreatePlotSetupRequest) -> PlotSetupOut:
+    return await asyncio.to_thread(_create_plot_setup, req)
+
+
+@router.patch("/plot-setups/{setup_id}", response_model=PlotSetupOut)
+async def update_plot_setup(setup_id: int, req: UpdatePlotSetupRequest) -> PlotSetupOut:
+    return await asyncio.to_thread(_update_plot_setup, setup_id, req)
+
+
+@router.delete("/plot-setups/{setup_id}")
+async def delete_plot_setup(setup_id: int) -> dict:
+    await asyncio.to_thread(_delete_plot_setup, setup_id)
+    return {"deleted": setup_id}

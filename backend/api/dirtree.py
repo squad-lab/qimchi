@@ -685,6 +685,16 @@ def _build_memory_tree(path_str: str) -> Dict[str, object]:
     return node
 
 
+def qcodes_run_day(run_timestamp) -> str:
+    """Return the UTC date used to group a QCoDeS run."""
+    try:
+        return datetime.fromtimestamp(float(run_timestamp), timezone.utc).strftime(
+            "%Y-%m-%d"
+        )
+    except Exception:
+        return "Unknown Date"
+
+
 def _build_sqlite_tree(db_path: Path) -> Dict[str, object]:
     """Build a virtual tree of QCoDeS runs grouped by date."""
     if not db_path.exists() or not db_path.is_file():
@@ -702,14 +712,7 @@ def _build_sqlite_tree(db_path: Path) -> Dict[str, object]:
     for run in runs:
         run_id = run["run_id"]
         run_name = run.get("name") or f"run_{run_id}"
-        run_ts = run.get("run_timestamp")
-        try:
-            # Use UTC for deterministic day buckets across server timezones.
-            day_key = datetime.fromtimestamp(float(run_ts), timezone.utc).strftime(
-                "%Y-%m-%d"
-            )
-        except Exception:
-            day_key = "Unknown Date"
+        day_key = qcodes_run_day(run.get("run_timestamp"))
 
         run_ref = f"{db_path}#run_id={run_id}"
         run_label = f"{run_id} | {run_name}"
