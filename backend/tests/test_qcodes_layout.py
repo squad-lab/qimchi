@@ -83,7 +83,8 @@ def test_a_sweep_with_one_point_recorded_twice_stays_one_line(record):
     payload = build_attrs_payload(dataset)
     assert payload["independents"] == ["vg"]
     assert payload["variable_independents"]["i"] == ["vg"]
-    np.testing.assert_array_equal(dataset["vg"], voltages)
+    # Some SQLite builds round stored floats to 15 significant digits.
+    np.testing.assert_allclose(dataset["vg"], voltages, rtol=1e-12)
 
 
 def test_a_raster_of_noisy_readbacks_is_gridded_by_its_rows(record):
