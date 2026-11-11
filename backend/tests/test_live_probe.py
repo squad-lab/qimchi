@@ -2,11 +2,13 @@
 How the backend drives live-registry maintenance.
 
 Reconciliation opens a real WebSocket to every producer it knows about, so it
-costs network time and it runs on the path the SPA polls once a second.
+can take time. Listings start it in the background instead of waiting; the SPA
+polls those listings once a second.
 
 """
 
 import asyncio
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -14,6 +16,11 @@ import pytest
 from qimchi_connect import registry as live_db
 
 from api import data_loader, live, live_measurements
+
+
+def _wait_for_maintenance() -> None:
+    if data_loader._maintenance is not None:
+        data_loader._maintenance.result(timeout=5)
 
 
 def _record(measurement_id: str = "m-001"):
@@ -120,6 +127,7 @@ def test_the_backend_gives_a_probe_enough_time_to_answer(monkeypatch):
 
     live_measurements.get_live_measurements()
     data_loader.get_live_dataset_entries()
+    _wait_for_maintenance()
 
     assert budgets, "no maintenance pass ran"
     assert min(budgets) >= 2.0, f"probe budget of {min(budgets)}s is too short"
@@ -144,10 +152,12 @@ async def test_a_producer_that_stopped_beating_does_not_reach_the_explorer(tmp_p
         )
 
         listed = await live.list_live_measurements()
+        await asyncio.to_thread(_wait_for_maintenance)
 
         assert [m["id"] for m in listed["measurements"]] == ["beating"]
         assert live_db.get_measurement("stopped").live_status is False
     finally:
+        _wait_for_maintenance()
         live_db.configure_database(None)
 
 
@@ -164,8 +174,37 @@ def test_maintenance_runs_on_a_timer_not_on_every_call(monkeypatch):
 
     for _ in range(5):
         data_loader.get_live_dataset_entries()
+        _wait_for_maintenance()
     assert len(passes) == 1, f"{len(passes)} maintenance passes for 5 calls"
 
     monkeypatch.setenv("QIMCHI_LIVE_MAINTENANCE_INTERVAL", "0")
     data_loader.get_live_dataset_entries()
+    _wait_for_maintenance()
     assert len(passes) == 2, "the throttle must be defeatable for debugging"
+
+
+def test_a_listing_does_not_wait_for_maintenance(monkeypatch):
+    released = threading.Event()
+    passes: list[int] = []
+
+    def slow_maintenance(*_args, **_kwargs):
+        passes.append(1)
+        released.wait(timeout=5)
+        return live_db.RegistryMaintenanceResult((), 0)
+
+    monkeypatch.setenv("QIMCHI_LIVE_MAINTENANCE_INTERVAL", "0")
+    monkeypatch.setattr(data_loader.live_db, "maintain_registry", slow_maintenance)
+    monkeypatch.setattr(data_loader.live_db, "init_database", lambda: None)
+    monkeypatch.setattr(
+        data_loader.live_db, "get_live_measurements", lambda: [_record()]
+    )
+    try:
+        started = time.perf_counter()
+        for _ in range(3):
+            assert set(data_loader.get_live_dataset_entries()) == {"m-001"}
+        assert time.perf_counter() - started < 1.0
+    finally:
+        released.set()
+        _wait_for_maintenance()
+    # A pass still running is not started again, even with the throttle off.
+    assert len(passes) == 1

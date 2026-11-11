@@ -19,6 +19,7 @@
 - [Fix] Default heat maps skip axis pairs that share one sweep dimension.
 - [Fix] QCoDeS databases and date folders can be hearted, trashed and tagged in the Explorer; their runs follow those folder marks.
 - [Fix] Notifications expire on time while new ones arrive.
+- [Misc] Measurement loading and plotting no longer wait behind downloads, image exports, Send to Notes or live-registry checks.
 - [Misc] QCoDeS databases are read with the bundled QCoDeS 0.59, which opens databases up to schema version 9 and upgrades older ones in place.
 - [Misc] The desktop apps and the Docker image run on Python 3.14. Running from source still works with Python 3.13.
 - [Misc] Citation metadata includes the Zenodo DOI and Dr. Vincent Mourik as an author.

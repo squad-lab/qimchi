@@ -440,6 +440,31 @@ async def test_run_export_task_completes_and_copies_for_desktop(tmp_path, monkey
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("batch", [False, True])
+async def test_an_export_is_saved_to_disk_before_it_is_completed(monkeypatch, batch):
+    result = {"zip_path": "a.zip", "zip_filename": "a.zip", "saved_paths": {}}
+    status_while_saving = []
+    export._export_tasks["task"] = {"status": "pending"}
+    monkeypatch.setattr(export, "_export_plot_images_sync", lambda *_a: result)
+    monkeypatch.setattr(export, "_export_many_plot_images_sync", lambda *_a: result)
+    monkeypatch.setattr(
+        export,
+        "_save_to_desktop",
+        lambda task_id, *_a: status_while_saving.append(
+            export._export_tasks[task_id]["status"]
+        ),
+    )
+
+    if batch:
+        await export._run_batch_export_task("task", [{}], None, None)
+    else:
+        await export._run_export_task("task", {}, "/data/run.zarr")
+
+    assert status_while_saving == ["pending"]
+    assert export._export_tasks["task"]["status"] == "completed"
+
+
+@pytest.mark.asyncio
 async def test_run_export_task_records_failure(monkeypatch):
     export._export_tasks["task"] = {"status": "pending"}
     monkeypatch.setattr(

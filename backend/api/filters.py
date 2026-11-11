@@ -4,11 +4,13 @@ The filters are adapted from the Qimchi Dash app.
 
 """
 
+import asyncio
 import base64
 import math
 from copy import deepcopy
 
 import numpy as np
+import xarray as xr
 from fastapi import APIRouter, HTTPException
 from numpy.polynomial.polynomial import Polynomial
 from plotly import graph_objects as go
@@ -1657,12 +1659,14 @@ def _generate_plot_json_for_transform(
     filters_opts: dict,
     swap_xy: bool,
     cut: dict | None = None,
+    dataset: xr.Dataset | None = None,
 ) -> tuple[dict, list[str]]:
     """Generate a plot JSON from canonical plot context + transform settings."""
     from .data_loader import load_dataset_sync
     from .plots import create_heat_maps, create_line_plots
 
-    dataset = load_dataset_sync(fpath)
+    if dataset is None:
+        dataset = load_dataset_sync(fpath)
     logger.debug(f"Loaded dataset with dims: {list(dataset.dims)}")
 
     effective_indeps = list(indeps)
@@ -1711,26 +1715,31 @@ def _generate_plot_json_for_transform(
     return plot_json, warnings
 
 
+def _transform_plot(options: dict) -> tuple[dict, list[str]]:
+    plot_json, warnings = _generate_plot_json_for_transform(**options)
+    return sanitize_for_json(plot_json), warnings
+
+
 @router.post("/transform-plot", response_model=TransformPlotResponse)
 async def transform_plot_endpoint(
     request: TransformPlotRequest,
 ) -> TransformPlotResponse:
     """Unified endpoint for plot transforms (filters + optional slider)."""
-    try:
-        from .plots import get_plot_context
+    from .data_loader import is_memory_reference, load_dataset_async
+    from .plots import _user_first, get_plot_context, register_plot_context
 
+    try:
         ctx = get_plot_context(request.plot_ref)
         if not ctx and request.context is not None:
             # Restore a released or evicted context from the client's copy.
-            from .plots import register_plot_context
-
             ctx = request.context.model_dump(exclude_none=True)
             register_plot_context(request.plot_ref, ctx)
         if not ctx:
             raise HTTPException(status_code=404, detail="Unknown plot_ref")
 
-        plot_json, warnings = _generate_plot_json_for_transform(
-            fpath=ctx["fpath"],
+        fpath = ctx["fpath"]
+        options = dict(
+            fpath=fpath,
             indeps=list(ctx["indeps"]),
             deps=list(ctx["deps"]),
             plot_type=str(ctx["plotType"]),
@@ -1740,8 +1749,15 @@ async def transform_plot_endpoint(
             swap_xy=bool(request.swap_xy),
             cut=ctx.get("cut"),
         )
-
-        plot_json = sanitize_for_json(plot_json)
+        if is_memory_reference(fpath):
+            # As in /plot/, live refreshes let the user's own requests go first.
+            await _user_first.wait_turn()
+            # Shares one fetch between the plots polling this measurement.
+            options["dataset"] = await load_dataset_async(fpath)
+            plot_json, warnings = await asyncio.to_thread(_transform_plot, options)
+        else:
+            async with _user_first.user_request():
+                plot_json, warnings = await asyncio.to_thread(_transform_plot, options)
 
         return TransformPlotResponse(
             plot_json=plot_json, plot_ref=request.plot_ref, warnings=warnings

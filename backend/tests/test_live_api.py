@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from fastapi import HTTPException
 
-from api import json_utils, live, live_measurements, live_utils
+from api import data_loader, json_utils, live, live_measurements, live_utils
 
 
 def _measurement(**changes):
@@ -74,6 +74,7 @@ def test_live_measurements_queries_and_converts_registry(monkeypatch):
     monkeypatch.setattr(live_measurements, "live_db", registry)
 
     listed = live_measurements.get_live_measurements()
+    data_loader._maintenance.result(timeout=5)
     resolved = live_measurements.get_measurement_info("m-2")
 
     assert listed[0].measurement_id == "m-1"

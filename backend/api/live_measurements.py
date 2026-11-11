@@ -3,6 +3,7 @@ API endpoints for querying live measurement database.
 
 """
 
+import asyncio
 import logging
 from typing import List, Optional
 
@@ -119,7 +120,7 @@ async def api_get_live_measurements():
     Get all currently live measurements.
 
     """
-    measurements = get_live_measurements()
+    measurements = await asyncio.to_thread(get_live_measurements)
     return {
         "success": True,
         "measurements": measurements,
@@ -133,7 +134,7 @@ async def api_get_measurement(measurement_id: str):
     Get information about a specific measurement.
 
     """
-    info = get_measurement_info(measurement_id)
+    info = await asyncio.to_thread(get_measurement_info, measurement_id)
     if info is None:
         return {
             "success": False,

@@ -541,6 +541,42 @@ def test_append_measurement_note_goes_through_the_db(tmp_path, monkeypatch):
     assert notes._db_get_note("run")[0] == "existing text\n\n![plot](run/img.png)\n"
 
 
+def test_notes_appended_at_the_same_time_are_all_kept(tmp_path, monkeypatch):
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    measurement = tmp_path / "sample" / "experiment" / "run.zarr"
+    measurement.mkdir(parents=True)
+    monkeypatch.setattr(notes, "_read_dataset_names", lambda _path: (None, None))
+    read_note = notes._db_get_note
+
+    def slow_read(*args):
+        # Give a second writer the chance to read the note before this one saves.
+        note = read_note(*args)
+        time.sleep(0.05)
+        return note
+
+    monkeypatch.setattr(notes, "_db_get_note", slow_read)
+    when = datetime(2026, 9, 13, tzinfo=timezone.utc)
+    start = threading.Barrier(4)
+
+    def append(index):
+        start.wait()
+        notes.append_measurement_note(
+            measurement, str(measurement), f"![plot](run/{index}.png)", when
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(append, range(4)))
+
+    body = read_note("run")[0]
+    assert all(f"run/{index}.png" in body for index in range(4))
+    [pooled] = (tmp_path / "sample").glob("*.md")
+    pooled_text = pooled.read_text(encoding="utf-8")
+    assert all(f"run/{index}.png" in pooled_text for index in range(4))
+
+
 @pytest.mark.asyncio
 async def test_measurement_note_db_errors_are_reported(tmp_path, monkeypatch):
     path = str(tmp_path / "run.zarr")

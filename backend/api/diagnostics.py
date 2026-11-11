@@ -22,6 +22,7 @@ from fastapi import APIRouter, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from . import background
 from .logger import LOG_PATH, logger
 
 router = APIRouter(prefix="/diagnostics")
@@ -33,6 +34,9 @@ _GAUGES: dict[str, Callable[[], int]] = {}
 def register_gauge(name: str, read: Callable[[], int]) -> None:
     """Report ``read()`` (a count of cached or pending items) in every sample."""
     _GAUGES[name] = read
+
+
+register_gauge("background jobs", background.pending_jobs)
 
 
 def _gauge_values() -> dict[str, int]:
@@ -359,6 +363,8 @@ class _Sampler:
 
     async def run(self, interval: float) -> None:
         while True:
+            # Not in the background pool: long downloads would delay the
+            # samples taken while they run.
             await asyncio.to_thread(self.snapshot)
             await asyncio.sleep(interval)
 
@@ -637,7 +643,7 @@ def build_bundle(destination: Path, include_crash_reports: bool) -> dict[str, An
 
 @router.post("/bundle", response_model=None)
 async def bundle_logs(
-    request: BundleRequest, background: BackgroundTasks
+    request: BundleRequest, tasks: BackgroundTasks
 ) -> FileResponse | dict:
     """Create a log bundle, saving it directly in desktop mode."""
     from .export import _desktop_export_dir
@@ -649,7 +655,7 @@ async def bundle_logs(
     )
     if folder is not None:
         target = folder / name
-        manifest = await asyncio.to_thread(
+        manifest = await background.run(
             build_bundle, target, request.include_crash_reports
         )
         logger.info("[diagnostics] saved a log bundle to %s", target)
@@ -657,6 +663,6 @@ async def bundle_logs(
 
     handle, temp = tempfile.mkstemp(suffix=".zip")
     os.close(handle)
-    await asyncio.to_thread(build_bundle, Path(temp), request.include_crash_reports)
-    background.add_task(lambda: Path(temp).unlink(missing_ok=True))
+    await background.run(build_bundle, Path(temp), request.include_crash_reports)
+    tasks.add_task(lambda: Path(temp).unlink(missing_ok=True))
     return FileResponse(temp, media_type="application/zip", filename=name)

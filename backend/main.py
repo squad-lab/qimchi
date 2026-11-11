@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 # Local imports
+from api import background as background_pool
 from api import (
     demo,
     diagnostics,
@@ -159,6 +160,7 @@ async def lifespan(app: FastAPI):
         for task in background:
             task.cancel()
         await asyncio.to_thread(diagnostics.sampler.snapshot, "shutdown")
+        background_pool.shutdown()
         demo.shutdown()
         try:
             pool = getattr(app.state, "export_pool", None)

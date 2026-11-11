@@ -40,7 +40,9 @@ async def list_live_measurements() -> Dict[str, object]:
 @router.get("/measurements/{measurement_id}")
 async def get_live_measurement(measurement_id: str) -> Dict[str, object]:
     """Return detailed information about a specific live measurement from SQLite DB."""
-    measurement = live_measurements.get_measurement_info(measurement_id)
+    measurement = await asyncio.to_thread(
+        live_measurements.get_measurement_info, measurement_id
+    )
 
     if not measurement:
         raise HTTPException(

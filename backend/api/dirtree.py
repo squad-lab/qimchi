@@ -859,7 +859,7 @@ async def load_live_measurements() -> Dict:
     Returns:
         Dict: Tree structure containing only live measurements
     """
-    measurements = live_measurements.get_live_measurements()
+    measurements = await asyncio.to_thread(live_measurements.get_live_measurements)
 
     if not measurements:
         return {
@@ -900,7 +900,10 @@ async def load_live_measurements() -> Dict:
 @router.post("/load/")
 async def load_directory(path: PathData) -> Dict:
     """Load a filesystem, live-memory, SQLite, or DataTree path as a tree."""
-    raw_path = path.path
+    return await asyncio.to_thread(_load_directory, path.path)
+
+
+def _load_directory(raw_path: str) -> Dict:
     logger.debug(f"load_directory | POST path={raw_path}")
 
     memory_path = normalize_memory_reference(raw_path)
@@ -956,8 +959,7 @@ async def load_directory(path: PathData) -> Dict:
         raise HTTPException(status_code=404, detail="Path is not a directory")
 
     try:
-        tree = await get_directory_tree_zarr(path=str(fs_path))
-        return tree
+        return _build_directory_tree_zarr(str(fs_path))
     except Exception as e:
         logger.error(
             f"load_directory | Error loading directory: {str(e)}", exc_info=True
@@ -1177,6 +1179,58 @@ async def get_meta_attrs(path: PathData) -> Dict:
             _close_dataset(data)
 
 
+def _metadata_sections(data: xr.Dataset) -> Dict:
+    metadata: dict = data.attrs
+
+    # Convert metadata to a dictionary if it's not already
+    if not isinstance(metadata, dict):
+        metadata = dict(metadata)
+
+    is_qcodes = bool(metadata.get("guid")) and any(
+        key in metadata for key in ("run_id", "ds_name", "qcodes_db_path")
+    )
+    if is_qcodes:
+        run_info = {
+            label: metadata[attr]
+            for label, attr in QCODES_SUMMARY_KEYS
+            if attr in metadata and metadata[attr] is not None
+        }
+        meta_dict: dict = {QCODES_RUN_SECTION: run_info} if run_info else {}
+        qcodes_meta: dict = {}
+        for key in QCODES_META_KEYS:
+            if key not in metadata:
+                continue
+            value = metadata[key]
+            if key == "snapshot" and isinstance(value, str):
+                parsed_snapshot = _expand_json_string(value)
+                if parsed_snapshot is not None:
+                    value = parsed_snapshot
+            qcodes_meta[key] = value
+        meta_dict[QCODES_META_SECTION] = qcodes_meta
+    else:
+        qanary_sections: list = [key for key in PREFERRED_META_KEYS if key in metadata]
+        if qanary_sections:
+            # Qanary reserves this pane for its four metadata sections.
+            meta_dict = {key: metadata[key] for key in qanary_sections}
+        else:
+            # Other formats expose their remaining attrs directly.
+            meta_dict = {
+                key: metadata[key]
+                for key in sorted(metadata)
+                if key not in INTERNAL_META_KEYS
+            }
+
+    # Ensure metadata is JSON serializable
+    meta_json = {}
+    for k, v in meta_dict.items():
+        if isinstance(v, (str, int, float, bool, list, dict)):
+            meta_json[k] = v
+        else:
+            meta_json[k] = str(v)
+
+    return sanitize_for_json(meta_json)
+
+
 @router.post("/load-meta/")
 async def get_metadata(path: PathData) -> Dict:
     """Return a dataset's collapsible metadata sections."""
@@ -1188,57 +1242,8 @@ async def get_metadata(path: PathData) -> Dict:
 
     try:
         data = await _load_dataset_for_metadata(raw_path)
-        metadata: dict = data.attrs  # Metadata
-
-        # Convert metadata to a dictionary if it's not already
-        if not isinstance(metadata, dict):
-            metadata = dict(metadata)
-
-        is_qcodes = bool(metadata.get("guid")) and any(
-            key in metadata for key in ("run_id", "ds_name", "qcodes_db_path")
-        )
-        if is_qcodes:
-            run_info = {
-                label: metadata[attr]
-                for label, attr in QCODES_SUMMARY_KEYS
-                if attr in metadata and metadata[attr] is not None
-            }
-            meta_dict: dict = {QCODES_RUN_SECTION: run_info} if run_info else {}
-            qcodes_meta: dict = {}
-            for key in QCODES_META_KEYS:
-                if key not in metadata:
-                    continue
-                value = metadata[key]
-                if key == "snapshot" and isinstance(value, str):
-                    parsed_snapshot = _expand_json_string(value)
-                    if parsed_snapshot is not None:
-                        value = parsed_snapshot
-                qcodes_meta[key] = value
-            meta_dict[QCODES_META_SECTION] = qcodes_meta
-        else:
-            qanary_sections: list = [
-                key for key in PREFERRED_META_KEYS if key in metadata
-            ]
-            if qanary_sections:
-                # Qanary reserves this pane for its four metadata sections.
-                meta_dict = {key: metadata[key] for key in qanary_sections}
-            else:
-                # Other formats expose their remaining attrs directly.
-                meta_dict = {
-                    key: metadata[key]
-                    for key in sorted(metadata)
-                    if key not in INTERNAL_META_KEYS
-                }
-
-        # Ensure metadata is JSON serializable
-        meta_json = {}
-        for k, v in meta_dict.items():
-            if isinstance(v, (str, int, float, bool, list, dict)):
-                meta_json[k] = v
-            else:
-                meta_json[k] = str(v)
-
-        return sanitize_for_json(meta_json)
+        # A QCoDeS snapshot can be several megabytes of JSON.
+        return await asyncio.to_thread(_metadata_sections, data)
 
     except HTTPException:
         raise
@@ -1262,34 +1267,36 @@ def _parameter_display(value: object, unit: object) -> str:
     return f"{text} {unit_text}".strip()
 
 
+def _pinned_parameters(data: xr.Dataset, names: list[str]) -> Dict:
+    snapshot = data.attrs.get("Parameters Snapshot")
+    if isinstance(snapshot, str):
+        snapshot = _expand_json_string(snapshot)
+    if not isinstance(snapshot, dict):
+        snapshot = {}
+
+    parameters = []
+    for name in names:
+        entry = snapshot.get(name)
+        if not isinstance(entry, dict):
+            parameters.append({"name": name, "missing": True})
+            continue
+        parameters.append(
+            {
+                "name": name,
+                "label": str(entry.get("label") or name),
+                "display": _parameter_display(entry.get("value"), entry.get("unit")),
+            }
+        )
+    return sanitize_for_json({"parameters": parameters})
+
+
 @router.post("/load-meta/parameters/")
 async def get_pinned_parameters(request: PinnedParametersRequest) -> Dict:
     """Return requested Parameters Snapshot entries in request order."""
     data: Optional[xr.Dataset] = None
     try:
         data = await _load_dataset_for_metadata(request.path)
-        snapshot = data.attrs.get("Parameters Snapshot")
-        if isinstance(snapshot, str):
-            snapshot = _expand_json_string(snapshot)
-        if not isinstance(snapshot, dict):
-            snapshot = {}
-
-        parameters = []
-        for name in request.names:
-            entry = snapshot.get(name)
-            if not isinstance(entry, dict):
-                parameters.append({"name": name, "missing": True})
-                continue
-            parameters.append(
-                {
-                    "name": name,
-                    "label": str(entry.get("label") or name),
-                    "display": _parameter_display(
-                        entry.get("value"), entry.get("unit")
-                    ),
-                }
-            )
-        return sanitize_for_json({"parameters": parameters})
+        return await asyncio.to_thread(_pinned_parameters, data, request.names)
     except HTTPException:
         raise
     except Exception as e:

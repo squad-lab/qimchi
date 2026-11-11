@@ -24,6 +24,7 @@ import re
 import sqlite3
 import threading
 import time
+from concurrent.futures import Future
 from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
@@ -35,6 +36,7 @@ from qimchi_connect import client as live_client
 from qimchi_connect import registry as live_db
 
 # Local imports
+from . import background
 from .diagnostics import register_gauge
 from .logger import logger
 from .qcodes_layout import qcodes_run_to_xarray
@@ -131,6 +133,7 @@ def _maintenance_interval() -> float:
 
 
 _last_maintenance = 0.0
+_maintenance: Future | None = None
 _maintenance_lock = threading.Lock()
 
 # Live fetches are shared per measurement and only touched by the event loop.
@@ -160,18 +163,30 @@ def _with_own_attrs(loaded: "LoadedData") -> "LoadedData":
     return replace(loaded, obj=loaded.obj.copy(deep=False))
 
 
-def maintain_live_registry(registry=None) -> None:
-    """Run throttled live-registry maintenance."""
-    global _last_maintenance
+def maintain_live_registry(registry=None) -> Future | None:
+    """Start a due live-registry pass and return it without waiting."""
+    global _last_maintenance, _maintenance
 
     registry = registry if registry is not None else live_db
     now = time.monotonic()
     interval = _maintenance_interval()
     with _maintenance_lock:
+        if _maintenance is not None and not _maintenance.done():
+            return _maintenance
         if interval > 0 and _last_maintenance and now - _last_maintenance < interval:
-            return
+            return None
         _last_maintenance = now
+        _maintenance = background.submit(_run_live_maintenance, registry)
+        _maintenance.add_done_callback(_log_maintenance_failure)
+        return _maintenance
 
+
+def _log_maintenance_failure(future: Future) -> None:
+    if not future.cancelled() and future.exception() is not None:
+        logger.error("Live registry maintenance failed", exc_info=future.exception())
+
+
+def _run_live_maintenance(registry) -> None:
     maintenance = registry.maintain_registry(
         retention_days=7,
         # A refused localhost connection can take about two seconds on Windows.
@@ -1716,7 +1731,7 @@ class DataTreeProvider:
                 close_fn()
 
     async def load_async(self, ref: str) -> LoadedData:
-        return self.load_sync(ref)
+        return await asyncio.to_thread(self.load_sync, ref)
 
 
 class FilesystemXarrayProvider:

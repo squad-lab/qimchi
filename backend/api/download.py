@@ -17,6 +17,7 @@ import numpy as np
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
+from . import background
 from .data_loader import (
     DataLoaderError,
     _load_qcodes_xarray_dataset,
@@ -419,7 +420,7 @@ async def download_dataset(path: PathData) -> FileResponse:
 
     """
     logger.debug(f"download_dataset | POST path={path}")
-    return _download_dataset(path.path)
+    return await background.run(_download_dataset, path.path)
 
 
 def _download_dataset(ref: str) -> FileResponse:
@@ -482,7 +483,7 @@ async def download_selected_datasets(paths: list[PathData]) -> FileResponse:
 
     if not paths:
         raise HTTPException(status_code=400, detail="No paths provided")
-    return _download_selected_datasets([p.path for p in paths])
+    return await background.run(_download_selected_datasets, [p.path for p in paths])
 
 
 def _download_selected_datasets(refs: list[str]) -> FileResponse:
@@ -521,7 +522,7 @@ async def download_multiple_datasets(data: PathsData) -> FileResponse:
 
     if not data.paths:
         raise HTTPException(status_code=400, detail="No paths provided")
-    return _download_multiple_datasets(data.paths)
+    return await background.run(_download_multiple_datasets, data.paths)
 
 
 def _download_multiple_datasets(refs: list[str]) -> FileResponse:
@@ -571,7 +572,7 @@ async def download_folder(path: PathData) -> FileResponse:
 
     """
     logger.debug(f"download_folder | POST path={path}")
-    return _download_folder(path.path)
+    return await background.run(_download_folder, path.path)
 
 
 def _download_folder(ref: str) -> FileResponse:

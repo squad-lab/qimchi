@@ -21,9 +21,9 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from plotly import graph_objects as go
 
-from .data_loader import qcodes_run_id, resolve_to_disk_path
-
 # Local imports
+from . import background
+from .data_loader import qcodes_run_id, resolve_to_disk_path
 from .diagnostics import register_gauge, sampler
 from .export_render import (
     PLOTLY_DEFAULT_HEIGHT,
@@ -544,11 +544,7 @@ async def _run_export_task(
     """
     try:
         logger.info(f"Starting export task {task_id}")
-        loop = asyncio.get_event_loop()
-
-        # Run the blocking export function in executor
-        result = await loop.run_in_executor(
-            None,  # Use default executor
+        result = await background.run(
             _export_plot_images_sync,
             plot_json,
             disk_fpath,
@@ -560,15 +556,14 @@ async def _run_export_task(
             name_suffix,
         )
 
-        # Update task status
+        # Copy first: a completed task without saved_to is fetched by the browser.
+        await background.run(_save_to_desktop, task_id, result, options)
         _export_tasks[task_id]["status"] = "completed"
         _export_tasks[task_id]["result"] = result
         _export_tasks[task_id]["zip_path"] = result["zip_path"]
         _export_tasks[task_id]["zip_filename"] = result["zip_filename"]
         logger.info(f"Export task {task_id} completed successfully")
-        await asyncio.to_thread(sampler.snapshot, "after export")
-
-        _save_to_desktop(task_id, result, options)
+        background.submit(sampler.snapshot, "after export")
 
     except Exception as e:
         logger.error(f"Export task {task_id} failed: {e}", exc_info=True)
@@ -674,9 +669,10 @@ async def _run_batch_export_task(
 ) -> None:
     try:
         logger.info(f"Starting batch export task {task_id} for {len(plots)} plots")
-        result = await asyncio.to_thread(
+        result = await background.run(
             _export_many_plot_images_sync, plots, export_pool, options
         )
+        await background.run(_save_to_desktop, task_id, result, options)
         task = _export_tasks[task_id]
         task.update(
             status="completed",
@@ -685,8 +681,7 @@ async def _run_batch_export_task(
             zip_filename=result["zip_filename"],
         )
         logger.info(f"Batch export task {task_id} completed")
-        await asyncio.to_thread(sampler.snapshot, "after batch export")
-        _save_to_desktop(task_id, result, options)
+        background.submit(sampler.snapshot, "after batch export")
     except Exception as e:
         logger.error(f"Batch export task {task_id} failed: {e}", exc_info=True)
         _export_tasks[task_id]["status"] = "failed"
@@ -1145,6 +1140,52 @@ async def download_export(task_id: str):
     )
 
 
+def _send_to_notes(
+    plot_json: Dict,
+    fpath: str,
+    relayout_data: Dict | None,
+    applied_filters: list[Dict],
+    measurement_info: Dict,
+    note_uuid: str | None,
+) -> Dict:
+    now = datetime.now(timezone.utc)
+    ts = now.strftime("%Y-%m-%d-%H-%M-%S")
+    saved = _save_light_dark_pngs(
+        plot_json,
+        fpath,
+        ts=ts,
+        relayout_data=relayout_data,
+        applied_filters=applied_filters,
+        measurement_info=measurement_info,
+    )
+
+    # Resolve memory:// paths to disk paths for notes file operations
+    disk_fpath = _resolve_fpath_to_disk(fpath)
+
+    # Link the light image as <dataset_uuid>/<image_filename>, relative to
+    # the note's sidecar folder.
+    dataset_path = Path(disk_fpath)
+    dataset_uuid, _, _ = _measurement_notes_paths(dataset_path)
+    light_path = Path(saved.get("png_light"))
+    md_line = f"![plot]({dataset_uuid}/{light_path.name})\n"
+
+    # Through the DB, not the .md alone: load_notes serves the DB first, so
+    # a link appended only to the file never showed up once a note existed.
+    appended = append_measurement_note(
+        dataset_path, fpath, md_line, now, uuid=note_uuid
+    )
+    sample_rollup = appended["sample_rollup"] or {}
+
+    return {
+        "success": True,
+        "message": "Saved images and appended note link.",
+        "paths": saved,
+        "md_line": md_line,
+        "notes_path": appended["notes_path"],
+        "sample_notes_path": sample_rollup.get("sample_notes_path"),
+    }
+
+
 @router.post("/export-plot-images/send-to-notes")
 async def export_and_send_to_notes(request: Request) -> JSONResponse:
     """Save plot PNGs and append the light variant to the dataset notes."""
@@ -1174,50 +1215,16 @@ async def export_and_send_to_notes(request: Request) -> JSONResponse:
         )
 
     try:
-        now = datetime.now(timezone.utc)
-        ts = now.strftime("%Y-%m-%d-%H-%M-%S")
-        saved = _save_light_dark_pngs(
+        content = await background.run(
+            _send_to_notes,
             plot_json,
             fpath,
-            ts=ts,
-            relayout_data=relayout_data,
-            applied_filters=applied_filters,
-            measurement_info=measurement_info,
+            relayout_data,
+            applied_filters,
+            measurement_info,
+            note_uuid if isinstance(note_uuid, str) else None,
         )
-
-        # Resolve memory:// paths to disk paths for notes file operations
-        disk_fpath = _resolve_fpath_to_disk(fpath)
-
-        # Link the light image as <dataset_uuid>/<image_filename>, relative to
-        # the note's sidecar folder.
-        dataset_path = Path(disk_fpath)
-        dataset_uuid, _, _ = _measurement_notes_paths(dataset_path)
-        light_path = Path(saved.get("png_light"))
-        md_line = f"![plot]({dataset_uuid}/{light_path.name})\n"
-
-        # Through the DB, not the .md alone: load_notes serves the DB first, so
-        # a link appended only to the file never showed up once a note existed.
-        appended = append_measurement_note(
-            dataset_path,
-            fpath,
-            md_line,
-            now,
-            uuid=note_uuid if isinstance(note_uuid, str) else None,
-        )
-        sample_rollup = appended["sample_rollup"] or {}
-
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": True,
-                "message": "Saved images and appended note link.",
-                "paths": saved,
-                "md_line": md_line,
-                "notes_path": appended["notes_path"],
-                "sample_notes_path": sample_rollup.get("sample_notes_path"),
-            },
-        )
-
+        return JSONResponse(status_code=200, content=content)
     except Exception as e:
         logger.error(f"Failed to export and send to notes: {e}")
         return JSONResponse(

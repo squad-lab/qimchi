@@ -1164,3 +1164,79 @@ def test_long_titles_are_shortened_in_the_middle():
     assert len(title["text"]) == 48
     assert title["text"].startswith("aaaa")
     assert title["text"].endswith("long_name.nc")
+
+
+@pytest.mark.asyncio
+async def test_a_transform_leaves_the_event_loop_free(monkeypatch, line_figure):
+    import asyncio
+    import time
+
+    def slow_render(**_kwargs):
+        time.sleep(0.4)
+        return line_figure, []
+
+    monkeypatch.setattr(filters, "_generate_plot_json_for_transform", slow_render)
+    monkeypatch.setattr(
+        plots,
+        "get_plot_context",
+        lambda _ref: {
+            "fpath": "run.nc",
+            "indeps": ["x"],
+            "deps": ["y"],
+            "plotType": "LinePlot",
+        },
+    )
+    lags: list[float] = []
+
+    async def heartbeat() -> None:
+        while True:
+            before = time.perf_counter()
+            await asyncio.sleep(0.02)
+            lags.append(time.perf_counter() - before - 0.02)
+
+    beating = asyncio.create_task(heartbeat())
+    await asyncio.sleep(0.05)
+    await filters.transform_plot_endpoint(TransformPlotRequest(plot_ref="ref"))
+    await asyncio.sleep(0.05)
+    beating.cancel()
+
+    assert lags and max(lags) < 0.15, f"the event loop stalled for {max(lags):.2f}s"
+
+
+@pytest.mark.asyncio
+async def test_a_live_transform_shares_the_live_fetch(monkeypatch, line_figure):
+    from api import data_loader
+
+    dataset = object()
+    fetched: list[str] = []
+    seen: dict = {}
+
+    async def load_async(ref):
+        fetched.append(ref)
+        return dataset
+
+    def render(**kwargs):
+        seen.update(kwargs)
+        return line_figure, []
+
+    def no_sync_load(_ref):
+        raise AssertionError("a live transform must not fetch on its own")
+
+    monkeypatch.setattr(data_loader, "load_dataset_async", load_async)
+    monkeypatch.setattr(data_loader, "load_dataset_sync", no_sync_load)
+    monkeypatch.setattr(filters, "_generate_plot_json_for_transform", render)
+    monkeypatch.setattr(
+        plots,
+        "get_plot_context",
+        lambda _ref: {
+            "fpath": "memory://live-1",
+            "indeps": ["x"],
+            "deps": ["y"],
+            "plotType": "LinePlot",
+        },
+    )
+
+    await filters.transform_plot_endpoint(TransformPlotRequest(plot_ref="ref"))
+
+    assert fetched == ["memory://live-1"]
+    assert seen["dataset"] is dataset

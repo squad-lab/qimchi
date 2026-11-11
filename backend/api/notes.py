@@ -4,8 +4,10 @@ FastAPI endpoints for loading and saving notes associated with .zarr datasets.
 """
 
 import asyncio
+import functools
 import os
 import re
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Tuple
@@ -41,6 +43,18 @@ _MD_EXPORT_ENABLED = os.getenv("QIMCHI_NOTES_MD_EXPORT", "true").lower() in (
     "true",
     "yes",
 )
+
+# Notes are read, changed and written back from worker threads.
+_notes_lock = threading.RLock()
+
+
+def _one_at_a_time(func):
+    @functools.wraps(func)
+    def locked(*args, **kwargs):
+        with _notes_lock:
+            return func(*args, **kwargs)
+
+    return locked
 
 
 def _parse_iso(ts: str | None) -> datetime:
@@ -648,6 +662,7 @@ def append_sample_rollup(
     }
 
 
+@_one_at_a_time
 def append_measurement_note(
     measurement_path: Path,
     path_ref: str,
@@ -728,6 +743,11 @@ async def load_notes(path: PathData) -> Dict:
         Dict: Notes for the zarr dataset
 
     """
+    return await asyncio.to_thread(_load_notes, path)
+
+
+@_one_at_a_time
+def _load_notes(path: PathData) -> Dict:
     # NOTE: Measurement notes are stored in: /.../{dataset_uuid}.zarr/../{dataset_uuid}/{dataset_uuid}.md
     # NOTE: Sample notes are stored in sample folder: /.../{sample}/{cryostat}_{sample}.md
     resolved_path = _resolve_note_path(path.path, required=False)
@@ -765,16 +785,14 @@ async def load_notes(path: PathData) -> Dict:
     if path.note_scope != "sample":
         try:
             if _is_qcodes_reference(path.path) and note_run_id == 0:
-                body, updated = await asyncio.to_thread(
-                    _db_get_qcodes_rollup, note_uuid
-                )
+                body, updated = _db_get_qcodes_rollup(note_uuid)
                 return {
                     "notes": body,
                     "last_saved": updated.isoformat() if updated else None,
                     "filename": frontmatter_filename,
                     "note_scope": "measurement",
                 }
-            db = await asyncio.to_thread(_db_get_note, note_uuid, note_run_id)
+            db = _db_get_note(note_uuid, note_run_id)
             if db is not None:
                 body, updated = db
                 return {
@@ -787,12 +805,8 @@ async def load_notes(path: PathData) -> Dict:
                 with open(notes_path, "r", encoding="utf-8") as f:
                     file_text = f.read()
                 body, last_saved, filename = _parse_frontmatter(file_text)
-                await asyncio.to_thread(
-                    _db_upsert_note,
-                    note_uuid,
-                    body or "",
-                    _parse_iso(last_saved),
-                    note_run_id,
+                _db_upsert_note(
+                    note_uuid, body or "", _parse_iso(last_saved), note_run_id
                 )
                 logger.debug(f"load_notes | imported sidecar into DB for {note_uuid}")
                 return {
@@ -864,6 +878,11 @@ async def save_notes(data: NotesData) -> Dict:
         Dict: Confirmation message
 
     """
+    return await asyncio.to_thread(_save_notes, data)
+
+
+@_one_at_a_time
+def _save_notes(data: NotesData) -> Dict:
     resolved_path = _resolve_note_path(data.path, required=False)
 
     if data.note_scope == "sample":
@@ -907,7 +926,7 @@ async def save_notes(data: NotesData) -> Dict:
             and not _is_qcodes_reference(data.path)
         )
         try:
-            prev = await asyncio.to_thread(_db_get_note, note_uuid, note_run_id)
+            prev = _db_get_note(note_uuid, note_run_id)
             previous_measurement_body = prev[0].rstrip() if prev else None
             # An empty save only matters when it clears an existing note. With
             # nothing stored, it is a no-op: no row, no sidecar folder.
@@ -928,7 +947,7 @@ async def save_notes(data: NotesData) -> Dict:
             # Clearing writes the empty body rather than deleting the row: with
             # the row gone, load_notes would re-import a surviving .md and bring
             # the cleared note back.
-            await asyncio.to_thread(_db_upsert_note, note_uuid, body, now, note_run_id)
+            _db_upsert_note(note_uuid, body, now, note_run_id)
         except Exception as e:
             logger.error(f"save_notes | DB error: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Error saving notes: {str(e)}")
