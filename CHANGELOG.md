@@ -26,7 +26,7 @@
 - [Fix] Derivative axis titles show names containing carets, tildes or dollar signs, such as Elicit's coordinate names, instead of a typesetting error.
 - [Fix] A derivative along an axis that has the same value at every point is not applied, with a notice explaining why, instead of leaving the plot empty.
 - [Misc] Explorer scans of folders with many Zarr stores are faster the first time.
-- [Misc] Measurement loading and plotting no longer wait behind downloads, image exports, Send to Notes or live-registry checks.
+- [Misc] Measurement loading and plotting no longer wait behind downloads, image exports, Send to Notes or live-registry checks. Downloads also avoid recompressing data that is already compressed.
 - [Misc] QCoDeS databases are read with the bundled QCoDeS 0.59, which opens databases up to schema version 9 and upgrades older ones in place.
 - [Misc] The desktop apps and the Docker image run on Python 3.14. Running from source still works with Python 3.13.
 - [Misc] Citation metadata includes the Zenodo DOI and Dr. Vincent Mourik as an author.

@@ -268,3 +268,31 @@ def test_browser_download_is_not_copied_to_disk(tmp_path, monkeypatch):
 
     assert "x-qimchi-saved-to" not in response.headers
     assert not downloads.exists()
+
+
+@pytest.mark.asyncio
+async def test_compressed_data_is_stored_and_the_rest_deflated(tmp_path):
+    import os
+
+    store = tmp_path / "run.zarr"
+    store.mkdir()
+    contents = {
+        "chunk": os.urandom(3_000_000),
+        "plain": bytes(200_000),
+        "small": os.urandom(100),
+    }
+    for name, data in contents.items():
+        (store / name).write_bytes(data)
+
+    response = await download.download_dataset(PathData(path=str(store)))
+
+    with zipfile.ZipFile(response.path) as archive:
+        kinds = {
+            info.filename.rsplit("/", 1)[-1]: info.compress_type
+            for info in archive.infolist()
+        }
+        for name, data in contents.items():
+            assert archive.read(f"run.zarr/{name}") == data
+    assert kinds["chunk"] == zipfile.ZIP_STORED
+    assert kinds["plain"] == zipfile.ZIP_DEFLATED
+    assert kinds["small"] == zipfile.ZIP_DEFLATED

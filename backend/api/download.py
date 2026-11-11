@@ -9,6 +9,7 @@ import shutil
 import sqlite3
 import tempfile
 import zipfile
+import zlib
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import quote
@@ -54,6 +55,23 @@ DATASET_EXTENSIONS = {".zarr", ".nc", ".h5", ".hdf5", ".csv", ".txt", ".dat", ".
 # Attributes the loader adds to record where a dataset came from.
 LOADER_ATTRS = ("path", "actual_path", "loaded_from")
 DATASET_GLOBS = [f"*{ext}" for ext in DATASET_EXTENSIONS]
+
+# Deflating these again costs time and saves almost nothing.
+COMPRESSED_SUFFIXES = {
+    ".7z",
+    ".bz2",
+    ".gif",
+    ".gz",
+    ".jpeg",
+    ".jpg",
+    ".png",
+    ".webp",
+    ".xz",
+    ".zip",
+    ".zst",
+}
+COMPRESSION_SAMPLE_BYTES = 64 * 1024
+COPY_CHUNK_BYTES = 64 * 1024
 
 # QCoDeS runs to download, as run IDs per database.
 QcodesRuns = dict[Path, set[int]]
@@ -321,6 +339,27 @@ def _is_sqlite_side_file(path: Path) -> bool:
     return False
 
 
+def _compression_for(suffix: str, head: bytes) -> int:
+    """Store files that deflate would barely shrink, such as compressed Zarr chunks."""
+    if suffix.lower() in COMPRESSED_SUFFIXES:
+        return zipfile.ZIP_STORED
+    if len(head) < COMPRESSION_SAMPLE_BYTES:
+        return zipfile.ZIP_DEFLATED
+    ratio = len(zlib.compress(head, 1)) / len(head)
+    return zipfile.ZIP_STORED if ratio > 0.9 else zipfile.ZIP_DEFLATED
+
+
+def _add_file(zipf, file_path: Path, arcname: Path | str) -> None:
+    """Add a file, reading its start once to choose how to compress it."""
+    info = zipfile.ZipInfo.from_file(file_path, arcname)
+    with open(file_path, "rb") as src:
+        head = src.read(COMPRESSION_SAMPLE_BYTES)
+        info.compress_type = _compression_for(file_path.suffix, head)
+        with zipf.open(info, "w") as dest:
+            dest.write(head)
+            shutil.copyfileobj(src, dest, COPY_CHUNK_BYTES)
+
+
 def _write_file(zipf, file_path: Path, arcname: Path | str, work_dir: Path) -> None:
     """Add a file to the archive, taking a consistent copy of SQLite databases."""
     if file_path.suffix.lower() in SQLITE_SUFFIXES:
@@ -335,7 +374,7 @@ def _write_file(zipf, file_path: Path, arcname: Path | str, work_dir: Path) -> N
             return
         finally:
             snapshot.unlink(missing_ok=True)
-    zipf.write(file_path, arcname)
+    _add_file(zipf, file_path, arcname)
 
 
 def _write_tree(zipf, root: Path, arc_root: Path, work_dir: Path) -> None:
