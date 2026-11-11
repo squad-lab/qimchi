@@ -23,7 +23,9 @@ from .units import (
     axis_title,
     colorbar_gutter_px,
     colorbar_title_annotation,
+    fit_hover_precision,
     format_quantity,
+    hover_digits,
     hover_entry,
     plain_axis_title,
     resolve_axis_definition,
@@ -678,9 +680,12 @@ class Line(QimchiFigure):
             traces["mode"] = "lines+markers"
             # Keep hover data separate from marker colours, which appearance
             # settings may replace. Plotly also misformats SI customdata.
+            sweep_digits = hover_digits(sweep_values)
             traces["customdata"] = [
                 format_quantity(
-                    float(value), sweep_definition.get("unit"), max_decimals=2
+                    float(value),
+                    sweep_definition.get("unit"),
+                    significant_digits=sweep_digits,
                 )
                 for value in np.asarray(sweep_values).reshape(-1)
             ]
@@ -712,6 +717,7 @@ class Line(QimchiFigure):
             ],
             layout=layout,
         )
+        fit_hover_precision(fig)
         logger.debug("Line || PLOTTED")
 
         return fig
@@ -954,5 +960,6 @@ class HeatMap(QimchiFigure):
             ],
             layout=layout,
         )
+        fit_hover_precision(fig)
 
         return fig

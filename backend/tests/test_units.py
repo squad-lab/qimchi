@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import xarray as xr
 
@@ -240,11 +242,54 @@ def test_hover_entries_carry_the_unit_on_the_value():
         "Voltage 1: %{x:.3~s}V"
     )
     assert units.hover_entry({"label": "Ratio", "unit": ""}, "y") == (
-        "Ratio: %{y:.2~f}"
+        "Ratio: %{y:.3~s}"
     )
+
+
+def test_small_values_without_an_si_unit_hover_with_a_prefix():
+    # Two decimals showed a 200 pA reading with no unit as "0".
+    data = xr.Dataset(
+        {"signal": ("gate", np.linspace(2e-13, 2e-10, 5))},
+        coords={"gate": np.linspace(0.3, 0.9, 5)},
+    )
+    data["gate"].attrs["units"] = "I"
+
+    assert Line({}, data, ["gate"], ["signal"]).plot().data[0].hovertemplate == (
+        "gate (I): %{x:.3~s}<br>signal: %{y:.3~s}<extra></extra>"
+    )
+
+
+def test_hover_shows_the_digits_a_narrow_sweep_changes_in():
+    # Three significant digits read 3.555 GHz and 3.556 GHz both as 3.56 GHz.
+    data = xr.Dataset(
+        {"S21": ("freq", np.linspace(0.1, 0.9, 101))},
+        coords={"freq": np.linspace(3.555e9, 3.556e9, 101)},
+    )
+    data["freq"].attrs["units"] = "Hz"
+
+    template = Line({}, data, ["freq"], ["S21"]).plot().data[0].hovertemplate
+
+    assert template == "freq: %{x:.6~s}Hz<br>S21: %{y:.3~s}<extra></extra>"
+
+
+def test_hover_digits_follow_the_typical_step():
+    rng = np.random.default_rng(0)
+
+    assert units.hover_digits(np.linspace(0, 1, 101)) == 3
+    assert units.hover_digits(np.linspace(3.555e9, 3.556e9, 1001)) == 7
+    assert units.hover_digits(np.arange(1580.0)) == 4
+    assert units.hover_digits(1e-10 + 1e-12 * rng.standard_normal(200)) == 4
+    assert units.hover_digits(np.full(10, 2.0)) == 3
+    assert units.hover_digits(["a", "b"]) == 3
+
+
+def test_hover_digits_of_missing_values_warn_about_nothing():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert units.hover_digits(np.full(10, np.nan)) == 3
 
 
 def test_a_prefixed_unit_keeps_the_plain_hover_form():
     assert units.hover_entry({"label": "Bias", "unit": "mV"}, "z") == (
-        "Bias (mV): %{z:.2~f}"
+        "Bias (mV): %{z:.3~s}"
     )

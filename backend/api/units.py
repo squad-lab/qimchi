@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import base64
 import math
 import re
 from dataclasses import dataclass
 from html import unescape
 from typing import Any, Mapping
+
+import numpy as np
 
 UNIT_META_KEY = "qimchi_units"
 COLORBAR_TITLE_ANNOTATION_NAME = "qimchi-colorbar-title"
@@ -432,9 +435,15 @@ def _nearest_prefix_exponent(value_in_base_units: float) -> int:
     return min(24, max(-24, exponent))
 
 
-def _format_mantissa(value: float, max_decimals: int | None = None) -> str:
+def _format_mantissa(
+    value: float,
+    max_decimals: int | None = None,
+    significant_digits: int | None = None,
+) -> str:
     # Prefix selection is the policy.  ``g`` merely avoids binary-float noise;
     # it is deliberately not a fixed significant-digit or decimal-place rule.
+    if significant_digits is not None:
+        return f"{value:.{significant_digits}g}"
     if max_decimals is not None:
         return f"{value:.{max_decimals}f}".rstrip("0").rstrip(".")
     return f"{value:.8g}"
@@ -446,13 +455,14 @@ def format_quantity(
     *,
     latex: bool = False,
     max_decimals: int | None = None,
+    significant_digits: int | None = None,
 ) -> str:
     """Move a scalar to its nearest engineering prefix for presentation."""
     parsed = parse_unit(unit) if not isinstance(unit, Unit) else unit
     if parsed.opaque:
         separator = r"\," if latex else " "
         return (
-            f"{_format_mantissa(value, max_decimals)}{separator}"
+            f"{_format_mantissa(value, max_decimals, significant_digits)}{separator}"
             f"{render_unit(parsed, latex=latex)}"
         )
     value_in_base_units = value * parsed.scale
@@ -461,10 +471,11 @@ def format_quantity(
     unit_text = _format_factors(
         parsed.factor_map, prefix_exponent=prefix_exponent, latex=latex
     )
+    mantissa = _format_mantissa(displayed_value, max_decimals, significant_digits)
     if not unit_text:
-        return _format_mantissa(displayed_value, max_decimals)
+        return mantissa
     separator = r"\," if latex else " "
-    return f"{_format_mantissa(displayed_value, max_decimals)}{separator}{unit_text}"
+    return f"{mantissa}{separator}{unit_text}"
 
 
 def axis_definition(
@@ -548,6 +559,81 @@ def plain_axis_title(definition: Mapping[str, Any]) -> str:
     return f"{normalized['label']} ({unit})" if unit else normalized["label"]
 
 
+HOVER_DIGITS = 3
+_MAX_HOVER_DIGITS = 12
+# Enough of an array to judge its step without copying a whole heat map.
+_HOVER_STEP_SAMPLE = 100_000
+_HOVER_VALUE_RE = re.compile(r"%\{(x|y|z|customdata):\.\d+~s\}")
+
+
+def _numeric_values(values: Any) -> np.ndarray | None:
+    if isinstance(values, Mapping) and "bdata" in values and "dtype" in values:
+        try:
+            array = np.frombuffer(
+                base64.b64decode(values["bdata"]), dtype=values["dtype"]
+            )
+        except (TypeError, ValueError):
+            return None
+        shape = values.get("shape")
+        if isinstance(shape, str) and shape:
+            try:
+                array = array.reshape([int(n) for n in shape.split(",")])
+            except ValueError:
+                pass
+        return array
+    if isinstance(values, np.ndarray):
+        return values
+    try:
+        return np.asarray(values, dtype=float)
+    except (TypeError, ValueError):
+        return None
+
+
+def hover_digits(values: Any) -> int:
+    """Return enough significant digits to distinguish neighbouring values."""
+    array = _numeric_values(values)
+    if array is None or array.dtype.kind not in "fiu" or array.size < 2:
+        return HOVER_DIGITS
+    if array.dtype.kind == "f" and np.isnan(array).all():
+        return HOVER_DIGITS
+    with np.errstate(all="ignore"):
+        largest = max(abs(float(np.nanmin(array))), abs(float(np.nanmax(array))))
+    if not math.isfinite(largest) or largest == 0:
+        return HOVER_DIGITS
+    rows = array.reshape(-1, array.shape[-1]) if array.ndim > 1 else array[None, :]
+    # Only the sample is copied, never a whole live heat map.
+    sample = rows[
+        : max(1, _HOVER_STEP_SAMPLE // rows.shape[1]), :_HOVER_STEP_SAMPLE
+    ].astype(float)
+    steps = np.abs(np.diff(sample, axis=-1)).ravel()
+    steps = steps[np.isfinite(steps) & (steps > 0)]
+    if not steps.size:
+        return HOVER_DIGITS
+    # The typical step, not the smallest: noise makes some steps arbitrarily small.
+    step = float(np.median(steps))
+    digits = math.floor(math.log10(largest)) - math.floor(math.log10(step)) + 1
+    return min(_MAX_HOVER_DIGITS, max(HOVER_DIGITS, digits))
+
+
+def fit_hover_precision(figure: Any) -> None:
+    """Format hover values with precision based on data."""
+    for trace in figure.data:
+        template = getattr(trace, "hovertemplate", None)
+        if not isinstance(template, str):
+            continue
+        digits: dict[str, int] = {}
+
+        def _value(match: re.Match[str]) -> str:
+            axis = match.group(1)
+            if axis not in digits:
+                digits[axis] = hover_digits(getattr(trace, axis, None))
+            return f"%{{{axis}:.{digits[axis]}~s}}"
+
+        fitted = _HOVER_VALUE_RE.sub(_value, template)
+        if fitted != template:
+            trace.hovertemplate = fitted
+
+
 def hover_entry(definition: Mapping[str, Any], placeholder: str) -> str:
     """Build a Plotly hover line with engineering notation."""
     normalized = axis_definition(definition.get("label"), definition.get("unit"))
@@ -555,14 +641,16 @@ def hover_entry(definition: Mapping[str, Any], placeholder: str) -> str:
     unit = parse_unit(normalized["unit"])
     symbol = render_unit(unit)
 
+    # Values without a unit to scale get a prefix too, or small ones would
+    # read as 0. `fit_hover_precision` adds digits where the data needs them.
+    value = f"%{{{placeholder}:.{HOVER_DIGITS}~s}}"
     if symbol and not unit.opaque and unit.scale == 1.0:
-        # Three significant figures cap the mantissa at two decimal places.
         # Separate a numeric value from units that begin with a digit.
         separator = " " if symbol[0].isdigit() else ""
-        return f"{label}: %{{{placeholder}:.3~s}}{separator}{symbol}"
+        return f"{label}: {value}{separator}{symbol}"
     if symbol:
-        return f"{label} ({symbol}): %{{{placeholder}:.2~f}}"
-    return f"{label}: %{{{placeholder}:.2~f}}"
+        return f"{label} ({symbol}): {value}"
+    return f"{label}: {value}"
 
 
 def _axis_unit_layout_definition(definition: Mapping[str, Any]) -> dict[str, Any]:
@@ -826,6 +914,7 @@ def set_figure_hover_entry(
         body = template[: len(template) - len(extra)]
         lines = [entry if placeholder in line else line for line in body.split("<br>")]
         trace.hovertemplate = "<br>".join(lines) + extra
+    fit_hover_precision(figure)
 
 
 def set_figure_axis_definition(

@@ -33,6 +33,7 @@ from .units import (
     axis_title_template_from_figure,
     divide_units,
     figure_axis_is_dependent,
+    fit_hover_precision,
     inverse_unit,
     latex_text,
     multiply_units,
@@ -347,6 +348,7 @@ class Filter:
             # TODOLATER: Connect to Toast notifications
             logger.error(err, exc_info=True)
 
+        fit_hover_precision(self.new_fig)
         # Convert go.Figure back to dict for API response
         return self.new_fig.to_dict(), self.warnings
 
