@@ -411,12 +411,26 @@ class Differentiate(Filter):
         )
         return True
 
+    def _does_not_change(self, values: np.ndarray, along: dict) -> bool:
+        """Warn and return True when the axis has the same value at every point."""
+        with np.errstate(all="ignore"):
+            steps = np.diff(np.asarray(values, dtype=float))
+        if np.any(np.isfinite(steps) & (steps != 0)):
+            return False
+        self.warnings.append(
+            f"The derivative along {along['label']} is not applied, because "
+            f"{along['label']} has the same value at every point."
+        )
+        return True
+
     def apply_1d(self):
         """
         Applies the differentiation filter to a 1D plot.
 
         """
         if self._too_few_points(self.y_axis.size, self.x_definition):
+            return
+        if self._does_not_change(self.x_axis, self.x_definition):
             return
         # Update y data and y-axis label
         self.new_fig.data[0].y = np.gradient(self.y_axis, self.x_axis)
@@ -447,6 +461,10 @@ class Differentiate(Filter):
             self.z_axis.shape[twod_axis],
             self.y_definition if twod_axis == 0 else self.x_definition,
         ):
+            return
+        if twod_axis == 0 and self._does_not_change(self.y_axis, self.y_definition):
+            return
+        if twod_axis == 1 and self._does_not_change(self.x_axis, self.x_definition):
             return
         # For np.gradient with 2D data, we need to specify spacing for each axis
         # axis=0 corresponds to rows (y-direction), axis=1 corresponds to columns (x-direction)

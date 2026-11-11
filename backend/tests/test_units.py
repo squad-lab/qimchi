@@ -289,6 +289,13 @@ def test_hover_digits_of_missing_values_warn_about_nothing():
         assert units.hover_digits(np.full(10, np.nan)) == 3
 
 
+def test_latex_text_escapes_what_mathjax_would_read_as_math():
+    # Elicit names its coordinates like this; a bare ^ is a double exponent.
+    assert units.latex_text("R^SPCHSH^time") == r"R{\hat{}}SPCHSH{\hat{}}time"
+    assert units.latex_text("a~b $5") == r"a{\sim}b \$5"
+    assert units.latex_text("a\\b") == r"a\backslash{}b"
+
+
 def test_a_prefixed_unit_keeps_the_plain_hover_form():
     assert units.hover_entry({"label": "Bias", "unit": "mV"}, "z") == (
         "Bias (mV): %{z:.3~s}"

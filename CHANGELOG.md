@@ -23,6 +23,8 @@
 - [Fix] NetCDF, HDF5 and Zarr files containing xarray DataTrees, including Elicit files, open as groups in the Explorer instead of as empty measurements. They keep format-specific icons, inherit file metadata, and use the group and file in plot titles. A file with one group opens that group directly.
 - [Fix] DataTree groups can be hearted, trashed, tagged and noted separately or through their file, like QCoDeS runs. A group downloads as a NetCDF file with its notes and library record; downloading the container still returns the whole file.
 - [Fix] Hover labels use enough digits to distinguish neighbouring values in narrow sweeps. Unitless values also receive SI prefixes when needed, so a stored value such as 200 pA no longer displays as 0.
+- [Fix] Derivative axis titles show names containing carets, tildes or dollar signs, such as Elicit's coordinate names, instead of a typesetting error.
+- [Fix] A derivative along an axis that has the same value at every point is not applied, with a notice explaining why, instead of leaving the plot empty.
 - [Misc] Explorer scans of folders with many Zarr stores are faster the first time.
 - [Misc] Measurement loading and plotting no longer wait behind downloads, image exports, Send to Notes or live-registry checks.
 - [Misc] QCoDeS databases are read with the bundled QCoDeS 0.59, which opens databases up to schema version 9 and upgrades older ones in place.

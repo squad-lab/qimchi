@@ -242,6 +242,39 @@ def test_line_differentiation_waits_for_a_second_point(line_figure):
     assert list(_axis(result, "y")) == [1]
 
 
+def test_line_differentiation_along_a_constant_axis_is_refused(line_figure):
+    line_figure["data"][0].update(x=[0, 0, 0, 0, 0])
+    line_figure["layout"]["xaxis"]["title"]["text"] = "R^SPCHSH^pulse_time"
+
+    result, warnings = filters.apply_filters(["diff"], {"diff": {}}, line_figure, 1)
+
+    assert "same value at every point" in warnings[0]
+    assert list(_axis(result, "y")) == [1, 2, 4, 8, 16]
+
+
+@pytest.mark.parametrize("name, axis", [("diff_x", "y"), ("diff_y", "x")])
+def test_heatmap_differentiation_along_a_constant_axis_is_refused(
+    heat_figure, name, axis
+):
+    flat = _axis(heat_figure, axis)
+    heat_figure["data"][0][axis] = [float(flat[0])] * len(flat)
+
+    result, warnings = filters.apply_filters([name], {name: {}}, heat_figure, 2)
+
+    assert "same value at every point" in warnings[0]
+    assert np.array_equal(_axis(result, "z").ravel(), _axis(heat_figure, "z").ravel())
+
+
+def test_derivative_title_escapes_carets(line_figure):
+    line_figure["layout"]["xaxis"]["title"]["text"] = "R^SPCHSH^pulse_time"
+
+    result, _warnings = filters.apply_filters(["diff"], {"diff": {}}, line_figure, 1)
+
+    title = result["layout"]["yaxis"]["title"]["text"]
+    assert r"R{\hat{}}SPCHSH{\hat{}}pulse\_time" in title
+    assert "^" not in title.replace(r"\hat{}", "")
+
+
 def test_differentiation_keeps_fraction_when_engineering_prefix_changes(line_figure):
     line_figure["layout"]["xaxis"]["title"]["text"] = "Plunger Gate 2 (V)"
     line_figure["layout"]["yaxis"]["title"]["text"] = "Top Gate Leakage (A)"

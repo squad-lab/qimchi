@@ -1015,12 +1015,16 @@ def latex_text(value: Any) -> str:
     """Escape ordinary text for use inside ``\\mathrm{...}``."""
     text = sanitize_label(value)
     replacements = {
-        "\\": r"\backslash ",
+        "\\": r"\backslash{}",
         "_": r"\_",
         "%": r"\%",
         "&": r"\&",
         "#": r"\#",
         "{": r"\{",
         "}": r"\}",
+        "$": r"\$",
+        # The app's MathJax has only the base and ams packages, so no \char.
+        "^": r"{\hat{}}",
+        "~": r"{\sim}",
     }
     return "".join(replacements.get(char, char) for char in text)

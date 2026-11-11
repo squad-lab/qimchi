@@ -79,6 +79,7 @@ import {
 } from "../../utils/numericArrays";
 import { engineeringPresentation, unitMetaFromLayout } from "./engineeringTicks";
 import { engineeringFormatter, type AxisUnitMeta } from "../../utils/engineeringFormat";
+import { normalizeMixedLatexTitle } from "../../utils/latexTitle";
 import {
   cutPlotAxis,
   OBLIQUE_CUT_CAVEAT,
@@ -137,27 +138,6 @@ const createColorbarTitleAnnotation = (text: string) => ({
   showarrow: false,
   font: { size: colorbarTitleFontSize(text) },
 });
-
-const normalizeMixedLatexTitle = (value: unknown): unknown => {
-  if (typeof value !== "string") return value;
-  const matches = [...value.matchAll(/\$([^$]+)\$/g)];
-  if (!matches.length || (matches.length === 1 && matches[0][0] === value)) return value;
-
-  const escapeText = (text: string) =>
-    text.replace(/([\\{}%&#_^])/g, "\\$1").replace(/\s+/g, "\\ ");
-  let cursor = 0;
-  let latex = "$";
-  for (const match of matches) {
-    const index = match.index ?? cursor;
-    const plain = value.slice(cursor, index);
-    if (plain) latex += "\\mathrm{" + escapeText(plain) + "}";
-    latex += match[1];
-    cursor = index + match[0].length;
-  }
-  const trailing = value.slice(cursor);
-  if (trailing) latex += "\\mathrm{" + escapeText(trailing) + "}";
-  return latex + "$";
-};
 
 type Props = {
   plotJson: PlotlyJSON;
