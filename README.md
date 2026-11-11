@@ -14,11 +14,13 @@ This repository contains a unified FastAPI application that serves a React-based
 
 ## What's new in 0.7.3
 
-- **Enhanced QCoDeS support:** repeated and noisy sweeps retain useful axes, stepped ramps can be plotted directly, and database and date folders support Explorer marks.
+- **Enhanced QCoDeS support:** repeated and noisy sweeps retain useful axes, stepped ramps can be plotted directly, and database and date folders support Explorer marks and downloads.
+- **Grouped datasets:** NetCDF, HDF5 and Zarr DataTrees open as groups with inherited metadata, separate notes and library marks, and group-level downloads.
 - **Composer:** combine multiple X, Y and Z fields, drag fields between axes, and plot independent coordinates as values.
 - **Plot setups:** save plot variables and settings to the library or a file, then apply them to other measurements.
-- **Basket selection:** use checkboxes, Shift+Click or the keyboard. A nonempty Basket always keeps one measurement selected.
+- **Basket selection:** use checkboxes, Shift+Click or the keyboard. A nonempty Basket always keeps one measurement selected, and Alt+UpArrow or Alt+DownArrow cycles a single dataset through the Explorer.
 - **Plot titles and exports:** titles identify measurements; QCoDeS image filenames include run numbers.
+- **Faster interaction:** plotting no longer waits behind downloads, exports or live-registry checks, and hover labels retain enough precision to distinguish nearby values.
 
 Everything in this release is listed in the [changelog](CHANGELOG.md#v073---unreleased).
 
