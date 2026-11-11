@@ -1,0 +1,8 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "y"
+    ],
+    "instrument": "fixture_dac",
+    "label": "Gate y",
+    "unit": "V"
+}

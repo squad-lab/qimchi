@@ -1,0 +1,2 @@
+# Stores as Qanary wrote them: never convert line endings.
+qanary-*/** -text -diff

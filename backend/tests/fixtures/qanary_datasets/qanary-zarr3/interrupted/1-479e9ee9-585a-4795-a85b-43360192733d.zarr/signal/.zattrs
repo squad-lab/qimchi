@@ -1,0 +1,9 @@
+{
+  "unit": "A",
+  "label": "Signal",
+  "instrument": "fixture_dac",
+  "_ARRAY_DIMENSIONS": [
+    "x",
+    "y"
+  ]
+}

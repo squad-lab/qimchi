@@ -106,23 +106,27 @@ def _plot_request(dataset_id: str) -> PlotRequest:
     )
 
 
-def _qanary_spec() -> str:
-    """Return the isolated producer requirement used by the live E2E.
+# The last release that writes with Zarr 2, and the current one. Releases
+# before 0.12 let in xarray 2026.9, which breaks their Zarr 2 writes.
+QANARY_RELEASES = ["qanary==0.12.3", "qanary==0.13.0"]
+
+
+def _qanary_specs() -> list[str]:
+    """Return the isolated producer requirements used by the live E2E.
 
     ``QIMCHI_QANARY_SPEC`` lets a developer exercise a local checkout, for
     example ``QIMCHI_QANARY_SPEC=../../qcutils``. CI and ordinary local runs
-    use the pinned released version below. Qanary is intentionally not a
-    backend extra because its Zarr 2 constraint conflicts with Qimchi's Zarr 3
-    environment even when that extra is not installed.
+    use the released versions above. Qanary is not a backend extra: it runs
+    in its own environment, as it does in a lab.
     """
     override = os.environ.get("QIMCHI_QANARY_SPEC")
-    if override:
-        return override
-
-    return "qanary==0.10.1"
+    return [override] if override else QANARY_RELEASES
 
 
-def test_qanary_live_heatmap_and_filter_use_the_production_qimchi_path(tmp_path):
+@pytest.mark.parametrize("qanary_spec", _qanary_specs())
+def test_qanary_live_heatmap_and_filter_use_the_production_qimchi_path(
+    tmp_path, qanary_spec
+):
     """A partial Qanary grid should become a filtered live Qimchi heatmap."""
     if shutil.which("uv") is None:
         pytest.skip("uv is required to run qanary in its isolated environment")
@@ -143,7 +147,7 @@ def test_qanary_live_heatmap_and_filter_use_the_production_qimchi_path(tmp_path)
                 "run",
                 "--no-project",
                 "--with",
-                _qanary_spec(),
+                qanary_spec,
                 "--python",
                 "3.13",
                 "python",

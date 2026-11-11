@@ -1,0 +1,9 @@
+{
+  "unit": "nA",
+  "label": "Current",
+  "instrument": "fixture_dac",
+  "_ARRAY_DIMENSIONS": [
+    "x",
+    "y"
+  ]
+}

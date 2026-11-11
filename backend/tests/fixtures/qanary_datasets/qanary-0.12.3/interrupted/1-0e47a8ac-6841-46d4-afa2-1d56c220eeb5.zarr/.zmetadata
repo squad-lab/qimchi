@@ -1,0 +1,140 @@
+{
+    "metadata": {
+        ".zattrs": {
+            "Cryostat": "test",
+            "Device Type": "hall-bar",
+            "Experiment Name": "fixture-interrupted",
+            "Extra Metadata": "{\"purpose\": \"format compatibility fixture\"}",
+            "Instruments Snapshot": "{\"fixture_dac\": {\"functions\": {}, \"submodules\": {}, \"parameters\": {\"IDN\": {\"__class__\": \"qcodes.parameters.parameter.Parameter\", \"full_name\": \"fixture_dac_IDN\", \"value\": {\"vendor\": \"QCoDeS\", \"model\": \"<class 'qcodes.instrument_drivers.mock_instruments.DummyInstrument'>\", \"serial\": \"NA\", \"firmware\": \"NA\"}, \"raw_value\": {\"vendor\": \"QCoDeS\", \"model\": \"<class 'qcodes.instrument_drivers.mock_instruments.DummyInstrument'>\", \"serial\": \"NA\", \"firmware\": \"NA\"}, \"ts\": \"2026-11-10 14:30:49+01:00\", \"inter_delay\": 0, \"name\": \"IDN\", \"label\": \"IDN\", \"unit\": \"\", \"instrument\": \"qcodes.instrument_drivers.mock_instruments.DummyInstrument\", \"instrument_name\": \"fixture_dac\", \"vals\": \"<Anything>\", \"validators\": [\"<Anything>\"], \"post_delay\": 0}, \"x\": {\"__class__\": \"qcodes.parameters.parameter.Parameter\", \"full_name\": \"fixture_dac_x\", \"value\": 0, \"raw_value\": 0, \"ts\": \"2026-11-10 14:30:49+01:00\", \"inter_delay\": 0, \"name\": \"x\", \"label\": \"Gate x\", \"unit\": \"V\", \"instrument\": \"qcodes.instrument_drivers.mock_instruments.DummyInstrument\", \"instrument_name\": \"fixture_dac\", \"vals\": \"<Numbers -800<=v<=400>\", \"validators\": [\"<Numbers -800<=v<=400>\"], \"post_delay\": 0}, \"y\": {\"__class__\": \"qcodes.parameters.parameter.Parameter\", \"full_name\": \"fixture_dac_y\", \"value\": 0, \"raw_value\": 0, \"ts\": \"2026-11-10 14:30:49+01:00\", \"inter_delay\": 0, \"name\": \"y\", \"label\": \"Gate y\", \"unit\": \"V\", \"instrument\": \"qcodes.instrument_drivers.mock_instruments.DummyInstrument\", \"instrument_name\": \"fixture_dac\", \"vals\": \"<Numbers -800<=v<=400>\", \"validators\": [\"<Numbers -800<=v<=400>\"], \"post_delay\": 0}, \"fixed_parameter\": {\"__class__\": \"qcodes.parameters.parameter.Parameter\", \"full_name\": \"fixture_dac_fixed_parameter\", \"value\": 5, \"raw_value\": 5, \"ts\": \"2026-11-10 14:30:49+01:00\", \"inter_delay\": 0, \"name\": \"fixed_parameter\", \"label\": \"fixed_parameter\", \"unit\": \"\", \"instrument\": \"qcodes.instrument_drivers.mock_instruments.DummyInstrument\", \"instrument_name\": \"fixture_dac\", \"validators\": [], \"post_delay\": 0}, \"signal\": {\"__class__\": \"qcodes.parameters.parameter.Parameter\", \"full_name\": \"fixture_dac_signal\", \"value\": 0.0, \"raw_value\": 0.0, \"ts\": \"2026-11-10 14:30:49+01:00\", \"inter_delay\": 0, \"name\": \"signal\", \"label\": \"Signal\", \"unit\": \"A\", \"instrument\": \"qcodes.instrument_drivers.mock_instruments.DummyInstrument\", \"instrument_name\": \"fixture_dac\", \"validators\": [], \"post_delay\": 0}, \"current\": {\"__class__\": \"qcodes.parameters.parameter.Parameter\", \"full_name\": \"fixture_dac_current\", \"value\": -0.5, \"raw_value\": -0.5, \"ts\": \"2026-11-10 14:30:49+01:00\", \"inter_delay\": 0, \"name\": \"current\", \"label\": \"Current\", \"unit\": \"nA\", \"instrument\": \"qcodes.instrument_drivers.mock_instruments.DummyInstrument\", \"instrument_name\": \"fixture_dac\", \"validators\": [], \"post_delay\": 0}}, \"__class__\": \"qcodes.instrument_drivers.mock_instruments.DummyInstrument\", \"name\": \"fixture_dac\", \"label\": \"fixture_dac\"}}",
+            "Measurement ID": "1-0e47a8ac-6841-46d4-afa2-1d56c220eeb5",
+            "Parameters Snapshot": "{\"x_gate\": {\"value\": \"0\", \"unit\": \"V\", \"label\": \"X gate\"}, \"y_gate\": {\"value\": \"0\", \"unit\": \"V\", \"label\": \"Y gate\"}}",
+            "Requirements": "",
+            "Sample Name": "S1",
+            "Sweeps": "{\"Gate x\": {\"Independent(s)\": \"Gate x\", \"Range\": \"0.000e+00 to 7.000e-01\", \"Number of Points\": 8, \"Delay (s)\": 0.0}, \"Gate y\": {\"Independent(s)\": \"Gate y\", \"Range\": \"0.000e+00 to 5.000e-01\", \"Number of Points\": 6, \"Delay (s)\": 0.0}}",
+            "Timestamp": "2026-11-10T14:30:49.629733",
+            "Wafer ID": "W1"
+        },
+        ".zgroup": {
+            "zarr_format": 2
+        },
+        "current/.zarray": {
+            "chunks": [
+                8,
+                6
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                8,
+                6
+            ],
+            "zarr_format": 2
+        },
+        "current/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "x",
+                "y"
+            ],
+            "instrument": "fixture_dac",
+            "label": "Current",
+            "unit": "nA"
+        },
+        "signal/.zarray": {
+            "chunks": [
+                8,
+                6
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                8,
+                6
+            ],
+            "zarr_format": 2
+        },
+        "signal/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "x",
+                "y"
+            ],
+            "instrument": "fixture_dac",
+            "label": "Signal",
+            "unit": "A"
+        },
+        "x/.zarray": {
+            "chunks": [
+                8
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                8
+            ],
+            "zarr_format": 2
+        },
+        "x/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "x"
+            ],
+            "instrument": "fixture_dac",
+            "label": "Gate x",
+            "unit": "V"
+        },
+        "y/.zarray": {
+            "chunks": [
+                6
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                6
+            ],
+            "zarr_format": 2
+        },
+        "y/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "y"
+            ],
+            "instrument": "fixture_dac",
+            "label": "Gate y",
+            "unit": "V"
+        }
+    },
+    "zarr_consolidated_format": 1
+}
