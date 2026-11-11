@@ -12,6 +12,7 @@
 - [Feature] Independent coordinates can be plotted as LinePlot Y or HeatMap Z values when they span the chosen axes. Dimensions without coordinates can be plotted by position.
 - [Fix] QCoDeS runs and date groups can be downloaded from the Explorer, Basket and Viewer again. Each run becomes a NetCDF file with the same axes, metadata and library marks.
 - [Fix] Downloaded databases include their most recent changes. Previously, a QCoDeS database downloaded during or shortly after a measurement could be missing its latest runs.
+- [Fix] QCoDeS runs from different databases open correctly at the same time. Previously, plotting or downloading runs from two databases at once could show a run from the wrong database or fail.
 - [Fix] Tooltips wrap long names without spaces.
 - [Fix] The Basket keeps a measurement selected as items are added or removed and after reload. The selected card's outline remains visible during horizontal scrolling.
 - [Fix] QCoDeS runs retain setpoint axes when values repeat. Repeated sweeps gain a `repetition` axis, and noisy 2D raster readbacks are gridded by row.

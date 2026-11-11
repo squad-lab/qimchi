@@ -2,7 +2,6 @@ import asyncio
 import sqlite3
 import sys
 import threading
-from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -42,6 +41,7 @@ async def test_load_data_async_zarr_runs_off_the_event_loop(tmp_path, monkeypatc
 
 def test_qcodes_loader_decodes_the_station_snapshot(tmp_path, monkeypatch):
     import qcodes.dataset
+    import qcodes.dataset.sqlite.database
 
     db_path = tmp_path / "runs.db"
     db_path.write_bytes(b"qcodes")
@@ -52,9 +52,13 @@ def test_qcodes_loader_decodes_the_station_snapshot(tmp_path, monkeypatch):
         number_of_results=1,
     )
     monkeypatch.setattr(
-        qcodes.dataset, "initialised_database_at", lambda _path: nullcontext()
+        qcodes.dataset.sqlite.database,
+        "connect",
+        lambda _path: SimpleNamespace(close=lambda: None),
     )
-    monkeypatch.setattr(qcodes.dataset, "load_by_id", lambda _run_id: qcodes_dataset)
+    monkeypatch.setattr(
+        qcodes.dataset, "load_by_id", lambda _run_id, conn: qcodes_dataset
+    )
 
     loaded = data_loader._load_qcodes_xarray_dataset(db_path, 7)
 

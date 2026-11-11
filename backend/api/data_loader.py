@@ -1339,15 +1339,19 @@ def list_qcodes_runs(db_path: str | Path) -> list[dict[str, Any]]:
 def _load_qcodes_xarray_dataset(db_path: Path, run_id: int) -> xr.Dataset:
     """Load a QCoDeS run as an xarray dataset."""
     try:
-        from qcodes.dataset import initialised_database_at, load_by_id
+        from qcodes.dataset import load_by_id
+        from qcodes.dataset.sqlite.database import connect
     except Exception as exc:
         raise MissingBackendDependencyError(
             f"QCoDeS is required to load sqlite datasets: {exc}"
         ) from exc
 
     try:
-        with initialised_database_at(str(db_path)):
-            qcodes_dataset = load_by_id(run_id)
+        # Not initialised_database_at: it sets the database for the whole
+        # process, so runs loaded in parallel could come from the wrong file.
+        conn = connect(db_path)
+        try:
+            qcodes_dataset = load_by_id(run_id, conn=conn)
             try:
                 dataset = qcodes_run_to_xarray(qcodes_dataset)
             except Exception:
@@ -1360,6 +1364,8 @@ def _load_qcodes_xarray_dataset(db_path: Path, run_id: int) -> xr.Dataset:
                 dataset = qcodes_dataset.to_xarray_dataset()
             # Store the result count separately from run metadata.
             dataset.attrs["qimchi_qcodes_records"] = qcodes_dataset.number_of_results
+        finally:
+            conn.close()
     except Exception as exc:
         raise DatasetResolutionError(
             f"Failed to load QCoDeS run_id={run_id} from '{db_path}': {exc}"

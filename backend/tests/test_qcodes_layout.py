@@ -232,3 +232,33 @@ def test_a_run_it_cannot_lay_out_falls_back_to_qcodes_export(record, monkeypatch
     # Compare QCoDeS' conversion of repeated setpoints.
     assert list(dataset.dims) == ["index"]
     assert "vg" in dataset.data_vars
+
+
+def test_runs_loaded_in_parallel_come_from_their_own_database(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    import qcodes
+
+    databases = {}
+    for offset in (0, 100):
+        db_path = tmp_path / f"runs-{offset}.db"
+        initialise_or_create_database_at(str(db_path))
+        experiment = load_or_create_experiment("parallel", sample_name="sample")
+        measurement = Measurement(exp=experiment, name="run")
+        measurement.register_custom_parameter("vg")
+        measurement.register_custom_parameter("i", setpoints=("vg",))
+        with measurement.run() as saver:
+            for g in range(5):
+                saver.add_result(("vg", g), ("i", g + offset))
+        databases[db_path] = np.arange(5) + offset
+    location = qcodes.config["core"]["db_location"]
+
+    def load(db_path):
+        dataset = data_loader._load_qcodes_xarray_dataset(db_path, 1)
+        return np.array_equal(dataset["i"].values, databases[db_path])
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        loads = list(pool.map(load, [*databases] * 50))
+
+    assert all(loads)
+    assert qcodes.config["core"]["db_location"] == location
