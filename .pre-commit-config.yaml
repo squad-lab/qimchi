@@ -31,10 +31,11 @@ repos:
         # tsconfig files are JSONC -- comments are valid there.
         exclude: ^frontend/tsconfig.*\.json$
       - id: end-of-file-fixer
-        exclude: ^(frontend/dist/|vendor/)
+        # Recorded datasets must keep every byte as written.
+        exclude: ^(frontend/dist/|vendor/|backend/tests/fixtures/qanary_datasets/qanary-)
       - id: trailing-whitespace
         # Two trailing spaces are a hard line break in Markdown; stripping them
         # silently reflows the README and the docs.
         args: [--markdown-linebreak-ext=md]
-        exclude: ^(frontend/dist/|vendor/)
+        exclude: ^(frontend/dist/|vendor/|backend/tests/fixtures/qanary_datasets/qanary-)
     rev: v6.0.0

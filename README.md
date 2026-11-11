@@ -293,7 +293,7 @@ For manual installation with full control over the setup process, follow these s
 3. **Set up Python virtual environment:**
    ```powershell
    cd ..
-   uv venv --python 3.13 --seed --clear
+   uv venv --python 3.14 --seed --clear
    .\.venv\Scripts\activate
    ```
 
@@ -382,7 +382,7 @@ For manual installation with full control over the setup process, follow these s
 3. **Set up Python virtual environment:**
    ```bash
    cd ..
-   uv venv --python 3.13 --seed --clear
+   uv venv --python 3.14 --seed --clear
    source .venv/bin/activate
    ```
 

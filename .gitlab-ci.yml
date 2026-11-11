@@ -1,8 +1,9 @@
 # Bookkeeping jobs use GitLab's default small Linux runner (1x). Tests and
-# builds opt into the fastest runner explicitly below; Windows keeps its
-# existing project runner and macOS keeps the hosted M2 Pro runner.
+# builds opt into the fastest runner explicitly below; Windows runs in a
+# Windows container on its project runner and macOS keeps the hosted M2 Pro
+# runner.
 default:
-  image: "python:3.13"
+  image: "python:3.14"
 
 variables:
   DOCKER_HOST: "tcp://docker:2375"
@@ -191,7 +192,7 @@ frontend-quality:
 
 auto_tag_version:
   stage: auto_tag_version
-  image: python:3.13-alpine
+  image: python:3.14-alpine
   before_script:
     - apk add --no-cache git
     - pip3 install toml --break-system-packages
@@ -259,7 +260,7 @@ auto_tag_version:
 # every push to preview would burn minutes on commits nobody wants to test.
 tag_preview:
   stage: auto_tag_version
-  image: python:3.13-alpine
+  image: python:3.14-alpine
   before_script:
     - apk add --no-cache git
     - pip3 install toml --break-system-packages
@@ -349,6 +350,7 @@ docker:
 # built SPA in a native window. Replaces the old qimchi.bat-wrapper exe.
 build-windows:
   stage: build
+  image: "python:3.14-windowsservercore-ltsc2025"
   tags:
     - windows
   # The Windows runner is the release bottleneck. Put this job in its queue as
@@ -367,12 +369,12 @@ build-windows:
       }
     - choco install innosetup --yes --no-progress
     - $env:Path = "$env:ProgramFiles\Inno Setup 6;$env:Path"
-    # uv manages Python 3.13 + all backend deps.
+    # uv manages Python 3.14 + all backend deps.
     - powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
     - $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
-    # The runner's preinstalled Node is 21.7.3, which Vite 8/rolldown reject
-    # (engines: ^20.19 || >=22.12). On 21.x npm SKIPS rolldown's native binding
-    # and `vite build` crashes. Pin a supported Node, fetched via preinstalled curl.
+    # The image has no Node. Vite 8/rolldown need ^20.19 || >=22.12 (on 21.x npm
+    # skips rolldown's native binding and `vite build` crashes), so pin one,
+    # fetched with Windows' own curl.exe.
     - $nodeVer = "22.12.0"
     - curl.exe -fsSL -o "$env:TEMP\node.zip" "https://nodejs.org/dist/v$nodeVer/node-v$nodeVer-win-x64.zip"
     - Expand-Archive "$env:TEMP\node.zip" -DestinationPath "$env:CI_PROJECT_DIR\.node" -Force

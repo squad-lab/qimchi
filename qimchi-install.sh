@@ -202,7 +202,7 @@ echo "============================================"
 cd "$QIMCHI_DIR/qimchi"
 
 # Create venv in $VENV_DIR
-uv venv --python 3.13 --seed --clear "$VENV_DIR"
+uv venv --python 3.14 --seed --clear "$VENV_DIR"
 
 # Activate it
 source "$VENV_DIR/bin/activate"

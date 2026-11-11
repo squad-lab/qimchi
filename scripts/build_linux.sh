@@ -111,13 +111,14 @@ fi
 echo "Setting up Python environment (backend/.venv)..."
 PYTHON_EXE="backend/.venv/bin/python"
 # Presence is not enough: uv garbage-collects managed base interpreters on
-# upgrade, leaving a python that exists but cannot run. Verify by running it.
-if [ -f "$PYTHON_EXE" ] && ! "$PYTHON_EXE" -c "import sys" >/dev/null 2>&1; then
-    echo "  backend/.venv interpreter does not run (stale base Python) -- recreating."
+# upgrade, leaving a python that exists but cannot run. Run it and verify that
+# it uses the version shipped with the app.
+if [ -f "$PYTHON_EXE" ] && ! "$PYTHON_EXE" -c "import sys; sys.exit(sys.version_info[:2] != (3, 14))" >/dev/null 2>&1; then
+    echo "  backend/.venv does not run Python 3.14 (older venv or stale base Python) -- recreating."
     rm -rf backend/.venv
 fi
 if [ ! -f "$PYTHON_EXE" ]; then
-    uv venv --python 3.13 backend/.venv
+    uv venv --python 3.14 backend/.venv
 fi
 "$PYTHON_EXE" -c "import sys" >/dev/null
 

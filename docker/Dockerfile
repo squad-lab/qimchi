@@ -20,7 +20,7 @@ RUN npm ci \
     && npm run build
 
 
-FROM python:3.13-slim AS final
+FROM python:3.14-slim AS final
 
 WORKDIR /app
 

@@ -4,7 +4,13 @@ Keep changes focused, add tests for new behavior or bug fixes, and describe the 
 
 ## Development setup
 
-Use Python 3.13 or later, uv, and Node.js 22.12 or later. See the README's [manual installation instructions](README.md#expert-installation) for system dependencies, image-export setup and the backend launch command.
+Use uv and Node.js 22.12 or later. See the README's [manual installation instructions](README.md#expert-installation) for system dependencies, image-export setup and the backend launch command.
+
+### Python support policy
+
+We support the second-newest stable Python feature release. This balances timely
+security and bug-fix support with enough time for our dependencies to stabilize
+on each new Python version.
 
 From the repository root, install the backend development tools and dataset readers:
 

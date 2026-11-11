@@ -157,19 +157,19 @@ $pythonExe = Join-Path $buildVenv "Scripts\python.exe"
 
 # Test-Path is not enough: uv-managed base interpreters get garbage-collected on
 # upgrade, which leaves python.exe on disk pointing at a home that no longer
-# exists. It looks fine and fails on first use. Actually run it.
+# exists. Run it and verify the version the app will ship.
 $venvOk = $false
 if (Test-Path $pythonExe) {
-    & $pythonExe -c "import sys" 2>&1 | Out-Null
+    & $pythonExe -c "import sys; sys.exit(sys.version_info[:2] != (3, 14))" 2>&1 | Out-Null
     $venvOk = ($LASTEXITCODE -eq 0)
     if (!$venvOk) {
-        Write-Warning "  backend/.venv exists but its interpreter does not run"
-        Write-Warning "  (its uv-managed base Python was probably removed) -- recreating."
+        Write-Warning "  backend/.venv does not run Python 3.14 (an older venv, or its"
+        Write-Warning "  uv-managed base Python was removed) -- recreating."
         Remove-Item -Recurse -Force $buildVenv -ErrorAction SilentlyContinue
     }
 }
 if (!$venvOk) {
-    uv venv --python 3.13 $buildVenv
+    uv venv --python 3.14 $buildVenv
     Assert-LastExit "uv venv"
     & $pythonExe -c "import sys" 2>&1 | Out-Null
     Assert-LastExit "newly created venv interpreter"

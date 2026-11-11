@@ -153,10 +153,15 @@ def test_polling_is_left_out_of_the_access_log_unless_it_fails():
 
 
 @pytest.mark.asyncio
-async def test_page_errors_are_logged_and_rate_limited(monkeypatch, caplog):
+async def test_page_errors_are_logged_and_rate_limited(monkeypatch):
     monkeypatch.setattr(diagnostics, "_client_log_times", diagnostics.deque())
     monkeypatch.setattr(diagnostics, "_CLIENT_LOG_LIMIT", 2)
-    diagnostics.frontend_logger.addHandler(caplog.handler)
+    # Not caplog: newer pytest versions also capture this logger, so every
+    # record would be counted twice.
+    records: list[logging.LogRecord] = []
+    handler = logging.Handler()
+    handler.emit = records.append
+    diagnostics.frontend_logger.addHandler(handler)
     try:
         for i in range(3):
             await diagnostics.client_log(
@@ -165,9 +170,9 @@ async def test_page_errors_are_logged_and_rate_limited(monkeypatch, caplog):
                 )
             )
     finally:
-        diagnostics.frontend_logger.removeHandler(caplog.handler)
+        diagnostics.frontend_logger.removeHandler(handler)
 
-    logged = [r.getMessage() for r in caplog.records if r.name == "qimchi.frontend"]
+    logged = [r.getMessage() for r in records]
     assert logged == ["boom 0 [app.js:1]\nat x", "boom 1 [app.js:1]\nat x"]
 
 
