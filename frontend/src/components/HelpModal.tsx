@@ -144,7 +144,8 @@ const ExplorerHelp = memo(() => (
       <p className="text-xs text-gray-500 mt-2">
         QCoDeS databases open as folders, with runs grouped by start date. Repeated sweeps can gain
         a <span className="font-mono">repetition</span> axis; evenly stepped values recorded against
-        time can serve as plot axes.
+        time can serve as plot axes. Downloaded runs and date groups are saved as NetCDF files, one
+        per run; downloading the database itself saves the whole database.
       </p>
     </div>
 

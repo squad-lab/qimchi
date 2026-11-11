@@ -1,7 +1,7 @@
 import type { AxiosResponse } from "axios";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { finishArchiveDownload } from "./download";
+import { downloadMessage, finishArchiveDownload } from "./download";
 
 const response = (headers: Record<string, string>): AxiosResponse<BlobPart> =>
   ({ data: "zip-bytes", headers }) as unknown as AxiosResponse<BlobPart>;
@@ -59,5 +59,31 @@ describe("finishArchiveDownload", () => {
 
     expect(document.querySelectorAll("a[download]")).toHaveLength(0);
     vi.unstubAllGlobals();
+  });
+});
+
+describe("downloadMessage", () => {
+  it("says when QCoDeS runs were saved as NetCDF", () => {
+    const result = finishArchiveDownload(
+      response({
+        "x-qimchi-saved-to": encodeURIComponent("C:/Downloads/exp_run-5.zip"),
+        "x-qimchi-qcodes-runs": "1",
+      }),
+      "exp_run-5.zip",
+    );
+
+    expect(result.qcodesRuns).toBe(1);
+    expect(downloadMessage(result)).toBe(
+      "Saved to C:/Downloads/exp_run-5.zip. The QCoDeS run is saved as a NetCDF file.",
+    );
+    expect(downloadMessage({ qcodesRuns: 3 }, "Download started")).toBe(
+      "Download started. QCoDeS runs are saved as NetCDF files, one per run.",
+    );
+  });
+
+  it("adds nothing for other downloads", () => {
+    expect(downloadMessage({})).toBeUndefined();
+    expect(downloadMessage({}, "Download started")).toBe("Download started");
+    expect(downloadMessage({ savedTo: "C:/a.zip" })).toBe("Saved to C:/a.zip");
   });
 });

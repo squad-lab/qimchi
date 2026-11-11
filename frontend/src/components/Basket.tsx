@@ -47,7 +47,7 @@ import {
   resolveAxisIndependents,
 } from "../utils/datasetFieldSelectors";
 import { detectDatasetKind, isDatasetPath, isSqliteContainerPath } from "../utils/datasetPaths";
-import { finishArchiveDownload } from "../utils/download";
+import { downloadMessage, finishArchiveDownload } from "../utils/download";
 import type { AttrData } from "./interfaces";
 import {
   selectAll,
@@ -975,9 +975,8 @@ const Basket = ({
                                       response,
                                       `${item.name}.zip`,
                                     );
-                                    if (result.savedTo) {
-                                      showToast(`Saved to ${result.savedTo}`, "success");
-                                    }
+                                    const message = downloadMessage(result);
+                                    if (message) showToast(message, "success");
                                   } catch (error) {
                                     console.error("Error downloading item:", error);
                                     showToast("Failed to download item", "error");

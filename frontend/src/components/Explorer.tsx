@@ -12,7 +12,7 @@ import { TreeNode } from "./treeUtils";
 import Tooltip from "./Tooltip";
 import { useSidebarStore } from "../stores/sidebarStore";
 import { useShortcut } from "../hooks/useGlobalShortcuts";
-import { finishArchiveDownload } from "../utils/download";
+import { downloadMessage, finishArchiveDownload } from "../utils/download";
 // window.pywebview types: see src/pywebview.d.ts
 
 interface ExplorerProps {
@@ -206,9 +206,8 @@ const Explorer = ({
       const result = finishArchiveDownload(response, `${node.name}.zip`);
 
       console.log("Download initiated successfully");
-      if (result.savedTo) {
-        showToast(`Saved to ${result.savedTo}`, "success");
-      }
+      const message = downloadMessage(result);
+      if (message) showToast(message, "success");
     } catch (error) {
       console.error("Error downloading dataset:", error);
       showToast("Failed to download dataset", "error", 3000, "Explorer", {

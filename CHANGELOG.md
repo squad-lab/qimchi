@@ -10,6 +10,8 @@
 - [Feature] When the Basket contains one dataset, Alt+UpArrow and Alt+DownArrow switch to the previous or next Explorer dataset.
 - [Feature] The Composer accepts multiple X fields and lets fields move between axes by dragging. Composer and plot setup requests for more than 30 plots require confirmation.
 - [Feature] Independent coordinates can be plotted as LinePlot Y or HeatMap Z values when they span the chosen axes. Dimensions without coordinates can be plotted by position.
+- [Fix] QCoDeS runs and date groups can be downloaded from the Explorer, Basket and Viewer again. Each run becomes a NetCDF file with the same axes, metadata and library marks.
+- [Fix] Downloaded databases include their most recent changes. Previously, a QCoDeS database downloaded during or shortly after a measurement could be missing its latest runs.
 - [Fix] Tooltips wrap long names without spaces.
 - [Fix] The Basket keeps a measurement selected as items are added or removed and after reload. The selected card's outline remains visible during horizontal scrolling.
 - [Fix] QCoDeS runs retain setpoint axes when values repeat. Repeated sweeps gain a `repetition` axis, and noisy 2D raster readbacks are gridded by row.

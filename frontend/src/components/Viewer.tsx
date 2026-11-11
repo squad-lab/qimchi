@@ -59,7 +59,7 @@ import {
   isComposerCompatibleWithDataset,
 } from "../utils/datasetFieldSelectors";
 import { isDatasetPath, isMemoryPath } from "../utils/datasetPaths";
-import { finishArchiveDownload } from "../utils/download";
+import { downloadMessage, finishArchiveDownload } from "../utils/download";
 import { useSettingsStore } from "../stores/settingsStore";
 import {
   PLOT_WIDTHS,
@@ -971,9 +971,8 @@ const Viewer = ({
       );
 
       console.log("Download initiated successfully");
-      if (result.savedTo) {
-        showToast(`Saved to ${result.savedTo}`, "success");
-      }
+      const message = downloadMessage(result);
+      if (message) showToast(message, "success");
     } catch {
       // console.error("Error downloading selected items:", error);
       showToast("Failed to download selected items", "error");

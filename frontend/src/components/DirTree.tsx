@@ -88,7 +88,7 @@ import {
   isDatasetPath,
   isSqliteContainerPath,
 } from "../utils/datasetPaths";
-import { finishArchiveDownload } from "../utils/download";
+import { downloadMessage, finishArchiveDownload } from "../utils/download";
 import { formatQanaryDatasetName } from "../utils/measurementDisplay";
 
 // Global cache to persist data across component mounts/unmounts
@@ -1277,10 +1277,7 @@ const DirTree = ({
           : `selected_items_${new Date().toISOString().split("T")[0]}.zip`;
       const result = finishArchiveDownload(response, filename);
       console.log("Download initiated successfully");
-      showToast(
-        result.savedTo ? `Saved to ${result.savedTo}` : "Download started successfully",
-        "success",
-      );
+      showToast(downloadMessage(result, "Download started successfully"), "success");
     } catch (error) {
       console.error("Error downloading selected items:", error);
       showToast("Failed to download selected items", "error");
@@ -1302,10 +1299,7 @@ const DirTree = ({
       const filename = `${node.name}.zip`;
       const result = finishArchiveDownload(response, filename);
       console.log("Folder download initiated successfully");
-      showToast(
-        result.savedTo ? `Saved to ${result.savedTo}` : "Folder download started successfully",
-        "success",
-      );
+      showToast(downloadMessage(result, "Folder download started successfully"), "success");
     } catch (error) {
       console.error("Error downloading folder:", error);
       showToast("Failed to download folder", "error");
