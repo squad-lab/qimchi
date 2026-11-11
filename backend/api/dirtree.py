@@ -10,7 +10,8 @@ import math
 import os
 import stat as stat_module
 import subprocess  # Windows compat
-from concurrent.futures import ThreadPoolExecutor
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
@@ -18,7 +19,7 @@ from typing import Dict, Optional
 import xarray as xr
 from fastapi import APIRouter, HTTPException
 
-from . import live_measurements
+from . import background, live_measurements
 
 # Local tool execs
 from .config import FD_EXEC, MAX_DEPTH  #  DU_EXEC, XARGS_EXEC | Windows compat
@@ -26,6 +27,7 @@ from .data_loader import (
     MEMORY_PROTOCOL,
     extract_measurement_id,
     get_live_dataset_entries,
+    has_datatree_groups,
     list_datatree_nodes,
     list_qcodes_runs,
     load_dataset_async,
@@ -153,8 +155,11 @@ def _store_fingerprint(st: os.stat_result) -> str:
     return f"{st.st_mtime_ns}:{st.st_size}"
 
 
-def _read_scan_cache(paths: list[str]) -> Dict[str, tuple]:
-    """Return cached scan metadata; treat database errors as cache misses."""
+def _read_scan_cache(paths: list[str], root: str | None = None) -> Dict[str, tuple]:
+    """
+    Read a root's scan cache in one range query; treat errors as misses.
+
+    """
     if not paths:
         return {}
 
@@ -164,20 +169,37 @@ def _read_scan_cache(paths: list[str]) -> Dict[str, tuple]:
         from .db_models import DatasetScanCache
         from .shared.db import session_scope
 
+        # Plain columns: building ORM objects took most of the time.
+        columns = select(
+            DatasetScanCache.abs_path,
+            DatasetScanCache.fingerprint,
+            DatasetScanCache.size_bytes,
+            DatasetScanCache.last_modified,
+            DatasetScanCache.datatree_nodes,
+        )
         found: Dict[str, tuple] = {}
         with session_scope() as session:
+            if root is not None:
+                wanted = set(paths)
+                rows = session.exec(
+                    columns.where(
+                        DatasetScanCache.abs_path >= root,
+                        DatasetScanCache.abs_path < root + chr(0x10FFFF),
+                    )
+                ).all()
+                return {
+                    abs_path: tuple(values)
+                    for abs_path, *values in rows
+                    if abs_path in wanted
+                }
             # SQLite caps variables per statement; chunk well under the limit.
             for start in range(0, len(paths), 500):
                 chunk = paths[start : start + 500]
                 rows = session.exec(
-                    select(DatasetScanCache).where(DatasetScanCache.abs_path.in_(chunk))
+                    columns.where(DatasetScanCache.abs_path.in_(chunk))
                 ).all()
-                for row in rows:
-                    found[row.abs_path] = (
-                        row.fingerprint,
-                        row.size_bytes,
-                        row.last_modified,
-                    )
+                for abs_path, *values in rows:
+                    found[abs_path] = tuple(values)
         return found
     except Exception as exc:
         logger.debug(f"_read_scan_cache | cache unavailable, computing instead: {exc}")
@@ -185,30 +207,41 @@ def _read_scan_cache(paths: list[str]) -> Dict[str, tuple]:
 
 
 def _write_scan_cache(entries: list[tuple]) -> None:
-    """Upsert (abs_path, fingerprint, size, last_modified) rows; best-effort."""
+    """Best-effort upsert of Explorer scan-cache rows."""
     if not entries:
         return
 
     try:
+        from sqlalchemy.dialects.sqlite import insert
+
         from .db_models import DatasetScanCache
         from .shared.db import session_scope
 
+        now = datetime.now(timezone.utc)
+        rows = [
+            {
+                "abs_path": abs_path,
+                "fingerprint": fingerprint,
+                "size_bytes": size_bytes,
+                "last_modified": last_modified,
+                "datatree_nodes": datatree_nodes,
+                "updated_at": now,
+            }
+            for abs_path, fingerprint, size_bytes, last_modified, datatree_nodes in entries
+        ]
+        # One statement: a row at a time costs seconds on a first scan of
+        # thousands of datasets.
+        statement = insert(DatasetScanCache)
+        statement = statement.on_conflict_do_update(
+            index_elements=["abs_path"],
+            set_={
+                column: statement.excluded[column]
+                for column in rows[0]
+                if column != "abs_path"
+            },
+        )
         with session_scope() as session:
-            for abs_path, fingerprint, size_bytes, last_modified in entries:
-                row = session.get(DatasetScanCache, abs_path)
-                if row is None:
-                    session.add(
-                        DatasetScanCache(
-                            abs_path=abs_path,
-                            fingerprint=fingerprint,
-                            size_bytes=size_bytes,
-                            last_modified=last_modified,
-                        )
-                    )
-                else:
-                    row.fingerprint = fingerprint
-                    row.size_bytes = size_bytes
-                    row.last_modified = last_modified
+            session.execute(statement, rows)
     except Exception as exc:
         logger.debug(f"_write_scan_cache | could not persist scan cache: {exc}")
 
@@ -440,35 +473,43 @@ def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
         except Exception:
             continue
 
-    # Zarr stores are the only entries whose size and mtime cost more than the
-    # stat we already have, so they are the only ones worth caching.
-    zarr_paths = [
-        str(item) for item, st in dataset_items if stat_module.S_ISDIR(st.st_mode)
+    # Zarr, NetCDF and HDF5 containers are the entries that cost more than the
+    # stat we already have: a zarr store's size and mtime, and whether any of
+    # them is a DataTree, which means reading its metadata.
+    container_paths = [
+        str(item)
+        for item, st in dataset_items
+        if stat_module.S_ISDIR(st.st_mode)
+        or item.suffix.lower() in _DATATREE_FILE_FORMATS
     ]
-    scan_cache = _read_scan_cache(zarr_paths)
+    scan_cache = _read_scan_cache(container_paths, str(path))
     cache_writes: list[tuple] = []
+    unprobed: list[tuple] = []
+    probes_left = DATATREE_PROBE_MINIMUM
+    probe_deadline = time.monotonic() + DATATREE_PROBE_BUDGET
 
     # Create dataset nodes
     for item, st in dataset_items:
         try:
+            item_str = str(item)
+            fingerprint = _store_fingerprint(st)
+            cached = scan_cache.get(item_str)
+            fresh = cached if cached is not None and cached[0] == fingerprint else None
+            needs_write = False
+
             if stat_module.S_ISDIR(st.st_mode):
                 fmt = "zarr"
                 # Size still ships because the Basket displays it.
-                item_str = str(item)
-                fingerprint = _store_fingerprint(st)
-                cached = scan_cache.get(item_str)
-                if cached is not None and cached[0] == fingerprint:
-                    size, last_modified = cached[1], cached[2]
+                if fresh is not None:
+                    size, last_modified = fresh[1], fresh[2]
                 else:
                     size = _get_folder_size(item)
                     last_modified = _get_dataset_last_modified(item, st.st_mtime)
-                    cache_writes.append((item_str, fingerprint, size, last_modified))
+                    needs_write = True
             else:
                 suffix = item.suffix.lower()
-                if suffix == ".nc":
-                    fmt = "netcdf"
-                elif suffix in {".h5", ".hdf5"}:
-                    fmt = "hdf5"
+                if suffix in _DATATREE_FILE_FORMATS:
+                    fmt = _DATATREE_FILE_FORMATS[suffix]
                 elif suffix in {".db", ".sqlite"}:
                     fmt = "sqlite"
                 elif suffix in {".csv", ".txt", ".dat"}:
@@ -480,21 +521,48 @@ def _build_directory_tree_zarr(path: str, max_depth: int = None) -> Dict:
                 size = st.st_size
                 last_modified = st.st_mtime
 
+            datatree_nodes: list = []
+            if fmt in {"zarr", "netcdf", "hdf5"}:
+                datatree_json = fresh[3] if fresh is not None else None
+                if datatree_json is None and (
+                    probes_left > 0 or time.monotonic() < probe_deadline
+                ):
+                    probes_left -= 1
+                    probed = _probe_datatree_nodes(item, fmt)
+                    if probed is not None:
+                        datatree_json = json.dumps(probed)
+                        needs_write = True
+                elif datatree_json is None:
+                    unprobed.append((item_str, fingerprint, size, last_modified, fmt))
+                if datatree_json and datatree_json != "[]":
+                    datatree_nodes = json.loads(datatree_json)
+                if needs_write:
+                    cache_writes.append(
+                        (item_str, fingerprint, size, last_modified, datatree_json)
+                    )
+
+            if datatree_nodes:
+                nodes[item_str] = _datatree_folder_node(
+                    item, fmt, datatree_nodes, _iso_from_mtime(st.st_mtime)
+                )
+                continue
+
             dataset_node = {
-                "id": f"file-{hash(str(item)) % 100000}",
+                "id": f"file-{hash(item_str) % 100000}",
                 "name": item.name,
-                "path": str(item),
+                "path": item_str,
                 "type": "file",
                 "size": size,
                 "timestamp": _iso_from_mtime(st.st_mtime),
                 "tags": [fmt],
                 "lastModified": last_modified,
             }
-            nodes[str(item)] = dataset_node
+            nodes[item_str] = dataset_node
         except Exception:
             continue
 
     _write_scan_cache(cache_writes)
+    _probe_datatrees_in_background(unprobed)
 
     # Use per-parent sets to build relationships in O(N).
     seen_child_paths: Dict[str, set] = {}
@@ -763,34 +831,81 @@ def _build_sqlite_tree(db_path: Path) -> Dict[str, object]:
     }
 
 
-def _build_datatree_tree(store_path: Path) -> Dict[str, object]:
-    """Build a virtual tree whose dataset leaves use ``#dt_path=`` references."""
-    if not store_path.exists():
-        raise FileNotFoundError(f"DataTree path does not exist: {store_path}")
+_DATATREE_FILE_FORMATS = {".nc": "netcdf", ".h5": "hdf5", ".hdf5": "hdf5"}
 
-    fmt_by_suffix = {
-        ".zarr": "zarr",
-        ".nc": "netcdf",
-        ".h5": "hdf5",
-        ".hdf5": "hdf5",
-    }
-    suffix = store_path.suffix.lower()
-    if suffix not in fmt_by_suffix:
-        raise ValueError(f"Not a DataTree-capable path: {store_path}")
-    fmt = fmt_by_suffix[suffix]
+# Seconds a scan may spend checking containers for DataTree groups. Opening an
+# HDF5 file costs about half a millisecond locally and far more on a network
+# drive, so the rest are checked in the background and show from the next scan.
+DATATREE_PROBE_BUDGET = 0.25
+# The first check in a session also pays for importing h5py, so a small folder
+# gets its first few checked whatever they cost.
+DATATREE_PROBE_MINIMUM = 8
+_datatree_probe_job: Optional[Future] = None
+
+
+def _probe_datatrees_in_background(entries: list[tuple]) -> None:
+    """Check containers a scan had no time for, one job at a time."""
+    global _datatree_probe_job
+    if not entries or (
+        _datatree_probe_job is not None and not _datatree_probe_job.done()
+    ):
+        return
+
+    def probe() -> None:
+        try:
+            rows = []
+            for item_str, fingerprint, size, last_modified, fmt in entries:
+                # On a network drive this can take minutes; don't hold up shutdown.
+                if background.is_shut_down():
+                    break
+                nodes = _probe_datatree_nodes(Path(item_str), fmt)
+                if nodes is not None:
+                    rows.append(
+                        (item_str, fingerprint, size, last_modified, json.dumps(nodes))
+                    )
+                if len(rows) >= 200:
+                    _write_scan_cache(rows)
+                    rows = []
+            _write_scan_cache(rows)
+        except Exception:
+            logger.exception("Checking containers for DataTree groups failed")
+
+    _datatree_probe_job = background.submit(probe)
+
+
+def _probe_datatree_nodes(store_path: Path, fmt: str) -> Optional[list]:
+    """Return DataTree nodes, ``[]`` for one dataset, or ``None`` on read failure."""
+    if not has_datatree_groups(store_path, fmt):
+        return []
+    try:
+        nodes = list_datatree_nodes(store_path)
+    except Exception as exc:
+        logger.debug(f"_probe_datatree_nodes | could not list {store_path}: {exc}")
+        return None
+    return nodes if any(str(n.get("path") or "/") != "/" for n in nodes) else []
+
+
+def _datatree_folder_node(
+    store_path: Path, fmt: str, nodes: list, timestamp: str
+) -> Dict[str, object]:
+    """Build a container's virtual tree; dataset leaves use ``#dt_path=`` references."""
 
     def _dt_node_id(prefix: str, value: str) -> str:
         digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
         return f"{prefix}-{digest}"
 
-    nodes = list_datatree_nodes(store_path)
-    if not nodes:
-        raise ValueError(f"No nodes found in DataTree store: {store_path}")
-    non_root_nodes = [n for n in nodes if str(n.get("path") or "/") != "/"]
-    if not non_root_nodes:
-        raise ValueError(f"Path is not a hierarchical DataTree container: {store_path}")
+    def _leaf(node_path: str, name: str) -> Dict[str, object]:
+        ref = f"{store_path}#dt_path={node_path}"
+        return {
+            "id": _dt_node_id("file-datatree-node", ref),
+            "name": name,
+            "path": ref,
+            "type": "file",
+            "timestamp": timestamp,
+            "tags": ["datatree-node", fmt],
+            "metadata": {"dt_path": node_path},
+        }
 
-    timestamp = _get_file_timestamp(store_path)
     root: Dict[str, object] = {
         "id": _dt_node_id("folder-datatree", str(store_path)),
         "name": store_path.name,
@@ -801,41 +916,43 @@ def _build_datatree_tree(store_path: Path) -> Dict[str, object]:
         "children": [],
     }
 
+    def _parent_path(node_path: str) -> str:
+        parent = str(Path(node_path).parent).replace("\\", "/")
+        return "/" if parent in {".", ""} else parent
+
+    node_paths = {str(n.get("path") or "/") for n in nodes}
+    has_children = {_parent_path(p) for p in node_paths if p != "/"}
+
     by_path: dict[str, Dict[str, object]] = {"/": root}
     for node in nodes:
         node_path = str(node.get("path") or "/")
-        if node_path == "/":
-            continue
         node_name = str(node.get("name") or Path(node_path).name or "node")
         has_dataset = bool(node.get("has_dataset"))
-        created: Dict[str, object] = {
-            "id": _dt_node_id(
-                "file-datatree-node", f"{store_path}#dt_path={node_path}"
-            ),
-            "name": node_name,
-            # Keep non-leaf path on container path to avoid invalid direct navigation.
-            "path": f"{store_path}#dt_path={node_path}"
-            if has_dataset
-            else str(store_path),
-            "type": "file" if has_dataset else "folder",
-            "timestamp": timestamp,
-            "tags": ["datatree-node", fmt],
-        }
-        if has_dataset:
-            created["metadata"] = {"dt_path": node_path}
+        if node_path == "/":
+            folder = root
+        elif node_path in has_children or not has_dataset:
+            # Groups get their own path so they can be marked apart from the file.
+            group_ref = f"{store_path}#dt_group={node_path}"
+            folder = {
+                "id": _dt_node_id("folder-datatree-node", group_ref),
+                "name": node_name,
+                "path": group_ref,
+                "type": "folder",
+                "timestamp": timestamp,
+                "tags": ["datatree-node", fmt],
+                "children": [],
+            }
+            by_path[node_path] = folder
         else:
-            created["children"] = []
-        by_path[node_path] = created
+            by_path[node_path] = _leaf(node_path, node_name)
+            continue
+        if has_dataset:
+            folder["children"].append(_leaf(node_path, node_name))
 
     for node_path in sorted(by_path.keys(), key=lambda p: (p.count("/"), p)):
         if node_path == "/":
             continue
-        parent_path = str(Path(node_path).parent).replace("\\", "/")
-        if parent_path == ".":
-            parent_path = "/"
-        parent = by_path.get(parent_path, root)
-        if parent.get("children") is None:
-            parent["children"] = []
+        parent = by_path.get(_parent_path(node_path), root)
         parent["children"].append(by_path[node_path])
 
     def _sort_children(node: Dict[str, object]) -> None:
@@ -849,6 +966,27 @@ def _build_datatree_tree(store_path: Path) -> Dict[str, object]:
 
     _sort_children(root)
     return root
+
+
+def _build_datatree_tree(store_path: Path) -> Dict[str, object]:
+    """Build the virtual tree of a container opened directly in the Explorer."""
+    if not store_path.exists():
+        raise FileNotFoundError(f"DataTree path does not exist: {store_path}")
+
+    suffix = store_path.suffix.lower()
+    fmt = "zarr" if suffix == ".zarr" else _DATATREE_FILE_FORMATS.get(suffix)
+    if fmt is None:
+        raise ValueError(f"Not a DataTree-capable path: {store_path}")
+
+    nodes = list_datatree_nodes(store_path)
+    if not nodes:
+        raise ValueError(f"No nodes found in DataTree store: {store_path}")
+    if not any(str(n.get("path") or "/") != "/" for n in nodes):
+        raise ValueError(f"Path is not a hierarchical DataTree container: {store_path}")
+
+    return _datatree_folder_node(
+        store_path, fmt, nodes, _get_file_timestamp(store_path)
+    )
 
 
 @router.post("/load-live/")

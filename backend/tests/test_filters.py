@@ -1131,6 +1131,15 @@ def test_a_file_plot_is_titled_by_its_file_and_folder():
     assert title["subtitle"]["text"] == "cooldown-1"
 
 
+def test_a_datatree_node_plot_is_titled_by_its_group_and_file():
+    title = figures.plot_title_layout(
+        {"path": "/data/cooldown-1/pinchoff.nc#dt_path=/LP_Pinchoff"}, "fallback"
+    )
+
+    assert title["text"] == "LP_Pinchoff"
+    assert title["subtitle"]["text"] == "pinchoff.nc"
+
+
 def test_a_quantify_plot_is_titled_by_its_name_and_tuid():
     title = figures.plot_title_layout(
         {"tuid": "20260911-120000-123-abcdef", "name": "Rabi", "path": "/q/x.hdf5"},

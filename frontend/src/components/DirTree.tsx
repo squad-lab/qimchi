@@ -60,6 +60,7 @@ import {
   Trash2,
   Tag as TagIcon,
   Grid3x3,
+  ListTree,
 } from "lucide-react";
 
 // Local imports
@@ -1120,10 +1121,12 @@ const DirTree = ({
     console.log("Double clicked node:", node.id);
 
     if (node.type === "folder") {
-      const isQcodesDateFolder =
-        node.tags?.includes("qcodes-date") === true || node.path.includes("#date=");
-      if (isQcodesDateFolder) {
-        // Virtual date folders inside sqlite/qcodes trees are only for visual grouping.
+      const isVirtualFolder =
+        node.tags?.includes("qcodes-date") === true ||
+        node.path.includes("#date=") ||
+        node.path.includes("#dt_group=");
+      if (isVirtualFolder) {
+        // QCoDeS dates and DataTree groups are virtual folders inside a file.
         // They should not mutate the explorer path.
         return;
       }
@@ -2189,6 +2192,7 @@ const TreeItemComponent = ({
   const isFocused = item.isFocused();
   const isSelected = item.isSelected();
   const isFolder = item.isFolder();
+  const isFileContainer = isFolder && !nodeData.path.includes("#") && isDatasetPath(nodeData.path);
   const isSqliteContainerNode =
     isSqliteContainerPath(nodeData.path) && !nodeData.path.includes("#");
   const isDatasetLeafNode = isDatasetNode(nodeData) && !isSqliteContainerNode;
@@ -2504,7 +2508,10 @@ const TreeItemComponent = ({
 
         {/* File/Folder Icon */}
         <span className="mr-2 shrink-0 text-sm">
-          {isFolder ? (
+          {/* DataTrees and QCoDeS databases open like folders but keep format-specific icons. */}
+          {isFileContainer && nodeData.tags?.includes("datatree") ? (
+            <ListTree size={16} className="text-[var(--qimchi-icon-datatree)]" />
+          ) : isFolder && !isFileContainer ? (
             isExpanded ? (
               <FolderOpenIcon size={16} className="text-blue-500" />
             ) : (

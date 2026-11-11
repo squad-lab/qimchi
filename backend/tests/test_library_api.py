@@ -179,8 +179,8 @@ async def test_library_routes_report_unknown_measurements_and_register_failures(
 
 @pytest.mark.asyncio
 async def test_register_without_an_identity_is_a_safe_noop(monkeypatch):
-    async def no_identity(*_args):
-        return None, None, {}
+    async def no_identity(path, _attrs):
+        return None, None, {}, path
 
     monkeypatch.setattr(library, "_resolve", no_identity)
     result = await library.register(library.RegisterRequest(path="unreadable.nc"))

@@ -107,6 +107,12 @@ def _source_title(meta: dict) -> tuple[str, str]:
 
     if path.startswith("memory://"):
         return path.removeprefix("memory://"), ""
+    if "#dt_path=" in path:
+        store, node = path.split("#dt_path=", 1)
+        source = Path(store)
+        if node.strip("/"):
+            return node.strip("/"), source.name
+        return source.name, source.parent.name
     if path:
         source = Path(path)
         return source.name, source.parent.name

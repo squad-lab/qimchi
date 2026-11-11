@@ -26,6 +26,7 @@ import {
   Tag as TagIcon,
   Settings as SettingsIcon,
   Grid3x3,
+  ListTree,
   Compass,
   AlertTriangle,
 } from "lucide-react";
@@ -133,13 +134,15 @@ const ExplorerHelp = memo(() => (
           <span className="text-xs font-semibold">MATLAB (.mat)</span>
         </div>
         <div className="flex items-center gap-2 p-2 bg-fuchsia-50/50 rounded-lg border border-fuchsia-100">
-          <FileArchive size={16} className="text-fuchsia-600" />
+          <ListTree size={16} className="text-fuchsia-600" />
           <span className="text-xs font-semibold">xarray DataTree</span>
         </div>
       </div>
       <p className="text-xs text-gray-500">
         Qimchi recognises Quantify runs inside HDF5 datasets. They can also be streamed live with
-        Qimchi-Connect. DataTree nodes can be browsed inside Zarr, NetCDF, and HDF5 containers.
+        Qimchi-Connect. Zarr, NetCDF and HDF5 files that keep their data in groups (xarray
+        DataTrees, such as Elicit&apos;s) get this icon and open like folders, with one entry per
+        group.
       </p>
       <p className="text-xs text-gray-500 mt-2">
         QCoDeS databases open as folders, with runs grouped by start date. Repeated sweeps can gain

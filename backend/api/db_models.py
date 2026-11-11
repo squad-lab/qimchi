@@ -182,7 +182,9 @@ class DatasetScanCache(SQLModel, table=True):
     """
     Node-local Explorer scan cache keyed by absolute path.
 
-    Size and mtime remain valid while the store fingerprint matches.
+    Size, mtime and DataTree nodes remain valid while the store fingerprint
+    matches. ``datatree_nodes`` stores the container's nodes, ``[]`` for a
+    single dataset, or NULL before the container has been checked.
     """
 
     __tablename__ = "dataset_scan_cache"
@@ -191,4 +193,5 @@ class DatasetScanCache(SQLModel, table=True):
     fingerprint: str
     size_bytes: int = 0
     last_modified: float = 0.0
+    datatree_nodes: str | None = None
     updated_at: datetime = Field(default_factory=_utcnow)

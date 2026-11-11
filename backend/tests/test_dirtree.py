@@ -288,8 +288,8 @@ async def test_load_directory_datatree_file_returns_virtual_tree(tmp_path, monke
     group = tree["children"][0]
     assert group["name"] == "group"
     assert group["type"] == "folder"
-    # Non-leaf nodes are visual structuring nodes, not direct dataset refs.
-    assert group["path"] == str(nc_file)
+    # Groups are folders with their own reference, not datasets.
+    assert group["path"] == f"{nc_file}#dt_group=/group"
 
     run_node = group["children"][0]
     assert run_node["type"] == "file"

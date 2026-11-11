@@ -305,13 +305,19 @@ def _lean_attrs(ds) -> dict:
     return out
 
 
+def _canonical_path(path: str, dataset) -> str:
+    """Record a bare path that opened a DataTree's only group under that group."""
+    source = str(getattr(dataset, "attrs", {}).get("path") or "")
+    return source if "#" not in path and "#dt_path=" in source else path
+
+
 async def _resolve(
     path: str, attrs: dict | None
-) -> tuple[str | None, str | None, dict | None]:
+) -> tuple[str | None, str | None, dict | None, str]:
     """Resolve dataset identity from attrs, loading data only when needed."""
     uuid, origin = resolve_from_attrs(attrs)
     if uuid:
-        return uuid, origin, attrs
+        return uuid, origin, attrs, path
 
     # Imported lazily to avoid a module-load cycle with the dirtree router.
     from .dirtree import _load_dataset_for_metadata
@@ -322,18 +328,18 @@ async def _resolve(
         logger.debug(
             "library: could not load %s to resolve identity", path, exc_info=True
         )
-        return None, None, attrs
+        return None, None, attrs, path
 
     if attrs is None:
         attrs = _lean_attrs(ds)
     uuid, origin = await asyncio.to_thread(resolve_identity, attrs, ds)
-    return uuid, origin, attrs
+    return uuid, origin, attrs, _canonical_path(path, ds)
 
 
-def library_metadata(dataset_path: Path, dataset_uuid: str | None = None) -> dict:
+def library_metadata(dataset_path: Path | str, dataset_uuid: str | None = None) -> dict:
     """Return export metadata, including library state when available."""
     if dataset_uuid is None:
-        dataset_uuid = dataset_path.stem
+        dataset_uuid = Path(dataset_path).stem
 
     meta: dict = {
         "dataset_uuid": dataset_uuid,
@@ -393,7 +399,8 @@ _ATTRS_CACHE_VERSION = 2
 def _fingerprint(path: str) -> str | None:
     """Cheap change signature for a dataset (None if it can't be stat'd)."""
     try:
-        st = Path(path).stat()
+        # A DataTree group changes only when its container does.
+        st = Path(path.partition("#dt_path=")[0]).stat()
     except OSError:
         return None
     return f"{st.st_mtime_ns}:{st.st_size}:v{_ATTRS_CACHE_VERSION}"
@@ -474,6 +481,7 @@ async def store_cached_attrs(path: str, attrs: dict, dataset=None) -> None:
     """Cache attrs and register the measurement without failing metadata loads."""
     if not attrs:
         return
+    path = _canonical_path(path, dataset)
     try:
         database_uuid = await asyncio.to_thread(_ensure_qcodes_database, path, attrs)
         if database_uuid:
@@ -571,7 +579,13 @@ def _qcodes_date_folder_runs(folder_path: str) -> list[str]:
 def _unheart_folder_descendants(session: Session, folder_path: str) -> list[str]:
     """Clear descendant hearts in one statement and return their paths."""
     base = folder_path.rstrip("/\\")
-    prefixes = (f"{base}/", f"{base}\\", f"{base}#")
+    prefixes = [f"{base}/", f"{base}\\", f"{base}#"]
+    exact = _qcodes_date_folder_runs(base)
+    store, separator, group = base.partition("#dt_group=")
+    if separator:
+        # A DataTree group's datasets are addressed by #dt_path=, not by its own path.
+        exact.append(f"{store}#dt_path={group}")
+        prefixes.append(f"{store}#dt_path={group}/")
     descendants = session.exec(
         select(Measurement.uuid, Measurement.abs_path)
         .join(MeasurementState, MeasurementState.uuid == Measurement.uuid)
@@ -583,7 +597,7 @@ def _unheart_folder_descendants(session: Session, folder_path: str) -> list[str]
                     Measurement.abs_path.startswith(prefix, autoescape=True)
                     for prefix in prefixes
                 ),
-                Measurement.abs_path.in_(_qcodes_date_folder_runs(base)),
+                Measurement.abs_path.in_(exact),
             ),
         )
     ).all()
@@ -932,8 +946,8 @@ async def register(req: RegisterRequest) -> StateOut:
     try:
         if req.folder:
             return await asyncio.to_thread(_register_folder, req.path)
-        uuid, origin, attrs = await _resolve(req.path, req.attrs)
-        return await asyncio.to_thread(_register, req.path, attrs, uuid, origin)
+        uuid, origin, attrs, path = await _resolve(req.path, req.attrs)
+        return await asyncio.to_thread(_register, path, attrs, uuid, origin)
     except HTTPException:
         raise
     except Exception:

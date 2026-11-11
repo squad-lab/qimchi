@@ -1054,7 +1054,7 @@ def _open_xarray_datatree(path: Path, fmt: str) -> xr.DataTree:
 
 
 def _extract_dataset_from_datatree(dtree: Any, node_path: Optional[str]) -> xr.Dataset:
-    """Return the Dataset at a DataTree node path."""
+    """Return a DataTree node with its used coordinates and inherited attributes."""
     selected_path = node_path or "/"
     try:
         node = dtree[selected_path] if selected_path != "/" else dtree
@@ -1063,13 +1063,155 @@ def _extract_dataset_from_datatree(dtree: Any, node_path: Optional[str]) -> xr.D
             f"DataTree node not found at '{selected_path}'"
         ) from exc
 
-    dataset = getattr(node, "ds", None)
-    if dataset is None:
+    try:
+        dataset = node.to_dataset()
+        own_coords = node.to_dataset(inherit=False).coords
+    except Exception as exc:
         raise DatasetKindMismatchError(
             f"DataTree node '{selected_path}' has no dataset payload"
+        ) from exc
+
+    used_dims = {dim for var in dataset.data_vars.values() for dim in var.dims}
+    unused_inherited = [
+        name
+        for name in dataset.coords
+        if name not in own_coords and not set(dataset[name].dims) <= used_dims
+    ]
+    dataset = dataset.drop_vars(unused_inherited)
+
+    attrs: dict = {}
+    for ancestor in reversed(node.parents):
+        attrs.update(ancestor.attrs)
+    attrs.update(node.attrs)
+    dataset.attrs = attrs
+    return dataset
+
+
+def _read_json_file(path: Path) -> dict:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _zarr_has_child_groups(path: Path) -> bool:
+    root_meta = path / "zarr.json"
+    if root_meta.is_file():
+        consolidated = (
+            _read_json_file(root_meta).get("consolidated_metadata") or {}
+        ).get("metadata")
+        if isinstance(consolidated, dict):
+            return any(
+                isinstance(meta, dict) and meta.get("node_type") == "group"
+                for meta in consolidated.values()
+            )
+        return any(
+            _read_json_file(child / "zarr.json").get("node_type") == "group"
+            for child in path.iterdir()
+            if child.is_dir()
         )
 
-    return dataset
+    consolidated_v2 = path / ".zmetadata"
+    if consolidated_v2.is_file():
+        keys = _read_json_file(consolidated_v2).get("metadata") or {}
+        return any(key.endswith("/.zgroup") for key in keys)
+    return any(
+        (child / ".zgroup").is_file() for child in path.iterdir() if child.is_dir()
+    )
+
+
+def _hdf5_has_child_groups(path: Path) -> bool:
+    try:
+        import h5py
+    except ImportError:
+        return False
+    try:
+        # h5py's low-level calls cost a quarter less than its File API here,
+        # which adds up over a folder of thousands of files.
+        with h5py.File(path, "r", locking=False) as handle:
+            names: list[bytes] = []
+            handle.id.links.iterate(names.append)
+            return any(
+                h5py.h5o.get_info(handle.id, name).type == h5py.h5o.TYPE_GROUP
+                for name in names
+            )
+    except OSError:
+        # netCDF3 files are not HDF5 and cannot hold groups.
+        return False
+
+
+def _hdf5_text(value: Any) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    return str(value)
+
+
+def _netcdf4_datatree_nodes(path: Path) -> Optional[list[dict[str, Any]]]:
+    """List netCDF-4 groups from HDF5 metadata without opening the DataTree."""
+    import h5py
+
+    with h5py.File(path, "r", locking=False) as handle:
+        if "_NCProperties" not in handle.attrs:
+            return None
+        nodes: list[dict[str, Any]] = []
+        pending: list[tuple[str, Any]] = [("/", handle)]
+        while pending:
+            node_path, group = pending.pop(0)
+            variables: list[str] = []
+            coordinates = set(_hdf5_text(group.attrs.get("coordinates", "")).split())
+            for name, item in group.items():
+                if isinstance(item, h5py.Group):
+                    pending.append((f"{node_path.rstrip('/')}/{name}", item))
+                elif _hdf5_text(item.attrs.get("CLASS", "")) != "DIMENSION_SCALE":
+                    variables.append(name)
+                    coordinates.update(
+                        _hdf5_text(item.attrs.get("coordinates", "")).split()
+                    )
+            nodes.append(
+                {
+                    "path": node_path,
+                    "name": "root" if node_path == "/" else node_path.rsplit("/", 1)[1],
+                    "has_dataset": any(v not in coordinates for v in variables),
+                }
+            )
+        return nodes
+
+
+def has_datatree_groups(path: str | Path, fmt: Optional[str] = None) -> bool:
+    """Check container metadata for groups below the root."""
+    path = Path(path)
+    fmt = fmt or _detect_filesystem_format(path)
+    try:
+        if fmt == "zarr":
+            return _zarr_has_child_groups(path)
+        if fmt in {"netcdf", "hdf5"}:
+            return _hdf5_has_child_groups(path)
+    except OSError:
+        pass
+    return False
+
+
+def _sole_datatree_group(dataset: xr.Dataset, path: Path, fmt: str) -> Optional[str]:
+    """Return the only populated group when a DataTree root is empty.
+
+    Returns ``None`` when *dataset* is not an empty DataTree root. A tree with
+    one populated group opens that group directly from its bare path.
+
+    Raises:
+        DatasetKindMismatchError: If the tree has several populated groups.
+    """
+    if dataset.data_vars or not has_datatree_groups(path, fmt):
+        return None
+    groups = [n["path"] for n in list_datatree_nodes(path) if n["has_dataset"]]
+    if len(groups) == 1:
+        return f"{path}#dt_path={groups[0]}"
+    raise DatasetKindMismatchError(
+        f"'{path.name}' keeps its data in groups (an xarray DataTree), so there "
+        "is nothing to plot at its top level. Open it in the Explorer and "
+        "choose one of its groups."
+    )
 
 
 def list_datatree_nodes(ref: str | Path) -> list[dict[str, Any]]:
@@ -1080,6 +1222,13 @@ def list_datatree_nodes(ref: str | Path) -> list[dict[str, Any]]:
         raise DatasetResolutionError(f"DataTree path does not exist: {path}")
 
     fmt = _detect_filesystem_format(path)
+    if fmt in {"netcdf", "hdf5"}:
+        try:
+            nodes = _netcdf4_datatree_nodes(path)
+        except (ImportError, OSError):
+            nodes = None
+        if nodes is not None:
+            return nodes
     dtree = _open_xarray_datatree(path, fmt)
     try:
         subtree = getattr(dtree, "subtree", None)
@@ -1090,8 +1239,8 @@ def list_datatree_nodes(ref: str | Path) -> list[dict[str, Any]]:
             node_name = str(getattr(node, "name", "") or "")
             if not node_name:
                 node_name = "root" if node_path == "/" else Path(node_path).name
-            node_ds = getattr(node, "ds", None)
-            has_dataset = node_ds is not None
+            # Every node has a (possibly empty) dataset; only data makes it plottable.
+            has_dataset = len(node.data_vars) > 0
             out.append(
                 {
                     "path": node_path,
@@ -1645,6 +1794,9 @@ class NetcdfHdf5Provider:
 
         fmt = _detect_filesystem_format(path)
         dataset = _load_xarray_dataset(path, fmt)
+        group_ref = _sole_datatree_group(dataset, path, fmt)
+        if group_ref is not None:
+            return DataTreeProvider().load_sync(group_ref)
         dataset, fmt = _prepare_quantify_dataset(dataset, fmt)
         _annotate_dataset(
             dataset,
@@ -1708,7 +1860,7 @@ class DataTreeProvider:
         fmt = _detect_filesystem_format(path)
         dtree = _open_xarray_datatree(path, fmt)
         try:
-            dataset = _extract_dataset_from_datatree(dtree, node_path)
+            dataset = _extract_dataset_from_datatree(dtree, node_path).load()
             _annotate_dataset(
                 dataset,
                 source_ref=ref,
@@ -1767,6 +1919,9 @@ class FilesystemXarrayProvider:
             )
 
         dataset = _load_xarray_dataset(path, fmt)
+        group_ref = _sole_datatree_group(dataset, path, fmt)
+        if group_ref is not None:
+            return DataTreeProvider().load_sync(group_ref)
         dataset, fmt = _prepare_quantify_dataset(dataset, fmt)
         _annotate_dataset(
             dataset,

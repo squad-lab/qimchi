@@ -148,7 +148,9 @@ def _note_db_identity(
                 detail="QCoDeS notes require the measurement UUID registered in Qimchi",
             )
         return clean_uuid, run_id or path_run_id or 0
-    return clean_uuid or Path(path_ref).stem, run_id or 0
+    store, group = _split_datatree_group(Path(path_ref))
+    fallback = f"{store.stem}#{group}" if group is not None else Path(path_ref).stem
+    return clean_uuid or fallback, run_id or 0
 
 
 def _resolve_note_path(
@@ -296,10 +298,26 @@ def _measurement_notes_paths(path: Path) -> Tuple[str, Path, Path]:
         Tuple[str, Path, Path]: (dataset_uuid, notes_dir, notes_path)
 
     """
+    store, group = _split_datatree_group(path)
+    if group is not None:
+        # One notes folder per file, as for any dataset, with a note per group.
+        notes_dir = store.parent / store.stem
+        return group, notes_dir, notes_dir / f"{group}.md"
+
     dataset_uuid = path.stem
     notes_dir = path.parent / dataset_uuid
     notes_path = notes_dir / f"{dataset_uuid}.md"
     return dataset_uuid, notes_dir, notes_path
+
+
+def _split_datatree_group(path: Path) -> Tuple[Path, str | None]:
+    """Split a ``file#dt_path=/group`` reference into the file and a group name."""
+    store, separator, group = str(path).partition("#dt_path=")
+    if not separator:
+        return path, None
+    # Path() turns the group's slashes into backslashes on Windows.
+    parts = [part for part in group.replace("\\", "/").split("/") if part]
+    return Path(store), "_".join(parts) or "root"
 
 
 def _infer_sample_dir_from_measurement_path(path: Path) -> Path:
@@ -308,6 +326,7 @@ def _infer_sample_dir_from_measurement_path(path: Path) -> Path:
     .../<sample>/<experiment>/<measurement>.zarr
 
     """
+    path, _ = _split_datatree_group(path)
     if path.parent and path.parent.parent:
         return path.parent.parent
     if path.parent:
@@ -321,6 +340,7 @@ def _read_dataset_names(path: Path) -> Tuple[str | None, str | None]:
 
     """
     try:
+        path, _ = _split_datatree_group(path)
         fmt = _detect_filesystem_format(path)
         ds = load_xarray_dataset(path, fmt)
         attrs = ds.attrs if hasattr(ds, "attrs") else {}

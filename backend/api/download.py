@@ -22,8 +22,11 @@ from .data_loader import (
     DataLoaderError,
     _load_qcodes_xarray_dataset,
     _parse_qcodes_reference,
+    has_datatree_groups,
     is_memory_reference,
+    list_datatree_nodes,
     list_qcodes_runs,
+    load_dataset_sync,
     resolve_to_disk_path,
 )
 from .dirtree import qcodes_run_day
@@ -31,6 +34,7 @@ from .logger import logger
 
 # Local imports
 from .models import PathData, PathsData
+from .shared.identity import resolve_identity
 
 router = APIRouter()
 
@@ -47,10 +51,15 @@ SQLITE_SIDE_FILES = ("-wal", "-shm", "-journal")
 
 DATASET_EXTENSIONS = {".zarr", ".nc", ".h5", ".hdf5", ".csv", ".txt", ".dat", ".mat"}
 
+# Attributes the loader adds to record where a dataset came from.
+LOADER_ATTRS = ("path", "actual_path", "loaded_from")
 DATASET_GLOBS = [f"*{ext}" for ext in DATASET_EXTENSIONS]
 
 # QCoDeS runs to download, as run IDs per database.
 QcodesRuns = dict[Path, set[int]]
+
+# DataTree groups to download, as group paths per file.
+DatatreeGroups = dict[Path, set[str]]
 
 
 def _resolve_reference(path_ref: str) -> str:
@@ -204,6 +213,91 @@ def _write_qcodes_runs(zipf, runs: QcodesRuns, work_dir: Path) -> int:
     return count
 
 
+def _datatree_selection(ref: str) -> tuple[Path, list[str], str] | None:
+    """Resolve a DataTree reference to a file and selected group paths.
+
+    Args:
+        ref (str): An Explorer reference such as ``tree.nc#dt_path=/sweep`` or
+            ``tree.nc#dt_group=/cooldown``.
+
+    Returns:
+        tuple[Path, list[str], str] | None: The file, selected group paths and
+            archive name, or ``None`` if *ref* is not a DataTree reference.
+
+    Raises:
+        HTTPException: If the file or selected groups cannot be found.
+    """
+    store, separator, group = ref.partition("#dt_path=")
+    is_folder = not separator
+    if is_folder:
+        store, separator, group = ref.partition("#dt_group=")
+        if not separator:
+            return None
+    store_path = Path(store)
+    if not store_path.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {store_path}")
+    name = f"{store_path.stem}_{_group_stem(group)}"
+    if not is_folder:
+        return store_path, [group], name
+
+    folder = group.rstrip("/")
+    try:
+        nodes = list_datatree_nodes(store_path)
+    except DataLoaderError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    groups = [
+        node["path"]
+        for node in nodes
+        if node["has_dataset"]
+        and (node["path"] == folder or node["path"].startswith(f"{folder}/"))
+    ]
+    if not groups:
+        raise HTTPException(
+            status_code=404, detail=f"No datasets in {folder} of {store_path.name}"
+        )
+    return store_path, groups, name
+
+
+def _group_stem(group: str) -> str:
+    """Name a DataTree group's files after its path, as its notes are."""
+    return _safe_name("_".join(part for part in group.split("/") if part) or "root")
+
+
+def _write_datatree_groups(zipf, groups: DatatreeGroups, work_dir: Path) -> None:
+    """Write selected DataTree groups as NetCDF files in an open archive.
+
+    Each group includes its inherited attributes, library record and note.
+
+    Args:
+        zipf: The open archive.
+        groups (DatatreeGroups): Group paths grouped by source file.
+        work_dir (Path): Scratch directory for the NetCDF files.
+    """
+    from .notes import _measurement_notes_paths
+
+    for store_path, group_paths in groups.items():
+        prefix = Path(store_path.stem)
+        for group in sorted(group_paths):
+            ref = f"{store_path}#dt_path={group}"
+            stem = _group_stem(group)
+            target = work_dir / "group.nc"
+            dataset = load_dataset_sync(ref)
+            try:
+                uuid, _ = resolve_identity(None, dataset)
+                for key in LOADER_ATTRS:
+                    dataset.attrs.pop(key, None)
+                _write_netcdf(dataset, target)
+            finally:
+                dataset.close()
+            zipf.write(target, prefix / f"{stem}.nc")
+            target.unlink()
+            # A string, since Path() would turn the group's slashes around on Windows.
+            _write_library_sidecar(zipf, ref, prefix, dataset_uuid=uuid, name=stem)
+            note = _measurement_notes_paths(Path(ref))[2]
+            if note.is_file():
+                zipf.write(note, prefix / f"{stem}.md")
+
+
 def _snapshot_sqlite(source: Path, target: Path) -> None:
     """Copy a SQLite database through SQLite, so its ``-wal`` content comes too."""
     src = sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True)
@@ -257,7 +351,7 @@ def _write_tree(zipf, root: Path, arc_root: Path, work_dir: Path) -> None:
 
 def _write_library_sidecar(
     zipf,
-    dataset_path: Path,
+    dataset_path: Path | str,
     prefix: Path,
     dataset_uuid: str | None = None,
     name: str | None = None,
@@ -276,7 +370,7 @@ def _write_library_sidecar(
 
     Args:
         zipf: The open archive.
-        dataset_path (Path): Dataset on disk the record describes.
+        dataset_path (Path | str): Dataset on disk the record describes.
         prefix (Path): Archive folder to write into, matching where this
             endpoint puts that dataset's notes.
         dataset_uuid (str | None): The dataset's UUID, when its file name is
@@ -288,7 +382,7 @@ def _write_library_sidecar(
         from .library import library_metadata
 
         record = library_metadata(dataset_path, dataset_uuid)
-        arcname = prefix / f"{name or dataset_path.stem}{LIBRARY_SIDECAR_SUFFIX}"
+        arcname = prefix / f"{name or Path(dataset_path).stem}{LIBRARY_SIDECAR_SUFFIX}"
         zipf.writestr(str(arcname), json.dumps(record, indent=2))
     except Exception as exc:
         # Annotations are a bonus; losing them must never lose the download.
@@ -423,11 +517,25 @@ async def download_dataset(path: PathData) -> FileResponse:
     return await background.run(_download_dataset, path.path)
 
 
+def _download_datatree_groups(
+    caller: str, store_path: Path, groups: list[str], name: str
+) -> FileResponse:
+    """Download groups of one DataTree as NetCDF files."""
+
+    def fill(zipf, work_dir: Path) -> None:
+        _write_datatree_groups(zipf, {store_path: set(groups)}, work_dir)
+
+    return _archive(caller, f"{name}.zip", fill)
+
+
 def _download_dataset(ref: str) -> FileResponse:
     ref = _resolve_reference(ref)
     selection = _qcodes_selection(ref)
     if selection is not None:
         return _download_qcodes_runs("download_dataset", *selection)
+    groups = _datatree_selection(ref)
+    if groups is not None:
+        return _download_datatree_groups("download_dataset", *groups)
 
     path = Path(ref)
     if not path.exists():
@@ -444,14 +552,20 @@ def _download_dataset(ref: str) -> FileResponse:
     return _archive("download_dataset", f"{path.stem}.zip", fill)
 
 
-def _split_references(caller: str, refs: list[str]) -> tuple[QcodesRuns, list[Path]]:
-    """Separate QCoDeS runs from paths, skipping unavailable ones."""
+def _split_references(
+    caller: str, refs: list[str]
+) -> tuple[QcodesRuns, DatatreeGroups, list[Path]]:
+    """Separate QCoDeS runs and DataTree groups from paths, skipping unavailable ones."""
     runs: QcodesRuns = {}
+    groups: DatatreeGroups = {}
     paths: list[Path] = []
     for ref in refs:
         try:
             resolved = _resolve_reference(ref)
             selection = _qcodes_selection(resolved)
+            group_selection = (
+                _datatree_selection(resolved) if selection is None else None
+            )
         except HTTPException as exc:
             logger.warning(f"{caller} | Unavailable: {ref} ({exc.detail})")
             continue
@@ -459,12 +573,16 @@ def _split_references(caller: str, refs: list[str]) -> tuple[QcodesRuns, list[Pa
             db_path, run_ids, _ = selection
             runs.setdefault(db_path, set()).update(run_ids)
             continue
+        if group_selection is not None:
+            store_path, group_paths, _ = group_selection
+            groups.setdefault(store_path, set()).update(group_paths)
+            continue
         path = Path(resolved)
         if not path.exists():
             logger.warning(f"{caller} | Path does not exist: {path}")
             continue
         paths.append(path)
-    return runs, paths
+    return runs, groups, paths
 
 
 @router.post("/download-selected/")
@@ -488,8 +606,8 @@ async def download_selected_datasets(paths: list[PathData]) -> FileResponse:
 
 def _download_selected_datasets(refs: list[str]) -> FileResponse:
     caller = "download_selected_datasets"
-    runs, valid_paths = _split_references(caller, refs)
-    if not runs and not valid_paths:
+    runs, groups, valid_paths = _split_references(caller, refs)
+    if not runs and not groups and not valid_paths:
         raise HTTPException(status_code=404, detail="No valid paths found")
 
     def fill(zipf, work_dir: Path) -> int:
@@ -499,9 +617,14 @@ def _download_selected_datasets(refs: list[str]) -> FileResponse:
             else:
                 _write_file(zipf, dataset_path, dataset_path.name, work_dir)
             _write_notes(zipf, dataset_path, Path(), work_dir)
+        _write_datatree_groups(zipf, groups, work_dir)
         return _write_qcodes_runs(zipf, runs, work_dir)
 
-    count = len(valid_paths) + sum(len(ids) for ids in runs.values())
+    count = (
+        len(valid_paths)
+        + sum(len(ids) for ids in runs.values())
+        + sum(len(group_paths) for group_paths in groups.values())
+    )
     return _archive(caller, f"selected_datasets_{count}_files.zip", fill)
 
 
@@ -527,10 +650,10 @@ async def download_multiple_datasets(data: PathsData) -> FileResponse:
 
 def _download_multiple_datasets(refs: list[str]) -> FileResponse:
     caller = "download_multiple_datasets"
-    runs, paths = _split_references(caller, refs)
+    runs, groups, paths = _split_references(caller, refs)
     valid_files = [path for path in paths if path.is_file()]
     valid_dirs = [path for path in paths if path.is_dir()]
-    if not runs and not valid_files and not valid_dirs:
+    if not runs and not groups and not valid_files and not valid_dirs:
         raise HTTPException(status_code=404, detail="No valid paths found")
 
     def fill(zipf, work_dir: Path) -> int:
@@ -548,10 +671,14 @@ def _download_multiple_datasets(refs: list[str]) -> FileResponse:
                     for ds_file in dir_path.glob(pattern):
                         _write_notes(zipf, ds_file, Path(dir_path.name), work_dir)
 
+        _write_datatree_groups(zipf, groups, work_dir)
         return _write_qcodes_runs(zipf, runs, work_dir)
 
     item_count = (
-        len(valid_files) + len(valid_dirs) + sum(len(ids) for ids in runs.values())
+        len(valid_files)
+        + len(valid_dirs)
+        + sum(len(ids) for ids in runs.values())
+        + sum(len(group_paths) for group_paths in groups.values())
     )
     return _archive(caller, f"items_{item_count}_files.zip", fill)
 
@@ -579,9 +706,15 @@ def _download_folder(ref: str) -> FileResponse:
     selection = _qcodes_selection(ref)
     if selection is not None:
         return _download_qcodes_runs("download_folder", *selection)
+    groups = _datatree_selection(ref)
+    if groups is not None:
+        return _download_datatree_groups("download_folder", *groups)
 
     path = Path(ref)
     if path.is_file() and path.suffix.lower() in QCODES_SUFFIXES:
+        return _download_dataset(ref)
+    # The Explorer shows a DataTree as a folder; it downloads as the dataset it is.
+    if has_datatree_groups(path):
         return _download_dataset(ref)
 
     if not path.exists() or not path.is_dir():

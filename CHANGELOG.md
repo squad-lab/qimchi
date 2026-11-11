@@ -19,6 +19,9 @@
 - [Fix] Default heat maps skip axis pairs that share one sweep dimension.
 - [Fix] QCoDeS databases and date folders can be hearted, trashed and tagged in the Explorer; their runs follow those folder marks.
 - [Fix] Notifications expire on time while new ones arrive.
+- [Fix] NetCDF, HDF5 and Zarr files containing xarray DataTrees, including Elicit files, open as groups in the Explorer instead of as empty measurements. They keep format-specific icons, inherit file metadata, and use the group and file in plot titles. A file with one group opens that group directly.
+- [Fix] DataTree groups can be hearted, trashed, tagged and noted separately or through their file, like QCoDeS runs. A group downloads as a NetCDF file with its notes and library record; downloading the container still returns the whole file.
+- [Misc] Explorer scans of folders with many Zarr stores are faster the first time.
 - [Misc] Measurement loading and plotting no longer wait behind downloads, image exports, Send to Notes or live-registry checks.
 - [Misc] QCoDeS databases are read with the bundled QCoDeS 0.59, which opens databases up to schema version 9 and upgrades older ones in place.
 - [Misc] The desktop apps and the Docker image run on Python 3.14. Running from source still works with Python 3.13.

@@ -392,6 +392,7 @@ select:not([multiple]) {
   --qimchi-icon-sqlite: #2fa86a;
   --qimchi-icon-csv: #e2803c;
   --qimchi-icon-matlab: #e0567a;
+  --qimchi-icon-datatree: #c454d6;
   --qimchi-icon-generic: #6cb33f;
 }
 
