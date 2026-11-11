@@ -142,7 +142,6 @@ def test_nginx_proxies_every_frontend_api_route_family():
         "/save-notes/",
         "/export-plot-images",
         "/download-folder/",
-        "/dataset-status/",
     )
     missed = [route for route in routes if api_pattern.match(route) is None]
     assert not missed, f"nginx would serve API routes as SPA content: {missed}"

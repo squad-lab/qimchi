@@ -32,7 +32,6 @@ from .data_loader import (
     load_dataset_sync,
     normalize_memory_reference,
     resolve_live_dataset,
-    resolve_to_disk_path,
 )
 from .diagnostics import register_gauge
 from .json_utils import sanitize_for_json
@@ -1299,49 +1298,3 @@ async def get_pinned_parameters(request: PinnedParametersRequest) -> Dict:
     finally:
         if data is not None:
             _close_dataset(data)
-
-
-@router.post("/dataset-status/")
-async def get_dataset_status(data: PathData) -> Dict:
-    """Return a dataset's live status and modification metadata."""
-    try:
-        disk_path = (
-            resolve_to_disk_path(data.path)
-            if data.path.startswith(MEMORY_PROTOCOL)
-            else data.path
-        )
-        path = Path(disk_path)
-
-        if not path.exists():
-            logger.error(f"get_dataset_status | Dataset path does not exist: {path}")
-            raise HTTPException(status_code=404, detail="Dataset not found")
-
-        if path.is_dir():
-            last_modified = _get_dataset_last_modified(path)
-            size = _get_folder_size(path)
-        elif path.is_file():
-            last_modified = path.stat().st_mtime
-            size = path.stat().st_size
-        else:
-            raise HTTPException(status_code=400, detail="Path is not a dataset path")
-
-        return {
-            "success": True,
-            "path": str(path),
-            "last_modified": last_modified,
-            "last_modified_iso": datetime.fromtimestamp(last_modified).isoformat(),
-            "size": size,
-            "timestamp": _get_file_timestamp(path),
-        }
-
-    except HTTPException:
-        logger.error(f"get_dataset_status | HTTPException raised for path: {data.path}")
-        raise
-
-    except Exception as e:
-        logger.error(
-            f"get_dataset_status | Error getting dataset status for {data.path}: {str(e)}"
-        )
-        raise HTTPException(
-            status_code=500, detail=f"Error getting dataset status: {str(e)}"
-        )
