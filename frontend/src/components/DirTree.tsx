@@ -1408,6 +1408,9 @@ const DirTree = ({
     }
   }, [tree, visibleNodes, onSelectNode]);
 
+  useShortcut("dataset-previous", () => handleCycleDataset("prev"));
+  useShortcut("dataset-next", () => handleCycleDataset("next"));
+
   // Global R keybind mapped to refresh-dir in useGlobalShortcuts
   useShortcut("refresh-dir", () => {
     if (path && path.trim() && !isLoading) {
@@ -1688,7 +1691,7 @@ const DirTree = ({
             <Tooltip
               content={
                 isCyclingEnabled()
-                  ? `Previous dataset (${getCurrentDatasetIndex() + 1}/${getTotalDatasets()})`
+                  ? `Previous dataset (${getCurrentDatasetIndex() + 1}/${getTotalDatasets()}) · Alt+↑`
                   : "Add exactly one dataset to basket to enable cycling"
               }
               position="top"
@@ -1707,7 +1710,7 @@ const DirTree = ({
             <Tooltip
               content={
                 isCyclingEnabled()
-                  ? `Next dataset (${getCurrentDatasetIndex() + 1}/${getTotalDatasets()})`
+                  ? `Next dataset (${getCurrentDatasetIndex() + 1}/${getTotalDatasets()}) · Alt+↓`
                   : "Add exactly one dataset to basket to enable cycling"
               }
               position="top"

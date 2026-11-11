@@ -70,3 +70,21 @@ describe("scoped shortcuts", () => {
     expect(plot).not.toHaveBeenCalled();
   });
 });
+
+describe("dataset cycling", () => {
+  it("needs Alt, leaving bare arrows to the tree and LineCut markers", () => {
+    renderHook(() => useGlobalShortcutsInit());
+    const previous = listen("dataset-previous");
+    const next = listen("dataset-next");
+
+    press(document.body, "ArrowUp");
+    press(document.body, "ArrowDown");
+    expect(previous).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+
+    press(document.body, "ArrowUp", { altKey: true });
+    press(document.body, "ArrowDown", { altKey: true });
+    expect(previous).toHaveBeenCalledTimes(1);
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+});

@@ -76,6 +76,8 @@ export type ShortcutAction =
   | "basket-focus-next"
   | "basket-toggle"
   | "basket-select-all"
+  | "dataset-previous"
+  | "dataset-next"
   | "toggle-help"
   | "toggle-settings"
   | "escape";
@@ -142,6 +144,8 @@ export const KEYBOARD_SHORTCUTS: Record<string, ShortcutConfig | ShortcutConfig[
     { action: "toggle-help", shift: true }, // Shift+H
   ],
   delete: { action: "selected-remove-plot" },
+  arrowup: { action: "dataset-previous", alt: true }, // Alt+Up
+  arrowdown: { action: "dataset-next", alt: true }, // Alt+Down
   arrowleft: [
     { action: "basket-previous", scope: "basket", repeat: true },
     { action: "basket-extend-previous", shift: true, scope: "basket", repeat: true },

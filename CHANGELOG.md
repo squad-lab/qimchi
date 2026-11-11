@@ -7,6 +7,7 @@
 - [Feature] QCoDeS metadata shows a run summary with its experiment, sample, name and record count.
 - [Feature] Plot setups save variables, filters, sliders, appearance and width to the library or a file for reuse with other measurements. Library setups can be renamed or deleted; compatible setups also restore Composer axes.
 - [Feature] Basket cards have selection checkboxes and support Shift+Click ranges and keyboard selection with arrows, Home, End, Space and Ctrl/Cmd+A.
+- [Feature] When the Basket contains one dataset, Alt+UpArrow and Alt+DownArrow switch to the previous or next Explorer dataset.
 - [Feature] The Composer accepts multiple X fields and lets fields move between axes by dragging. Composer and plot setup requests for more than 30 plots require confirmation.
 - [Feature] Independent coordinates can be plotted as LinePlot Y or HeatMap Z values when they span the chosen axes. Dimensions without coordinates can be plotted by position.
 - [Fix] Tooltips wrap long names without spaces.

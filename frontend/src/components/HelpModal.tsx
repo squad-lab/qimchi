@@ -318,8 +318,8 @@ const ExplorerHelp = memo(() => (
         <li className="flex gap-2 leading-relaxed">
           <ChevronRight size={14} className="shrink-0 mt-1 text-blue-500" />
           <span>
-            When exactly one dataset is in the Basket, use the ↑/↓ arrow buttons to cycle through
-            datasets in the current view
+            When exactly one dataset is in the Basket, use the ↑/↓ arrow buttons, or Alt+↑ and
+            Alt+↓, to cycle through datasets in the current view
           </span>
         </li>
         <li className="flex gap-2 leading-relaxed">
@@ -1434,6 +1434,7 @@ const KeyboardHelp = memo(() => (
           ["Ctrl+Z", "Reopen the last closed plot(s)"],
           ["Alt+Shift+H", "Heart selected datasets (Explorer)"],
           ["Alt+Shift+T", "Trash selected datasets (Explorer)"],
+          ["Alt+↑ / ↓", "Previous or next dataset (one dataset in the Basket)"],
           ["Alt+1", "Open Explorer pane"],
           ["Alt+2", "Open Metadata pane"],
           ["Alt+3", "Open Notes pane"],
